@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 
 function App() {
   const [assets, setAssets] = useState([]);
@@ -14,8 +14,10 @@ function App() {
   // Market snapshot state
   const [marketData, setMarketData] = useState(null);
   const [marketLoading, setMarketLoading] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [marketError, setMarketError] = useState(null);
 
+  // Load all assets on mount
   useEffect(() => {
     fetch('/api/assets')
       .then((res) => {
@@ -38,16 +40,59 @@ function App() {
       });
   }, []);
 
+  const fetchMarketData = useCallback((symbol, isInitial = false) => {
+    if (!symbol) return;
+
+    if (isInitial) {
+      setMarketLoading(true);
+      setMarketData(null);
+    } else {
+      setIsRefreshing(true);
+    }
+    setMarketError(null);
+
+    fetch(`/api/market/${encodeURIComponent(symbol)}`)
+      .then((res) => {
+        if (!res.ok) {
+          throw new Error(`HTTP error! status: ${res.status}`);
+        }
+        return res.json();
+      })
+      .then((json) => {
+        if (json.status === 'ok' && json.data) {
+          setMarketData(json.data);
+        } else {
+          throw new Error(json.message || 'Failed to load market snapshot');
+        }
+        setMarketLoading(false);
+        setIsRefreshing(false);
+      })
+      .catch((err) => {
+        setMarketError(err.message || 'Market snapshot unavailable');
+        setMarketLoading(false);
+        setIsRefreshing(false);
+      });
+  }, []);
+
+  // Automatic 5-minute refresh timer for market snapshot
+  useEffect(() => {
+    if (!selectedSymbol) return;
+
+    // Refresh every 5 minutes (300,000 ms)
+    const intervalId = setInterval(() => {
+      fetchMarketData(selectedSymbol, false);
+    }, 5 * 60 * 1000);
+
+    return () => {
+      clearInterval(intervalId);
+    };
+  }, [selectedSymbol, fetchMarketData]);
+
   const handleSelectAsset = (symbol) => {
     setSelectedSymbol(symbol);
     setDetailLoading(true);
     setDetailError(null);
     setAssetDetail(null);
-
-    // Reset market snapshot state
-    setMarketData(null);
-    setMarketLoading(true);
-    setMarketError(null);
 
     // 1. Fetch asset details from database
     fetch(`/api/assets/${encodeURIComponent(symbol)}`)
@@ -70,26 +115,8 @@ function App() {
         setDetailLoading(false);
       });
 
-    // 2. Fetch market snapshot (isolated, so failure doesn't break asset detail)
-    fetch(`/api/market/${encodeURIComponent(symbol)}`)
-      .then((res) => {
-        if (!res.ok) {
-          throw new Error(`HTTP error! status: ${res.status}`);
-        }
-        return res.json();
-      })
-      .then((json) => {
-        if (json.status === 'ok' && json.data) {
-          setMarketData(json.data);
-        } else {
-          throw new Error(json.message || 'Failed to load market snapshot');
-        }
-        setMarketLoading(false);
-      })
-      .catch((err) => {
-        setMarketError(err.message || 'Market snapshot unavailable');
-        setMarketLoading(false);
-      });
+    // 2. Fetch initial market snapshot
+    fetchMarketData(symbol, true);
   };
 
   const handleBackToList = () => {
@@ -98,6 +125,7 @@ function App() {
     setDetailError(null);
     setMarketData(null);
     setMarketError(null);
+    setIsRefreshing(false);
   };
 
   return (
@@ -141,8 +169,21 @@ function App() {
 
           {/* Market Snapshot Section */}
           <div style={{ border: '1px solid #cce5ff', backgroundColor: '#f0f8ff', padding: '1.5rem', borderRadius: '4px' }}>
-            <h3 style={{ marginTop: 0, color: '#004085' }}>Market Snapshot</h3>
-            <p style={{ fontSize: '0.85rem', color: '#555', marginTop: '-0.5rem', marginBottom: '1rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+              <h3 style={{ margin: 0, color: '#004085' }}>Market Snapshot</h3>
+              <button
+                onClick={() => fetchMarketData(selectedSymbol, false)}
+                disabled={isRefreshing || marketLoading}
+                style={{
+                  padding: '4px 10px',
+                  cursor: isRefreshing || marketLoading ? 'default' : 'pointer',
+                  fontSize: '0.85rem'
+                }}
+              >
+                {isRefreshing ? 'Refreshing...' : 'Refresh'}
+              </button>
+            </div>
+            <p style={{ fontSize: '0.85rem', color: '#555', marginTop: 0, marginBottom: '1rem' }}>
               <em>Delayed market data</em>
             </p>
 
