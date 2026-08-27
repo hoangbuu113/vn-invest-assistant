@@ -17,6 +17,94 @@ const RANGE_MAP = {
 };
 
 /**
+ * Normalizes Yahoo Finance chart meta quote data into a deterministic delayed market snapshot.
+ *
+ * Rules:
+ * 1. price: finite AND > 0 -> valid; otherwise null
+ * 2. previousClose: finite AND > 0 -> preserve; otherwise null
+ * 3. change & changePercent: calculated using full source precision if price and previousClose are valid, otherwise null
+ * 4. dayHigh & dayLow: finite AND > 0 -> preserve; otherwise null
+ * 5. volume: finite AND >= 0 -> preserve exact numeric value; otherwise null
+ * 6. priceAsOf & updatedAt: valid source timestamp (regularMarketTime) -> ISO string; otherwise null
+ * 7. priceSource: "yahoo_delayed_snapshot", freshness: "delayed"
+ */
+export function normalizeMarketSnapshot(meta, symbol) {
+  if (!meta || typeof meta !== 'object') {
+    const err = new Error(`No market quote available for '${symbol}'`);
+    err.status = 404;
+    throw err;
+  }
+
+  const rawPrice = meta.regularMarketPrice;
+  const price = typeof rawPrice === 'number' && !isNaN(rawPrice) && isFinite(rawPrice) && rawPrice > 0
+    ? rawPrice
+    : null;
+
+  const rawPrevClose = meta.previousClose ?? meta.chartPreviousClose;
+  const previousClose = typeof rawPrevClose === 'number' && !isNaN(rawPrevClose) && isFinite(rawPrevClose) && rawPrevClose > 0
+    ? rawPrevClose
+    : null;
+
+  let change = null;
+  let changePercent = null;
+
+  if (price !== null && previousClose !== null) {
+    change = price - previousClose;
+    changePercent = ((price / previousClose) - 1) * 100;
+  }
+
+  const rawHigh = meta.regularMarketDayHigh;
+  const dayHigh = typeof rawHigh === 'number' && !isNaN(rawHigh) && isFinite(rawHigh) && rawHigh > 0
+    ? rawHigh
+    : null;
+
+  const rawLow = meta.regularMarketDayLow;
+  const dayLow = typeof rawLow === 'number' && !isNaN(rawLow) && isFinite(rawLow) && rawLow > 0
+    ? rawLow
+    : null;
+
+  const rawVol = meta.regularMarketVolume;
+  const volume = typeof rawVol === 'number' && !isNaN(rawVol) && isFinite(rawVol) && rawVol >= 0
+    ? rawVol
+    : null;
+
+  const rawMarketTime = meta.regularMarketTime;
+  const priceAsOf = typeof rawMarketTime === 'number' && !isNaN(rawMarketTime) && isFinite(rawMarketTime) && rawMarketTime > 0
+    ? new Date(rawMarketTime * 1000).toISOString()
+    : null;
+
+  const currency = typeof meta.currency === 'string' && meta.currency.trim().length > 0
+    ? meta.currency.trim()
+    : null;
+
+  let exchange = null;
+  const exchangeCandidates = [meta.fullExchangeName, meta.exchangeName];
+  for (const cand of exchangeCandidates) {
+    if (typeof cand === 'string' && cand.trim().length > 0) {
+      exchange = cand.trim();
+      break;
+    }
+  }
+
+  return {
+    symbol: symbol,
+    currency: currency,
+    exchange: exchange,
+    price: price,
+    previousClose: previousClose,
+    change: change,
+    changePercent: changePercent,
+    dayHigh: dayHigh,
+    dayLow: dayLow,
+    volume: volume,
+    updatedAt: priceAsOf,
+    priceAsOf: priceAsOf,
+    priceSource: 'yahoo_delayed_snapshot',
+    freshness: 'delayed'
+  };
+}
+
+/**
  * Fetches and normalizes a delayed market data snapshot from Yahoo Finance.
  * @param {string} rawSymbol - The internal asset symbol (e.g. 'FPT')
  */
@@ -58,36 +146,7 @@ export async function getMarketSnapshot(rawSymbol) {
       throw err;
     }
 
-    const meta = result.meta;
-    const price = meta.regularMarketPrice ?? null;
-    const previousClose = meta.previousClose ?? meta.chartPreviousClose ?? null;
-
-    let change = null;
-    let changePercent = null;
-
-    if (price !== null && previousClose !== null && previousClose !== 0) {
-      change = Number((price - previousClose).toFixed(2));
-      changePercent = Number(((change / previousClose) * 100).toFixed(2));
-    }
-
-    const updatedAt = meta.regularMarketTime
-      ? new Date(meta.regularMarketTime * 1000).toISOString()
-      : new Date().toISOString();
-
-    return {
-      symbol: symbol,
-      currency: meta.currency || 'VND',
-      exchange: meta.fullExchangeName || meta.exchangeName || 'HOSE',
-      price: price,
-      previousClose: previousClose,
-      change: change,
-      changePercent: changePercent,
-      dayHigh: meta.regularMarketDayHigh ?? null,
-      dayLow: meta.regularMarketDayLow ?? null,
-      volume: meta.regularMarketVolume ?? null,
-      updatedAt: updatedAt,
-      freshness: 'delayed'
-    };
+    return normalizeMarketSnapshot(result.meta, symbol);
   } catch (err) {
     if (err.status) {
       throw err;

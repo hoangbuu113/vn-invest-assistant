@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Fintech3DOrb } from './components/Fintech3DOrb.jsx';
 import { MarketTicker } from './components/MarketTicker.jsx';
@@ -156,6 +156,11 @@ function App() {
   const [historyData, setHistoryData] = useState(null);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState(null);
+
+  // Request controller refs for stale response protection
+  const activeMarketReqRef = useRef(null);
+  const activeHistoryReqRef = useRef(null);
+  const activeAssetDetailReqRef = useRef(null);
 
   // News feed state
   const [news, setNews] = useState([]);
@@ -562,14 +567,23 @@ function App() {
     }
     setMarketError(null);
 
-    fetch(`/api/market/${encodeURIComponent(symbol)}`)
+    if (activeMarketReqRef.current) {
+      activeMarketReqRef.current.abort();
+    }
+    const controller = new AbortController();
+    activeMarketReqRef.current = controller;
+
+    fetch(`/api/market/${encodeURIComponent(symbol)}`, { signal: controller.signal })
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.json();
       })
       .then((json) => {
+        if (controller.signal.aborted) return;
         if (json.status === 'ok' && json.data) {
-          setMarketData(json.data);
+          if (json.data.symbol === symbol) {
+            setMarketData(json.data);
+          }
         } else {
           throw new Error(json.message || 'Không thể tải dữ liệu giá thị trường');
         }
@@ -577,6 +591,7 @@ function App() {
         setIsRefreshing(false);
       })
       .catch((err) => {
+        if (controller.signal.aborted || err.name === 'AbortError') return;
         setMarketError(err.message || 'Dữ liệu giá thị trường không khả dụng');
         setMarketLoading(false);
         setIsRefreshing(false);
@@ -601,20 +616,30 @@ function App() {
     setHistoryError(null);
     setHistoryData(null); // Prevent stale range data from showing while loading
 
-    fetch(`/api/market/${encodeURIComponent(symbol)}/history?range=${encodeURIComponent(range)}`)
+    if (activeHistoryReqRef.current) {
+      activeHistoryReqRef.current.abort();
+    }
+    const controller = new AbortController();
+    activeHistoryReqRef.current = controller;
+
+    fetch(`/api/market/${encodeURIComponent(symbol)}/history?range=${encodeURIComponent(range)}`, { signal: controller.signal })
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.json();
       })
       .then((json) => {
+        if (controller.signal.aborted) return;
         if (json.status === 'ok' && json.data) {
-          setHistoryData(json.data);
+          if (json.data.symbol === symbol && json.data.range === range) {
+            setHistoryData(json.data);
+          }
         } else {
           throw new Error(json.message || 'Không thể tải dữ liệu lịch sử giá');
         }
         setHistoryLoading(false);
       })
       .catch((err) => {
+        if (controller.signal.aborted || err.name === 'AbortError') return;
         setHistoryError(err.message || 'Dữ liệu lịch sử giá không khả dụng');
         setHistoryLoading(false);
       });
@@ -629,26 +654,37 @@ function App() {
   };
 
   const handleSelectAsset = (symbol) => {
+    if (activeAssetDetailReqRef.current) activeAssetDetailReqRef.current.abort();
+    if (activeMarketReqRef.current) activeMarketReqRef.current.abort();
+    if (activeHistoryReqRef.current) activeHistoryReqRef.current.abort();
+
+    const controller = new AbortController();
+    activeAssetDetailReqRef.current = controller;
+
     setSelectedSymbol(symbol);
     setDetailLoading(true);
     setDetailError(null);
     setAssetDetail(null);
     setHistoryRange('1M');
 
-    fetch(`/api/assets/${encodeURIComponent(symbol)}`)
+    fetch(`/api/assets/${encodeURIComponent(symbol)}`, { signal: controller.signal })
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.json();
       })
       .then((json) => {
+        if (controller.signal.aborted) return;
         if (json.status === 'ok' && json.data) {
-          setAssetDetail(json.data);
+          if (json.data.symbol === symbol) {
+            setAssetDetail(json.data);
+          }
         } else {
           throw new Error(json.message || `Không thể tải thông tin chi tiết cho ${symbol}`);
         }
         setDetailLoading(false);
       })
       .catch((err) => {
+        if (controller.signal.aborted || err.name === 'AbortError') return;
         setDetailError(err.message || `Không thể tải thông tin chi tiết cho ${symbol}`);
         setDetailLoading(false);
       });
@@ -658,6 +694,10 @@ function App() {
   };
 
   const handleBackToList = () => {
+    if (activeAssetDetailReqRef.current) activeAssetDetailReqRef.current.abort();
+    if (activeMarketReqRef.current) activeMarketReqRef.current.abort();
+    if (activeHistoryReqRef.current) activeHistoryReqRef.current.abort();
+
     setSelectedSymbol(null);
     setAssetDetail(null);
     setDetailError(null);
@@ -669,6 +709,15 @@ function App() {
     setHistoryLoading(false);
     setHistoryRange('1M');
   };
+
+  // Abort all active requests on component unmount
+  useEffect(() => {
+    return () => {
+      if (activeAssetDetailReqRef.current) activeAssetDetailReqRef.current.abort();
+      if (activeMarketReqRef.current) activeMarketReqRef.current.abort();
+      if (activeHistoryReqRef.current) activeHistoryReqRef.current.abort();
+    };
+  }, []);
 
   return (
     <div className="app-container">
@@ -882,12 +931,12 @@ function App() {
                       </div>
                       <div className="metric-change">
                         <span className={`fintech-badge ${portfolioOverview.summary.totalUnrealizedPnL > 0 ? 'badge-gain' : portfolioOverview.summary.totalUnrealizedPnL < 0 ? 'badge-loss' : 'badge-neutral'}`}>
-                          {portfolioOverview.summary.totalUnrealizedPnLPercent !== null ? (
+                          {portfolioOverview.summary.totalUnrealizedPnLPercent !== null && portfolioOverview.summary.totalUnrealizedPnLPercent !== undefined ? (
                             <>
                               {portfolioOverview.summary.totalUnrealizedPnLPercent > 0 ? '+' : ''}
                               <CountUp value={portfolioOverview.summary.totalUnrealizedPnLPercent} decimals={2} suffix="%" />
                             </>
-                          ) : '0.00%'}
+                          ) : '—'}
                         </span>
                       </div>
                     </TiltCard>
@@ -1014,9 +1063,9 @@ function App() {
                                         </div>
                                         <div style={{ marginTop: '2px' }}>
                                           <span className={`fintech-badge ${isProfit ? 'badge-gain' : isLoss ? 'badge-loss' : 'badge-neutral'}`}>
-                                            {h.unrealizedPnLPercent !== null
-                                              ? `${h.unrealizedPnLPercent > 0 ? '+' : ''}${h.unrealizedPnLPercent}%`
-                                              : '0%'}
+                                            {h.unrealizedPnLPercent !== null && h.unrealizedPnLPercent !== undefined
+                                              ? `${h.unrealizedPnLPercent > 0 ? '+' : ''}${Number(h.unrealizedPnLPercent).toFixed(2)}%`
+                                              : '—'}
                                           </span>
                                         </div>
                                       </div>
@@ -1304,32 +1353,34 @@ function App() {
                         <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.85rem', marginBottom: '1.25rem', flexWrap: 'wrap' }}>
                           <span style={{ fontSize: '2.15rem', fontWeight: 800, color: 'var(--color-slate-900)', letterSpacing: '-0.02em' }}>
                             {marketData.price !== null ? (
-                              <CountUp value={marketData.price} suffix={` ${marketData.currency}`} />
+                              <CountUp value={marketData.price} suffix={marketData.currency ? ` ${marketData.currency}` : ''} />
                             ) : 'N/A'}
                           </span>
 
-                          <span className={`fintech-badge ${(marketData.change || 0) >= 0 ? 'badge-gain' : 'badge-loss'}`} style={{ fontSize: '0.88rem', padding: '4px 12px' }}>
-                            {marketData.change !== null ? (
-                              <>
-                                {marketData.change > 0 ? '+' : ''}
-                                {marketData.change.toLocaleString('vi-VN')} ({marketData.changePercent > 0 ? '+' : ''}{marketData.changePercent}%)
-                              </>
-                            ) : 'N/A'}
-                          </span>
+                          {marketData.change !== null && marketData.change !== undefined ? (
+                            <span className={`fintech-badge ${(marketData.change || 0) >= 0 ? 'badge-gain' : 'badge-loss'}`} style={{ fontSize: '0.88rem', padding: '4px 12px' }}>
+                              {marketData.change > 0 ? '+' : ''}
+                              {Number(marketData.change).toLocaleString('vi-VN', { maximumFractionDigits: 2 })} ({marketData.changePercent > 0 ? '+' : ''}{marketData.changePercent !== null && marketData.changePercent !== undefined ? `${Number(marketData.changePercent).toFixed(2)}%` : '—'})
+                            </span>
+                          ) : (
+                            <span className="fintech-badge badge-neutral" style={{ fontSize: '0.88rem', padding: '4px 12px' }}>
+                              —
+                            </span>
+                          )}
                         </div>
 
                         <div className="metrics-grid" style={{ marginBottom: 0 }}>
                           <div className="metric-card" style={{ padding: '0.95rem 1rem', '--card-accent': '#64748b' }}>
                             <div className="metric-label">Cao nhất trong ngày</div>
                             <div className="metric-value" style={{ fontSize: '1.15rem' }}>
-                              {marketData.dayHigh !== null ? `${marketData.dayHigh.toLocaleString('vi-VN')} ₫` : 'N/A'}
+                              {marketData.dayHigh !== null ? `${marketData.dayHigh.toLocaleString('vi-VN')}${marketData.currency ? ` ${marketData.currency}` : ''}` : 'N/A'}
                             </div>
                           </div>
 
                           <div className="metric-card" style={{ padding: '0.95rem 1rem', '--card-accent': '#64748b' }}>
                             <div className="metric-label">Thấp nhất trong ngày</div>
                             <div className="metric-value" style={{ fontSize: '1.15rem' }}>
-                              {marketData.dayLow !== null ? `${marketData.dayLow.toLocaleString('vi-VN')} ₫` : 'N/A'}
+                              {marketData.dayLow !== null ? `${marketData.dayLow.toLocaleString('vi-VN')}${marketData.currency ? ` ${marketData.currency}` : ''}` : 'N/A'}
                             </div>
                           </div>
 

@@ -2,77 +2,81 @@ import { getInvestorProfile, getHoldings } from './supabase.js';
 import { getMarketSnapshot } from './market.js';
 
 /**
- * Calculates and returns a deterministic portfolio overview.
- * Combines profile cash, holdings, and delayed market prices without mutating or persisting derived metrics.
+ * Pure calculation function for portfolio holdings and aggregate summary.
+ *
+ * Rules:
+ * 1. Holding priced ONLY if latestPrice is finite and > 0.
+ * 2. Unpriced holdings have: latestPrice = null, marketValue = null, unrealizedPnL = null, unrealizedPnLPercent = null, pricingStatus = 'unavailable', marketUpdatedAt = null.
+ * 3. Valuation status is 'partial' if any holding has pricingStatus !== 'available', otherwise 'complete'.
+ * 4. Full precision math without intermediate rounding:
+ *    - costBasis = quantity * averageCost
+ *    - marketValue = quantity * latestPrice
+ *    - unrealizedPnL = marketValue - costBasis
+ *    - unrealizedPnLPercent = costBasis > 0 ? (unrealizedPnL / costBasis) * 100 : null
+ * 5. Aggregates:
+ *    - pricedCostBasis = sum(costBasis of priced holdings)
+ *    - totalMarketValue = sum(marketValue of priced holdings)
+ *    - totalUnrealizedPnL = totalMarketValue - pricedCostBasis
+ *    - totalUnrealizedPnLPercent = pricedCostBasis > 0 ? (totalUnrealizedPnL / pricedCostBasis) * 100 : null
+ *    - totalPortfolioValue = cashAvailable + totalMarketValue
  */
-export async function getPortfolioOverview() {
-  const [profile, holdings] = await Promise.all([
-    getInvestorProfile(),
-    getHoldings()
-  ]);
-
-  const cashAvailable = profile && typeof profile.cash_available === 'number'
+export function calculatePortfolioValuation(profile, holdings, snapshotsMap = {}) {
+  const cashAvailable = profile && typeof profile.cash_available === 'number' && !isNaN(profile.cash_available) && isFinite(profile.cash_available)
     ? profile.cash_available
-    : Number(profile?.cash_available || 0);
+    : (typeof profile?.cash_available === 'string' && !isNaN(Number(profile.cash_available)) ? Number(profile.cash_available) : 0);
 
-  // Fetch market quotes concurrently for all holdings
-  const holdingsWithMarket = await Promise.all(
-    holdings.map(async (holding) => {
-      const quantity = typeof holding.quantity === 'number' ? holding.quantity : Number(holding.quantity || 0);
-      const averageCost = typeof holding.average_cost === 'number' ? holding.average_cost : Number(holding.average_cost || 0);
-      const costBasis = Number((quantity * averageCost).toFixed(2));
-      const symbol = holding.asset?.symbol || null;
+  const holdingsWithMarket = (Array.isArray(holdings) ? holdings : []).map((holding) => {
+    const rawQuantity = holding.quantity;
+    const quantity = typeof rawQuantity === 'number' && !isNaN(rawQuantity) && isFinite(rawQuantity)
+      ? rawQuantity
+      : Number(rawQuantity || 0);
 
-      let latestPrice = null;
-      let marketValue = null;
-      let unrealizedPnL = null;
-      let unrealizedPnLPercent = null;
-      let marketUpdatedAt = null;
-      let pricingStatus = 'unavailable';
+    const rawAvgCost = holding.average_cost;
+    const averageCost = typeof rawAvgCost === 'number' && !isNaN(rawAvgCost) && isFinite(rawAvgCost)
+      ? rawAvgCost
+      : Number(rawAvgCost || 0);
 
-      if (symbol) {
-        try {
-          const snapshot = await getMarketSnapshot(symbol);
-          if (snapshot && typeof snapshot.price === 'number' && !isNaN(snapshot.price)) {
-            latestPrice = snapshot.price;
-            marketValue = Number((quantity * latestPrice).toFixed(2));
-            unrealizedPnL = Number((marketValue - costBasis).toFixed(2));
-            unrealizedPnLPercent = costBasis === 0 ? null : Number(((unrealizedPnL / costBasis) * 100).toFixed(2));
-            marketUpdatedAt = snapshot.updatedAt || new Date().toISOString();
-            pricingStatus = 'available';
-          }
-        } catch {
-          // Market price lookup failed; preserve holding with pricingStatus = 'unavailable'
-          latestPrice = null;
-          marketValue = null;
-          unrealizedPnL = null;
-          unrealizedPnLPercent = null;
-          marketUpdatedAt = null;
-          pricingStatus = 'unavailable';
-        }
-      }
+    const costBasis = quantity * averageCost;
+    const symbol = holding.asset?.symbol || null;
 
-      return {
-        id: holding.id,
-        assetId: holding.asset_id,
-        symbol: symbol,
-        name: holding.asset?.name || null,
-        assetType: holding.asset?.asset_type || null,
-        exchange: holding.asset?.exchange || null,
-        quantity: quantity,
-        averageCost: averageCost,
-        costBasis: costBasis,
-        latestPrice: latestPrice,
-        marketValue: marketValue,
-        unrealizedPnL: unrealizedPnL,
-        unrealizedPnLPercent: unrealizedPnLPercent,
-        marketUpdatedAt: marketUpdatedAt,
-        pricingStatus: pricingStatus
-      };
-    })
-  );
+    let latestPrice = null;
+    let marketValue = null;
+    let unrealizedPnL = null;
+    let unrealizedPnLPercent = null;
+    let marketUpdatedAt = null;
+    let pricingStatus = 'unavailable';
 
-  // Aggregate totals
+    const snapshot = symbol ? snapshotsMap[symbol] : null;
+
+    if (snapshot && typeof snapshot.price === 'number' && !isNaN(snapshot.price) && isFinite(snapshot.price) && snapshot.price > 0) {
+      latestPrice = snapshot.price;
+      marketValue = quantity * latestPrice;
+      unrealizedPnL = marketValue - costBasis;
+      unrealizedPnLPercent = costBasis > 0 ? (unrealizedPnL / costBasis) * 100 : null;
+      marketUpdatedAt = snapshot.priceAsOf || snapshot.updatedAt || null;
+      pricingStatus = 'available';
+    }
+
+    return {
+      id: holding.id,
+      assetId: holding.asset_id,
+      symbol: symbol,
+      name: holding.asset?.name || null,
+      assetType: holding.asset?.asset_type || null,
+      exchange: holding.asset?.exchange || null,
+      quantity: quantity,
+      averageCost: averageCost,
+      costBasis: costBasis,
+      latestPrice: latestPrice,
+      marketValue: marketValue,
+      unrealizedPnL: unrealizedPnL,
+      unrealizedPnLPercent: unrealizedPnLPercent,
+      marketUpdatedAt: marketUpdatedAt,
+      pricingStatus: pricingStatus
+    };
+  });
+
+  // Aggregate totals using full precision
   let totalCostBasis = 0;
   let pricedCostBasis = 0;
   let totalMarketValue = 0;
@@ -88,16 +92,12 @@ export async function getPortfolioOverview() {
     }
   }
 
-  totalCostBasis = Number(totalCostBasis.toFixed(2));
-  pricedCostBasis = Number(pricedCostBasis.toFixed(2));
-  totalMarketValue = Number(totalMarketValue.toFixed(2));
+  const totalUnrealizedPnL = totalMarketValue - pricedCostBasis;
+  const totalUnrealizedPnLPercent = pricedCostBasis > 0
+    ? (totalUnrealizedPnL / pricedCostBasis) * 100
+    : null;
 
-  const totalUnrealizedPnL = Number((totalMarketValue - pricedCostBasis).toFixed(2));
-  const totalUnrealizedPnLPercent = pricedCostBasis === 0
-    ? null
-    : Number(((totalUnrealizedPnL / pricedCostBasis) * 100).toFixed(2));
-
-  const totalPortfolioValue = Number((cashAvailable + totalMarketValue).toFixed(2));
+  const totalPortfolioValue = cashAvailable + totalMarketValue;
   const valuationStatus = hasUnavailablePricing ? 'partial' : 'complete';
 
   return {
@@ -115,3 +115,36 @@ export async function getPortfolioOverview() {
   };
 }
 
+/**
+ * Calculates and returns a deterministic portfolio overview.
+ * Combines profile cash, holdings, and delayed market prices without mutating or persisting derived metrics.
+ */
+export async function getPortfolioOverview() {
+  const [profile, holdings] = await Promise.all([
+    getInvestorProfile(),
+    getHoldings()
+  ]);
+
+  // Collect unique symbols
+  const symbols = Array.from(new Set(
+    (holdings || [])
+      .map((h) => h.asset?.symbol)
+      .filter((sym) => typeof sym === 'string' && sym.trim().length > 0)
+  ));
+
+  // Fetch market quotes concurrently
+  const snapshotsEntries = await Promise.all(
+    symbols.map(async (symbol) => {
+      try {
+        const snapshot = await getMarketSnapshot(symbol);
+        return [symbol, snapshot];
+      } catch {
+        return [symbol, null];
+      }
+    })
+  );
+
+  const snapshotsMap = Object.fromEntries(snapshotsEntries);
+
+  return calculatePortfolioValuation(profile, holdings, snapshotsMap);
+}

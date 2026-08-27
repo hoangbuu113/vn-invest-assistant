@@ -69,11 +69,13 @@ export function MarketTicker() {
                 <div key={`${item.symbol}-${idx}`} className="ticker-item">
                   <span className="ticker-symbol">{item.symbol}</span>
                   <span className="ticker-price">
-                    {item.price !== null ? `${item.price.toLocaleString('vi-VN')} ₫` : 'N/A'}
+                    {item.price !== null ? `${item.price.toLocaleString('vi-VN')}${item.currency ? ` ${item.currency}` : ''}` : 'N/A'}
                   </span>
                   <span className={`ticker-change ${isGain ? 'change-gain' : isLoss ? 'change-loss' : 'change-neutral'}`}>
                     {isGain ? '▲ +' : isLoss ? '▼ ' : '➖ '}
-                    {item.changePercent !== null ? `${item.changePercent}%` : '0%'}
+                    {item.changePercent !== null && item.changePercent !== undefined
+                      ? `${Number(item.changePercent).toFixed(2)}%`
+                      : '—'}
                   </span>
                 </div>
               );
@@ -84,4 +86,3 @@ export function MarketTicker() {
     </div>
   );
 }
-
