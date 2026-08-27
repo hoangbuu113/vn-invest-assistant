@@ -24,6 +24,21 @@ function formatPublishedTime(isoString) {
   }
 }
 
+const ASSET_TYPE_LABELS = {
+  stock: 'Cổ phiếu',
+  etf: 'ETF',
+  fund: 'Quỹ đầu tư',
+  gold: 'Vàng',
+  deposit: 'Tiền gửi',
+  bank_deposit: 'Tiền gửi',
+  bond: 'Trái phiếu'
+};
+
+function formatAssetType(assetType) {
+  if (!assetType) return 'N/A';
+  return ASSET_TYPE_LABELS[String(assetType).toLowerCase()] || assetType;
+}
+
 function App() {
   const [activeTab, setActiveTab] = useState('news'); // 'news' | 'assets' | 'profile'
 
@@ -81,11 +96,11 @@ function App() {
           setRiskTolerance(json.data.risk_tolerance || 'moderate');
           setInvestmentHorizon(json.data.investment_horizon || 'medium');
         } else {
-          throw new Error(json.message || 'Failed to load profile');
+          throw new Error(json.message || 'Không thể tải hồ sơ đầu tư');
         }
       })
       .catch((err) => {
-        setProfileError(err.message || 'Failed to fetch investor profile');
+        setProfileError(err.message || 'Không thể tải hồ sơ đầu tư');
       })
       .finally(() => {
         setProfileLoading(false);
@@ -103,7 +118,7 @@ function App() {
 
     const numericCash = Number(cashAvailable);
     if (cashAvailable === '' || isNaN(numericCash) || !isFinite(numericCash) || numericCash < 0) {
-      setProfileError('Available cash must be a valid non-negative number.');
+      setProfileError('Tiền sẵn sàng đầu tư phải là số hợp lệ không âm.');
       setProfileSuccess(false);
       return;
     }
@@ -140,11 +155,11 @@ function App() {
           setInvestmentHorizon(json.data.investment_horizon);
           setProfileSuccess(true);
         } else {
-          throw new Error(json.message || 'Failed to save profile');
+          throw new Error(json.message || 'Không thể lưu hồ sơ đầu tư');
         }
       })
       .catch((err) => {
-        setProfileError(err.message || 'Failed to save profile changes');
+        setProfileError(err.message || 'Không thể lưu thay đổi hồ sơ đầu tư');
       })
       .finally(() => {
         setProfileSaving(false);
@@ -162,12 +177,12 @@ function App() {
         if (json.status === 'ok' && Array.isArray(json.data)) {
           setAssets(json.data);
         } else {
-          throw new Error(json.message || 'Failed to load assets');
+          throw new Error(json.message || 'Không thể tải danh sách tài sản');
         }
         setLoading(false);
       })
       .catch((err) => {
-        setError(err.message || 'Failed to connect to backend');
+        setError(err.message || 'Không thể kết nối đến máy chủ');
         setLoading(false);
       });
   }, []);
@@ -190,11 +205,11 @@ function App() {
         if (json.status === 'ok' && Array.isArray(json.data)) {
           setNews(json.data);
         } else {
-          throw new Error(json.message || 'Failed to load news');
+          throw new Error(json.message || 'Không thể tải tin tức');
         }
       })
       .catch((err) => {
-        setNewsError(err.message || 'Failed to fetch news feed');
+        setNewsError(err.message || 'Không thể tải nguồn tin tức');
       })
       .finally(() => {
         setNewsLoading(false);
@@ -227,13 +242,13 @@ function App() {
         if (json.status === 'ok' && json.data) {
           setMarketData(json.data);
         } else {
-          throw new Error(json.message || 'Failed to load market snapshot');
+          throw new Error(json.message || 'Không thể tải dữ liệu giá thị trường');
         }
         setMarketLoading(false);
         setIsRefreshing(false);
       })
       .catch((err) => {
-        setMarketError(err.message || 'Market snapshot unavailable');
+        setMarketError(err.message || 'Dữ liệu giá thị trường không khả dụng');
         setMarketLoading(false);
         setIsRefreshing(false);
       });
@@ -265,12 +280,12 @@ function App() {
         if (json.status === 'ok' && json.data) {
           setAssetDetail(json.data);
         } else {
-          throw new Error(json.message || `Failed to load details for ${symbol}`);
+          throw new Error(json.message || `Không thể tải thông tin chi tiết cho ${symbol}`);
         }
         setDetailLoading(false);
       })
       .catch((err) => {
-        setDetailError(err.message || `Failed to load details for ${symbol}`);
+        setDetailError(err.message || `Không thể tải thông tin chi tiết cho ${symbol}`);
         setDetailLoading(false);
       });
 
@@ -341,7 +356,7 @@ function App() {
                 transition: 'all 0.15s ease'
               }}
             >
-              News Feed
+              Tin tức
             </button>
             <button
               onClick={() => setActiveTab('assets')}
@@ -358,7 +373,7 @@ function App() {
                 transition: 'all 0.15s ease'
               }}
             >
-              Asset Browser
+              Tài sản
             </button>
             <button
               onClick={() => setActiveTab('profile')}
@@ -375,7 +390,7 @@ function App() {
                 transition: 'all 0.15s ease'
               }}
             >
-              Investor Profile
+              Hồ sơ đầu tư
             </button>
           </nav>
         </div>
@@ -397,10 +412,10 @@ function App() {
             }}>
               <div>
                 <h2 style={{ margin: '0 0 0.25rem 0', fontSize: '1.25rem', fontWeight: 700, color: '#0f172a' }}>
-                  Market News
+                  Tin tức thị trường
                 </h2>
                 <p style={{ margin: 0, fontSize: '0.85rem', color: '#64748b' }}>
-                  Latest financial, corporate, and macroeconomic updates · <span style={{ color: '#94a3b8' }}>Source: CafeF</span>
+                  Cập nhật tin tức tài chính, doanh nghiệp và vĩ mô mới nhất · <span style={{ color: '#94a3b8' }}>Nguồn: CafeF</span>
                 </p>
               </div>
 
@@ -425,7 +440,7 @@ function App() {
                 }}
               >
                 <span>{newsRefreshing ? '⟳' : '↻'}</span>
-                <span>{newsRefreshing ? 'Refreshing...' : 'Refresh'}</span>
+                <span>{newsRefreshing ? 'Đang làm mới...' : 'Làm mới'}</span>
               </button>
             </div>
 
@@ -440,7 +455,7 @@ function App() {
                 color: '#64748b'
               }}>
                 <div style={{ fontSize: '1.5rem', marginBottom: '0.5rem' }}>⏳</div>
-                <p style={{ margin: 0, fontSize: '0.9rem', fontWeight: 500 }}>Loading latest news from CafeF...</p>
+                <p style={{ margin: 0, fontSize: '0.9rem', fontWeight: 500 }}>Đang tải tin tức mới nhất từ CafeF...</p>
               </div>
             )}
 
@@ -457,7 +472,7 @@ function App() {
                 alignItems: 'center'
               }}>
                 <div>
-                  <strong style={{ display: 'block', marginBottom: '0.25rem', fontSize: '0.9rem' }}>Unable to load news feed</strong>
+                  <strong style={{ display: 'block', marginBottom: '0.25rem', fontSize: '0.9rem' }}>Không thể tải tin tức</strong>
                   <span style={{ fontSize: '0.85rem' }}>{newsError}</span>
                 </div>
                 <button
@@ -473,7 +488,7 @@ function App() {
                     cursor: 'pointer'
                   }}
                 >
-                  Retry
+                  Thử lại
                 </button>
               </div>
             )}
@@ -489,7 +504,7 @@ function App() {
                 fontSize: '0.82rem',
                 color: '#92400e'
               }}>
-                Could not refresh feed ({newsError}). Displaying previous news items.
+                Không thể làm mới nguồn tin ({newsError}). Đang hiển thị các tin tức trước đó.
               </div>
             )}
 
@@ -503,7 +518,7 @@ function App() {
                 textAlign: 'center',
                 color: '#64748b'
               }}>
-                <p style={{ margin: 0, fontSize: '0.9rem' }}>No news articles available at the moment.</p>
+                <p style={{ margin: 0, fontSize: '0.9rem' }}>Hiện chưa có tin tức nào.</p>
               </div>
             )}
 
@@ -626,14 +641,14 @@ function App() {
                     cursor: 'pointer'
                   }}
                 >
-                  &larr; Back to Assets List
+                  &larr; Quay lại danh sách
                 </button>
 
-                {detailLoading && <p style={{ color: '#64748b', fontSize: '0.9rem' }}>Loading details for {selectedSymbol}...</p>}
+                {detailLoading && <p style={{ color: '#64748b', fontSize: '0.9rem' }}>Đang tải thông tin chi tiết cho {selectedSymbol}...</p>}
 
                 {detailError && (
                   <div style={{ backgroundColor: '#fef2f2', border: '1px solid #fecaca', color: '#991b1b', padding: '1rem', borderRadius: '6px', marginBottom: '1rem' }}>
-                    <p style={{ margin: 0, fontSize: '0.88rem' }}><strong>Error:</strong> {detailError}</p>
+                    <p style={{ margin: 0, fontSize: '0.88rem' }}><strong>Lỗi:</strong> {detailError}</p>
                   </div>
                 )}
 
@@ -649,9 +664,9 @@ function App() {
                       {assetDetail.symbol} <span style={{ color: '#64748b', fontWeight: 400 }}>· {assetDetail.name}</span>
                     </h3>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.75rem', fontSize: '0.88rem' }}>
-                      <div><span style={{ color: '#64748b' }}>Symbol:</span> <strong>{assetDetail.symbol}</strong></div>
-                      <div><span style={{ color: '#64748b' }}>Asset Type:</span> <strong>{assetDetail.asset_type || 'N/A'}</strong></div>
-                      <div><span style={{ color: '#64748b' }}>Exchange:</span> <strong>{assetDetail.exchange || 'N/A'}</strong></div>
+                      <div><span style={{ color: '#64748b' }}>Mã:</span> <strong>{assetDetail.symbol}</strong></div>
+                      <div><span style={{ color: '#64748b' }}>Loại tài sản:</span> <strong>{formatAssetType(assetDetail.asset_type)}</strong></div>
+                      <div><span style={{ color: '#64748b' }}>Sàn:</span> <strong>{assetDetail.exchange || 'N/A'}</strong></div>
                       <div><span style={{ color: '#64748b' }}>ID:</span> <span style={{ color: '#64748b', fontSize: '0.8rem' }}>{assetDetail.id}</span></div>
                     </div>
                   </div>
@@ -666,8 +681,8 @@ function App() {
                 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
                     <div>
-                      <h3 style={{ margin: 0, fontSize: '1.05rem', color: '#0f172a', fontWeight: 600 }}>Market Snapshot</h3>
-                      <span style={{ fontSize: '0.78rem', color: '#94a3b8' }}>Delayed market data (~15m)</span>
+                      <h3 style={{ margin: 0, fontSize: '1.05rem', color: '#0f172a', fontWeight: 600 }}>Giá thị trường</h3>
+                      <span style={{ fontSize: '0.78rem', color: '#94a3b8' }}>Dữ liệu thị trường có độ trễ (~15 phút)</span>
                     </div>
                     <button
                       onClick={() => fetchMarketData(selectedSymbol, false)}
@@ -683,15 +698,15 @@ function App() {
                         cursor: isRefreshing || marketLoading ? 'default' : 'pointer'
                       }}
                     >
-                      {isRefreshing ? 'Refreshing...' : 'Refresh'}
+                      {isRefreshing ? 'Đang làm mới...' : 'Làm mới'}
                     </button>
                   </div>
 
-                  {marketLoading && <p style={{ color: '#64748b', fontSize: '0.9rem' }}>Loading market snapshot...</p>}
+                  {marketLoading && <p style={{ color: '#64748b', fontSize: '0.9rem' }}>Đang tải dữ liệu giá thị trường...</p>}
 
                   {marketError && (
                     <div style={{ backgroundColor: '#fffbeb', border: '1px solid #fde68a', color: '#92400e', padding: '0.75rem', borderRadius: '6px', fontSize: '0.85rem' }}>
-                      Notice: Unable to load market snapshot ({marketError}).
+                      Thông báo: Không thể tải dữ liệu giá thị trường ({marketError}).
                     </div>
                   )}
 
@@ -712,10 +727,10 @@ function App() {
                       </div>
 
                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '0.75rem', fontSize: '0.85rem' }}>
-                        <div><span style={{ color: '#64748b' }}>Day High:</span> <strong>{marketData.dayHigh !== null ? marketData.dayHigh.toLocaleString() : 'N/A'}</strong></div>
-                        <div><span style={{ color: '#64748b' }}>Day Low:</span> <strong>{marketData.dayLow !== null ? marketData.dayLow.toLocaleString() : 'N/A'}</strong></div>
-                        <div><span style={{ color: '#64748b' }}>Volume:</span> <strong>{marketData.volume !== null ? marketData.volume.toLocaleString() : 'N/A'}</strong></div>
-                        <div><span style={{ color: '#64748b' }}>Updated:</span> <span style={{ color: '#64748b' }}>{formatPublishedTime(marketData.updatedAt)}</span></div>
+                        <div><span style={{ color: '#64748b' }}>Cao nhất trong ngày:</span> <strong>{marketData.dayHigh !== null ? marketData.dayHigh.toLocaleString() : 'N/A'}</strong></div>
+                        <div><span style={{ color: '#64748b' }}>Thấp nhất trong ngày:</span> <strong>{marketData.dayLow !== null ? marketData.dayLow.toLocaleString() : 'N/A'}</strong></div>
+                        <div><span style={{ color: '#64748b' }}>Khối lượng:</span> <strong>{marketData.volume !== null ? marketData.volume.toLocaleString() : 'N/A'}</strong></div>
+                        <div><span style={{ color: '#64748b' }}>Cập nhật lúc:</span> <span style={{ color: '#64748b' }}>{formatPublishedTime(marketData.updatedAt)}</span></div>
                       </div>
                     </div>
                   )}
@@ -726,23 +741,23 @@ function App() {
               <div>
                 <div style={{ marginBottom: '1rem' }}>
                   <h2 style={{ margin: '0 0 0.25rem 0', fontSize: '1.25rem', fontWeight: 700, color: '#0f172a' }}>
-                    Asset Browser
+                    Danh sách tài sản
                   </h2>
                   <p style={{ margin: 0, fontSize: '0.85rem', color: '#64748b' }}>
-                    Tracked assets in database ({assets.length} items)
+                    Danh sách tài sản đang theo dõi ({assets.length} mã)
                   </p>
                 </div>
 
-                {loading && <p style={{ color: '#64748b', fontSize: '0.9rem' }}>Loading assets from database...</p>}
+                {loading && <p style={{ color: '#64748b', fontSize: '0.9rem' }}>Đang tải danh sách tài sản...</p>}
 
                 {error && (
                   <div style={{ backgroundColor: '#fef2f2', border: '1px solid #fecaca', color: '#991b1b', padding: '1rem', borderRadius: '6px', marginBottom: '1rem' }}>
-                    <p style={{ margin: 0, fontSize: '0.88rem' }}><strong>Error loading assets:</strong> {error}</p>
+                    <p style={{ margin: 0, fontSize: '0.88rem' }}><strong>Lỗi tải danh sách tài sản:</strong> {error}</p>
                   </div>
                 )}
 
                 {!loading && !error && assets.length === 0 && (
-                  <p style={{ color: '#64748b' }}>No assets found in database.</p>
+                  <p style={{ color: '#64748b' }}>Không tìm thấy tài sản nào trong cơ sở dữ liệu.</p>
                 )}
 
                 {!loading && !error && assets.length > 0 && (
@@ -755,11 +770,11 @@ function App() {
                     <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.88rem' }}>
                       <thead>
                         <tr style={{ backgroundColor: '#f8fafc', borderBottom: '1px solid #e2e8f0', color: '#64748b', fontSize: '0.78rem', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                          <th style={{ padding: '10px 16px', fontWeight: 600 }}>Symbol</th>
-                          <th style={{ padding: '10px 16px', fontWeight: 600 }}>Name</th>
-                          <th style={{ padding: '10px 16px', fontWeight: 600 }}>Type</th>
-                          <th style={{ padding: '10px 16px', fontWeight: 600 }}>Exchange</th>
-                          <th style={{ padding: '10px 16px', fontWeight: 600, textAlign: 'right' }}>Action</th>
+                          <th style={{ padding: '10px 16px', fontWeight: 600 }}>Mã</th>
+                          <th style={{ padding: '10px 16px', fontWeight: 600 }}>Tên</th>
+                          <th style={{ padding: '10px 16px', fontWeight: 600 }}>Loại tài sản</th>
+                          <th style={{ padding: '10px 16px', fontWeight: 600 }}>Sàn</th>
+                          <th style={{ padding: '10px 16px', fontWeight: 600, textAlign: 'right' }}>Thao tác</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -778,7 +793,7 @@ function App() {
                               {asset.name}
                             </td>
                             <td style={{ padding: '10px 16px', color: '#64748b' }}>
-                              {asset.asset_type || 'N/A'}
+                              {formatAssetType(asset.asset_type)}
                             </td>
                             <td style={{ padding: '10px 16px', color: '#64748b' }}>
                               {asset.exchange || 'N/A'}
@@ -800,7 +815,7 @@ function App() {
                                   cursor: 'pointer'
                                 }}
                               >
-                                View
+                                Xem
                               </button>
                             </td>
                           </tr>
@@ -819,10 +834,10 @@ function App() {
           <section>
             <div style={{ marginBottom: '1.25rem' }}>
               <h2 style={{ margin: '0 0 0.25rem 0', fontSize: '1.25rem', fontWeight: 700, color: '#0f172a' }}>
-                Investor Profile
+                Hồ sơ đầu tư
               </h2>
               <p style={{ margin: 0, fontSize: '0.85rem', color: '#64748b' }}>
-                Manage your available investment capital, risk tolerance, and investment horizon
+                Quản lý số tiền sẵn sàng đầu tư, mức chấp nhận rủi ro và thời gian đầu tư của bạn
               </p>
             </div>
 
@@ -837,7 +852,7 @@ function App() {
                 color: '#64748b'
               }}>
                 <div style={{ fontSize: '1.5rem', marginBottom: '0.5rem' }}>⏳</div>
-                <p style={{ margin: 0, fontSize: '0.9rem', fontWeight: 500 }}>Loading investor profile...</p>
+                <p style={{ margin: 0, fontSize: '0.9rem', fontWeight: 500 }}>Đang tải hồ sơ đầu tư...</p>
               </div>
             )}
 
@@ -855,7 +870,7 @@ function App() {
                 marginBottom: '1rem'
               }}>
                 <div>
-                  <strong style={{ display: 'block', marginBottom: '0.25rem', fontSize: '0.9rem' }}>Unable to load profile</strong>
+                  <strong style={{ display: 'block', marginBottom: '0.25rem', fontSize: '0.9rem' }}>Không thể tải hồ sơ đầu tư</strong>
                   <span style={{ fontSize: '0.85rem' }}>{profileError}</span>
                 </div>
                 <button
@@ -871,7 +886,7 @@ function App() {
                     cursor: 'pointer'
                   }}
                 >
-                  Retry
+                  Thử lại
                 </button>
               </div>
             )}
@@ -891,7 +906,7 @@ function App() {
                 gap: '0.5rem'
               }}>
                 <span>✓</span>
-                <span>Investor profile saved successfully! Persisted to Supabase.</span>
+                <span>Đã lưu hồ sơ đầu tư thành công!</span>
               </div>
             )}
 
@@ -923,10 +938,10 @@ function App() {
                   {/* Field 1: Available Cash */}
                   <div style={{ marginBottom: '1.5rem' }}>
                     <label style={{ display: 'block', fontSize: '0.9rem', fontWeight: 600, color: '#0f172a', marginBottom: '0.25rem' }}>
-                      Available Investment Cash (<code>cash_available</code>)
+                      Tiền sẵn sàng đầu tư
                     </label>
                     <p style={{ margin: '0 0 0.5rem 0', fontSize: '0.82rem', color: '#64748b' }}>
-                      Money currently available to deploy into investments (in VND).
+                      Số tiền bạn hiện có thể sử dụng để đầu tư (tính theo VNĐ).
                     </p>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                       <input
@@ -940,7 +955,7 @@ function App() {
                           setProfileError(null);
                         }}
                         required
-                        placeholder="e.g. 100000000"
+                        placeholder="Ví dụ: 100000000"
                         style={{
                           width: '100%',
                           maxWidth: '360px',
@@ -953,7 +968,7 @@ function App() {
                         }}
                       />
                       <span style={{ fontSize: '0.88rem', fontWeight: 600, color: '#475569' }}>
-                        VND
+                        VNĐ
                       </span>
                     </div>
                     {/* Live Formatted VND Preview */}
@@ -967,16 +982,16 @@ function App() {
                   {/* Field 2: Risk Tolerance */}
                   <div style={{ marginBottom: '1.5rem' }}>
                     <label style={{ display: 'block', fontSize: '0.9rem', fontWeight: 600, color: '#0f172a', marginBottom: '0.25rem' }}>
-                      Risk Tolerance (<code>risk_tolerance</code>)
+                      Mức chấp nhận rủi ro
                     </label>
                     <p style={{ margin: '0 0 0.5rem 0', fontSize: '0.82rem', color: '#64748b' }}>
-                      Your comfort level with market volatility and drawdown risks.
+                      Mức độ chấp nhận biến động giá và rủi ro sụt giảm tài sản của bạn.
                     </p>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.75rem' }}>
                       {[
-                        { value: 'low', label: 'Low', desc: 'Capital preservation, minimal risk (Bảo toàn vốn)' },
-                        { value: 'moderate', label: 'Moderate', desc: 'Balanced risk and growth (Cân bằng)' },
-                        { value: 'high', label: 'High', desc: 'Maximum growth potential, high volatility (Tăng trưởng)' }
+                        { value: 'low', label: 'Thấp', desc: 'Bảo toàn vốn, hạn chế rủi ro tối đa' },
+                        { value: 'moderate', label: 'Vừa', desc: 'Cân bằng giữa lợi nhuận và an toàn' },
+                        { value: 'high', label: 'Cao', desc: 'Kỳ vọng tăng trưởng cao, chấp nhận biến động lớn' }
                       ].map((item) => (
                         <label
                           key={item.value}
@@ -1018,16 +1033,16 @@ function App() {
                   {/* Field 3: Investment Horizon */}
                   <div style={{ marginBottom: '1.75rem' }}>
                     <label style={{ display: 'block', fontSize: '0.9rem', fontWeight: 600, color: '#0f172a', marginBottom: '0.25rem' }}>
-                      Investment Horizon (<code>investment_horizon</code>)
+                      Thời gian đầu tư
                     </label>
                     <p style={{ margin: '0 0 0.5rem 0', fontSize: '0.82rem', color: '#64748b' }}>
-                      Your intended time horizon before needing to withdraw deployed funds.
+                      Khoảng thời gian dự kiến trước khi bạn cần rút hoặc sử dụng vốn đầu tư.
                     </p>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.75rem' }}>
                       {[
-                        { value: 'short', label: 'Short', desc: 'Short-term (< 1 year / Dưới 1 năm)' },
-                        { value: 'medium', label: 'Medium', desc: 'Medium-term (1–3 years / 1-3 năm)' },
-                        { value: 'long', label: 'Long', desc: 'Long-term (> 3 years / Trên 3 năm)' }
+                        { value: 'short', label: 'Ngắn hạn', desc: 'Dưới 1 năm' },
+                        { value: 'medium', label: 'Trung hạn', desc: 'Từ 1 đến 3 năm' },
+                        { value: 'long', label: 'Dài hạn', desc: 'Trên 3 năm' }
                       ].map((item) => (
                         <label
                           key={item.value}
@@ -1090,12 +1105,12 @@ function App() {
                         transition: 'background-color 0.15s ease'
                       }}
                     >
-                      {profileSaving ? 'Saving Changes...' : 'Save Profile'}
+                      {profileSaving ? 'Đang lưu...' : 'Lưu thay đổi'}
                     </button>
 
                     {profile && profile.updated_at && (
                       <span style={{ fontSize: '0.78rem', color: '#94a3b8' }}>
-                        Last updated: {formatPublishedTime(profile.updated_at)}
+                        Cập nhật lúc: {formatPublishedTime(profile.updated_at)}
                       </span>
                     )}
                   </div>
