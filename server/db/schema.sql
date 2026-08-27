@@ -65,4 +65,57 @@ CREATE POLICY "Allow public update access to investor_profile"
     USING (true)
     WITH CHECK (true);
 
+-- ==========================================================
+-- Schema Migration: 003_create_holdings_table.sql
+-- Purpose: User asset portfolio holdings table
+-- ==========================================================
+
+CREATE TABLE IF NOT EXISTS public.holdings (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    profile_id UUID NOT NULL REFERENCES public.investor_profile(id) ON DELETE CASCADE,
+    asset_id UUID NOT NULL REFERENCES public.assets(id) ON DELETE CASCADE,
+    quantity NUMERIC(15, 4) NOT NULL CHECK (quantity > 0),
+    average_cost NUMERIC(15, 2) NOT NULL CHECK (average_cost >= 0),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_holdings_profile_asset UNIQUE (profile_id, asset_id)
+);
+
+-- Index for fast lookups by profile_id and asset_id
+CREATE INDEX IF NOT EXISTS idx_holdings_profile_id ON public.holdings (profile_id);
+CREATE INDEX IF NOT EXISTS idx_holdings_asset_id ON public.holdings (asset_id);
+
+-- Enable Row Level Security (RLS)
+ALTER TABLE public.holdings ENABLE ROW LEVEL SECURITY;
+
+-- Allow public read access to holdings table
+DROP POLICY IF EXISTS "Allow public read access to holdings" ON public.holdings;
+CREATE POLICY "Allow public read access to holdings"
+    ON public.holdings
+    FOR SELECT
+    USING (true);
+
+-- Allow public insert access to holdings table
+DROP POLICY IF EXISTS "Allow public insert access to holdings" ON public.holdings;
+CREATE POLICY "Allow public insert access to holdings"
+    ON public.holdings
+    FOR INSERT
+    WITH CHECK (true);
+
+-- Allow public update access to holdings table
+DROP POLICY IF EXISTS "Allow public update access to holdings" ON public.holdings;
+CREATE POLICY "Allow public update access to holdings"
+    ON public.holdings
+    FOR UPDATE
+    USING (true)
+    WITH CHECK (true);
+
+-- Allow public delete access to holdings table
+DROP POLICY IF EXISTS "Allow public delete access to holdings" ON public.holdings;
+CREATE POLICY "Allow public delete access to holdings"
+    ON public.holdings
+    FOR DELETE
+    USING (true);
+
+
 

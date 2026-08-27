@@ -1,7 +1,17 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import { checkSupabaseConnection, getAssets, getAssetBySymbol, getInvestorProfile, updateInvestorProfile } from './src/supabase.js';
+import {
+  checkSupabaseConnection,
+  getAssets,
+  getAssetBySymbol,
+  getInvestorProfile,
+  updateInvestorProfile,
+  getHoldings,
+  addHolding,
+  updateHolding,
+  deleteHolding
+} from './src/supabase.js';
 import { getMarketSnapshot } from './src/market.js';
 import { getNewsFeed } from './src/news.js';
 
@@ -118,6 +128,172 @@ app.put('/api/profile', async (req, res) => {
     return res.status(500).json({
       status: 'error',
       message: 'Failed to update investor profile',
+      details: error.message
+    });
+  }
+});
+
+// Holdings endpoints
+app.get('/api/holdings', async (req, res) => {
+  try {
+    const holdings = await getHoldings();
+    return res.json({
+      status: 'ok',
+      count: holdings.length,
+      data: holdings
+    });
+  } catch (error) {
+    return res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch holdings',
+      details: error.message
+    });
+  }
+});
+
+app.post('/api/holdings', async (req, res) => {
+  try {
+    const { asset_id, quantity, average_cost } = req.body || {};
+    const errors = [];
+
+    if (!asset_id || typeof asset_id !== 'string') {
+      errors.push('asset_id is required');
+    }
+
+    const numericQuantity = Number(quantity);
+    if (
+      quantity === undefined ||
+      quantity === null ||
+      quantity === '' ||
+      isNaN(numericQuantity) ||
+      !isFinite(numericQuantity) ||
+      numericQuantity <= 0
+    ) {
+      errors.push('quantity must be a number greater than 0');
+    }
+
+    const numericCost = Number(average_cost);
+    if (
+      average_cost === undefined ||
+      average_cost === null ||
+      average_cost === '' ||
+      isNaN(numericCost) ||
+      !isFinite(numericCost) ||
+      numericCost < 0
+    ) {
+      errors.push('average_cost must be a non-negative number');
+    }
+
+    if (errors.length > 0) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Invalid holding data',
+        errors
+      });
+    }
+
+    const newHolding = await addHolding({
+      asset_id: asset_id.trim(),
+      quantity: numericQuantity,
+      average_cost: numericCost
+    });
+
+    return res.status(201).json({
+      status: 'ok',
+      data: newHolding
+    });
+  } catch (error) {
+    const statusCode = error.statusCode || 500;
+    return res.status(statusCode).json({
+      status: 'error',
+      message: error.message || 'Failed to add holding',
+      details: error.message
+    });
+  }
+});
+
+app.put('/api/holdings/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const { quantity, average_cost } = req.body || {};
+    const errors = [];
+
+    if (!id || typeof id !== 'string') {
+      errors.push('Valid holding ID is required');
+    }
+
+    const numericQuantity = Number(quantity);
+    if (
+      quantity === undefined ||
+      quantity === null ||
+      quantity === '' ||
+      isNaN(numericQuantity) ||
+      !isFinite(numericQuantity) ||
+      numericQuantity <= 0
+    ) {
+      errors.push('quantity must be a number greater than 0');
+    }
+
+    const numericCost = Number(average_cost);
+    if (
+      average_cost === undefined ||
+      average_cost === null ||
+      average_cost === '' ||
+      isNaN(numericCost) ||
+      !isFinite(numericCost) ||
+      numericCost < 0
+    ) {
+      errors.push('average_cost must be a non-negative number');
+    }
+
+    if (errors.length > 0) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Invalid holding update data',
+        errors
+      });
+    }
+
+    const updated = await updateHolding(id, {
+      quantity: numericQuantity,
+      average_cost: numericCost
+    });
+
+    return res.json({
+      status: 'ok',
+      data: updated
+    });
+  } catch (error) {
+    const statusCode = error.statusCode || 500;
+    return res.status(statusCode).json({
+      status: 'error',
+      message: error.message || 'Failed to update holding',
+      details: error.message
+    });
+  }
+});
+
+app.delete('/api/holdings/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    if (!id || typeof id !== 'string') {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Valid holding ID is required'
+      });
+    }
+
+    const result = await deleteHolding(id);
+    return res.json({
+      status: 'ok',
+      message: 'Holding deleted successfully',
+      data: result
+    });
+  } catch (error) {
+    const statusCode = error.statusCode || 500;
+    return res.status(statusCode).json({
+      status: 'error',
+      message: error.message || 'Failed to delete holding',
       details: error.message
     });
   }

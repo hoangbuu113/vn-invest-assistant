@@ -205,3 +205,190 @@ export async function updateInvestorProfile({ cash_available, risk_tolerance, in
   return normalizeProfile(data);
 }
 
+/**
+ * Normalizes a holding row from Supabase.
+ */
+function normalizeHolding(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    profile_id: row.profile_id,
+    asset_id: row.asset_id,
+    quantity: typeof row.quantity === 'number' ? row.quantity : Number(row.quantity),
+    average_cost: typeof row.average_cost === 'number' ? row.average_cost : Number(row.average_cost),
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    asset: row.assets || null
+  };
+}
+
+/**
+ * Fetches all holdings for the single investor profile with joined asset information.
+ */
+export async function getHoldings() {
+  if (!isSupabaseConfigured || !supabase) {
+    throw new Error('Supabase credentials are not configured. Please set SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY in server/.env');
+  }
+
+  const profile = await getInvestorProfile();
+
+  const { data, error } = await supabase
+    .from('holdings')
+    .select('id, profile_id, asset_id, quantity, average_cost, created_at, updated_at, assets (id, symbol, name, asset_type, exchange)')
+    .eq('profile_id', profile.id)
+    .order('created_at', { ascending: true });
+
+  if (error) {
+    throw new Error(`Database query error: ${error.message} (code: ${error.code || 'UNKNOWN'})`);
+  }
+
+  return (data || []).map(normalizeHolding);
+}
+
+/**
+ * Adds a new holding for the investor profile.
+ */
+export async function addHolding({ asset_id, quantity, average_cost }) {
+  if (!isSupabaseConfigured || !supabase) {
+    throw new Error('Supabase credentials are not configured. Please set SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY in server/.env');
+  }
+
+  const profile = await getInvestorProfile();
+
+  // Check if asset exists
+  const { data: asset, error: assetErr } = await supabase
+    .from('assets')
+    .select('id, symbol, name, asset_type, exchange')
+    .eq('id', asset_id)
+    .maybeSingle();
+
+  if (assetErr) {
+    throw new Error(`Database query error: ${assetErr.message}`);
+  }
+
+  if (!asset) {
+    const notFoundErr = new Error(`Asset with ID '${asset_id}' not found`);
+    notFoundErr.statusCode = 400;
+    throw notFoundErr;
+  }
+
+  // Check if holding for this asset already exists for profile
+  const { data: existing, error: existingErr } = await supabase
+    .from('holdings')
+    .select('id')
+    .eq('profile_id', profile.id)
+    .eq('asset_id', asset_id)
+    .maybeSingle();
+
+  if (existingErr) {
+    throw new Error(`Database query error: ${existingErr.message}`);
+  }
+
+  if (existing) {
+    const dupErr = new Error(`Holding for asset '${asset.symbol}' already exists. Edit the existing holding instead.`);
+    dupErr.statusCode = 400;
+    throw dupErr;
+  }
+
+  const { data, error } = await supabase
+    .from('holdings')
+    .insert([
+      {
+        profile_id: profile.id,
+        asset_id,
+        quantity,
+        average_cost
+      }
+    ])
+    .select('id, profile_id, asset_id, quantity, average_cost, created_at, updated_at, assets (id, symbol, name, asset_type, exchange)')
+    .single();
+
+  if (error) {
+    throw new Error(`Database insert error: ${error.message} (code: ${error.code || 'UNKNOWN'})`);
+  }
+
+  return normalizeHolding(data);
+}
+
+/**
+ * Updates an existing holding by ID.
+ */
+export async function updateHolding(id, { quantity, average_cost }) {
+  if (!isSupabaseConfigured || !supabase) {
+    throw new Error('Supabase credentials are not configured. Please set SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY in server/.env');
+  }
+
+  if (!id || typeof id !== 'string') {
+    const err = new Error('Invalid holding ID');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const { data, error } = await supabase
+    .from('holdings')
+    .update({
+      quantity,
+      average_cost,
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', id)
+    .select('id, profile_id, asset_id, quantity, average_cost, created_at, updated_at, assets (id, symbol, name, asset_type, exchange)')
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Database update error: ${error.message} (code: ${error.code || 'UNKNOWN'})`);
+  }
+
+  if (!data) {
+    const err = new Error(`Holding with ID '${id}' not found`);
+    err.statusCode = 404;
+    throw err;
+  }
+
+  return normalizeHolding(data);
+}
+
+/**
+ * Deletes a holding by ID.
+ */
+export async function deleteHolding(id) {
+  if (!isSupabaseConfigured || !supabase) {
+    throw new Error('Supabase credentials are not configured. Please set SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY in server/.env');
+  }
+
+  if (!id || typeof id !== 'string') {
+    const err = new Error('Invalid holding ID');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  // Check if holding exists first
+  const { data: existing, error: findErr } = await supabase
+    .from('holdings')
+    .select('id')
+    .eq('id', id)
+    .maybeSingle();
+
+  if (findErr) {
+    throw new Error(`Database query error: ${findErr.message}`);
+  }
+
+  if (!existing) {
+    const err = new Error(`Holding with ID '${id}' not found`);
+    err.statusCode = 404;
+    throw err;
+  }
+
+  const { error } = await supabase
+    .from('holdings')
+    .delete()
+    .eq('id', id);
+
+  if (error) {
+    throw new Error(`Database delete error: ${error.message} (code: ${error.code || 'UNKNOWN'})`);
+  }
+
+  return { id, deleted: true };
+}
+
+
