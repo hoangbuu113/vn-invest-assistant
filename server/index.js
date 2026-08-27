@@ -3,6 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import { checkSupabaseConnection, getAssets, getAssetBySymbol } from './src/supabase.js';
 import { getMarketSnapshot } from './src/market.js';
+import { getNewsFeed } from './src/news.js';
 
 dotenv.config();
 
@@ -94,6 +95,24 @@ app.get('/api/market/:symbol', async (req, res) => {
     return res.status(statusCode).json({
       status: 'error',
       message: error.message || 'Failed to fetch market snapshot'
+    });
+  }
+});
+
+// News feed endpoint (aggregated & normalized from CafeF RSS)
+app.get('/api/news', async (req, res) => {
+  try {
+    const news = await getNewsFeed();
+    return res.json({
+      status: 'ok',
+      count: news.length,
+      data: news
+    });
+  } catch (error) {
+    return res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch news feed',
+      details: error.message
     });
   }
 });
