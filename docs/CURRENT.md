@@ -1,7 +1,7 @@
 # Current Project Status
 
 ## LATEST VERIFIED CHECKPOINT
-- **Commit**: `d15fec1`
+- **Commit**: `cbba8de`
 - **Branch**: `main`
 
 ## CURRENT PHASE
@@ -15,6 +15,11 @@ BUILD
   - Delayed market snapshot via Yahoo Finance (`GET /api/market/:symbol`)
   - Snapshot UI displaying price, change, volume, high/low, last updated time
   - Manual and 5-minute automatic snapshot refresh
+- **Feature 03 — News Feed**
+  - Real CafeF RSS integration across 4 categories (`GET /api/news`)
+  - Deterministic investment relevance filtering (removes accidents, crime, lifestyle, and non-financial noise)
+  - Polished News Feed UI with loading, error, and empty states
+  - Manual news refresh control
 
 ## CURRENT STATE
-Feature 02 is complete and verified.
+Feature 03 is complete and verified.
