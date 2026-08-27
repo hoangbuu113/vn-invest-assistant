@@ -1,7 +1,7 @@
 # Current Project Status
 
 ## LATEST VERIFIED CHECKPOINT
-- **Commit**: `145479d`
+- **Commit**: `c67dbf9`
 - **Branch**: `main`
 
 ## CURRENT PHASE
@@ -25,7 +25,12 @@ BUILD
   - Profile preferences: available investment cash (`cash_available`), risk tolerance (`risk_tolerance`: `low`/`moderate`/`high`), and horizon (`investment_horizon`: `short`/`medium`/`long`)
   - Current asset portfolio holdings management with server validation (`GET`/`POST`/`PUT`/`DELETE /api/holdings`)
   - Vietnamese localized user interface ("Hồ sơ đầu tư" & "Danh mục hiện có") with full CRUD support
+- **Feature 05 — Portfolio Overview**
+  - Portfolio overview endpoint (`GET /api/portfolio/overview`) combining investor profile + holdings + delayed market prices
+  - Calculates cost basis, market value, unrealized P/L and total portfolio value on demand
+  - Supports partial valuation when some market prices are unavailable
+  - Derived portfolio metrics are computed on demand, not persisted
+  - UI System Upgrade (Passes 1–5: design token system, motion & depth, interactive 3D constellation orb, magnetic controls, market ticker, and wealth orbit) complete at `c67dbf9`
 
 ## CURRENT STATE
-Feature 04 is complete and verified.
-
+Feature 05 (Portfolio Overview) and Project-Wide UI System Upgrade are complete and verified at checkpoint `c67dbf9`.

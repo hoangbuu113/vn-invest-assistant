@@ -17,6 +17,14 @@ The following architectural and product decisions are confirmed:
   - **Investment Horizon Values**: `short`, `medium`, `long`.
   - **Holdings Model**: Stored in `public.holdings` referencing profile and asset (`asset_id`, `quantity` > 0, `average_cost` >= 0) with unique asset-per-profile constraint.
   - **Localization**: All user-facing UI is in Vietnamese; internal code, API routes, and database identifiers remain in English.
+- **Portfolio Overview (Feature 05)**:
+  - **Derived Metrics**: Portfolio metrics (total cost basis, total market value, unrealized P/L, total portfolio value) are calculated on demand, not stored as source-of-truth.
+  - **Missing Prices**: Missing market prices remain unavailable; never fabricate price = 0.
+  - **Partial Valuation**: If some holdings cannot be priced, portfolio valuation is explicitly partial (`valuationStatus: 'partial'`).
+  - **Market Data Labeling**: Yahoo market data remains labeled as delayed with timestamp (~15 min delay).
+  - **Aggregate P/L Calculation**: Aggregate P/L only uses holdings with usable market prices.
+  - **Stale Threshold**: No fixed stale-age threshold in V1.
+  - **Out of Scope for Feature 05**: Feature 05 does not include realized P/L, transaction history, fees/taxes, charts, AI, recommendations, or portfolio optimization.
 - **Personalization Factors**: Analysis personalized using:
   - Available capital
   - Risk tolerance
