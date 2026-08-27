@@ -30,7 +30,7 @@ function App() {
   return (
     <div style={{ fontFamily: 'sans-serif', padding: '2rem', maxWidth: '800px', margin: '0 auto' }}>
       <h1>VN Invest Assistant</h1>
-      <h2>Investment Assets</h2>
+      <h2>Asset Browser</h2>
 
       {loading && <p>Loading assets from database...</p>}
 
@@ -40,7 +40,11 @@ function App() {
         </div>
       )}
 
-      {!loading && !error && (
+      {!loading && !error && assets.length === 0 && (
+        <p>No assets found in database.</p>
+      )}
+
+      {!loading && !error && assets.length > 0 && (
         <div>
           <p>Total assets: {assets.length}</p>
           <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: '1rem' }}>
@@ -57,8 +61,8 @@ function App() {
                 <tr key={asset.id || asset.symbol} style={{ borderBottom: '1px solid #eee' }}>
                   <td style={{ padding: '8px', fontWeight: 'bold' }}>{asset.symbol}</td>
                   <td style={{ padding: '8px' }}>{asset.name}</td>
-                  <td style={{ padding: '8px' }}>{asset.asset_type}</td>
-                  <td style={{ padding: '8px' }}>{asset.exchange}</td>
+                  <td style={{ padding: '8px' }}>{asset.asset_type || 'N/A'}</td>
+                  <td style={{ padding: '8px' }}>{asset.exchange || 'N/A'}</td>
                 </tr>
               ))}
             </tbody>
