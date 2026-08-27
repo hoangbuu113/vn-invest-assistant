@@ -1,7 +1,7 @@
 # Current Project Status
 
 ## LATEST VERIFIED CHECKPOINT
-- **Commit**: `c67dbf9`
+- **Commit**: `20ae997`
 - **Branch**: `main`
 
 ## CURRENT PHASE
@@ -30,7 +30,17 @@ BUILD
   - Calculates cost basis, market value, unrealized P/L and total portfolio value on demand
   - Supports partial valuation when some market prices are unavailable
   - Derived portfolio metrics are computed on demand, not persisted
-  - UI System Upgrade (Passes 1–5: design token system, motion & depth, interactive 3D constellation orb, magnetic controls, market ticker, and wealth orbit) complete at `c67dbf9`
+  - UI System Upgrade (Passes 1–5: design token system, motion & depth, interactive 3D constellation orb, magnetic controls, market ticker, and wealth orbit) complete
+- **Feature 06 — Historical Price & Trend**
+  - Daily historical price API endpoint (`GET /api/market/:symbol/history?range=...`)
+  - Supported V1 ranges: `1W`, `1M`, `3M`, `6M`, `1Y`
+  - Daily interval only (`1d`)
+  - Yahoo Finance remains the historical data source
+  - Historical bars are fetched and calculated on demand
+  - No historical-price warehouse is persisted
+  - Asset Detail includes interactive historical price chart and period summary (start price, latest price, absolute change, % change, period high, period low)
+  - Data remains labeled as delayed with latest timestamp
 
 ## CURRENT STATE
-Feature 05 (Portfolio Overview) and Project-Wide UI System Upgrade are complete and verified at checkpoint `c67dbf9`.
+Feature 06 (Historical Price & Trend) is complete and verified at checkpoint `20ae997`.
+

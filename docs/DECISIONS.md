@@ -25,6 +25,16 @@ The following architectural and product decisions are confirmed:
   - **Aggregate P/L Calculation**: Aggregate P/L only uses holdings with usable market prices.
   - **Stale Threshold**: No fixed stale-age threshold in V1.
   - **Out of Scope for Feature 05**: Feature 05 does not include realized P/L, transaction history, fees/taxes, charts, AI, recommendations, or portfolio optimization.
+- **Historical Price & Trend (Feature 06)**:
+  - **Supported Ranges**: V1 historical price ranges are `1W`, `1M`, `3M`, `6M`, `1Y`.
+  - **Interval**: All V1 historical ranges use daily bars (`1d`).
+  - **Provider & Fetching**: Historical price data is fetched on demand from Yahoo Finance.
+  - **Persistence**: Historical bars and derived range metrics are not persisted as source-of-truth.
+  - **Data Integrity**: Missing trading days are not synthesized.
+  - **Error Handling**: Unsupported/missing history returns an unavailable/error state rather than fabricated data.
+  - **Deterministic Metrics**: Period metrics calculated on demand: start price, latest price, absolute change, percentage change, period high, period low, and valid sessions.
+  - **Out of Scope for Feature 06**: No MA, RSI, MACD, support/resistance, bullish/bearish scoring, AI, recommendations, prediction, or backtesting in Feature 06.
+  - **Labeling**: Current/latest historical data keeps delayed-data wording and timestamp; no fixed stale-age threshold.
 - **Personalization Factors**: Analysis personalized using:
   - Available capital
   - Risk tolerance
@@ -40,3 +50,4 @@ The following architectural and product decisions are confirmed:
   - Financial/news detection target around every 30–60 seconds in later iterations.
 - **Project Philosophy**: Learning project for full-stack/vibe coding, but must remain practically usable in real life.
 - **Scoring Methodology**: Quantitative scoring should be evidence/data-driven (derived from data, rules, or quantitative models) rather than invented by AI intuition alone.
+
