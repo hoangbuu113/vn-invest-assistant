@@ -26,6 +26,68 @@ const xmlParser = new XMLParser({
   trimValues: true
 });
 
+// Non-investment topic patterns to filter out
+const EXCLUSION_PATTERNS = [
+  // Accidents, Natural Disasters, Fatalities
+  /\b(tai nạn|lật thuyền|rơi máy bay|chìm tàu|chìm xuồng|đắm tàu|cháy nhà|hỏa hoạn|lũ quét|sạt lở|lở đất|động đất|sóng thần|mắc kẹt|bị thương|tử vong|chết người|thiệt mạng|thương vong|ngập lụt|nạn nhân)\b/i,
+  // Crime, Violence, Police Blotter
+  /\b(giết người|án mạng|sát hại|cướp giật|trộm cắp|hiếp dâm|bắt cóc|lừa tình|đánh ghen|ma túy|tử thi|thi thể|mất tích|huyết án|bắn chết|đâm chết|tự tử|hành hung)\b/i,
+  // Entertainment, Showbiz, Pop Culture, Sports
+  /\b(showbiz|hoa hậu|hoa khôi|người mẫu|diễn viên|ca sĩ|phim ảnh|rạp chiếu|gameshow|concert|sao việt|sao hàn|sao hoa ngữ|đám cưới|scandal|bóng đá|bàn thắng|vô địch|cầu thủ|madam pang|fifa|aff cup|world cup|tiền đạo|huấn luyện viên)\b/i,
+  // Lifestyle, Health, Quirky Trivia, Clickbait
+  /\b(tử vi|cung hoàng đạo|phong thủy|mẹo vặt|làm đẹp|giảm cân|tắm nắng|nghỉ dưỡng|món ăn|đặc sản|chữa bệnh|ung thư|bệnh viện|sức khỏe|bánh quy|rắn hổ mang|động vật hoang dã|thịt chó|quái vật|sinh vật lạ|kỳ lạ|chuyện lạ|bí ẩn|vũ trụ sâu|người ngoài hành tinh)\b/i,
+  // Pure military hardware / skirmishes without economic context
+  /\b(tiêm kích|xe tăng vứt xó|vận tải cơ|không chiến|bắn hạ|tên lửa phòng không|súng đạn)\b/i
+];
+
+// Strong financial signals that protect financial stories with incidental keywords
+const STRONG_FINANCIAL_SIGNALS = [
+  /\b(chứng khoán|cổ phiếu|trái phiếu|vn-index|vn30|hose|hnx|upcom|etf|quỹ đầu tư|lợi nhuận|doanh thu|lãi ròng|lãi suất|tỷ giá|usd|vnd|ngân hàng|tín dụng|gdp|lạm phát|fdi|oda|giá vàng|giá dầu|thương mại|xuất khẩu|nhập khẩu|thuế quan|chính sách tiền tệ|ngân sách|bất động sản)\b/i
+];
+
+// Relevant economic, corporate, policy, and global financial signals for Macro & Global feeds
+const RELEVANT_MACRO_GLOBAL_SIGNALS = [
+  /\b(chứng khoán|cổ phiếu|trái phiếu|etf|quỹ|cổ tức|niêm yết|ipo|m&a|sáp nhập|thâu tóm)\b/i,
+  /\b(doanh nghiệp|tập đoàn|công ty|hãng|tỷ phú|lợi nhuận|doanh thu|phá sản|tài sản|vốn hóa)\b/i,
+  /\b(ngân hàng|fed|ecb|boj|nhnn|lãi suất|tín dụng|tiền tệ|tỷ giá|usd|eur|cny|ngoại hối|dự trữ ngoại hối)\b/i,
+  /\b(kinh tế|gdp|lạm phát|cpi|fdi|oda|xuất khẩu|nhập khẩu|thương mại|thuế quan|ngân sách|đầu tư công)\b/i,
+  /\b(giá vàng|kim loại quý|giá dầu|khí đốt|năng lượng|hàng hóa|bất động sản|địa ốc|chuỗi cung ứng)\b/i,
+  /\b(tỷ usd|triệu usd|nghìn tỷ|tỷ đồng|đầu tư|dự án|nhà máy|khu công nghiệp|hạ tầng|metro|sân bay|cảng biển)\b/i,
+  /\b(trừng phạt kinh tế|cấm vận|thỏa thuận thương mại|hợp tác kinh tế|chính sách kinh tế)\b/i
+];
+
+/**
+ * Deterministically checks whether a news item is relevant to an investment assistant.
+ * @param {{ title: string, summary: string, category: string }} item
+ * @returns {boolean}
+ */
+export function isRelevantNewsItem(item) {
+  const text = `${item.title || ''} ${item.summary || ''}`.toLowerCase();
+
+  // 1. Exclude obvious non-financial stories (accidents, crimes, entertainment, lifestyle)
+  for (const pattern of EXCLUSION_PATTERNS) {
+    if (pattern.test(text)) {
+      const hasStrongFinancial = STRONG_FINANCIAL_SIGNALS.some((p) => p.test(text));
+      const isPureAccidentOrCrime = /\b(lũ quét|sạt lở|chìm tàu|rơi máy bay|giết người|án mạng|hiếp dâm|bắt cóc|tắm nắng|mắc kẹt trên|thi thể|hoa hậu|showbiz|madam pang|bóng đá)\b/i.test(text);
+      if (isPureAccidentOrCrime || !hasStrongFinancial) {
+        return false;
+      }
+    }
+  }
+
+  // 2. Market & Company feeds are predominantly relevant unless caught by exclusions
+  if (item.category === 'market' || item.category === 'company') {
+    return true;
+  }
+
+  // 3. Macro and Global feeds must possess clear financial/economic relevance
+  if (item.category === 'macro' || item.category === 'global') {
+    return RELEVANT_MACRO_GLOBAL_SIGNALS.some((p) => p.test(text));
+  }
+
+  return true;
+}
+
 /**
  * Strips HTML tags and decodes common HTML entities.
  * @param {string} text
@@ -76,7 +138,9 @@ async function fetchSingleFeed(feedConfig) {
       items = items ? [items] : [];
     }
 
-    return items.map((item) => {
+    const normalizedItems = [];
+
+    for (const item of items) {
       const guidValue = typeof item.guid === 'object'
         ? (item.guid['#text'] || item.guid['__text'] || item.link)
         : (item.guid || item.link);
@@ -102,7 +166,7 @@ async function fetchSingleFeed(feedConfig) {
         }
       }
 
-      return {
+      const candidate = {
         id,
         title,
         summary,
@@ -111,7 +175,14 @@ async function fetchSingleFeed(feedConfig) {
         publishedAt,
         url: link
       };
-    });
+
+      // Filter out non-investment and irrelevant stories
+      if (isRelevantNewsItem(candidate)) {
+        normalizedItems.push(candidate);
+      }
+    }
+
+    return normalizedItems;
   } catch (error) {
     clearTimeout(timeout);
     console.warn(`[News] Error fetching feed ${feedConfig.category} (${feedConfig.url}):`, error.message);
@@ -120,7 +191,7 @@ async function fetchSingleFeed(feedConfig) {
 }
 
 /**
- * Fetches, deduplicates, sorts, and limits CafeF news from all 4 categories.
+ * Fetches, filters, deduplicates, sorts, and limits CafeF news from all 4 categories.
  * @param {Array<{ category: string, url: string }>} [feeds=CAFEF_FEEDS]
  * @param {number} [limit=30]
  * @returns {Promise<Array<object>>}
