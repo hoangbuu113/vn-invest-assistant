@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import { checkSupabaseConnection, getAssets, getAssetBySymbol } from './src/supabase.js';
+import { getMarketSnapshot } from './src/market.js';
 
 dotenv.config();
 
@@ -75,6 +76,24 @@ app.get('/api/assets/:symbol', async (req, res) => {
       status: 'error',
       message: 'Failed to fetch asset from database',
       details: error.message
+    });
+  }
+});
+
+// Market snapshot endpoint (delayed data from Yahoo Finance)
+app.get('/api/market/:symbol', async (req, res) => {
+  const { symbol } = req.params;
+  try {
+    const snapshot = await getMarketSnapshot(symbol);
+    return res.json({
+      status: 'ok',
+      data: snapshot
+    });
+  } catch (error) {
+    const statusCode = error.status || 500;
+    return res.status(statusCode).json({
+      status: 'error',
+      message: error.message || 'Failed to fetch market snapshot'
     });
   }
 });

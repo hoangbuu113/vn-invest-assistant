@@ -11,6 +11,11 @@ function App() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState(null);
 
+  // Market snapshot state
+  const [marketData, setMarketData] = useState(null);
+  const [marketLoading, setMarketLoading] = useState(false);
+  const [marketError, setMarketError] = useState(null);
+
   useEffect(() => {
     fetch('/api/assets')
       .then((res) => {
@@ -39,6 +44,12 @@ function App() {
     setDetailError(null);
     setAssetDetail(null);
 
+    // Reset market snapshot state
+    setMarketData(null);
+    setMarketLoading(true);
+    setMarketError(null);
+
+    // 1. Fetch asset details from database
     fetch(`/api/assets/${encodeURIComponent(symbol)}`)
       .then((res) => {
         if (!res.ok) {
@@ -58,12 +69,35 @@ function App() {
         setDetailError(err.message || `Failed to load asset details for ${symbol}`);
         setDetailLoading(false);
       });
+
+    // 2. Fetch market snapshot (isolated, so failure doesn't break asset detail)
+    fetch(`/api/market/${encodeURIComponent(symbol)}`)
+      .then((res) => {
+        if (!res.ok) {
+          throw new Error(`HTTP error! status: ${res.status}`);
+        }
+        return res.json();
+      })
+      .then((json) => {
+        if (json.status === 'ok' && json.data) {
+          setMarketData(json.data);
+        } else {
+          throw new Error(json.message || 'Failed to load market snapshot');
+        }
+        setMarketLoading(false);
+      })
+      .catch((err) => {
+        setMarketError(err.message || 'Market snapshot unavailable');
+        setMarketLoading(false);
+      });
   };
 
   const handleBackToList = () => {
     setSelectedSymbol(null);
     setAssetDetail(null);
     setDetailError(null);
+    setMarketData(null);
+    setMarketError(null);
   };
 
   return (
@@ -94,7 +128,7 @@ function App() {
           )}
 
           {assetDetail && (
-            <div style={{ border: '1px solid #ddd', padding: '1.5rem', borderRadius: '4px' }}>
+            <div style={{ border: '1px solid #ddd', padding: '1.5rem', borderRadius: '4px', marginBottom: '1.5rem' }}>
               <h3 style={{ marginTop: 0 }}>{assetDetail.symbol} — {assetDetail.name}</h3>
               <p><strong>ID:</strong> {assetDetail.id}</p>
               <p><strong>Symbol:</strong> {assetDetail.symbol}</p>
@@ -104,6 +138,44 @@ function App() {
               <p><strong>Created At:</strong> {assetDetail.created_at}</p>
             </div>
           )}
+
+          {/* Market Snapshot Section */}
+          <div style={{ border: '1px solid #cce5ff', backgroundColor: '#f0f8ff', padding: '1.5rem', borderRadius: '4px' }}>
+            <h3 style={{ marginTop: 0, color: '#004085' }}>Market Snapshot</h3>
+            <p style={{ fontSize: '0.85rem', color: '#555', marginTop: '-0.5rem', marginBottom: '1rem' }}>
+              <em>Delayed market data</em>
+            </p>
+
+            {marketLoading && <p>Loading market snapshot...</p>}
+
+            {marketError && (
+              <div style={{ color: '#721c24' }}>
+                <p><strong>Notice:</strong> Unable to load market snapshot ({marketError}).</p>
+              </div>
+            )}
+
+            {marketData && (
+              <div>
+                <p>
+                  <strong>Latest Price:</strong>{' '}
+                  <span style={{ fontSize: '1.2rem', fontWeight: 'bold' }}>
+                    {marketData.price !== null ? marketData.price.toLocaleString() : 'N/A'} {marketData.currency}
+                  </span>
+                </p>
+                <p>
+                  <strong>Price Change:</strong>{' '}
+                  <span style={{ color: (marketData.change || 0) >= 0 ? 'green' : 'red', fontWeight: 'bold' }}>
+                    {marketData.change !== null ? (marketData.change > 0 ? `+${marketData.change.toLocaleString()}` : marketData.change.toLocaleString()) : 'N/A'}{' '}
+                    ({marketData.changePercent !== null ? (marketData.changePercent > 0 ? `+${marketData.changePercent}%` : `${marketData.changePercent}%`) : 'N/A'})
+                  </span>
+                </p>
+                <p><strong>Day High:</strong> {marketData.dayHigh !== null ? marketData.dayHigh.toLocaleString() : 'N/A'} {marketData.currency}</p>
+                <p><strong>Day Low:</strong> {marketData.dayLow !== null ? marketData.dayLow.toLocaleString() : 'N/A'} {marketData.currency}</p>
+                <p><strong>Volume:</strong> {marketData.volume !== null ? marketData.volume.toLocaleString() : 'N/A'}</p>
+                <p><strong>Last Updated Time:</strong> {marketData.updatedAt || 'N/A'}</p>
+              </div>
+            )}
+          </div>
         </div>
       ) : (
         /* Asset List View */
