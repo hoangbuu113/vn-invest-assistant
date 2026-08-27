@@ -26,35 +26,25 @@ const xmlParser = new XMLParser({
   trimValues: true
 });
 
-// Non-investment topic patterns to filter out
-const EXCLUSION_PATTERNS = [
-  // Accidents, Natural Disasters, Fatalities
-  /\b(tai nạn|lật thuyền|rơi máy bay|chìm tàu|chìm xuồng|đắm tàu|cháy nhà|hỏa hoạn|lũ quét|sạt lở|lở đất|động đất|sóng thần|mắc kẹt|bị thương|tử vong|chết người|thiệt mạng|thương vong|ngập lụt|nạn nhân)\b/i,
+// Non-investment general noise exclusion patterns (accidents, crimes, celebrity, lifestyle, sports, weird trivia)
+const EXCLUSION_REGEXES = [
+  // Accidents, Natural Disasters, Casualties
+  /tai nạn|lật thuyền|rơi máy bay|chìm tàu|chìm xuồng|đắm tàu|cháy nhà|hỏa hoạn|lũ quét|sạt lở|lở đất|động đất|sóng thần|mắc kẹt|bị thương|tử vong|chết người|thiệt mạng|thương vong|ngập lụt|nạn nhân|cứu hộ|mất tích/i,
   // Crime, Violence, Police Blotter
-  /\b(giết người|án mạng|sát hại|cướp giật|trộm cắp|hiếp dâm|bắt cóc|lừa tình|đánh ghen|ma túy|tử thi|thi thể|mất tích|huyết án|bắn chết|đâm chết|tự tử|hành hung)\b/i,
-  // Entertainment, Showbiz, Pop Culture, Sports
-  /\b(showbiz|hoa hậu|hoa khôi|người mẫu|diễn viên|ca sĩ|phim ảnh|rạp chiếu|gameshow|concert|sao việt|sao hàn|sao hoa ngữ|đám cưới|scandal|bóng đá|bàn thắng|vô địch|cầu thủ|madam pang|fifa|aff cup|world cup|tiền đạo|huấn luyện viên)\b/i,
+  /giết người|án mạng|sát hại|cướp giật|cướp tài sản|trộm cắp|hiếp dâm|bắt cóc|lừa tình|đánh ghen|ma túy|tử thi|thi thể|huyết án|bắn chết|đâm chết|tự tử|hành hung|tội phạm/i,
+  // Entertainment, Showbiz, Sports
+  /showbiz|hoa hậu|hoa khôi|người mẫu|diễn viên|ca sĩ|phim ảnh|rạp chiếu|gameshow|concert|sao việt|sao hàn|sao hoa ngữ|đám cưới|scandal|bóng đá|bàn thắng|vô địch|cầu thủ|madam pang|fifa|aff cup|world cup|tiền đạo|huấn luyện viên/i,
   // Lifestyle, Health, Quirky Trivia, Clickbait
-  /\b(tử vi|cung hoàng đạo|phong thủy|mẹo vặt|làm đẹp|giảm cân|tắm nắng|nghỉ dưỡng|món ăn|đặc sản|chữa bệnh|ung thư|bệnh viện|sức khỏe|bánh quy|rắn hổ mang|động vật hoang dã|thịt chó|quái vật|sinh vật lạ|kỳ lạ|chuyện lạ|bí ẩn|vũ trụ sâu|người ngoài hành tinh)\b/i,
-  // Pure military hardware / skirmishes without economic context
-  /\b(tiêm kích|xe tăng vứt xó|vận tải cơ|không chiến|bắn hạ|tên lửa phòng không|súng đạn)\b/i
+  /tử vi|cung hoàng đạo|phong thủy|mẹo vặt|làm đẹp|giảm cân|tắm nắng|nghỉ dưỡng|món ăn|ẩm thực|đặc sản|chữa bệnh|ung thư|bệnh viện|sức khỏe|bánh quy|rắn hổ mang|động vật hoang dã|thịt chó|quái vật|sinh vật lạ|kỳ lạ|chuyện lạ|bí ẩn|vũ trụ sâu|người ngoài hành tinh/i,
+  // Pure Military Hardware / Skirmish Trivia without economic context
+  /tiêm kích|xe tăng vứt xó|vận tải cơ|không chiến|bắn hạ|tên lửa phòng không|súng đạn/i
 ];
 
-// Strong financial signals that protect financial stories with incidental keywords
-const STRONG_FINANCIAL_SIGNALS = [
-  /\b(chứng khoán|cổ phiếu|trái phiếu|vn-index|vn30|hose|hnx|upcom|etf|quỹ đầu tư|lợi nhuận|doanh thu|lãi ròng|lãi suất|tỷ giá|usd|vnd|ngân hàng|tín dụng|gdp|lạm phát|fdi|oda|giá vàng|giá dầu|thương mại|xuất khẩu|nhập khẩu|thuế quan|chính sách tiền tệ|ngân sách|bất động sản)\b/i
-];
+// Global finance positive signals (Must contain at least one finance/economy/market concept)
+const GLOBAL_FINANCIAL_REGEX = /chứng khoán|cổ phiếu|cổ phần|cổ tức|trái phiếu|lợi suất|yield|stock|shares|equity|etf|quỹ đầu tư|fund|wall street|s&p 500|nasdaq|dow jones|nikkei|ipo|m&a|sáp nhập|thâu tóm|niêm yết|vốn hóa|ngân hàng|bank|central bank|fed|cục dự trữ liên bang|ecb|boj|pbc|nhnn|lãi suất|interest rate|tín dụng|credit|chính sách tiền tệ|tiền tệ|tỷ giá|ngoại tệ|ngoại hối|forex|fx|usd|eur|jpy|cny|nhân dân tệ|đô la|dự trữ ngoại hối|kinh tế|economy|economic|gdp|lạm phát|inflation|giảm phát|deflation|suy thoái|recession|cpi|pmi|thất nghiệp|nợ công|ngân sách|tài khóa|thương mại|trade|xuất khẩu|export|nhập khẩu|import|thuế quan|tariff|fdi|chuỗi cung ứng|supply chain|cấm vận|trừng phạt kinh tế|sanction|hiệp định thương mại|giá vàng|vàng|gold|giá dầu|dầu mỏ|dầu brent|dầu wti|crude oil|khí đốt|năng lượng|hàng hóa|commodity|opec|bất động sản|real estate|doanh nghiệp|tập đoàn|công ty|hãng|tỷ phú|doanh thu|lợi nhuận|phá sản|tỷ usd|triệu usd|nghìn tỷ|đầu tư|nhà máy|bán dẫn|semiconductor|chip|công nghệ cao/i;
 
-// Relevant economic, corporate, policy, and global financial signals for Macro & Global feeds
-const RELEVANT_MACRO_GLOBAL_SIGNALS = [
-  /\b(chứng khoán|cổ phiếu|trái phiếu|etf|quỹ|cổ tức|niêm yết|ipo|m&a|sáp nhập|thâu tóm)\b/i,
-  /\b(doanh nghiệp|tập đoàn|công ty|hãng|tỷ phú|lợi nhuận|doanh thu|phá sản|tài sản|vốn hóa)\b/i,
-  /\b(ngân hàng|fed|ecb|boj|nhnn|lãi suất|tín dụng|tiền tệ|tỷ giá|usd|eur|cny|ngoại hối|dự trữ ngoại hối)\b/i,
-  /\b(kinh tế|gdp|lạm phát|cpi|fdi|oda|xuất khẩu|nhập khẩu|thương mại|thuế quan|ngân sách|đầu tư công)\b/i,
-  /\b(giá vàng|kim loại quý|giá dầu|khí đốt|năng lượng|hàng hóa|bất động sản|địa ốc|chuỗi cung ứng)\b/i,
-  /\b(tỷ usd|triệu usd|nghìn tỷ|tỷ đồng|đầu tư|dự án|nhà máy|khu công nghiệp|hạ tầng|metro|sân bay|cảng biển)\b/i,
-  /\b(trừng phạt kinh tế|cấm vận|thỏa thuận thương mại|hợp tác kinh tế|chính sách kinh tế)\b/i
-];
+// Macro positive signals (Macroeconomics, infrastructure, fiscal, industry, trade)
+const MACRO_FINANCIAL_REGEX = /kinh tế|gdp|lạm phát|cpi|fdi|oda|xuất khẩu|nhập khẩu|thương mại|thuế|ngân sách|đầu tư công|vốn đầu tư|lãi suất|tín dụng|ngân hàng|tỷ giá|quy hoạch|hạ tầng|khu công nghiệp|nhà máy|sân bay|cảng biển|cao tốc|metro|đường sắt|năng lượng|điện|bất động sản|địa ốc|thị trường|doanh nghiệp|tập đoàn|công ty|tỷ đồng|nghìn tỷ|triệu usd|tỷ usd|chính sách|thủ tướng|bộ tài chính|bộ công thương/i;
 
 /**
  * Deterministically checks whether a news item is relevant to an investment assistant.
@@ -64,27 +54,24 @@ const RELEVANT_MACRO_GLOBAL_SIGNALS = [
 export function isRelevantNewsItem(item) {
   const text = `${item.title || ''} ${item.summary || ''}`.toLowerCase();
 
-  // 1. Exclude obvious non-financial stories (accidents, crimes, entertainment, lifestyle)
-  for (const pattern of EXCLUSION_PATTERNS) {
-    if (pattern.test(text)) {
-      const hasStrongFinancial = STRONG_FINANCIAL_SIGNALS.some((p) => p.test(text));
-      const isPureAccidentOrCrime = /\b(lũ quét|sạt lở|chìm tàu|rơi máy bay|giết người|án mạng|hiếp dâm|bắt cóc|tắm nắng|mắc kẹt trên|thi thể|hoa hậu|showbiz|madam pang|bóng đá)\b/i.test(text);
-      if (isPureAccidentOrCrime || !hasStrongFinancial) {
-        return false;
-      }
+  // 1. General exclusion check for non-investment noise (accidents, crimes, entertainment, weird trivia)
+  for (const regex of EXCLUSION_REGEXES) {
+    if (regex.test(text)) {
+      return false;
     }
   }
 
-  // 2. Market & Company feeds are predominantly relevant unless caught by exclusions
-  if (item.category === 'market' || item.category === 'company') {
-    return true;
+  // 2. Global feed articles must have a clear financial/economic/market signal
+  if (item.category === 'global') {
+    return GLOBAL_FINANCIAL_REGEX.test(text);
   }
 
-  // 3. Macro and Global feeds must possess clear financial/economic relevance
-  if (item.category === 'macro' || item.category === 'global') {
-    return RELEVANT_MACRO_GLOBAL_SIGNALS.some((p) => p.test(text));
+  // 3. Macro feed articles must possess economic/investment context
+  if (item.category === 'macro') {
+    return MACRO_FINANCIAL_REGEX.test(text);
   }
 
+  // 4. Market and Company feed items are inherently financial unless caught by exclusions
   return true;
 }
 
