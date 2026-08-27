@@ -1,0 +1,64 @@
+# Dependencies
+node_modules/
+vendor/
+.venv/
+venv/
+env/
+__pycache__/
+*.pyc
+
+# Production & Build outputs
+dist/
+build/
+out/
+.next/
+.nuxt/
+.output/
+.cache/
+*.tsbuildinfo
+
+# Environment & Secrets
+.env
+.env.local
+.env.*.local
+.env.production
+.env.staging
+!.env.example
+
+# Logs & Runtime data
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Local Databases & Storage
+*.sqlite
+*.sqlite3
+*.db
+data/local/
+*.local
+
+# IDE & Editor artifacts
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Temporary files & Testing
+tmp/
+temp/
+coverage/
+.coverage
+.nyc_output/
+
