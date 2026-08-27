@@ -91,3 +91,30 @@ export async function getAssets() {
 
   return data || [];
 }
+
+/**
+ * Fetches a single asset by symbol from the Supabase assets table.
+ */
+export async function getAssetBySymbol(symbol) {
+  if (!isSupabaseConfigured || !supabase) {
+    throw new Error('Supabase credentials are not configured. Please set SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY in server/.env');
+  }
+
+  if (!symbol || typeof symbol !== 'string') {
+    return null;
+  }
+
+  const normalizedSymbol = symbol.trim().toUpperCase();
+
+  const { data, error } = await supabase
+    .from('assets')
+    .select('id, symbol, name, asset_type, exchange, created_at')
+    .eq('symbol', normalizedSymbol)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Database query error: ${error.message} (code: ${error.code || 'UNKNOWN'})`);
+  }
+
+  return data;
+}

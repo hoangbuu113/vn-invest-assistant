@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import { checkSupabaseConnection, getAssets } from './src/supabase.js';
+import { checkSupabaseConnection, getAssets, getAssetBySymbol } from './src/supabase.js';
 
 dotenv.config();
 
@@ -50,6 +50,30 @@ app.get('/api/assets', async (req, res) => {
     return res.status(500).json({
       status: 'error',
       message: 'Failed to fetch assets from database',
+      details: error.message
+    });
+  }
+});
+
+// Single asset detail endpoint
+app.get('/api/assets/:symbol', async (req, res) => {
+  const { symbol } = req.params;
+  try {
+    const asset = await getAssetBySymbol(symbol);
+    if (!asset) {
+      return res.status(404).json({
+        status: 'error',
+        message: `Asset with symbol '${symbol}' not found`
+      });
+    }
+    return res.json({
+      status: 'ok',
+      data: asset
+    });
+  } catch (error) {
+    return res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch asset from database',
       details: error.message
     });
   }
