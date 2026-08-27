@@ -15,12 +15,22 @@ import {
   AnimatedNavTabs
 } from './components/MotionHelpers.jsx';
 
+import { PriceHistoryChart } from './components/PriceHistoryChart.jsx';
+
 const CATEGORY_STYLES = {
   market: { label: 'Thị trường', bg: '#eff6ff', color: '#1d4ed8', border: '#bfdbfe', accent: '#2563eb' },
   company: { label: 'Doanh nghiệp', bg: '#faf5ff', color: '#7c3aed', border: '#e9d5ff', accent: '#7c3aed' },
   macro: { label: 'Vĩ mô', bg: '#ecfdf5', color: '#047857', border: '#a7f3d0', accent: '#059669' },
   global: { label: 'Quốc tế', bg: '#fff7ed', color: '#c2410c', border: '#fed7aa', accent: '#ea580c' }
 };
+
+const HISTORY_RANGES = [
+  { id: '1W', label: '1T' },
+  { id: '1M', label: '1Th' },
+  { id: '3M', label: '3Th' },
+  { id: '6M', label: '6Th' },
+  { id: '1Y', label: '1N' }
+];
 
 const NAV_TABS = [
   { id: 'portfolio', label: 'Danh mục', icon: '📊' },
@@ -140,6 +150,12 @@ function App() {
   const [marketLoading, setMarketLoading] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [marketError, setMarketError] = useState(null);
+
+  // Historical market data state (Feature 06)
+  const [historyRange, setHistoryRange] = useState('1M'); // '1W' | '1M' | '3M' | '6M' | '1Y'
+  const [historyData, setHistoryData] = useState(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState(null);
 
   // News feed state
   const [news, setNews] = useState([]);
@@ -578,11 +594,46 @@ function App() {
     return () => clearInterval(intervalId);
   }, [selectedSymbol, fetchMarketData]);
 
+  // Fetch historical market data (Feature 06)
+  const fetchHistoryData = useCallback((symbol, range = '1M') => {
+    if (!symbol) return;
+    setHistoryLoading(true);
+    setHistoryError(null);
+    setHistoryData(null); // Prevent stale range data from showing while loading
+
+    fetch(`/api/market/${encodeURIComponent(symbol)}/history?range=${encodeURIComponent(range)}`)
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
+      .then((json) => {
+        if (json.status === 'ok' && json.data) {
+          setHistoryData(json.data);
+        } else {
+          throw new Error(json.message || 'Không thể tải dữ liệu lịch sử giá');
+        }
+        setHistoryLoading(false);
+      })
+      .catch((err) => {
+        setHistoryError(err.message || 'Dữ liệu lịch sử giá không khả dụng');
+        setHistoryLoading(false);
+      });
+  }, []);
+
+  // Handle range change for history chart
+  const handleRangeChange = (newRange) => {
+    setHistoryRange(newRange);
+    if (selectedSymbol) {
+      fetchHistoryData(selectedSymbol, newRange);
+    }
+  };
+
   const handleSelectAsset = (symbol) => {
     setSelectedSymbol(symbol);
     setDetailLoading(true);
     setDetailError(null);
     setAssetDetail(null);
+    setHistoryRange('1M');
 
     fetch(`/api/assets/${encodeURIComponent(symbol)}`)
       .then((res) => {
@@ -603,6 +654,7 @@ function App() {
       });
 
     fetchMarketData(symbol, true);
+    fetchHistoryData(symbol, '1M');
   };
 
   const handleBackToList = () => {
@@ -612,6 +664,10 @@ function App() {
     setMarketData(null);
     setMarketError(null);
     setIsRefreshing(false);
+    setHistoryData(null);
+    setHistoryError(null);
+    setHistoryLoading(false);
+    setHistoryRange('1M');
   };
 
   return (
@@ -1291,6 +1347,161 @@ function App() {
                             </div>
                           </div>
                         </div>
+                      </div>
+                    )}
+                  </TiltCard>
+
+                  {/* Historical Price & Trend Card (Feature 06) */}
+                  <TiltCard className="fintech-card" style={{ padding: '1.5rem', marginTop: '1.25rem' }}>
+                    {/* Header: Title, delayed badge, and range selector */}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.75rem' }}>
+                      <div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <h3 style={{ margin: 0, fontSize: '1.1rem', color: 'var(--color-slate-900)', fontWeight: 800 }}>Lịch sử giá</h3>
+                          <span className="fintech-badge badge-neutral" style={{ fontSize: '0.75rem' }}>
+                            Dữ liệu thị trường có độ trễ
+                          </span>
+                        </div>
+                        {historyData && historyData.updatedAt && (
+                          <span style={{ fontSize: '0.78rem', color: 'var(--color-slate-400)', display: 'block', marginTop: '2px' }}>
+                            Cập nhật lúc: {formatPublishedTime(historyData.updatedAt)}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Range Selector: 1T | 1Th | 3Th | 6Th | 1N */}
+                      <div className="range-selector-group">
+                        {HISTORY_RANGES.map((r) => (
+                          <button
+                            key={r.id}
+                            type="button"
+                            className={`range-selector-btn ${historyRange === r.id ? 'active' : ''}`}
+                            onClick={() => handleRangeChange(r.id)}
+                            disabled={historyLoading}
+                          >
+                            {r.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Loading State */}
+                    {historyLoading && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', padding: '1rem 0' }}>
+                        <div className="skeleton-shimmer" style={{ width: '100%', height: '220px', borderRadius: 'var(--radius-md)' }} />
+                        <div className="metrics-grid" style={{ marginBottom: 0 }}>
+                          {[1, 2, 3, 4, 5, 6].map((n) => (
+                            <div key={n} className="skeleton-shimmer" style={{ height: '65px' }} />
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Error State */}
+                    {historyError && !historyLoading && (
+                      <div className="fintech-banner banner-warning" style={{ margin: '0.5rem 0' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', flexWrap: 'wrap', gap: '0.5rem' }}>
+                          <span>Không thể tải dữ liệu lịch sử giá ({historyError}).</span>
+                          <MagneticButton
+                            onClick={() => fetchHistoryData(selectedSymbol, historyRange)}
+                            className="fintech-btn btn-secondary btn-sm"
+                          >
+                            Thử lại
+                          </MagneticButton>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Content when loaded */}
+                    {historyData && !historyLoading && (
+                      <div>
+                        {/* Summary Metrics Grid */}
+                        <div className="metrics-grid" style={{ marginBottom: '1.25rem' }}>
+                          {/* 1. Giá đầu kỳ */}
+                          <div className="metric-card" style={{ padding: '0.85rem 1rem', '--card-accent': '#64748b' }}>
+                            <div className="metric-label">Giá đầu kỳ</div>
+                            <div className="metric-value" style={{ fontSize: '1.1rem' }}>
+                              {historyData.metrics?.periodStartPrice !== null && historyData.metrics?.periodStartPrice !== undefined
+                                ? `${historyData.metrics.periodStartPrice.toLocaleString('vi-VN')} ₫`
+                                : 'N/A'}
+                            </div>
+                          </div>
+
+                          {/* 2. Giá gần nhất */}
+                          <div className="metric-card" style={{ padding: '0.85rem 1rem', '--card-accent': '#3b82f6' }}>
+                            <div className="metric-label">Giá gần nhất</div>
+                            <div className="metric-value" style={{ fontSize: '1.1rem' }}>
+                              {historyData.metrics?.latestPrice !== null && historyData.metrics?.latestPrice !== undefined
+                                ? `${historyData.metrics.latestPrice.toLocaleString('vi-VN')} ₫`
+                                : 'N/A'}
+                            </div>
+                          </div>
+
+                          {/* 3. Thay đổi tuyệt đối */}
+                          <div
+                            className={`metric-card ${
+                              (historyData.metrics?.absoluteChange || 0) > 0
+                                ? 'metric-card-gain'
+                                : (historyData.metrics?.absoluteChange || 0) < 0
+                                ? 'metric-card-loss'
+                                : ''
+                            }`}
+                            style={{ padding: '0.85rem 1rem', '--card-accent': (historyData.metrics?.absoluteChange || 0) >= 0 ? '#10b981' : '#ef4444' }}
+                          >
+                            <div className="metric-label">Thay đổi</div>
+                            <div className="metric-value" style={{ fontSize: '1.1rem' }}>
+                              {historyData.metrics?.absoluteChange !== null && historyData.metrics?.absoluteChange !== undefined
+                                ? `${historyData.metrics.absoluteChange > 0 ? '+' : ''}${historyData.metrics.absoluteChange.toLocaleString('vi-VN')} ₫`
+                                : 'N/A'}
+                            </div>
+                          </div>
+
+                          {/* 4. % Thay đổi */}
+                          <div
+                            className={`metric-card ${
+                              (historyData.metrics?.percentageChange || 0) > 0
+                                ? 'metric-card-gain'
+                                : (historyData.metrics?.percentageChange || 0) < 0
+                                ? 'metric-card-loss'
+                                : ''
+                            }`}
+                            style={{ padding: '0.85rem 1rem', '--card-accent': (historyData.metrics?.percentageChange || 0) >= 0 ? '#10b981' : '#ef4444' }}
+                          >
+                            <div className="metric-label">% Thay đổi</div>
+                            <div className="metric-value" style={{ fontSize: '1.1rem' }}>
+                              {historyData.metrics?.percentageChange !== null && historyData.metrics?.percentageChange !== undefined
+                                ? `${historyData.metrics.percentageChange > 0 ? '+' : ''}${historyData.metrics.percentageChange}%`
+                                : 'N/A'}
+                            </div>
+                          </div>
+
+                          {/* 5. Cao nhất kỳ */}
+                          <div className="metric-card" style={{ padding: '0.85rem 1rem', '--card-accent': '#10b981' }}>
+                            <div className="metric-label">Cao nhất</div>
+                            <div className="metric-value" style={{ fontSize: '1.1rem' }}>
+                              {historyData.metrics?.periodHigh !== null && historyData.metrics?.periodHigh !== undefined
+                                ? `${historyData.metrics.periodHigh.toLocaleString('vi-VN')} ₫`
+                                : 'N/A'}
+                            </div>
+                          </div>
+
+                          {/* 6. Thấp nhất kỳ */}
+                          <div className="metric-card" style={{ padding: '0.85rem 1rem', '--card-accent': '#ef4444' }}>
+                            <div className="metric-label">Thấp nhất</div>
+                            <div className="metric-value" style={{ fontSize: '1.1rem' }}>
+                              {historyData.metrics?.periodLow !== null && historyData.metrics?.periodLow !== undefined
+                                ? `${historyData.metrics.periodLow.toLocaleString('vi-VN')} ₫`
+                                : 'N/A'}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Visual Trend Chart */}
+                        <PriceHistoryChart
+                          bars={historyData.bars || []}
+                          percentageChange={historyData.metrics?.percentageChange}
+                          currency="VND"
+                        />
                       </div>
                     )}
                   </TiltCard>

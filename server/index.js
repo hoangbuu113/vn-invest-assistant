@@ -12,7 +12,7 @@ import {
   updateHolding,
   deleteHolding
 } from './src/supabase.js';
-import { getMarketSnapshot } from './src/market.js';
+import { getMarketSnapshot, getMarketHistory } from './src/market.js';
 import { getNewsFeed } from './src/news.js';
 import { getPortfolioOverview } from './src/portfolio.js';
 
@@ -356,6 +356,25 @@ app.get('/api/market/:symbol', async (req, res) => {
     return res.status(statusCode).json({
       status: 'error',
       message: error.message || 'Failed to fetch market snapshot'
+    });
+  }
+});
+
+// Historical market data endpoint (daily bars & period metrics from Yahoo Finance)
+app.get('/api/market/:symbol/history', async (req, res) => {
+  const { symbol } = req.params;
+  const { range = '1M' } = req.query;
+  try {
+    const history = await getMarketHistory(symbol, range);
+    return res.json({
+      status: 'ok',
+      data: history
+    });
+  } catch (error) {
+    const statusCode = error.status || 500;
+    return res.status(statusCode).json({
+      status: 'error',
+      message: error.message || 'Failed to fetch market history'
     });
   }
 });

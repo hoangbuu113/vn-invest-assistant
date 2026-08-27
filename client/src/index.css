@@ -1178,6 +1178,117 @@ body {
   transform: translateX(3px);
 }
 
+/* Feature 06: Price History & Trend Styles */
+.range-selector-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--color-slate-100);
+  padding: 3px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-default);
+}
+
+.range-selector-btn {
+  border: none;
+  background: transparent;
+  padding: 4px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--color-slate-600);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.range-selector-btn:hover:not(:disabled) {
+  color: var(--color-slate-900);
+  background: rgba(255, 255, 255, 0.6);
+}
+
+.range-selector-btn.active {
+  background: var(--bg-surface-solid);
+  color: var(--color-brand-700);
+  box-shadow: var(--shadow-sm);
+}
+
+.range-selector-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.price-history-chart-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  width: 100%;
+}
+
+.chart-active-readout {
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  padding: 0.35rem 0.75rem;
+  background: var(--color-slate-50);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+
+.active-readout-inner {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  flex-wrap: wrap;
+  font-size: 0.84rem;
+}
+
+.readout-date {
+  font-weight: 700;
+  color: var(--color-slate-800);
+}
+
+.readout-close {
+  color: var(--color-slate-900);
+}
+
+.readout-sub {
+  color: var(--color-slate-500);
+  font-size: 0.78rem;
+}
+
+.active-readout-hint {
+  font-size: 0.8rem;
+  color: var(--color-slate-400);
+}
+
+.svg-container {
+  width: 100%;
+  overflow: hidden;
+  position: relative;
+}
+
+.price-trend-svg {
+  width: 100%;
+  height: auto;
+  display: block;
+  user-select: none;
+  cursor: crosshair;
+}
+
+.chart-empty-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3rem 1rem;
+  background: var(--color-slate-50);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-md);
+  color: var(--color-slate-500);
+  font-size: 0.9rem;
+  font-weight: 500;
+  text-align: center;
+}
+
 /* Responsive adjustments */
 @media (max-width: 680px) {
   .app-header-inner {
@@ -1232,3 +1343,4 @@ body {
     animation: none !important;
   }
 }
+
