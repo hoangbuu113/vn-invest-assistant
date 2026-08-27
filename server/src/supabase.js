@@ -3,18 +3,24 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
+const rawUrl = process.env.SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_PUBLISHABLE_KEY || process.env.SUPABASE_ANON_KEY;
+
+// Sanitize URL in case trailing slashes or /rest/v1 were included
+const supabaseUrl = rawUrl
+  ? rawUrl.trim().replace(/\/rest\/v1\/?$/, '').replace(/\/+$/, '')
+  : null;
 
 export const isSupabaseConfigured = Boolean(
   supabaseUrl &&
-  supabaseAnonKey &&
+  supabaseKey &&
   supabaseUrl !== 'https://your-project-id.supabase.co' &&
-  supabaseAnonKey !== 'your-supabase-anon-key'
+  supabaseKey !== 'your-supabase-publishable-key' &&
+  supabaseKey !== 'your-supabase-anon-key'
 );
 
 export const supabase = isSupabaseConfigured
-  ? createClient(supabaseUrl, supabaseAnonKey)
+  ? createClient(supabaseUrl, supabaseKey)
   : null;
 
 /**
@@ -25,7 +31,7 @@ export async function checkSupabaseConnection() {
   if (!isSupabaseConfigured || !supabase) {
     return {
       connected: false,
-      error: 'Supabase credentials are not configured. Please set SUPABASE_URL and SUPABASE_ANON_KEY in server/.env'
+      error: 'Supabase credentials are not configured. Please set SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY in server/.env'
     };
   }
 
@@ -40,7 +46,7 @@ export async function checkSupabaseConnection() {
       return {
         connected: false,
         status,
-        error: error?.message || 'Authentication failed: Invalid SUPABASE_URL or SUPABASE_ANON_KEY'
+        error: error?.message || 'Authentication failed: Invalid SUPABASE_URL or SUPABASE_PUBLISHABLE_KEY'
       };
     }
 
