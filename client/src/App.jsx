@@ -25,7 +25,19 @@ function formatPublishedTime(isoString) {
 }
 
 function App() {
-  const [activeTab, setActiveTab] = useState('news'); // 'news' | 'assets'
+  const [activeTab, setActiveTab] = useState('news'); // 'news' | 'assets' | 'profile'
+
+  // Profile state
+  const [profile, setProfile] = useState(null);
+  const [profileLoading, setProfileLoading] = useState(true);
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileError, setProfileError] = useState(null);
+  const [profileSuccess, setProfileSuccess] = useState(false);
+
+  // Form states
+  const [cashAvailable, setCashAvailable] = useState('');
+  const [riskTolerance, setRiskTolerance] = useState('moderate');
+  const [investmentHorizon, setInvestmentHorizon] = useState('medium');
 
   // Assets state
   const [assets, setAssets] = useState([]);
@@ -49,6 +61,95 @@ function App() {
   const [newsLoading, setNewsLoading] = useState(true);
   const [newsRefreshing, setNewsRefreshing] = useState(false);
   const [newsError, setNewsError] = useState(null);
+
+  // Fetch investor profile data
+  const fetchProfile = useCallback((isInitial = false) => {
+    if (isInitial) {
+      setProfileLoading(true);
+    }
+    setProfileError(null);
+
+    fetch('/api/profile')
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
+      .then((json) => {
+        if (json.status === 'ok' && json.data) {
+          setProfile(json.data);
+          setCashAvailable(json.data.cash_available !== undefined ? String(json.data.cash_available) : '0');
+          setRiskTolerance(json.data.risk_tolerance || 'moderate');
+          setInvestmentHorizon(json.data.investment_horizon || 'medium');
+        } else {
+          throw new Error(json.message || 'Failed to load profile');
+        }
+      })
+      .catch((err) => {
+        setProfileError(err.message || 'Failed to fetch investor profile');
+      })
+      .finally(() => {
+        setProfileLoading(false);
+      });
+  }, []);
+
+  // Fetch profile on initial mount
+  useEffect(() => {
+    fetchProfile(true);
+  }, [fetchProfile]);
+
+  // Handle saving profile changes
+  const handleSaveProfile = (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+
+    const numericCash = Number(cashAvailable);
+    if (cashAvailable === '' || isNaN(numericCash) || !isFinite(numericCash) || numericCash < 0) {
+      setProfileError('Available cash must be a valid non-negative number.');
+      setProfileSuccess(false);
+      return;
+    }
+
+    setProfileSaving(true);
+    setProfileError(null);
+    setProfileSuccess(false);
+
+    fetch('/api/profile', {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        cash_available: numericCash,
+        risk_tolerance: riskTolerance,
+        investment_horizon: investmentHorizon
+      })
+    })
+      .then((res) => {
+        if (!res.ok) {
+          return res.json().then((json) => {
+            const errMsg = json.errors ? json.errors.join(', ') : json.message || `HTTP ${res.status}`;
+            throw new Error(errMsg);
+          });
+        }
+        return res.json();
+      })
+      .then((json) => {
+        if (json.status === 'ok' && json.data) {
+          setProfile(json.data);
+          setCashAvailable(String(json.data.cash_available));
+          setRiskTolerance(json.data.risk_tolerance);
+          setInvestmentHorizon(json.data.investment_horizon);
+          setProfileSuccess(true);
+        } else {
+          throw new Error(json.message || 'Failed to save profile');
+        }
+      })
+      .catch((err) => {
+        setProfileError(err.message || 'Failed to save profile changes');
+      })
+      .finally(() => {
+        setProfileSaving(false);
+      });
+  };
 
   // Load all assets on mount
   useEffect(() => {
@@ -258,6 +359,23 @@ function App() {
               }}
             >
               Asset Browser
+            </button>
+            <button
+              onClick={() => setActiveTab('profile')}
+              style={{
+                padding: '6px 14px',
+                fontSize: '0.85rem',
+                fontWeight: activeTab === 'profile' ? 600 : 500,
+                backgroundColor: activeTab === 'profile' ? '#ffffff' : 'transparent',
+                color: activeTab === 'profile' ? '#0f172a' : '#64748b',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                boxShadow: activeTab === 'profile' ? '0 1px 2px rgba(0,0,0,0.06)' : 'none',
+                transition: 'all 0.15s ease'
+              }}
+            >
+              Investor Profile
             </button>
           </nav>
         </div>
@@ -691,6 +809,297 @@ function App() {
                     </table>
                   </div>
                 )}
+              </div>
+            )}
+          </section>
+        )}
+
+        {/* TAB 3: INVESTOR PROFILE */}
+        {activeTab === 'profile' && (
+          <section>
+            <div style={{ marginBottom: '1.25rem' }}>
+              <h2 style={{ margin: '0 0 0.25rem 0', fontSize: '1.25rem', fontWeight: 700, color: '#0f172a' }}>
+                Investor Profile
+              </h2>
+              <p style={{ margin: 0, fontSize: '0.85rem', color: '#64748b' }}>
+                Manage your available investment capital, risk tolerance, and investment horizon
+              </p>
+            </div>
+
+            {/* Loading State */}
+            {profileLoading && (
+              <div style={{
+                backgroundColor: '#ffffff',
+                border: '1px solid #e2e8f0',
+                borderRadius: '8px',
+                padding: '3rem 2rem',
+                textAlign: 'center',
+                color: '#64748b'
+              }}>
+                <div style={{ fontSize: '1.5rem', marginBottom: '0.5rem' }}>⏳</div>
+                <p style={{ margin: 0, fontSize: '0.9rem', fontWeight: 500 }}>Loading investor profile...</p>
+              </div>
+            )}
+
+            {/* Fatal Fetch Error State */}
+            {profileError && !profile && !profileLoading && (
+              <div style={{
+                backgroundColor: '#fef2f2',
+                border: '1px solid #fecaca',
+                borderRadius: '8px',
+                padding: '1.25rem 1.5rem',
+                color: '#991b1b',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                marginBottom: '1rem'
+              }}>
+                <div>
+                  <strong style={{ display: 'block', marginBottom: '0.25rem', fontSize: '0.9rem' }}>Unable to load profile</strong>
+                  <span style={{ fontSize: '0.85rem' }}>{profileError}</span>
+                </div>
+                <button
+                  onClick={() => fetchProfile(true)}
+                  style={{
+                    padding: '6px 12px',
+                    fontSize: '0.82rem',
+                    fontWeight: 600,
+                    backgroundColor: '#991b1b',
+                    color: '#ffffff',
+                    border: 'none',
+                    borderRadius: '4px',
+                    cursor: 'pointer'
+                  }}
+                >
+                  Retry
+                </button>
+              </div>
+            )}
+
+            {/* Success Banner */}
+            {profileSuccess && (
+              <div style={{
+                backgroundColor: '#f0fdf4',
+                border: '1px solid #bbf7d0',
+                borderRadius: '6px',
+                padding: '0.75rem 1rem',
+                marginBottom: '1.25rem',
+                fontSize: '0.88rem',
+                color: '#15803d',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem'
+              }}>
+                <span>✓</span>
+                <span>Investor profile saved successfully! Persisted to Supabase.</span>
+              </div>
+            )}
+
+            {/* Save Error Banner */}
+            {profileError && profile && (
+              <div style={{
+                backgroundColor: '#fef2f2',
+                border: '1px solid #fecaca',
+                borderRadius: '6px',
+                padding: '0.75rem 1rem',
+                marginBottom: '1.25rem',
+                fontSize: '0.88rem',
+                color: '#991b1b'
+              }}>
+                {profileError}
+              </div>
+            )}
+
+            {/* Profile Form Card */}
+            {!profileLoading && (
+              <div style={{
+                backgroundColor: '#ffffff',
+                border: '1px solid #e2e8f0',
+                borderRadius: '8px',
+                padding: '1.5rem',
+                boxShadow: '0 1px 2px rgba(0,0,0,0.02)'
+              }}>
+                <form onSubmit={handleSaveProfile}>
+                  {/* Field 1: Available Cash */}
+                  <div style={{ marginBottom: '1.5rem' }}>
+                    <label style={{ display: 'block', fontSize: '0.9rem', fontWeight: 600, color: '#0f172a', marginBottom: '0.25rem' }}>
+                      Available Investment Cash (<code>cash_available</code>)
+                    </label>
+                    <p style={{ margin: '0 0 0.5rem 0', fontSize: '0.82rem', color: '#64748b' }}>
+                      Money currently available to deploy into investments (in VND).
+                    </p>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                      <input
+                        type="number"
+                        min="0"
+                        step="100000"
+                        value={cashAvailable}
+                        onChange={(e) => {
+                          setCashAvailable(e.target.value);
+                          setProfileSuccess(false);
+                          setProfileError(null);
+                        }}
+                        required
+                        placeholder="e.g. 100000000"
+                        style={{
+                          width: '100%',
+                          maxWidth: '360px',
+                          padding: '8px 12px',
+                          fontSize: '0.95rem',
+                          border: '1px solid #cbd5e1',
+                          borderRadius: '6px',
+                          outline: 'none',
+                          boxSizing: 'border-box'
+                        }}
+                      />
+                      <span style={{ fontSize: '0.88rem', fontWeight: 600, color: '#475569' }}>
+                        VND
+                      </span>
+                    </div>
+                    {/* Live Formatted VND Preview */}
+                    {!isNaN(Number(cashAvailable)) && cashAvailable !== '' && Number(cashAvailable) >= 0 && (
+                      <div style={{ marginTop: '0.35rem', fontSize: '0.82rem', color: '#2563eb' }}>
+                        ≈ {Number(cashAvailable).toLocaleString('vi-VN')} ₫
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Field 2: Risk Tolerance */}
+                  <div style={{ marginBottom: '1.5rem' }}>
+                    <label style={{ display: 'block', fontSize: '0.9rem', fontWeight: 600, color: '#0f172a', marginBottom: '0.25rem' }}>
+                      Risk Tolerance (<code>risk_tolerance</code>)
+                    </label>
+                    <p style={{ margin: '0 0 0.5rem 0', fontSize: '0.82rem', color: '#64748b' }}>
+                      Your comfort level with market volatility and drawdown risks.
+                    </p>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.75rem' }}>
+                      {[
+                        { value: 'low', label: 'Low', desc: 'Capital preservation, minimal risk (Bảo toàn vốn)' },
+                        { value: 'moderate', label: 'Moderate', desc: 'Balanced risk and growth (Cân bằng)' },
+                        { value: 'high', label: 'High', desc: 'Maximum growth potential, high volatility (Tăng trưởng)' }
+                      ].map((item) => (
+                        <label
+                          key={item.value}
+                          style={{
+                            display: 'block',
+                            padding: '0.85rem 1rem',
+                            borderRadius: '6px',
+                            border: `1.5px solid ${riskTolerance === item.value ? '#2563eb' : '#e2e8f0'}`,
+                            backgroundColor: riskTolerance === item.value ? '#eff6ff' : '#ffffff',
+                            cursor: 'pointer',
+                            transition: 'all 0.15s ease'
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
+                            <input
+                              type="radio"
+                              name="risk_tolerance"
+                              value={item.value}
+                              checked={riskTolerance === item.value}
+                              onChange={(e) => {
+                                setRiskTolerance(e.target.value);
+                                setProfileSuccess(false);
+                                setProfileError(null);
+                              }}
+                              style={{ margin: 0 }}
+                            />
+                            <strong style={{ fontSize: '0.9rem', color: riskTolerance === item.value ? '#1d4ed8' : '#0f172a' }}>
+                              {item.label}
+                            </strong>
+                          </div>
+                          <span style={{ fontSize: '0.78rem', color: '#64748b', display: 'block' }}>
+                            {item.desc}
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Field 3: Investment Horizon */}
+                  <div style={{ marginBottom: '1.75rem' }}>
+                    <label style={{ display: 'block', fontSize: '0.9rem', fontWeight: 600, color: '#0f172a', marginBottom: '0.25rem' }}>
+                      Investment Horizon (<code>investment_horizon</code>)
+                    </label>
+                    <p style={{ margin: '0 0 0.5rem 0', fontSize: '0.82rem', color: '#64748b' }}>
+                      Your intended time horizon before needing to withdraw deployed funds.
+                    </p>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.75rem' }}>
+                      {[
+                        { value: 'short', label: 'Short', desc: 'Short-term (< 1 year / Dưới 1 năm)' },
+                        { value: 'medium', label: 'Medium', desc: 'Medium-term (1–3 years / 1-3 năm)' },
+                        { value: 'long', label: 'Long', desc: 'Long-term (> 3 years / Trên 3 năm)' }
+                      ].map((item) => (
+                        <label
+                          key={item.value}
+                          style={{
+                            display: 'block',
+                            padding: '0.85rem 1rem',
+                            borderRadius: '6px',
+                            border: `1.5px solid ${investmentHorizon === item.value ? '#2563eb' : '#e2e8f0'}`,
+                            backgroundColor: investmentHorizon === item.value ? '#eff6ff' : '#ffffff',
+                            cursor: 'pointer',
+                            transition: 'all 0.15s ease'
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
+                            <input
+                              type="radio"
+                              name="investment_horizon"
+                              value={item.value}
+                              checked={investmentHorizon === item.value}
+                              onChange={(e) => {
+                                setInvestmentHorizon(e.target.value);
+                                setProfileSuccess(false);
+                                setProfileError(null);
+                              }}
+                              style={{ margin: 0 }}
+                            />
+                            <strong style={{ fontSize: '0.9rem', color: investmentHorizon === item.value ? '#1d4ed8' : '#0f172a' }}>
+                              {item.label}
+                            </strong>
+                          </div>
+                          <span style={{ fontSize: '0.78rem', color: '#64748b', display: 'block' }}>
+                            {item.desc}
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Actions & Meta */}
+                  <div style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    paddingTop: '1rem',
+                    borderTop: '1px solid #f1f5f9'
+                  }}>
+                    <button
+                      type="submit"
+                      disabled={profileSaving}
+                      style={{
+                        padding: '8px 20px',
+                        fontSize: '0.9rem',
+                        fontWeight: 600,
+                        backgroundColor: profileSaving ? '#93c5fd' : '#2563eb',
+                        color: '#ffffff',
+                        border: 'none',
+                        borderRadius: '6px',
+                        cursor: profileSaving ? 'default' : 'pointer',
+                        boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+                        transition: 'background-color 0.15s ease'
+                      }}
+                    >
+                      {profileSaving ? 'Saving Changes...' : 'Save Profile'}
+                    </button>
+
+                    {profile && profile.updated_at && (
+                      <span style={{ fontSize: '0.78rem', color: '#94a3b8' }}>
+                        Last updated: {formatPublishedTime(profile.updated_at)}
+                      </span>
+                    )}
+                  </div>
+                </form>
               </div>
             )}
           </section>

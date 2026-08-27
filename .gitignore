@@ -58,6 +58,8 @@ Desktop.ini
 # Temporary files & Testing
 tmp/
 temp/
+supabase/.temp/
+.temp/
 coverage/
 .coverage
 .nyc_output/

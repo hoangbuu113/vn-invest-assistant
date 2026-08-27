@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import { checkSupabaseConnection, getAssets, getAssetBySymbol } from './src/supabase.js';
+import { checkSupabaseConnection, getAssets, getAssetBySymbol, getInvestorProfile, updateInvestorProfile } from './src/supabase.js';
 import { getMarketSnapshot } from './src/market.js';
 import { getNewsFeed } from './src/news.js';
 
@@ -9,6 +9,9 @@ dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+
+const ALLOWED_RISK_TOLERANCE = ['low', 'moderate', 'high'];
+const ALLOWED_INVESTMENT_HORIZON = ['short', 'medium', 'long'];
 
 app.use(cors());
 app.use(express.json());
@@ -37,6 +40,87 @@ app.get('/api/db-health', async (req, res) => {
     message: 'Database connection check failed',
     details: result.error
   });
+});
+
+// Investor profile endpoints
+app.get('/api/profile', async (req, res) => {
+  try {
+    const profile = await getInvestorProfile();
+    return res.json({
+      status: 'ok',
+      data: profile
+    });
+  } catch (error) {
+    return res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch investor profile',
+      details: error.message
+    });
+  }
+});
+
+app.put('/api/profile', async (req, res) => {
+  try {
+    const { cash_available, risk_tolerance, investment_horizon } = req.body || {};
+
+    const errors = [];
+
+    // Validate cash_available
+    const numericCash = Number(cash_available);
+    if (
+      cash_available === undefined ||
+      cash_available === null ||
+      cash_available === '' ||
+      isNaN(numericCash) ||
+      !isFinite(numericCash) ||
+      numericCash < 0
+    ) {
+      errors.push('cash_available must be a non-negative number');
+    }
+
+    // Validate risk_tolerance
+    if (
+      !risk_tolerance ||
+      typeof risk_tolerance !== 'string' ||
+      !ALLOWED_RISK_TOLERANCE.includes(risk_tolerance.toLowerCase().trim())
+    ) {
+      errors.push("risk_tolerance must be one of: 'low', 'moderate', 'high'");
+    }
+
+    // Validate investment_horizon
+    if (
+      !investment_horizon ||
+      typeof investment_horizon !== 'string' ||
+      !ALLOWED_INVESTMENT_HORIZON.includes(investment_horizon.toLowerCase().trim())
+    ) {
+      errors.push("investment_horizon must be one of: 'short', 'medium', 'long'");
+    }
+
+    if (errors.length > 0) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Invalid profile data',
+        errors
+      });
+    }
+
+    const updated = await updateInvestorProfile({
+      cash_available: numericCash,
+      risk_tolerance: risk_tolerance.toLowerCase().trim(),
+      investment_horizon: investment_horizon.toLowerCase().trim()
+    });
+
+    return res.json({
+      status: 'ok',
+      data: updated
+    });
+  } catch (error) {
+    return res.status(500).json({
+      status: 'error',
+      message: 'Failed to update investor profile',
+      details: error.message
+    });
+  }
 });
 
 // Assets list endpoint

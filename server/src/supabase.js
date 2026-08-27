@@ -118,3 +118,90 @@ export async function getAssetBySymbol(symbol) {
 
   return data;
 }
+
+/**
+ * Normalizes an investor profile row from Supabase.
+ */
+function normalizeProfile(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    cash_available: typeof row.cash_available === 'number' ? row.cash_available : Number(row.cash_available),
+    risk_tolerance: row.risk_tolerance,
+    investment_horizon: row.investment_horizon,
+    created_at: row.created_at,
+    updated_at: row.updated_at
+  };
+}
+
+/**
+ * Fetches the single investor profile from Supabase.
+ * If no profile row exists, seeds and returns a default profile.
+ */
+export async function getInvestorProfile() {
+  if (!isSupabaseConfigured || !supabase) {
+    throw new Error('Supabase credentials are not configured. Please set SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY in server/.env');
+  }
+
+  const { data, error } = await supabase
+    .from('investor_profile')
+    .select('id, cash_available, risk_tolerance, investment_horizon, created_at, updated_at')
+    .order('created_at', { ascending: true })
+    .limit(1);
+
+  if (error) {
+    throw new Error(`Database query error: ${error.message} (code: ${error.code || 'UNKNOWN'})`);
+  }
+
+  if (!data || data.length === 0) {
+    const defaultProfile = {
+      cash_available: 0,
+      risk_tolerance: 'moderate',
+      investment_horizon: 'medium'
+    };
+
+    const { data: inserted, error: insertError } = await supabase
+      .from('investor_profile')
+      .insert([defaultProfile])
+      .select('id, cash_available, risk_tolerance, investment_horizon, created_at, updated_at')
+      .single();
+
+    if (insertError) {
+      throw new Error(`Failed to initialize default investor profile: ${insertError.message}`);
+    }
+
+    return normalizeProfile(inserted);
+  }
+
+  return normalizeProfile(data[0]);
+}
+
+/**
+ * Updates the single investor profile in Supabase.
+ */
+export async function updateInvestorProfile({ cash_available, risk_tolerance, investment_horizon }) {
+  if (!isSupabaseConfigured || !supabase) {
+    throw new Error('Supabase credentials are not configured. Please set SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY in server/.env');
+  }
+
+  const currentProfile = await getInvestorProfile();
+
+  const { data, error } = await supabase
+    .from('investor_profile')
+    .update({
+      cash_available,
+      risk_tolerance,
+      investment_horizon,
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', currentProfile.id)
+    .select('id, cash_available, risk_tolerance, investment_horizon, created_at, updated_at')
+    .single();
+
+  if (error) {
+    throw new Error(`Database update error: ${error.message} (code: ${error.code || 'UNKNOWN'})`);
+  }
+
+  return normalizeProfile(data);
+}
+

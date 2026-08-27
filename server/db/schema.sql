@@ -26,3 +26,43 @@ CREATE POLICY "Allow public read access to assets"
     FOR SELECT
     USING (true);
 
+-- ==========================================================
+-- Schema Migration: 002_create_investor_profile_table.sql
+-- Purpose: Single-user investor profile table for capital, risk & horizon
+-- ==========================================================
+
+CREATE TABLE IF NOT EXISTS public.investor_profile (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    cash_available NUMERIC(15, 2) NOT NULL DEFAULT 0 CHECK (cash_available >= 0),
+    risk_tolerance VARCHAR(20) NOT NULL CHECK (risk_tolerance IN ('low', 'moderate', 'high')),
+    investment_horizon VARCHAR(20) NOT NULL CHECK (investment_horizon IN ('short', 'medium', 'long')),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Enable Row Level Security (RLS)
+ALTER TABLE public.investor_profile ENABLE ROW LEVEL SECURITY;
+
+-- Allow public read access to investor_profile table
+DROP POLICY IF EXISTS "Allow public read access to investor_profile" ON public.investor_profile;
+CREATE POLICY "Allow public read access to investor_profile"
+    ON public.investor_profile
+    FOR SELECT
+    USING (true);
+
+-- Allow public insert access to investor_profile table
+DROP POLICY IF EXISTS "Allow public insert access to investor_profile" ON public.investor_profile;
+CREATE POLICY "Allow public insert access to investor_profile"
+    ON public.investor_profile
+    FOR INSERT
+    WITH CHECK (true);
+
+-- Allow public update access to investor_profile table
+DROP POLICY IF EXISTS "Allow public update access to investor_profile" ON public.investor_profile;
+CREATE POLICY "Allow public update access to investor_profile"
+    ON public.investor_profile
+    FOR UPDATE
+    USING (true)
+    WITH CHECK (true);
+
+

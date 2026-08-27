@@ -16,3 +16,14 @@ ON CONFLICT (symbol) DO UPDATE SET
     asset_type = EXCLUDED.asset_type,
     exchange = EXCLUDED.exchange;
 
+-- ==========================================================
+-- Seed Data: 002_seed_investor_profile.sql
+-- Purpose: Initial default investor profile record
+-- Idempotent: Only insert if no profile row exists
+-- ==========================================================
+
+INSERT INTO public.investor_profile (cash_available, risk_tolerance, investment_horizon)
+SELECT 0, 'moderate', 'medium'
+WHERE NOT EXISTS (SELECT 1 FROM public.investor_profile);
+
+
