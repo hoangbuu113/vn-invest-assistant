@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import { checkSupabaseConnection } from './src/supabase.js';
+import { checkSupabaseConnection, getAssets } from './src/supabase.js';
 
 dotenv.config();
 
@@ -35,6 +35,24 @@ app.get('/api/db-health', async (req, res) => {
     message: 'Database connection check failed',
     details: result.error
   });
+});
+
+// Assets list endpoint
+app.get('/api/assets', async (req, res) => {
+  try {
+    const assets = await getAssets();
+    return res.json({
+      status: 'ok',
+      count: assets.length,
+      data: assets
+    });
+  } catch (error) {
+    return res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch assets from database',
+      details: error.message
+    });
+  }
 });
 
 app.listen(PORT, () => {
