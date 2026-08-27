@@ -11,6 +11,17 @@ export default defineConfig({
         changeOrigin: true
       }
     }
+  },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          three: ['three'],
+          framer: ['framer-motion']
+        }
+      }
+    },
+    chunkSizeWarningLimit: 600
   }
 });
 

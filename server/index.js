@@ -14,6 +14,7 @@ import {
 } from './src/supabase.js';
 import { getMarketSnapshot } from './src/market.js';
 import { getNewsFeed } from './src/news.js';
+import { getPortfolioOverview } from './src/portfolio.js';
 
 dotenv.config();
 
@@ -372,6 +373,23 @@ app.get('/api/news', async (req, res) => {
     return res.status(500).json({
       status: 'error',
       message: 'Failed to fetch news feed',
+      details: error.message
+    });
+  }
+});
+
+// Portfolio overview endpoint (combines profile, holdings, and delayed market prices)
+app.get('/api/portfolio/overview', async (req, res) => {
+  try {
+    const overview = await getPortfolioOverview();
+    return res.json({
+      status: 'ok',
+      data: overview
+    });
+  } catch (error) {
+    return res.status(500).json({
+      status: 'error',
+      message: 'Failed to generate portfolio overview',
       details: error.message
     });
   }

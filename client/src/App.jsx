@@ -1,11 +1,33 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Fintech3DOrb } from './components/Fintech3DOrb.jsx';
+import { MarketTicker } from './components/MarketTicker.jsx';
+import { MoneyFlowAmbience } from './components/MoneyFlowAmbience.jsx';
+import { WealthOrbit } from './components/WealthOrbit.jsx';
+import { EconomicPulseRail } from './components/EconomicPulseRail.jsx';
+import {
+  TiltCard,
+  MagneticButton,
+  CountUp,
+  MultiLayerBackground,
+  GlobalCursorSpotlight,
+  PointerHalo,
+  AnimatedNavTabs
+} from './components/MotionHelpers.jsx';
 
 const CATEGORY_STYLES = {
-  market: { label: 'Thị trường', bg: '#eff6ff', color: '#1d4ed8', border: '#bfdbfe' },
-  company: { label: 'Doanh nghiệp', bg: '#faf5ff', color: '#7c3aed', border: '#e9d5ff' },
-  macro: { label: 'Vĩ mô', bg: '#f0fdf4', color: '#15803d', border: '#bbf7d0' },
-  global: { label: 'Quốc tế', bg: '#fff7ed', color: '#c2410c', border: '#fed7aa' }
+  market: { label: 'Thị trường', bg: '#eff6ff', color: '#1d4ed8', border: '#bfdbfe', accent: '#2563eb' },
+  company: { label: 'Doanh nghiệp', bg: '#faf5ff', color: '#7c3aed', border: '#e9d5ff', accent: '#7c3aed' },
+  macro: { label: 'Vĩ mô', bg: '#ecfdf5', color: '#047857', border: '#a7f3d0', accent: '#059669' },
+  global: { label: 'Quốc tế', bg: '#fff7ed', color: '#c2410c', border: '#fed7aa', accent: '#ea580c' }
 };
+
+const NAV_TABS = [
+  { id: 'portfolio', label: 'Danh mục', icon: '📊' },
+  { id: 'news', label: 'Tin tức', icon: '📰' },
+  { id: 'assets', label: 'Tài sản', icon: '📈' },
+  { id: 'profile', label: 'Hồ sơ đầu tư', icon: '👤' }
+];
 
 function formatPublishedTime(isoString) {
   if (!isoString) return 'N/A';
@@ -39,8 +61,35 @@ function formatAssetType(assetType) {
   return ASSET_TYPE_LABELS[String(assetType).toLowerCase()] || assetType;
 }
 
+const pageVariants = {
+  initial: { opacity: 0, scale: 0.985, y: 10, filter: 'blur(4px)' },
+  animate: {
+    opacity: 1,
+    scale: 1,
+    y: 0,
+    filter: 'blur(0px)',
+    transition: {
+      duration: 0.28,
+      ease: [0.16, 1, 0.3, 1],
+      staggerChildren: 0.06
+    }
+  },
+  exit: {
+    opacity: 0,
+    scale: 0.99,
+    y: -6,
+    filter: 'blur(2px)',
+    transition: { duration: 0.16, ease: [0.4, 0, 1, 1] }
+  }
+};
+
+const sectionItemVariants = {
+  initial: { opacity: 0, y: 12 },
+  animate: { opacity: 1, y: 0, transition: { duration: 0.25, ease: [0.16, 1, 0.3, 1] } }
+};
+
 function App() {
-  const [activeTab, setActiveTab] = useState('news'); // 'news' | 'assets' | 'profile'
+  const [activeTab, setActiveTab] = useState('news'); // 'news' | 'portfolio' | 'assets' | 'profile'
 
   // Profile state
   const [profile, setProfile] = useState(null);
@@ -97,6 +146,12 @@ function App() {
   const [newsLoading, setNewsLoading] = useState(true);
   const [newsRefreshing, setNewsRefreshing] = useState(false);
   const [newsError, setNewsError] = useState(null);
+
+  // Portfolio overview state
+  const [portfolioOverview, setPortfolioOverview] = useState(null);
+  const [portfolioLoading, setPortfolioLoading] = useState(true);
+  const [portfolioRefreshing, setPortfolioRefreshing] = useState(false);
+  const [portfolioError, setPortfolioError] = useState(null);
 
   // Fetch investor profile data
   const fetchProfile = useCallback((isInitial = false) => {
@@ -175,6 +230,7 @@ function App() {
           setRiskTolerance(json.data.risk_tolerance);
           setInvestmentHorizon(json.data.investment_horizon);
           setProfileSuccess(true);
+          fetchPortfolio(false);
         } else {
           throw new Error(json.message || 'Không thể lưu hồ sơ đầu tư');
         }
@@ -266,6 +322,7 @@ function App() {
           setNewQuantity('');
           setNewAverageCost('');
           setHoldingsSuccess(`Đã thêm ${json.data.asset?.symbol || 'tài sản'} vào danh mục thành công.`);
+          fetchPortfolio(false);
         }
       })
       .catch((err) => {
@@ -331,6 +388,7 @@ function App() {
           setHoldings((prev) => prev.map((h) => (h.id === id ? json.data : h)));
           setEditingHoldingId(null);
           setHoldingsSuccess(`Đã cập nhật ${json.data.asset?.symbol || 'tài sản'} thành công.`);
+          fetchPortfolio(false);
         }
       })
       .catch((err) => {
@@ -366,6 +424,7 @@ function App() {
         if (json.status === 'ok') {
           setHoldings((prev) => prev.filter((h) => h.id !== id));
           setHoldingsSuccess(`Đã xóa ${symbol || 'tài sản'} khỏi danh mục.`);
+          fetchPortfolio(false);
         }
       })
       .catch((err) => {
@@ -431,6 +490,50 @@ function App() {
   useEffect(() => {
     fetchNews(true);
   }, [fetchNews]);
+
+  // Fetch portfolio overview data
+  const fetchPortfolio = useCallback((isInitial = false) => {
+    if (isInitial) {
+      setPortfolioLoading(true);
+    } else {
+      setPortfolioRefreshing(true);
+    }
+    setPortfolioError(null);
+
+    fetch('/api/portfolio/overview')
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
+      .then((json) => {
+        if (json.status === 'ok' && json.data) {
+          setPortfolioOverview(json.data);
+        } else {
+          throw new Error(json.message || 'Không thể tải tổng quan danh mục');
+        }
+      })
+      .catch((err) => {
+        setPortfolioError(err.message || 'Không thể tải dữ liệu tổng quan danh mục');
+      })
+      .finally(() => {
+        setPortfolioLoading(false);
+        setPortfolioRefreshing(false);
+      });
+  }, []);
+
+  // Fetch portfolio on initial mount
+  useEffect(() => {
+    fetchPortfolio(true);
+  }, [fetchPortfolio]);
+
+  // Periodic 5-minute auto-refresh when on portfolio tab
+  useEffect(() => {
+    if (activeTab !== 'portfolio') return;
+    const intervalId = setInterval(() => {
+      fetchPortfolio(false);
+    }, 5 * 60 * 1000);
+    return () => clearInterval(intervalId);
+  }, [activeTab, fetchPortfolio]);
 
   const fetchMarketData = useCallback((symbol, isInitial = false) => {
     if (!symbol) return;
@@ -512,1278 +615,1338 @@ function App() {
   };
 
   return (
-    <div style={{
-      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
-      backgroundColor: '#f8fafc',
-      minHeight: '100vh',
-      color: '#0f172a'
-    }}>
+    <div className="app-container">
+      {/* Multi-Layer Parallax Ambient Background */}
+      <MultiLayerBackground />
+
+      {/* Additive Gen Z Money Flow Ambience & Floating Glyphs */}
+      <MoneyFlowAmbience />
+
+      {/* Global Desktop Cursor Spotlight */}
+      <GlobalCursorSpotlight />
+
+      {/* Desktop Pointer Halo */}
+      <PointerHalo />
+
       {/* Top Application Shell Header */}
-      <header style={{
-        backgroundColor: '#ffffff',
-        borderBottom: '1px solid #e2e8f0',
-        position: 'sticky',
-        top: 0,
-        zIndex: 10
-      }}>
-        <div style={{
-          maxWidth: '920px',
-          margin: '0 auto',
-          padding: '0.75rem 1.5rem',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center'
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-            <span style={{ fontSize: '1.2rem', lineHeight: 1 }}>📈</span>
+      <header className="app-header">
+        <div className="app-header-inner">
+          {/* Brand Identity */}
+          <div className="brand-mark">
+            <div className="brand-icon-box">
+              <span>📈</span>
+            </div>
             <div>
-              <h1 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 700, color: '#0f172a', letterSpacing: '-0.01em' }}>
-                VN Invest Assistant
-              </h1>
+              <h1 className="brand-title">VN Invest Assistant</h1>
+              <p className="brand-tagline">Trợ lý Phân tích Đầu tư Cá nhân</p>
             </div>
           </div>
 
-          {/* Compact Segmented Navigation */}
-          <nav style={{
-            display: 'flex',
-            backgroundColor: '#f1f5f9',
-            padding: '3px',
-            borderRadius: '6px',
-            gap: '2px'
-          }}>
-            <button
-              onClick={() => setActiveTab('news')}
-              style={{
-                padding: '6px 14px',
-                fontSize: '0.85rem',
-                fontWeight: activeTab === 'news' ? 600 : 500,
-                backgroundColor: activeTab === 'news' ? '#ffffff' : 'transparent',
-                color: activeTab === 'news' ? '#0f172a' : '#64748b',
-                border: 'none',
-                borderRadius: '4px',
-                cursor: 'pointer',
-                boxShadow: activeTab === 'news' ? '0 1px 2px rgba(0,0,0,0.06)' : 'none',
-                transition: 'all 0.15s ease'
-              }}
-            >
-              Tin tức
-            </button>
-            <button
-              onClick={() => setActiveTab('assets')}
-              style={{
-                padding: '6px 14px',
-                fontSize: '0.85rem',
-                fontWeight: activeTab === 'assets' ? 600 : 500,
-                backgroundColor: activeTab === 'assets' ? '#ffffff' : 'transparent',
-                color: activeTab === 'assets' ? '#0f172a' : '#64748b',
-                border: 'none',
-                borderRadius: '4px',
-                cursor: 'pointer',
-                boxShadow: activeTab === 'assets' ? '0 1px 2px rgba(0,0,0,0.06)' : 'none',
-                transition: 'all 0.15s ease'
-              }}
-            >
-              Tài sản
-            </button>
-            <button
-              onClick={() => setActiveTab('profile')}
-              style={{
-                padding: '6px 14px',
-                fontSize: '0.85rem',
-                fontWeight: activeTab === 'profile' ? 600 : 500,
-                backgroundColor: activeTab === 'profile' ? '#ffffff' : 'transparent',
-                color: activeTab === 'profile' ? '#0f172a' : '#64748b',
-                border: 'none',
-                borderRadius: '4px',
-                cursor: 'pointer',
-                boxShadow: activeTab === 'profile' ? '0 1px 2px rgba(0,0,0,0.06)' : 'none',
-                transition: 'all 0.15s ease'
-              }}
-            >
-              Hồ sơ đầu tư
-            </button>
-          </nav>
+          {/* Animated Spring-Sliding Navigation Control */}
+          <AnimatedNavTabs
+            tabs={NAV_TABS}
+            activeTab={activeTab}
+            onChange={(tabId) => setActiveTab(tabId)}
+          />
         </div>
       </header>
 
-      {/* Main Content Area */}
-      <main style={{ maxWidth: '920px', margin: '0 auto', padding: '1.5rem 1.5rem 3rem 1.5rem' }}>
+      {/* Additive Market Pulse Ticker Bar */}
+      <MarketTicker />
 
-        {/* TAB 1: NEWS FEED */}
-        {activeTab === 'news' && (
-          <section>
-            {/* News Section Header */}
-            <div style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'flex-start',
-              marginBottom: '1rem',
-              gap: '1rem'
-            }}>
-              <div>
-                <h2 style={{ margin: '0 0 0.25rem 0', fontSize: '1.25rem', fontWeight: 700, color: '#0f172a' }}>
-                  Tin tức thị trường
-                </h2>
-                <p style={{ margin: 0, fontSize: '0.85rem', color: '#64748b' }}>
-                  Cập nhật tin tức tài chính, doanh nghiệp và vĩ mô mới nhất · <span style={{ color: '#94a3b8' }}>Nguồn: CafeF</span>
-                </p>
-              </div>
+      {/* Main Content Area with Sequential Coordinated Transitions */}
+      <main className="app-main">
+        <AnimatePresence mode="wait">
 
-              {/* Compact Refresh Button */}
-              <button
-                onClick={() => fetchNews(false)}
-                disabled={newsRefreshing || newsLoading}
-                style={{
-                  padding: '6px 12px',
-                  fontSize: '0.82rem',
-                  fontWeight: 500,
-                  backgroundColor: '#ffffff',
-                  color: newsRefreshing || newsLoading ? '#94a3b8' : '#334155',
-                  border: '1px solid #cbd5e1',
-                  borderRadius: '6px',
-                  cursor: newsRefreshing || newsLoading ? 'default' : 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '5px',
-                  boxShadow: '0 1px 2px rgba(0,0,0,0.04)',
-                  whiteSpace: 'nowrap'
-                }}
-              >
-                <span>{newsRefreshing ? '⟳' : '↻'}</span>
-                <span>{newsRefreshing ? 'Đang làm mới...' : 'Làm mới'}</span>
-              </button>
-            </div>
+          {/* TAB 1: PORTFOLIO OVERVIEW */}
+          {activeTab === 'portfolio' && (
+            <motion.section
+              key="portfolio-view"
+              variants={pageVariants}
+              initial="initial"
+              animate="animate"
+              exit="exit"
+            >
+              {/* Header with 3D Constellation Orb & Wealth Orbit Widget */}
+              <motion.div variants={sectionItemVariants} className="section-header" style={{ alignItems: 'center' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
+                  <Fintech3DOrb size={74} className="dashboard-3d-accent" />
+                  <div>
+                    <h2 className="section-title">Tổng quan danh mục</h2>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                      <span className="section-subtitle">
+                        Theo dõi giá trị tài sản, lãi/lỗ và cơ cấu danh mục đầu tư
+                      </span>
+                      <span className="fintech-badge badge-neutral" style={{ animation: 'pulseGlow 3s ease-in-out infinite' }}>
+                        Dữ liệu thị trường có độ trễ (~15p)
+                      </span>
+                    </div>
 
-            {/* Loading State */}
-            {newsLoading && (
-              <div style={{
-                backgroundColor: '#ffffff',
-                border: '1px solid #e2e8f0',
-                borderRadius: '8px',
-                padding: '3rem 2rem',
-                textAlign: 'center',
-                color: '#64748b'
-              }}>
-                <div style={{ fontSize: '1.5rem', marginBottom: '0.5rem' }}>⏳</div>
-                <p style={{ margin: 0, fontSize: '0.9rem', fontWeight: 500 }}>Đang tải tin tức mới nhất từ CafeF...</p>
-              </div>
-            )}
-
-            {/* Fatal Error State */}
-            {newsError && !newsLoading && news.length === 0 && (
-              <div style={{
-                backgroundColor: '#fef2f2',
-                border: '1px solid #fecaca',
-                borderRadius: '8px',
-                padding: '1.25rem 1.5rem',
-                color: '#991b1b',
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center'
-              }}>
-                <div>
-                  <strong style={{ display: 'block', marginBottom: '0.25rem', fontSize: '0.9rem' }}>Không thể tải tin tức</strong>
-                  <span style={{ fontSize: '0.85rem' }}>{newsError}</span>
+                    {/* Additive Wealth Orbit Lifecycle Display */}
+                    <WealthOrbit />
+                  </div>
                 </div>
-                <button
-                  onClick={() => fetchNews(true)}
-                  style={{
-                    padding: '6px 12px',
-                    fontSize: '0.82rem',
-                    fontWeight: 600,
-                    backgroundColor: '#991b1b',
-                    color: '#ffffff',
-                    border: 'none',
-                    borderRadius: '4px',
-                    cursor: 'pointer'
-                  }}
+
+                {/* Refresh Button */}
+                <MagneticButton
+                  onClick={() => fetchPortfolio(false)}
+                  disabled={portfolioRefreshing || portfolioLoading}
+                  className="fintech-btn btn-secondary btn-sm"
                 >
-                  Thử lại
-                </button>
-              </div>
-            )}
+                  <span className={portfolioRefreshing ? 'spin-icon' : ''}>{portfolioRefreshing ? '⟳' : '↻'}</span>
+                  <span>{portfolioRefreshing ? 'Đang làm mới...' : 'Làm mới'}</span>
+                </MagneticButton>
+              </motion.div>
 
-            {/* Non-fatal Refresh Error Banner */}
-            {newsError && news.length > 0 && (
-              <div style={{
-                backgroundColor: '#fffbeb',
-                border: '1px solid #fde68a',
-                borderRadius: '6px',
-                padding: '0.6rem 1rem',
-                marginBottom: '1rem',
-                fontSize: '0.82rem',
-                color: '#92400e'
-              }}>
-                Không thể làm mới nguồn tin ({newsError}). Đang hiển thị các tin tức trước đó.
-              </div>
-            )}
+              {/* Loading State */}
+              {portfolioLoading && (
+                <div className="state-box">
+                  <div className="state-icon spin-icon">⏳</div>
+                  <h3 className="state-title">Đang tính toán tổng quan danh mục...</h3>
+                  <p className="state-desc">Đang tải và cập nhật số liệu định giá thị trường mới nhất.</p>
+                </div>
+              )}
 
-            {/* Empty State */}
-            {!newsLoading && !newsError && news.length === 0 && (
-              <div style={{
-                backgroundColor: '#ffffff',
-                border: '1px solid #e2e8f0',
-                borderRadius: '8px',
-                padding: '3rem 2rem',
-                textAlign: 'center',
-                color: '#64748b'
-              }}>
-                <p style={{ margin: 0, fontSize: '0.9rem' }}>Hiện chưa có tin tức nào.</p>
-              </div>
-            )}
+              {/* Fatal Error State */}
+              {portfolioError && !portfolioLoading && !portfolioOverview && (
+                <div className="fintech-banner banner-error">
+                  <div>
+                    <strong style={{ display: 'block', marginBottom: '0.2rem' }}>Không thể tải tổng quan danh mục</strong>
+                    <span style={{ fontSize: '0.85rem' }}>{portfolioError}</span>
+                  </div>
+                  <MagneticButton
+                    onClick={() => fetchPortfolio(true)}
+                    className="fintech-btn btn-danger btn-sm"
+                  >
+                    Thử lại
+                  </MagneticButton>
+                </div>
+              )}
 
-            {/* News Articles List */}
-            {!newsLoading && news.length > 0 && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                {news.map((item) => {
-                  const cat = CATEGORY_STYLES[item.category] || { label: item.category, bg: '#f1f5f9', color: '#475569', border: '#cbd5e1' };
-                  return (
-                    <article
-                      key={item.id || item.url}
+              {/* Non-fatal Refresh Error Banner */}
+              {portfolioError && portfolioOverview && (
+                <div className="fintech-banner banner-warning">
+                  <span>Không thể làm mới dữ liệu định giá ({portfolioError}). Đang hiển thị kết quả gần nhất.</span>
+                </div>
+              )}
+
+              {/* Partial Valuation Warning Banner */}
+              {!portfolioLoading && portfolioOverview && portfolioOverview.summary?.valuationStatus === 'partial' && (
+                <div className="fintech-banner banner-warning">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <span>⚠️</span>
+                    <span><strong>Định giá một phần</strong> — một số tài sản chưa có dữ liệu giá thị trường từ sàn.</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Content when loaded */}
+              {!portfolioLoading && portfolioOverview && (
+                <>
+                  {/* Metric Summary Cards with 3D Tilt & Dynamic Radial Sheen */}
+                  <motion.div variants={sectionItemVariants} className="metrics-grid">
+                    {/* Metric 1: Cash Available */}
+                    <TiltCard className="metric-card" style={{ '--card-accent': '#3b82f6' }}>
+                      <div className="metric-header">
+                        <span className="metric-label">Tiền sẵn sàng đầu tư</span>
+                        <span className="metric-icon">💵</span>
+                      </div>
+                      <div className="metric-value">
+                        <CountUp value={portfolioOverview.summary.cashAvailable} suffix=" ₫" />
+                      </div>
+                      <div className="metric-change" style={{ color: 'var(--color-slate-500)' }}>
+                        Vốn tiền mặt chưa giải ngân
+                      </div>
+                    </TiltCard>
+
+                    {/* Metric 2: Total Cost Basis */}
+                    <TiltCard className="metric-card" style={{ '--card-accent': '#64748b' }}>
+                      <div className="metric-header">
+                        <span className="metric-label">Giá vốn đang nắm giữ</span>
+                        <span className="metric-icon">💼</span>
+                      </div>
+                      <div className="metric-value">
+                        <CountUp value={portfolioOverview.summary.totalCostBasis} suffix=" ₫" />
+                      </div>
+                      <div className="metric-change" style={{ color: 'var(--color-slate-500)' }}>
+                        Tổng chi phí mua ban đầu
+                      </div>
+                    </TiltCard>
+
+                    {/* Metric 3: Total Market Value */}
+                    <TiltCard className="metric-card" style={{ '--card-accent': '#6366f1' }}>
+                      <div className="metric-header">
+                        <span className="metric-label">Giá trị thị trường</span>
+                        <span className="metric-icon">📊</span>
+                      </div>
+                      <div className="metric-value">
+                        <CountUp value={portfolioOverview.summary.totalMarketValue} suffix=" ₫" />
+                      </div>
+                      <div className="metric-change" style={{ color: 'var(--color-slate-500)' }}>
+                        Định giá theo giá khớp gần nhất
+                      </div>
+                    </TiltCard>
+
+                    {/* Metric 4: Unrealized P/L */}
+                    <TiltCard
+                      className={`metric-card ${
+                        portfolioOverview.summary.totalUnrealizedPnL > 0
+                          ? 'metric-card-gain'
+                          : portfolioOverview.summary.totalUnrealizedPnL < 0
+                          ? 'metric-card-loss'
+                          : ''
+                      }`}
                       style={{
-                        backgroundColor: '#ffffff',
-                        border: '1px solid #e2e8f0',
-                        borderRadius: '8px',
-                        padding: '1rem 1.25rem',
-                        boxShadow: '0 1px 2px rgba(0,0,0,0.02)',
-                        transition: 'border-color 0.15s ease'
+                        '--card-accent':
+                          portfolioOverview.summary.totalUnrealizedPnL > 0
+                            ? '#10b981'
+                            : portfolioOverview.summary.totalUnrealizedPnL < 0
+                            ? '#ef4444'
+                            : '#94a3b8'
                       }}
                     >
-                      {/* Meta Row: Category Badge + Timestamp */}
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-                        <span style={{
-                          fontSize: '0.72rem',
-                          fontWeight: 600,
-                          padding: '2px 8px',
-                          borderRadius: '4px',
-                          backgroundColor: cat.bg,
-                          color: cat.color,
-                          border: `1px solid ${cat.border}`,
-                          letterSpacing: '0.02em',
-                          textTransform: 'uppercase'
-                        }}>
-                          {cat.label}
-                        </span>
-
-                        <span style={{ fontSize: '0.78rem', color: '#94a3b8' }}>
-                          {formatPublishedTime(item.publishedAt)}
+                      <div className="metric-header">
+                        <span className="metric-label">Lãi / Lỗ tạm tính</span>
+                        <span className="metric-icon">
+                          {portfolioOverview.summary.totalUnrealizedPnL > 0 ? '▲' : portfolioOverview.summary.totalUnrealizedPnL < 0 ? '▼' : '➖'}
                         </span>
                       </div>
+                      <div
+                        className="metric-value"
+                        style={{
+                          color: portfolioOverview.summary.totalUnrealizedPnL > 0
+                            ? 'var(--color-gain-600)'
+                            : portfolioOverview.summary.totalUnrealizedPnL < 0
+                              ? 'var(--color-loss-600)'
+                              : 'var(--color-slate-900)'
+                        }}
+                      >
+                        {portfolioOverview.summary.totalUnrealizedPnL > 0 ? '+' : ''}
+                        <CountUp value={portfolioOverview.summary.totalUnrealizedPnL} suffix=" ₫" />
+                      </div>
+                      <div className="metric-change">
+                        <span className={`fintech-badge ${portfolioOverview.summary.totalUnrealizedPnL > 0 ? 'badge-gain' : portfolioOverview.summary.totalUnrealizedPnL < 0 ? 'badge-loss' : 'badge-neutral'}`}>
+                          {portfolioOverview.summary.totalUnrealizedPnLPercent !== null ? (
+                            <>
+                              {portfolioOverview.summary.totalUnrealizedPnLPercent > 0 ? '+' : ''}
+                              <CountUp value={portfolioOverview.summary.totalUnrealizedPnLPercent} decimals={2} suffix="%" />
+                            </>
+                          ) : '0.00%'}
+                        </span>
+                      </div>
+                    </TiltCard>
 
-                      {/* Headline Link */}
-                      <h3 style={{ margin: '0 0 0.4rem 0', fontSize: '1.02rem', lineHeight: '1.45', fontWeight: 600 }}>
-                        <a
-                          href={item.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          style={{
-                            color: '#0f172a',
-                            textDecoration: 'none'
-                          }}
-                          onMouseOver={(e) => (e.currentTarget.style.color = '#2563eb')}
-                          onMouseOut={(e) => (e.currentTarget.style.color = '#0f172a')}
-                        >
-                          {item.title}
-                        </a>
-                      </h3>
+                    {/* Metric 5: Total Portfolio Value (Highlight with Animated Border Glow) */}
+                    <TiltCard className="metric-card metric-card-highlight" borderGlow={true} style={{ '--card-accent': '#2563eb' }}>
+                      <div className="metric-header">
+                        <span className="metric-label" style={{ color: 'var(--color-brand-700)' }}>Tổng giá trị danh mục</span>
+                        <span className="metric-icon">💎</span>
+                      </div>
+                      <div className="metric-value" style={{ color: 'var(--color-brand-700)', fontSize: '1.45rem' }}>
+                        <CountUp value={portfolioOverview.summary.totalPortfolioValue} suffix=" ₫" />
+                      </div>
+                      <div className="metric-change" style={{ color: 'var(--color-brand-600)' }}>
+                        Tiền mặt + Giá trị thị trường
+                      </div>
+                    </TiltCard>
+                  </motion.div>
 
-                      {/* Summary */}
-                      {item.summary && (
-                        <p style={{
-                          margin: '0 0 0.6rem 0',
-                          fontSize: '0.88rem',
-                          color: '#475569',
-                          lineHeight: '1.55'
-                        }}>
-                          {item.summary}
+                  {/* Holdings Breakdown Table */}
+                  <motion.div variants={sectionItemVariants} className="fintech-card" style={{ overflow: 'hidden' }}>
+                    <div className="card-header">
+                      <span style={{ fontSize: '0.95rem', fontWeight: 800, color: 'var(--color-slate-900)' }}>
+                        Chi tiết tài sản nắm giữ ({portfolioOverview.holdings.length})
+                      </span>
+                    </div>
+
+                    {portfolioOverview.holdings.length === 0 ? (
+                      <div className="state-box" style={{ border: 'none', boxShadow: 'none' }}>
+                        <div className="state-icon float-icon">💼</div>
+                        <h3 className="state-title">Chưa có tài sản nào trong danh mục</h3>
+                        <p className="state-desc" style={{ marginBottom: '1.25rem' }}>
+                          Chuyển sang mục <strong>Hồ sơ đầu tư</strong> để thêm các tài sản bạn đang nắm giữ.
                         </p>
-                      )}
-
-                      {/* Footer Row: Attribution + Read Original Link */}
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '0.25rem' }}>
-                        <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>
-                          CafeF
-                        </span>
-                        <a
-                          href={item.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          style={{
-                            fontSize: '0.8rem',
-                            fontWeight: 500,
-                            color: '#2563eb',
-                            textDecoration: 'none',
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '3px'
-                          }}
-                          onMouseOver={(e) => (e.currentTarget.style.textDecoration = 'underline')}
-                          onMouseOut={(e) => (e.currentTarget.style.textDecoration = 'none')}
+                        <MagneticButton
+                          onClick={() => setActiveTab('profile')}
+                          className="fintech-btn btn-primary btn-sm"
                         >
-                          Đọc bài gốc ↗
-                        </a>
+                          Đến Hồ sơ đầu tư &rarr;
+                        </MagneticButton>
                       </div>
-                    </article>
-                  );
-                })}
-              </div>
-            )}
-          </section>
-        )}
+                    ) : (
+                      <div className="table-container">
+                        <table className="fintech-table">
+                          <thead>
+                            <tr>
+                              <th>Mã & Tài sản</th>
+                              <th style={{ textAlign: 'right' }}>Số lượng</th>
+                              <th style={{ textAlign: 'right' }}>Giá mua TB</th>
+                              <th style={{ textAlign: 'right' }}>Giá gần nhất</th>
+                              <th style={{ textAlign: 'right' }}>Giá trị hiện tại</th>
+                              <th style={{ textAlign: 'right' }}>Lãi / Lỗ tạm tính</th>
+                              <th style={{ textAlign: 'right' }}>Cập nhật giá</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {portfolioOverview.holdings.map((h) => {
+                              const isPriced = h.pricingStatus === 'available' && h.latestPrice !== null;
+                              const isProfit = isPriced && h.unrealizedPnL > 0;
+                              const isLoss = isPriced && h.unrealizedPnL < 0;
 
-        {/* TAB 2: ASSET BROWSER */}
-        {activeTab === 'assets' && (
-          <section>
-            {/* Detail View */}
-            {selectedSymbol ? (
-              <div>
-                <button
-                  onClick={handleBackToList}
-                  style={{
-                    padding: '6px 12px',
-                    marginBottom: '1rem',
-                    fontSize: '0.85rem',
-                    fontWeight: 500,
-                    backgroundColor: '#ffffff',
-                    color: '#334155',
-                    border: '1px solid #cbd5e1',
-                    borderRadius: '6px',
-                    cursor: 'pointer'
-                  }}
-                >
-                  &larr; Quay lại danh sách
-                </button>
+                              return (
+                                <tr key={h.id}>
+                                  {/* 1. Symbol & Name */}
+                                  <td>
+                                    <div style={{ fontWeight: 800, color: 'var(--color-slate-900)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                      <span>{h.symbol || 'N/A'}</span>
+                                      {h.assetType && (
+                                        <span className="fintech-badge badge-neutral">
+                                          {formatAssetType(h.assetType)}
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div style={{ fontSize: '0.78rem', color: 'var(--color-slate-500)', marginTop: '2px' }}>
+                                      {h.name || 'Tài sản'}
+                                    </div>
+                                  </td>
 
-                {detailLoading && <p style={{ color: '#64748b', fontSize: '0.9rem' }}>Đang tải thông tin chi tiết cho {selectedSymbol}...</p>}
+                                  {/* 2. Quantity */}
+                                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--color-slate-900)' }}>
+                                    {h.quantity.toLocaleString('vi-VN')}
+                                  </td>
 
-                {detailError && (
-                  <div style={{ backgroundColor: '#fef2f2', border: '1px solid #fecaca', color: '#991b1b', padding: '1rem', borderRadius: '6px', marginBottom: '1rem' }}>
-                    <p style={{ margin: 0, fontSize: '0.88rem' }}><strong>Lỗi:</strong> {detailError}</p>
-                  </div>
-                )}
+                                  {/* 3. Average Cost */}
+                                  <td style={{ textAlign: 'right', color: 'var(--color-slate-700)' }}>
+                                    {h.averageCost.toLocaleString('vi-VN')} ₫
+                                  </td>
 
-                {assetDetail && (
-                  <div style={{
-                    backgroundColor: '#ffffff',
-                    border: '1px solid #e2e8f0',
-                    borderRadius: '8px',
-                    padding: '1.25rem 1.5rem',
-                    marginBottom: '1rem'
-                  }}>
-                    <h3 style={{ margin: '0 0 0.75rem 0', fontSize: '1.15rem', color: '#0f172a' }}>
-                      {assetDetail.symbol} <span style={{ color: '#64748b', fontWeight: 400 }}>· {assetDetail.name}</span>
-                    </h3>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.75rem', fontSize: '0.88rem' }}>
-                      <div><span style={{ color: '#64748b' }}>Mã:</span> <strong>{assetDetail.symbol}</strong></div>
-                      <div><span style={{ color: '#64748b' }}>Loại tài sản:</span> <strong>{formatAssetType(assetDetail.asset_type)}</strong></div>
-                      <div><span style={{ color: '#64748b' }}>Sàn:</span> <strong>{assetDetail.exchange || 'N/A'}</strong></div>
-                      <div><span style={{ color: '#64748b' }}>ID:</span> <span style={{ color: '#64748b', fontSize: '0.8rem' }}>{assetDetail.id}</span></div>
-                    </div>
-                  </div>
-                )}
+                                  {/* 4. Latest Price */}
+                                  <td style={{ textAlign: 'right' }}>
+                                    {isPriced ? (
+                                      <span style={{ fontWeight: 700, color: 'var(--color-slate-900)' }}>
+                                        {h.latestPrice.toLocaleString('vi-VN')} ₫
+                                      </span>
+                                    ) : (
+                                      <span style={{ fontSize: '0.78rem', color: 'var(--color-slate-400)', fontStyle: 'italic' }}>
+                                        Chưa có dữ liệu
+                                      </span>
+                                    )}
+                                  </td>
 
-                {/* Market Snapshot Card */}
-                <div style={{
-                  backgroundColor: '#ffffff',
-                  border: '1px solid #e2e8f0',
-                  borderRadius: '8px',
-                  padding: '1.25rem 1.5rem'
-                }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
-                    <div>
-                      <h3 style={{ margin: 0, fontSize: '1.05rem', color: '#0f172a', fontWeight: 600 }}>Giá thị trường</h3>
-                      <span style={{ fontSize: '0.78rem', color: '#94a3b8' }}>Dữ liệu thị trường có độ trễ (~15 phút)</span>
-                    </div>
-                    <button
-                      onClick={() => fetchMarketData(selectedSymbol, false)}
-                      disabled={isRefreshing || marketLoading}
-                      style={{
-                        padding: '4px 10px',
-                        fontSize: '0.8rem',
-                        fontWeight: 500,
-                        backgroundColor: '#ffffff',
-                        color: isRefreshing || marketLoading ? '#94a3b8' : '#334155',
-                        border: '1px solid #cbd5e1',
-                        borderRadius: '4px',
-                        cursor: isRefreshing || marketLoading ? 'default' : 'pointer'
-                      }}
-                    >
-                      {isRefreshing ? 'Đang làm mới...' : 'Làm mới'}
-                    </button>
-                  </div>
+                                  {/* 5. Market Value */}
+                                  <td style={{ textAlign: 'right' }}>
+                                    {isPriced && h.marketValue !== null ? (
+                                      <span style={{ fontWeight: 800, color: 'var(--color-slate-900)' }}>
+                                        {h.marketValue.toLocaleString('vi-VN')} ₫
+                                      </span>
+                                    ) : (
+                                      <span style={{ fontSize: '0.78rem', color: 'var(--color-slate-400)', fontStyle: 'italic' }}>
+                                        Chưa có dữ liệu
+                                      </span>
+                                    )}
+                                  </td>
 
-                  {marketLoading && <p style={{ color: '#64748b', fontSize: '0.9rem' }}>Đang tải dữ liệu giá thị trường...</p>}
+                                  {/* 6. Unrealized PnL & % */}
+                                  <td style={{ textAlign: 'right' }}>
+                                    {isPriced && h.unrealizedPnL !== null ? (
+                                      <div>
+                                        <div style={{
+                                          fontWeight: 800,
+                                          color: isProfit ? 'var(--color-gain-600)' : isLoss ? 'var(--color-loss-600)' : 'var(--color-slate-900)'
+                                        }}>
+                                          {isProfit ? '+' : ''}{h.unrealizedPnL.toLocaleString('vi-VN')} ₫
+                                        </div>
+                                        <div style={{ marginTop: '2px' }}>
+                                          <span className={`fintech-badge ${isProfit ? 'badge-gain' : isLoss ? 'badge-loss' : 'badge-neutral'}`}>
+                                            {h.unrealizedPnLPercent !== null
+                                              ? `${h.unrealizedPnLPercent > 0 ? '+' : ''}${h.unrealizedPnLPercent}%`
+                                              : '0%'}
+                                          </span>
+                                        </div>
+                                      </div>
+                                    ) : (
+                                      <span style={{ fontSize: '0.78rem', color: 'var(--color-slate-400)', fontStyle: 'italic' }}>
+                                        Chưa có dữ liệu
+                                      </span>
+                                    )}
+                                  </td>
 
-                  {marketError && (
-                    <div style={{ backgroundColor: '#fffbeb', border: '1px solid #fde68a', color: '#92400e', padding: '0.75rem', borderRadius: '6px', fontSize: '0.85rem' }}>
-                      Thông báo: Không thể tải dữ liệu giá thị trường ({marketError}).
-                    </div>
-                  )}
-
-                  {marketData && (
-                    <div>
-                      <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.75rem', marginBottom: '1rem' }}>
-                        <span style={{ fontSize: '1.5rem', fontWeight: 700, color: '#0f172a' }}>
-                          {marketData.price !== null ? marketData.price.toLocaleString() : 'N/A'} <span style={{ fontSize: '0.9rem', fontWeight: 500, color: '#64748b' }}>{marketData.currency}</span>
-                        </span>
-                        <span style={{
-                          fontSize: '0.95rem',
-                          fontWeight: 600,
-                          color: (marketData.change || 0) >= 0 ? '#16a34a' : '#dc2626'
-                        }}>
-                          {marketData.change !== null ? (marketData.change > 0 ? `+${marketData.change.toLocaleString()}` : marketData.change.toLocaleString()) : 'N/A'}{' '}
-                          ({marketData.changePercent !== null ? (marketData.changePercent > 0 ? `+${marketData.changePercent}%` : `${marketData.changePercent}%`) : 'N/A'})
-                        </span>
+                                  {/* 7. Market Updated Time */}
+                                  <td style={{ textAlign: 'right', fontSize: '0.8rem', color: 'var(--color-slate-500)' }}>
+                                    {isPriced && h.marketUpdatedAt ? (
+                                      formatPublishedTime(h.marketUpdatedAt)
+                                    ) : (
+                                      <span style={{ color: 'var(--color-slate-400)', fontStyle: 'italic' }}>
+                                        Chưa có dữ liệu
+                                      </span>
+                                    )}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
                       </div>
+                    )}
+                  </motion.div>
+                </>
+              )}
+            </motion.section>
+          )}
 
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '0.75rem', fontSize: '0.85rem' }}>
-                        <div><span style={{ color: '#64748b' }}>Cao nhất trong ngày:</span> <strong>{marketData.dayHigh !== null ? marketData.dayHigh.toLocaleString() : 'N/A'}</strong></div>
-                        <div><span style={{ color: '#64748b' }}>Thấp nhất trong ngày:</span> <strong>{marketData.dayLow !== null ? marketData.dayLow.toLocaleString() : 'N/A'}</strong></div>
-                        <div><span style={{ color: '#64748b' }}>Khối lượng:</span> <strong>{marketData.volume !== null ? marketData.volume.toLocaleString() : 'N/A'}</strong></div>
-                        <div><span style={{ color: '#64748b' }}>Cập nhật lúc:</span> <span style={{ color: '#64748b' }}>{formatPublishedTime(marketData.updatedAt)}</span></div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            ) : (
-              /* Asset List View */
-              <div>
-                <div style={{ marginBottom: '1rem' }}>
-                  <h2 style={{ margin: '0 0 0.25rem 0', fontSize: '1.25rem', fontWeight: 700, color: '#0f172a' }}>
-                    Danh sách tài sản
-                  </h2>
-                  <p style={{ margin: 0, fontSize: '0.85rem', color: '#64748b' }}>
-                    Danh sách tài sản đang theo dõi ({assets.length} mã)
+          {/* TAB 2: NEWS FEED */}
+          {activeTab === 'news' && (
+            <motion.section
+              key="news-view"
+              variants={pageVariants}
+              initial="initial"
+              animate="animate"
+              exit="exit"
+            >
+              {/* Header */}
+              <motion.div variants={sectionItemVariants} className="section-header">
+                <div>
+                  <h2 className="section-title">Tin tức thị trường</h2>
+                  <p className="section-subtitle">
+                    Cập nhật tin tức tài chính, doanh nghiệp và vĩ mô mới nhất · <span style={{ color: 'var(--color-slate-400)' }}>Nguồn: CafeF</span>
                   </p>
                 </div>
 
-                {loading && <p style={{ color: '#64748b', fontSize: '0.9rem' }}>Đang tải danh sách tài sản...</p>}
+                {/* Refresh Button */}
+                <MagneticButton
+                  onClick={() => fetchNews(false)}
+                  disabled={newsRefreshing || newsLoading}
+                  className="fintech-btn btn-secondary btn-sm"
+                >
+                  <span className={newsRefreshing ? 'spin-icon' : ''}>{newsRefreshing ? '⟳' : '↻'}</span>
+                  <span>{newsRefreshing ? 'Đang làm mới...' : 'Làm mới'}</span>
+                </MagneticButton>
+              </motion.div>
 
-                {error && (
-                  <div style={{ backgroundColor: '#fef2f2', border: '1px solid #fecaca', color: '#991b1b', padding: '1rem', borderRadius: '6px', marginBottom: '1rem' }}>
-                    <p style={{ margin: 0, fontSize: '0.88rem' }}><strong>Lỗi tải danh sách tài sản:</strong> {error}</p>
+              {/* Additive Economic Category Pulse Rail */}
+              <motion.div variants={sectionItemVariants}>
+                <EconomicPulseRail />
+              </motion.div>
+
+              {/* Loading State with Shimmer */}
+              {newsLoading && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+                  {[1, 2, 3].map((i) => (
+                    <div key={i} className="news-card" style={{ '--accent-color': '#e2e8f0' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
+                        <div className="skeleton-shimmer" style={{ width: '80px', height: '20px' }} />
+                        <div className="skeleton-shimmer" style={{ width: '100px', height: '16px' }} />
+                      </div>
+                      <div className="skeleton-shimmer" style={{ width: '85%', height: '22px', marginBottom: '0.65rem' }} />
+                      <div className="skeleton-shimmer" style={{ width: '100%', height: '36px', marginBottom: '0.75rem' }} />
+                      <div className="skeleton-shimmer" style={{ width: '60px', height: '14px' }} />
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Fatal Error State */}
+              {newsError && !newsLoading && news.length === 0 && (
+                <div className="fintech-banner banner-error">
+                  <div>
+                    <strong style={{ display: 'block', marginBottom: '0.2rem' }}>Không thể tải tin tức</strong>
+                    <span style={{ fontSize: '0.85rem' }}>{newsError}</span>
+                  </div>
+                  <MagneticButton
+                    onClick={() => fetchNews(true)}
+                    className="fintech-btn btn-danger btn-sm"
+                  >
+                    Thử lại
+                  </MagneticButton>
+                </div>
+              )}
+
+              {/* Non-fatal Refresh Error Banner */}
+              {newsError && news.length > 0 && (
+                <div className="fintech-banner banner-warning">
+                  <span>Không thể làm mới nguồn tin ({newsError}). Đang hiển thị các tin tức trước đó.</span>
+                </div>
+              )}
+
+              {/* Empty State */}
+              {!newsLoading && !newsError && news.length === 0 && (
+                <div className="state-box">
+                  <div className="state-icon float-icon">📰</div>
+                  <h3 className="state-title">Hiện chưa có tin tức nào</h3>
+                  <p className="state-desc">Hãy nhấn nút "Làm mới" phía trên để tải nguồn tin mới nhất.</p>
+                </div>
+              )}
+
+              {/* News Articles List with Scroll Reveal */}
+              {!newsLoading && news.length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+                  {news.map((item, idx) => {
+                    const cat = CATEGORY_STYLES[item.category] || { label: item.category, bg: '#f1f5f9', color: '#475569', border: '#cbd5e1', accent: '#94a3b8' };
+                    return (
+                      <motion.article
+                        key={item.id || item.url}
+                        className="news-card"
+                        style={{ '--accent-color': cat.accent }}
+                        initial={{ opacity: 0, y: 16 }}
+                        whileInView={{ opacity: 1, y: 0 }}
+                        viewport={{ once: true, margin: '-20px' }}
+                        transition={{ duration: 0.28, delay: Math.min(idx * 0.03, 0.3) }}
+                        whileHover={{ y: -2 }}
+                      >
+                        {/* Meta Row: Category Badge + Timestamp */}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.65rem' }}>
+                          <span
+                            className="fintech-badge"
+                            style={{
+                              backgroundColor: cat.bg,
+                              color: cat.color,
+                              border: `1px solid ${cat.border}`,
+                              textTransform: 'uppercase'
+                            }}
+                          >
+                            {cat.label}
+                          </span>
+
+                          <span style={{ fontSize: '0.78rem', color: 'var(--color-slate-400)', fontWeight: 500 }}>
+                            {formatPublishedTime(item.publishedAt)}
+                          </span>
+                        </div>
+
+                        {/* Headline Link */}
+                        <h3 className="news-title">
+                          <a
+                            href={item.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="news-title-link"
+                          >
+                            {item.title}
+                          </a>
+                        </h3>
+
+                        {/* Summary */}
+                        {item.summary && (
+                          <p className="news-summary">
+                            {item.summary}
+                          </p>
+                        )}
+
+                        {/* Footer Row: Attribution + Read Original Link */}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '0.45rem', borderTop: '1px solid var(--border-subtle)' }}>
+                          <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--color-slate-400)' }}>
+                            Nguồn: CafeF
+                          </span>
+                          <a
+                            href={item.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="news-link-action"
+                          >
+                            Đọc bài gốc ↗
+                          </a>
+                        </div>
+                      </motion.article>
+                    );
+                  })}
+                </div>
+              )}
+            </motion.section>
+          )}
+
+          {/* TAB 3: ASSET BROWSER */}
+          {activeTab === 'assets' && (
+            <motion.section
+              key="assets-view"
+              variants={pageVariants}
+              initial="initial"
+              animate="animate"
+              exit="exit"
+            >
+              {/* Detail View */}
+              {selectedSymbol ? (
+                <div>
+                  <MagneticButton
+                    onClick={handleBackToList}
+                    className="fintech-btn btn-secondary btn-sm"
+                    style={{ marginBottom: '1.25rem' }}
+                  >
+                    &larr; Quay lại danh sách
+                  </MagneticButton>
+
+                  {detailLoading && (
+                    <div className="state-box" style={{ marginBottom: '1.25rem' }}>
+                      <div className="state-icon spin-icon">⏳</div>
+                      <p className="state-desc">Đang tải thông tin chi tiết cho {selectedSymbol}...</p>
+                    </div>
+                  )}
+
+                  {detailError && (
+                    <div className="fintech-banner banner-error">
+                      <p style={{ margin: 0 }}><strong>Lỗi:</strong> {detailError}</p>
+                    </div>
+                  )}
+
+                  {assetDetail && (
+                    <TiltCard className="fintech-card" style={{ padding: '1.35rem 1.5rem', marginBottom: '1.25rem' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.85rem' }}>
+                        <h3 style={{ margin: 0, fontSize: '1.35rem', fontWeight: 800, color: 'var(--color-slate-900)' }}>
+                          {assetDetail.symbol}
+                        </h3>
+                        <span className="fintech-badge badge-brand">
+                          {formatAssetType(assetDetail.asset_type)}
+                        </span>
+                      </div>
+                      <p style={{ margin: '0 0 1rem 0', fontSize: '0.95rem', color: 'var(--color-slate-600)', fontWeight: 600 }}>
+                        {assetDetail.name}
+                      </p>
+
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '1rem', paddingTop: '0.85rem', borderTop: '1px solid var(--border-subtle)', fontSize: '0.88rem' }}>
+                        <div><span style={{ color: 'var(--color-slate-500)' }}>Mã tài sản:</span> <strong style={{ color: 'var(--color-slate-900)' }}>{assetDetail.symbol}</strong></div>
+                        <div><span style={{ color: 'var(--color-slate-500)' }}>Loại tài sản:</span> <strong style={{ color: 'var(--color-slate-900)' }}>{formatAssetType(assetDetail.asset_type)}</strong></div>
+                        <div><span style={{ color: 'var(--color-slate-500)' }}>Sàn niêm yết:</span> <strong style={{ color: 'var(--color-slate-900)' }}>{assetDetail.exchange || 'N/A'}</strong></div>
+                        <div><span style={{ color: 'var(--color-slate-500)' }}>Mã định danh:</span> <span style={{ color: 'var(--color-slate-400)', fontSize: '0.78rem' }}>{assetDetail.id}</span></div>
+                      </div>
+                    </TiltCard>
+                  )}
+
+                  {/* Market Snapshot Card with 3D Tilt */}
+                  <TiltCard className="fintech-card" style={{ padding: '1.5rem' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.75rem' }}>
+                      <div>
+                        <h3 style={{ margin: 0, fontSize: '1.1rem', color: 'var(--color-slate-900)', fontWeight: 800 }}>Giá thị trường</h3>
+                        <span style={{ fontSize: '0.78rem', color: 'var(--color-slate-400)' }}>Dữ liệu thị trường có độ trễ (~15 phút)</span>
+                      </div>
+                      <MagneticButton
+                        onClick={() => fetchMarketData(selectedSymbol, false)}
+                        disabled={isRefreshing || marketLoading}
+                        className="fintech-btn btn-secondary btn-sm"
+                      >
+                        <span className={isRefreshing ? 'spin-icon' : ''}>{isRefreshing ? '⟳' : '↻'}</span>
+                        <span>{isRefreshing ? 'Đang làm mới...' : 'Làm mới'}</span>
+                      </MagneticButton>
+                    </div>
+
+                    {marketLoading && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', padding: '1rem 0' }}>
+                        <div className="skeleton-shimmer" style={{ width: '220px', height: '36px' }} />
+                        <div className="metrics-grid" style={{ marginBottom: 0 }}>
+                          {[1, 2, 3, 4].map((n) => (
+                            <div key={n} className="skeleton-shimmer" style={{ height: '70px' }} />
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {marketError && (
+                      <div className="fintech-banner banner-warning">
+                        <span>Thông báo: Không thể tải dữ liệu giá thị trường ({marketError}).</span>
+                      </div>
+                    )}
+
+                    {marketData && !marketLoading && (
+                      <div>
+                        <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.85rem', marginBottom: '1.25rem', flexWrap: 'wrap' }}>
+                          <span style={{ fontSize: '2.15rem', fontWeight: 800, color: 'var(--color-slate-900)', letterSpacing: '-0.02em' }}>
+                            {marketData.price !== null ? (
+                              <CountUp value={marketData.price} suffix={` ${marketData.currency}`} />
+                            ) : 'N/A'}
+                          </span>
+
+                          <span className={`fintech-badge ${(marketData.change || 0) >= 0 ? 'badge-gain' : 'badge-loss'}`} style={{ fontSize: '0.88rem', padding: '4px 12px' }}>
+                            {marketData.change !== null ? (
+                              <>
+                                {marketData.change > 0 ? '+' : ''}
+                                {marketData.change.toLocaleString('vi-VN')} ({marketData.changePercent > 0 ? '+' : ''}{marketData.changePercent}%)
+                              </>
+                            ) : 'N/A'}
+                          </span>
+                        </div>
+
+                        <div className="metrics-grid" style={{ marginBottom: 0 }}>
+                          <div className="metric-card" style={{ padding: '0.95rem 1rem', '--card-accent': '#64748b' }}>
+                            <div className="metric-label">Cao nhất trong ngày</div>
+                            <div className="metric-value" style={{ fontSize: '1.15rem' }}>
+                              {marketData.dayHigh !== null ? `${marketData.dayHigh.toLocaleString('vi-VN')} ₫` : 'N/A'}
+                            </div>
+                          </div>
+
+                          <div className="metric-card" style={{ padding: '0.95rem 1rem', '--card-accent': '#64748b' }}>
+                            <div className="metric-label">Thấp nhất trong ngày</div>
+                            <div className="metric-value" style={{ fontSize: '1.15rem' }}>
+                              {marketData.dayLow !== null ? `${marketData.dayLow.toLocaleString('vi-VN')} ₫` : 'N/A'}
+                            </div>
+                          </div>
+
+                          <div className="metric-card" style={{ padding: '0.95rem 1rem', '--card-accent': '#3b82f6' }}>
+                            <div className="metric-label">Khối lượng giao dịch</div>
+                            <div className="metric-value" style={{ fontSize: '1.15rem' }}>
+                              {marketData.volume !== null ? marketData.volume.toLocaleString('vi-VN') : 'N/A'}
+                            </div>
+                          </div>
+
+                          <div className="metric-card" style={{ padding: '0.95rem 1rem', '--card-accent': '#10b981' }}>
+                            <div className="metric-label">Cập nhật lúc</div>
+                            <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--color-slate-600)' }}>
+                              {formatPublishedTime(marketData.updatedAt)}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </TiltCard>
+                </div>
+              ) : (
+                /* Asset List View */
+                <div>
+                  <motion.div variants={sectionItemVariants} className="section-header">
+                    <div>
+                      <h2 className="section-title">Danh sách tài sản</h2>
+                      <p className="section-subtitle">
+                        Danh sách tài sản đang theo dõi trong hệ thống ({assets.length} mã)
+                      </p>
+                    </div>
+                  </motion.div>
+
+                  {loading && (
+                    <div className="state-box">
+                      <div className="state-icon spin-icon">⏳</div>
+                      <h3 className="state-title">Đang tải danh sách tài sản...</h3>
+                    </div>
+                  )}
+
+                  {error && (
+                    <div className="fintech-banner banner-error">
+                      <p style={{ margin: 0 }}><strong>Lỗi tải danh sách tài sản:</strong> {error}</p>
+                    </div>
+                  )}
+
+                  {!loading && !error && assets.length === 0 && (
+                    <div className="state-box">
+                      <div className="state-icon float-icon">📈</div>
+                      <h3 className="state-title">Không tìm thấy tài sản nào</h3>
+                      <p className="state-desc">Chưa có tài sản trong cơ sở dữ liệu.</p>
+                    </div>
+                  )}
+
+                  {!loading && !error && assets.length > 0 && (
+                    <motion.div variants={sectionItemVariants} className="fintech-card" style={{ overflow: 'hidden' }}>
+                      <div className="table-container">
+                        <table className="fintech-table">
+                          <thead>
+                            <tr>
+                              <th>Mã</th>
+                              <th>Tên tài sản</th>
+                              <th>Loại tài sản</th>
+                              <th>Sàn giao dịch</th>
+                              <th style={{ textAlign: 'right' }}>Thao tác</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {assets.map((asset) => (
+                              <tr
+                                key={asset.id || asset.symbol}
+                                className="row-interactive"
+                                onClick={() => handleSelectAsset(asset.symbol)}
+                              >
+                                <td style={{ fontWeight: 800, color: 'var(--color-slate-900)' }}>
+                                  <span style={{
+                                    padding: '2px 8px',
+                                    borderRadius: '4px',
+                                    backgroundColor: 'var(--color-brand-50)',
+                                    color: 'var(--color-brand-700)',
+                                    border: '1px solid var(--color-brand-200)',
+                                    fontWeight: 800
+                                  }}>
+                                    {asset.symbol}
+                                  </span>
+                                </td>
+                                <td style={{ color: 'var(--color-slate-800)', fontWeight: 600 }}>
+                                  {asset.name}
+                                </td>
+                                <td>
+                                  <span className="fintech-badge badge-neutral">
+                                    {formatAssetType(asset.asset_type)}
+                                  </span>
+                                </td>
+                                <td style={{ color: 'var(--color-slate-500)' }}>
+                                  {asset.exchange || 'N/A'}
+                                </td>
+                                <td style={{ textAlign: 'right' }}>
+                                  <MagneticButton
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleSelectAsset(asset.symbol);
+                                    }}
+                                    className="fintech-btn btn-secondary btn-sm"
+                                  >
+                                    Xem chi tiết ↗
+                                  </MagneticButton>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </motion.div>
+                  )}
+                </div>
+              )}
+            </motion.section>
+          )}
+
+          {/* TAB 4: INVESTOR PROFILE & HOLDINGS */}
+          {activeTab === 'profile' && (
+            <motion.section
+              key="profile-view"
+              variants={pageVariants}
+              initial="initial"
+              animate="animate"
+              exit="exit"
+            >
+              <motion.div variants={sectionItemVariants} className="section-header">
+                <div>
+                  <h2 className="section-title">Hồ sơ đầu tư</h2>
+                  <p className="section-subtitle">
+                    Quản lý số tiền sẵn sàng đầu tư, mức chấp nhận rủi ro và thời gian đầu tư của bạn
+                  </p>
+                </div>
+              </motion.div>
+
+              {/* Loading State */}
+              {profileLoading && (
+                <div className="state-box">
+                  <div className="state-icon spin-icon">⏳</div>
+                  <h3 className="state-title">Đang tải hồ sơ đầu tư...</h3>
+                </div>
+              )}
+
+              {/* Fatal Fetch Error State */}
+              {profileError && !profile && !profileLoading && (
+                <div className="fintech-banner banner-error">
+                  <div>
+                    <strong style={{ display: 'block', marginBottom: '0.2rem' }}>Không thể tải hồ sơ đầu tư</strong>
+                    <span style={{ fontSize: '0.85rem' }}>{profileError}</span>
+                  </div>
+                  <MagneticButton
+                    onClick={() => fetchProfile(true)}
+                    className="fintech-btn btn-danger btn-sm"
+                  >
+                    Thử lại
+                  </MagneticButton>
+                </div>
+              )}
+
+              {/* Success Banner */}
+              {profileSuccess && (
+                <motion.div
+                  className="fintech-banner banner-success"
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <span>✓</span>
+                    <span>Đã lưu hồ sơ đầu tư thành công!</span>
+                  </div>
+                  <button
+                    onClick={() => setProfileSuccess(false)}
+                    className="banner-close-btn"
+                  >
+                    ×
+                  </button>
+                </motion.div>
+              )}
+
+              {/* Save Error Banner */}
+              {profileError && profile && (
+                <div className="fintech-banner banner-error">
+                  <span>{profileError}</span>
+                  <button
+                    onClick={() => setProfileError(null)}
+                    className="banner-close-btn"
+                  >
+                    ×
+                  </button>
+                </div>
+              )}
+
+              {/* Profile Form Card with Subtle 3D Tilt */}
+              {!profileLoading && (
+                <motion.div variants={sectionItemVariants}>
+                  <TiltCard className="fintech-card" style={{ padding: '1.75rem', marginBottom: '2.5rem' }} tiltMax={2.5}>
+                    <form onSubmit={handleSaveProfile}>
+                      {/* Field 1: Available Cash */}
+                      <div style={{ marginBottom: '1.75rem' }}>
+                        <label style={{ display: 'block', fontSize: '0.92rem', fontWeight: 800, color: 'var(--color-slate-900)', marginBottom: '0.25rem' }}>
+                          Tiền sẵn sàng đầu tư
+                        </label>
+                        <p style={{ margin: '0 0 0.65rem 0', fontSize: '0.82rem', color: 'var(--color-slate-500)' }}>
+                          Số tiền bạn hiện có thể sử dụng để đầu tư (tính theo VNĐ).
+                        </p>
+                        <div className="input-suffix-group">
+                          <input
+                            type="number"
+                            min="0"
+                            step="100000"
+                            value={cashAvailable}
+                            onChange={(e) => {
+                              setCashAvailable(e.target.value);
+                              setProfileSuccess(false);
+                              setProfileError(null);
+                            }}
+                            required
+                            placeholder="Ví dụ: 100000000"
+                            className="fintech-input"
+                          />
+                          <span className="input-suffix-badge">VNĐ</span>
+                        </div>
+
+                        {/* Live Formatted VND Preview */}
+                        {!isNaN(Number(cashAvailable)) && cashAvailable !== '' && Number(cashAvailable) >= 0 && (
+                          <motion.div
+                            initial={{ opacity: 0, y: 4 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            style={{ marginTop: '0.45rem', fontSize: '0.85rem', color: 'var(--color-brand-600)', fontWeight: 700 }}
+                          >
+                            ≈ <CountUp value={Number(cashAvailable)} suffix=" ₫" />
+                          </motion.div>
+                        )}
+                      </div>
+
+                      {/* Field 2: Risk Tolerance */}
+                      <div style={{ marginBottom: '1.75rem' }}>
+                        <label style={{ display: 'block', fontSize: '0.92rem', fontWeight: 800, color: 'var(--color-slate-900)', marginBottom: '0.25rem' }}>
+                          Mức chấp nhận rủi ro
+                        </label>
+                        <p style={{ margin: '0 0 0.65rem 0', fontSize: '0.82rem', color: 'var(--color-slate-500)' }}>
+                          Mức độ chấp nhận biến động giá và rủi ro sụt giảm tài sản của bạn.
+                        </p>
+                        <div className="radio-card-grid">
+                          {[
+                            { value: 'low', label: 'Thấp', desc: 'Bảo toàn vốn, hạn chế rủi ro tối đa' },
+                            { value: 'moderate', label: 'Vừa', desc: 'Cân bằng giữa lợi nhuận và an toàn' },
+                            { value: 'high', label: 'Cao', desc: 'Kỳ vọng tăng trưởng cao, chấp nhận biến động lớn' }
+                          ].map((item) => (
+                            <motion.label
+                              key={item.value}
+                              className={`radio-card-item ${riskTolerance === item.value ? 'selected' : ''}`}
+                              whileHover={{ y: -2 }}
+                              whileTap={{ scale: 0.98 }}
+                            >
+                              <div className="radio-card-header">
+                                <input
+                                  type="radio"
+                                  name="risk_tolerance"
+                                  value={item.value}
+                                  checked={riskTolerance === item.value}
+                                  onChange={(e) => {
+                                    setRiskTolerance(e.target.value);
+                                    setProfileSuccess(false);
+                                    setProfileError(null);
+                                  }}
+                                  style={{ margin: 0 }}
+                                />
+                                <span className="radio-card-title">{item.label}</span>
+                              </div>
+                              <span className="radio-card-desc">{item.desc}</span>
+                            </motion.label>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Field 3: Investment Horizon */}
+                      <div style={{ marginBottom: '2rem' }}>
+                        <label style={{ display: 'block', fontSize: '0.92rem', fontWeight: 800, color: 'var(--color-slate-900)', marginBottom: '0.25rem' }}>
+                          Thời gian đầu tư
+                        </label>
+                        <p style={{ margin: '0 0 0.65rem 0', fontSize: '0.82rem', color: 'var(--color-slate-500)' }}>
+                          Khoảng thời gian dự kiến trước khi bạn cần rút hoặc sử dụng vốn đầu tư.
+                        </p>
+                        <div className="radio-card-grid">
+                          {[
+                            { value: 'short', label: 'Ngắn hạn', desc: 'Dưới 1 năm' },
+                            { value: 'medium', label: 'Trung hạn', desc: 'Từ 1 đến 3 năm' },
+                            { value: 'long', label: 'Dài hạn', desc: 'Trên 3 năm' }
+                          ].map((item) => (
+                            <motion.label
+                              key={item.value}
+                              className={`radio-card-item ${investmentHorizon === item.value ? 'selected' : ''}`}
+                              whileHover={{ y: -2 }}
+                              whileTap={{ scale: 0.98 }}
+                            >
+                              <div className="radio-card-header">
+                                <input
+                                  type="radio"
+                                  name="investment_horizon"
+                                  value={item.value}
+                                  checked={investmentHorizon === item.value}
+                                  onChange={(e) => {
+                                    setInvestmentHorizon(e.target.value);
+                                    setProfileSuccess(false);
+                                    setProfileError(null);
+                                  }}
+                                  style={{ margin: 0 }}
+                                />
+                                <span className="radio-card-title">{item.label}</span>
+                              </div>
+                              <span className="radio-card-desc">{item.desc}</span>
+                            </motion.label>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Actions & Meta */}
+                      <div style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        paddingTop: '1.25rem',
+                        borderTop: '1px solid var(--border-subtle)',
+                        flexWrap: 'wrap',
+                        gap: '0.75rem'
+                      }}>
+                        <MagneticButton
+                          type="submit"
+                          disabled={profileSaving}
+                          className="fintech-btn btn-primary"
+                        >
+                          <span className={profileSaving ? 'spin-icon' : ''}>{profileSaving ? '⟳' : ''}</span>
+                          <span>{profileSaving ? 'Đang lưu...' : 'Lưu thay đổi'}</span>
+                        </MagneticButton>
+
+                        {profile && profile.updated_at && (
+                          <span style={{ fontSize: '0.8rem', color: 'var(--color-slate-400)' }}>
+                            Cập nhật lúc: {formatPublishedTime(profile.updated_at)}
+                          </span>
+                        )}
+                      </div>
+                    </form>
+                  </TiltCard>
+                </motion.div>
+              )}
+
+              {/* SECTION 2: DANH MỤC HIỆN CÓ (HOLDINGS) */}
+              <motion.div variants={sectionItemVariants} className="section-header">
+                <div>
+                  <h2 className="section-title">Danh mục hiện có</h2>
+                  <p className="section-subtitle">
+                    Ghi nhận các mã và tài sản bạn đang nắm giữ thực tế
+                  </p>
+                </div>
+              </motion.div>
+
+              {/* Holdings Feedback Banners */}
+              {holdingsSuccess && (
+                <motion.div
+                  className="fintech-banner banner-success"
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <span>✓</span>
+                    <span>{holdingsSuccess}</span>
+                  </div>
+                  <button
+                    onClick={() => setHoldingsSuccess(null)}
+                    className="banner-close-btn"
+                  >
+                    ×
+                  </button>
+                </motion.div>
+              )}
+
+              {holdingsError && (
+                <div className="fintech-banner banner-error">
+                  <span>{holdingsError}</span>
+                  <button
+                    onClick={() => setHoldingsError(null)}
+                    className="banner-close-btn"
+                  >
+                    ×
+                  </button>
+                </div>
+              )}
+
+              {/* Add Holding Form Card with Subtle 3D Tilt */}
+              <motion.div variants={sectionItemVariants}>
+                <TiltCard className="fintech-card" style={{ padding: '1.5rem', marginBottom: '1.75rem' }} tiltMax={2}>
+                  <h3 style={{ margin: '0 0 1rem 0', fontSize: '1.02rem', fontWeight: 800, color: 'var(--color-slate-900)' }}>
+                    Thêm tài sản vào danh mục
+                  </h3>
+
+                  {addHoldingError && (
+                    <div className="fintech-banner banner-error">
+                      <span>{addHoldingError}</span>
+                    </div>
+                  )}
+
+                  <form onSubmit={handleAddHolding}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem', marginBottom: '1.25rem' }}>
+                      {/* Select Asset */}
+                      <div>
+                        <label style={{ display: 'block', fontSize: '0.84rem', fontWeight: 700, color: 'var(--color-slate-700)', marginBottom: '0.35rem' }}>
+                          Tài sản
+                        </label>
+                        <select
+                          value={selectedAssetId}
+                          onChange={(e) => {
+                            setSelectedAssetId(e.target.value);
+                            setAddHoldingError(null);
+                          }}
+                          required
+                          className="fintech-select"
+                        >
+                          <option value="">-- Chọn tài sản --</option>
+                          {assets.map((asset) => {
+                            const alreadyHeld = holdings.some((h) => h.asset_id === asset.id);
+                            return (
+                              <option key={asset.id} value={asset.id} disabled={alreadyHeld}>
+                                {asset.symbol} - {asset.name} ({formatAssetType(asset.asset_type)}) {alreadyHeld ? '(Đã có)' : ''}
+                              </option>
+                            );
+                          })}
+                        </select>
+                      </div>
+
+                      {/* Quantity */}
+                      <div>
+                        <label style={{ display: 'block', fontSize: '0.84rem', fontWeight: 700, color: 'var(--color-slate-700)', marginBottom: '0.35rem' }}>
+                          Số lượng
+                        </label>
+                        <input
+                          type="number"
+                          min="0.0001"
+                          step="any"
+                          placeholder="Ví dụ: 1000"
+                          value={newQuantity}
+                          onChange={(e) => {
+                            setNewQuantity(e.target.value);
+                            setAddHoldingError(null);
+                          }}
+                          required
+                          className="fintech-input"
+                        />
+                      </div>
+
+                      {/* Average Purchase Price */}
+                      <div>
+                        <label style={{ display: 'block', fontSize: '0.84rem', fontWeight: 700, color: 'var(--color-slate-700)', marginBottom: '0.35rem' }}>
+                          Giá mua trung bình (VNĐ)
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          step="100"
+                          placeholder="Ví dụ: 58000"
+                          value={newAverageCost}
+                          onChange={(e) => {
+                            setNewAverageCost(e.target.value);
+                            setAddHoldingError(null);
+                          }}
+                          required
+                          className="fintech-input"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Calculation preview and submit button */}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
+                      <div>
+                        {Number(newQuantity) > 0 && Number(newAverageCost) >= 0 && (
+                          <span style={{ fontSize: '0.88rem', color: 'var(--color-brand-600)', fontWeight: 700 }}>
+                            Tổng vốn dự kiến: {(Number(newQuantity) * Number(newAverageCost)).toLocaleString('vi-VN')} ₫
+                          </span>
+                        )}
+                      </div>
+
+                      <MagneticButton
+                        type="submit"
+                        disabled={addHoldingLoading}
+                        className="fintech-btn btn-primary"
+                      >
+                        <span className={addHoldingLoading ? 'spin-icon' : ''}>{addHoldingLoading ? '⟳' : '+'}</span>
+                        <span>{addHoldingLoading ? 'Đang thêm...' : 'Thêm vào danh mục'}</span>
+                      </MagneticButton>
+                    </div>
+                  </form>
+                </TiltCard>
+              </motion.div>
+
+              {/* Holdings Table */}
+              <motion.div variants={sectionItemVariants} className="fintech-card" style={{ overflow: 'hidden' }}>
+                <div className="card-header">
+                  <span style={{ fontSize: '0.95rem', fontWeight: 800, color: 'var(--color-slate-900)' }}>
+                    Danh sách tài sản đang nắm giữ ({holdings.length})
+                  </span>
+                  <MagneticButton
+                    onClick={() => fetchHoldings(false)}
+                    disabled={holdingsLoading}
+                    className="fintech-btn btn-secondary btn-sm"
+                  >
+                    <span className={holdingsLoading ? 'spin-icon' : ''}>{holdingsLoading ? '⟳' : '↻'}</span>
+                    <span>{holdingsLoading ? 'Đang tải...' : 'Làm mới'}</span>
+                  </MagneticButton>
+                </div>
+
+                {editHoldingError && (
+                  <div className="fintech-banner banner-error" style={{ margin: '0.75rem 1rem' }}>
+                    <span>{editHoldingError}</span>
                   </div>
                 )}
 
-                {!loading && !error && assets.length === 0 && (
-                  <p style={{ color: '#64748b' }}>Không tìm thấy tài sản nào trong cơ sở dữ liệu.</p>
+                {holdingsLoading && holdings.length === 0 && (
+                  <div className="state-box" style={{ border: 'none', boxShadow: 'none' }}>
+                    <div className="state-icon spin-icon">⏳</div>
+                    <h3 className="state-title">Đang tải danh mục tài sản...</h3>
+                  </div>
                 )}
 
-                {!loading && !error && assets.length > 0 && (
-                  <div style={{
-                    backgroundColor: '#ffffff',
-                    border: '1px solid #e2e8f0',
-                    borderRadius: '8px',
-                    overflow: 'hidden'
-                  }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.88rem' }}>
+                {!holdingsLoading && holdings.length === 0 && (
+                  <div className="state-box" style={{ border: 'none', boxShadow: 'none' }}>
+                    <div className="state-icon float-icon">💼</div>
+                    <h3 className="state-title">Chưa có tài sản nào trong danh mục</h3>
+                    <p className="state-desc">
+                      Sử dụng biểu mẫu phía trên để ghi nhận các khoản đầu tư bạn đang sở hữu.
+                    </p>
+                  </div>
+                )}
+
+                {holdings.length > 0 && (
+                  <div className="table-container">
+                    <table className="fintech-table">
                       <thead>
-                        <tr style={{ backgroundColor: '#f8fafc', borderBottom: '1px solid #e2e8f0', color: '#64748b', fontSize: '0.78rem', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                          <th style={{ padding: '10px 16px', fontWeight: 600 }}>Mã</th>
-                          <th style={{ padding: '10px 16px', fontWeight: 600 }}>Tên</th>
-                          <th style={{ padding: '10px 16px', fontWeight: 600 }}>Loại tài sản</th>
-                          <th style={{ padding: '10px 16px', fontWeight: 600 }}>Sàn</th>
-                          <th style={{ padding: '10px 16px', fontWeight: 600, textAlign: 'right' }}>Thao tác</th>
+                        <tr>
+                          <th>Tài sản</th>
+                          <th style={{ textAlign: 'right' }}>Số lượng</th>
+                          <th style={{ textAlign: 'right' }}>Giá mua TB</th>
+                          <th style={{ textAlign: 'right' }}>Tổng giá trị vốn</th>
+                          <th style={{ textAlign: 'right' }}>Thao tác</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {assets.map((asset) => (
-                          <tr
-                            key={asset.id || asset.symbol}
-                            style={{ borderBottom: '1px solid #f1f5f9', cursor: 'pointer' }}
-                            onClick={() => handleSelectAsset(asset.symbol)}
-                            onMouseOver={(e) => (e.currentTarget.style.backgroundColor = '#f8fafc')}
-                            onMouseOut={(e) => (e.currentTarget.style.backgroundColor = '#ffffff')}
-                          >
-                            <td style={{ padding: '10px 16px', fontWeight: 700, color: '#0f172a' }}>
-                              {asset.symbol}
-                            </td>
-                            <td style={{ padding: '10px 16px', color: '#334155' }}>
-                              {asset.name}
-                            </td>
-                            <td style={{ padding: '10px 16px', color: '#64748b' }}>
-                              {formatAssetType(asset.asset_type)}
-                            </td>
-                            <td style={{ padding: '10px 16px', color: '#64748b' }}>
-                              {asset.exchange || 'N/A'}
-                            </td>
-                            <td style={{ padding: '10px 16px', textAlign: 'right' }}>
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleSelectAsset(asset.symbol);
-                                }}
-                                style={{
-                                  padding: '4px 10px',
-                                  fontSize: '0.8rem',
-                                  fontWeight: 500,
-                                  backgroundColor: '#ffffff',
-                                  color: '#2563eb',
-                                  border: '1px solid #cbd5e1',
-                                  borderRadius: '4px',
-                                  cursor: 'pointer'
-                                }}
-                              >
-                                Xem
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
+                        {holdings.map((h) => {
+                          const isEditing = editingHoldingId === h.id;
+                          const asset = h.asset || {};
+                          const totalCost = Number(h.quantity) * Number(h.average_cost);
+
+                          return (
+                            <tr key={h.id} className={isEditing ? 'row-editing' : ''}>
+                              {/* Column 1: Asset symbol & name */}
+                              <td>
+                                <div style={{ fontWeight: 800, color: 'var(--color-slate-900)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                  <span>{asset.symbol || 'N/A'}</span>
+                                  {asset.asset_type && (
+                                    <span className="fintech-badge badge-neutral">
+                                      {formatAssetType(asset.asset_type)}
+                                    </span>
+                                  )}
+                                </div>
+                                <div style={{ fontSize: '0.78rem', color: 'var(--color-slate-500)', marginTop: '2px' }}>
+                                  {asset.name || 'Tài sản'}
+                                </div>
+                              </td>
+
+                              {/* Column 2: Quantity */}
+                              <td style={{ textAlign: 'right' }}>
+                                {isEditing ? (
+                                  <input
+                                    type="number"
+                                    min="0.0001"
+                                    step="any"
+                                    value={editQuantity}
+                                    onChange={(e) => setEditQuantity(e.target.value)}
+                                    className="fintech-input"
+                                    style={{ width: '100px', padding: '4px 8px', fontSize: '0.85rem' }}
+                                  />
+                                ) : (
+                                  <span style={{ fontWeight: 800, color: 'var(--color-slate-900)' }}>
+                                    {Number(h.quantity).toLocaleString('vi-VN')}
+                                  </span>
+                                )}
+                              </td>
+
+                              {/* Column 3: Average Cost */}
+                              <td style={{ textAlign: 'right' }}>
+                                {isEditing ? (
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    step="100"
+                                    value={editAverageCost}
+                                    onChange={(e) => setEditAverageCost(e.target.value)}
+                                    className="fintech-input"
+                                    style={{ width: '120px', padding: '4px 8px', fontSize: '0.85rem' }}
+                                  />
+                                ) : (
+                                  <span style={{ color: 'var(--color-slate-700)', fontWeight: 600 }}>
+                                    {Number(h.average_cost).toLocaleString('vi-VN')} ₫
+                                  </span>
+                                )}
+                              </td>
+
+                              {/* Column 4: Total Cost Basis */}
+                              <td style={{ textAlign: 'right' }}>
+                                {isEditing ? (
+                                  <span style={{ fontSize: '0.84rem', color: 'var(--color-brand-600)', fontWeight: 700 }}>
+                                    {Number(editQuantity) > 0 && Number(editAverageCost) >= 0
+                                      ? `${(Number(editQuantity) * Number(editAverageCost)).toLocaleString('vi-VN')} ₫`
+                                      : '---'}
+                                  </span>
+                                ) : (
+                                  <span style={{ fontWeight: 800, color: 'var(--color-slate-900)' }}>
+                                    {totalCost.toLocaleString('vi-VN')} ₫
+                                  </span>
+                                )}
+                              </td>
+
+                              {/* Column 5: Actions */}
+                              <td style={{ textAlign: 'right' }}>
+                                {isEditing ? (
+                                  <div style={{ display: 'inline-flex', gap: '6px' }}>
+                                    <MagneticButton
+                                      onClick={() => handleSaveEditHolding(h.id)}
+                                      disabled={editHoldingLoading}
+                                      className="fintech-btn btn-primary btn-sm"
+                                    >
+                                      {editHoldingLoading ? '...' : 'Lưu'}
+                                    </MagneticButton>
+                                    <MagneticButton
+                                      onClick={handleCancelEdit}
+                                      disabled={editHoldingLoading}
+                                      className="fintech-btn btn-secondary btn-sm"
+                                    >
+                                      Hủy
+                                    </MagneticButton>
+                                  </div>
+                                ) : (
+                                  <div style={{ display: 'inline-flex', gap: '6px' }}>
+                                    <MagneticButton
+                                      onClick={() => handleStartEditHolding(h)}
+                                      className="fintech-btn btn-secondary btn-sm"
+                                    >
+                                      Chỉnh sửa
+                                    </MagneticButton>
+                                    <MagneticButton
+                                      onClick={() => handleDeleteHolding(h.id, asset.symbol)}
+                                      disabled={deletingHoldingId === h.id}
+                                      className="fintech-btn btn-danger btn-sm"
+                                    >
+                                      {deletingHoldingId === h.id ? '...' : 'Xóa'}
+                                    </MagneticButton>
+                                  </div>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
                 )}
-              </div>
-            )}
-          </section>
-        )}
+              </motion.div>
+            </motion.section>
+          )}
 
-        {/* TAB 3: INVESTOR PROFILE */}
-        {activeTab === 'profile' && (
-          <section>
-            <div style={{ marginBottom: '1.25rem' }}>
-              <h2 style={{ margin: '0 0 0.25rem 0', fontSize: '1.25rem', fontWeight: 700, color: '#0f172a' }}>
-                Hồ sơ đầu tư
-              </h2>
-              <p style={{ margin: 0, fontSize: '0.85rem', color: '#64748b' }}>
-                Quản lý số tiền sẵn sàng đầu tư, mức chấp nhận rủi ro và thời gian đầu tư của bạn
-              </p>
-            </div>
-
-            {/* Loading State */}
-            {profileLoading && (
-              <div style={{
-                backgroundColor: '#ffffff',
-                border: '1px solid #e2e8f0',
-                borderRadius: '8px',
-                padding: '3rem 2rem',
-                textAlign: 'center',
-                color: '#64748b'
-              }}>
-                <div style={{ fontSize: '1.5rem', marginBottom: '0.5rem' }}>⏳</div>
-                <p style={{ margin: 0, fontSize: '0.9rem', fontWeight: 500 }}>Đang tải hồ sơ đầu tư...</p>
-              </div>
-            )}
-
-            {/* Fatal Fetch Error State */}
-            {profileError && !profile && !profileLoading && (
-              <div style={{
-                backgroundColor: '#fef2f2',
-                border: '1px solid #fecaca',
-                borderRadius: '8px',
-                padding: '1.25rem 1.5rem',
-                color: '#991b1b',
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                marginBottom: '1rem'
-              }}>
-                <div>
-                  <strong style={{ display: 'block', marginBottom: '0.25rem', fontSize: '0.9rem' }}>Không thể tải hồ sơ đầu tư</strong>
-                  <span style={{ fontSize: '0.85rem' }}>{profileError}</span>
-                </div>
-                <button
-                  onClick={() => fetchProfile(true)}
-                  style={{
-                    padding: '6px 12px',
-                    fontSize: '0.82rem',
-                    fontWeight: 600,
-                    backgroundColor: '#991b1b',
-                    color: '#ffffff',
-                    border: 'none',
-                    borderRadius: '4px',
-                    cursor: 'pointer'
-                  }}
-                >
-                  Thử lại
-                </button>
-              </div>
-            )}
-
-            {/* Success Banner */}
-            {profileSuccess && (
-              <div style={{
-                backgroundColor: '#f0fdf4',
-                border: '1px solid #bbf7d0',
-                borderRadius: '6px',
-                padding: '0.75rem 1rem',
-                marginBottom: '1.25rem',
-                fontSize: '0.88rem',
-                color: '#15803d',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.5rem'
-              }}>
-                <span>✓</span>
-                <span>Đã lưu hồ sơ đầu tư thành công!</span>
-              </div>
-            )}
-
-            {/* Save Error Banner */}
-            {profileError && profile && (
-              <div style={{
-                backgroundColor: '#fef2f2',
-                border: '1px solid #fecaca',
-                borderRadius: '6px',
-                padding: '0.75rem 1rem',
-                marginBottom: '1.25rem',
-                fontSize: '0.88rem',
-                color: '#991b1b'
-              }}>
-                {profileError}
-              </div>
-            )}
-
-            {/* Profile Form Card */}
-            {!profileLoading && (
-              <div style={{
-                backgroundColor: '#ffffff',
-                border: '1px solid #e2e8f0',
-                borderRadius: '8px',
-                padding: '1.5rem',
-                boxShadow: '0 1px 2px rgba(0,0,0,0.02)'
-              }}>
-                <form onSubmit={handleSaveProfile}>
-                  {/* Field 1: Available Cash */}
-                  <div style={{ marginBottom: '1.5rem' }}>
-                    <label style={{ display: 'block', fontSize: '0.9rem', fontWeight: 600, color: '#0f172a', marginBottom: '0.25rem' }}>
-                      Tiền sẵn sàng đầu tư
-                    </label>
-                    <p style={{ margin: '0 0 0.5rem 0', fontSize: '0.82rem', color: '#64748b' }}>
-                      Số tiền bạn hiện có thể sử dụng để đầu tư (tính theo VNĐ).
-                    </p>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                      <input
-                        type="number"
-                        min="0"
-                        step="100000"
-                        value={cashAvailable}
-                        onChange={(e) => {
-                          setCashAvailable(e.target.value);
-                          setProfileSuccess(false);
-                          setProfileError(null);
-                        }}
-                        required
-                        placeholder="Ví dụ: 100000000"
-                        style={{
-                          width: '100%',
-                          maxWidth: '360px',
-                          padding: '8px 12px',
-                          fontSize: '0.95rem',
-                          border: '1px solid #cbd5e1',
-                          borderRadius: '6px',
-                          outline: 'none',
-                          boxSizing: 'border-box'
-                        }}
-                      />
-                      <span style={{ fontSize: '0.88rem', fontWeight: 600, color: '#475569' }}>
-                        VNĐ
-                      </span>
-                    </div>
-                    {/* Live Formatted VND Preview */}
-                    {!isNaN(Number(cashAvailable)) && cashAvailable !== '' && Number(cashAvailable) >= 0 && (
-                      <div style={{ marginTop: '0.35rem', fontSize: '0.82rem', color: '#2563eb' }}>
-                        ≈ {Number(cashAvailable).toLocaleString('vi-VN')} ₫
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Field 2: Risk Tolerance */}
-                  <div style={{ marginBottom: '1.5rem' }}>
-                    <label style={{ display: 'block', fontSize: '0.9rem', fontWeight: 600, color: '#0f172a', marginBottom: '0.25rem' }}>
-                      Mức chấp nhận rủi ro
-                    </label>
-                    <p style={{ margin: '0 0 0.5rem 0', fontSize: '0.82rem', color: '#64748b' }}>
-                      Mức độ chấp nhận biến động giá và rủi ro sụt giảm tài sản của bạn.
-                    </p>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.75rem' }}>
-                      {[
-                        { value: 'low', label: 'Thấp', desc: 'Bảo toàn vốn, hạn chế rủi ro tối đa' },
-                        { value: 'moderate', label: 'Vừa', desc: 'Cân bằng giữa lợi nhuận và an toàn' },
-                        { value: 'high', label: 'Cao', desc: 'Kỳ vọng tăng trưởng cao, chấp nhận biến động lớn' }
-                      ].map((item) => (
-                        <label
-                          key={item.value}
-                          style={{
-                            display: 'block',
-                            padding: '0.85rem 1rem',
-                            borderRadius: '6px',
-                            border: `1.5px solid ${riskTolerance === item.value ? '#2563eb' : '#e2e8f0'}`,
-                            backgroundColor: riskTolerance === item.value ? '#eff6ff' : '#ffffff',
-                            cursor: 'pointer',
-                            transition: 'all 0.15s ease'
-                          }}
-                        >
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
-                            <input
-                              type="radio"
-                              name="risk_tolerance"
-                              value={item.value}
-                              checked={riskTolerance === item.value}
-                              onChange={(e) => {
-                                setRiskTolerance(e.target.value);
-                                setProfileSuccess(false);
-                                setProfileError(null);
-                              }}
-                              style={{ margin: 0 }}
-                            />
-                            <strong style={{ fontSize: '0.9rem', color: riskTolerance === item.value ? '#1d4ed8' : '#0f172a' }}>
-                              {item.label}
-                            </strong>
-                          </div>
-                          <span style={{ fontSize: '0.78rem', color: '#64748b', display: 'block' }}>
-                            {item.desc}
-                          </span>
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Field 3: Investment Horizon */}
-                  <div style={{ marginBottom: '1.75rem' }}>
-                    <label style={{ display: 'block', fontSize: '0.9rem', fontWeight: 600, color: '#0f172a', marginBottom: '0.25rem' }}>
-                      Thời gian đầu tư
-                    </label>
-                    <p style={{ margin: '0 0 0.5rem 0', fontSize: '0.82rem', color: '#64748b' }}>
-                      Khoảng thời gian dự kiến trước khi bạn cần rút hoặc sử dụng vốn đầu tư.
-                    </p>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.75rem' }}>
-                      {[
-                        { value: 'short', label: 'Ngắn hạn', desc: 'Dưới 1 năm' },
-                        { value: 'medium', label: 'Trung hạn', desc: 'Từ 1 đến 3 năm' },
-                        { value: 'long', label: 'Dài hạn', desc: 'Trên 3 năm' }
-                      ].map((item) => (
-                        <label
-                          key={item.value}
-                          style={{
-                            display: 'block',
-                            padding: '0.85rem 1rem',
-                            borderRadius: '6px',
-                            border: `1.5px solid ${investmentHorizon === item.value ? '#2563eb' : '#e2e8f0'}`,
-                            backgroundColor: investmentHorizon === item.value ? '#eff6ff' : '#ffffff',
-                            cursor: 'pointer',
-                            transition: 'all 0.15s ease'
-                          }}
-                        >
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
-                            <input
-                              type="radio"
-                              name="investment_horizon"
-                              value={item.value}
-                              checked={investmentHorizon === item.value}
-                              onChange={(e) => {
-                                setInvestmentHorizon(e.target.value);
-                                setProfileSuccess(false);
-                                setProfileError(null);
-                              }}
-                              style={{ margin: 0 }}
-                            />
-                            <strong style={{ fontSize: '0.9rem', color: investmentHorizon === item.value ? '#1d4ed8' : '#0f172a' }}>
-                              {item.label}
-                            </strong>
-                          </div>
-                          <span style={{ fontSize: '0.78rem', color: '#64748b', display: 'block' }}>
-                            {item.desc}
-                          </span>
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Actions & Meta */}
-                  <div style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    paddingTop: '1rem',
-                    borderTop: '1px solid #f1f5f9'
-                  }}>
-                    <button
-                      type="submit"
-                      disabled={profileSaving}
-                      style={{
-                        padding: '8px 20px',
-                        fontSize: '0.9rem',
-                        fontWeight: 600,
-                        backgroundColor: profileSaving ? '#93c5fd' : '#2563eb',
-                        color: '#ffffff',
-                        border: 'none',
-                        borderRadius: '6px',
-                        cursor: profileSaving ? 'default' : 'pointer',
-                        boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
-                        transition: 'background-color 0.15s ease'
-                      }}
-                    >
-                      {profileSaving ? 'Đang lưu...' : 'Lưu thay đổi'}
-                    </button>
-
-                    {profile && profile.updated_at && (
-                      <span style={{ fontSize: '0.78rem', color: '#94a3b8' }}>
-                        Cập nhật lúc: {formatPublishedTime(profile.updated_at)}
-                      </span>
-                    )}
-                  </div>
-                </form>
-              </div>
-            )}
-
-            {/* SECTION 2: DANH MỤC HIỆN CÓ (HOLDINGS) */}
-            <div style={{ marginTop: '2.5rem', marginBottom: '1rem' }}>
-              <h2 style={{ margin: '0 0 0.25rem 0', fontSize: '1.25rem', fontWeight: 700, color: '#0f172a' }}>
-                Danh mục hiện có
-              </h2>
-              <p style={{ margin: 0, fontSize: '0.85rem', color: '#64748b' }}>
-                Ghi nhận các mã và tài sản bạn đang nắm giữ thực tế
-              </p>
-            </div>
-
-            {/* Holdings Feedback Banners */}
-            {holdingsSuccess && (
-              <div style={{
-                backgroundColor: '#f0fdf4',
-                border: '1px solid #bbf7d0',
-                borderRadius: '6px',
-                padding: '0.75rem 1rem',
-                marginBottom: '1rem',
-                fontSize: '0.88rem',
-                color: '#15803d',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between'
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <span>✓</span>
-                  <span>{holdingsSuccess}</span>
-                </div>
-                <button
-                  onClick={() => setHoldingsSuccess(null)}
-                  style={{ background: 'none', border: 'none', color: '#15803d', cursor: 'pointer', fontSize: '1rem' }}
-                >
-                  ×
-                </button>
-              </div>
-            )}
-
-            {holdingsError && (
-              <div style={{
-                backgroundColor: '#fef2f2',
-                border: '1px solid #fecaca',
-                borderRadius: '6px',
-                padding: '0.75rem 1rem',
-                marginBottom: '1rem',
-                fontSize: '0.88rem',
-                color: '#991b1b',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between'
-              }}>
-                <span>{holdingsError}</span>
-                <button
-                  onClick={() => setHoldingsError(null)}
-                  style={{ background: 'none', border: 'none', color: '#991b1b', cursor: 'pointer', fontSize: '1rem' }}
-                >
-                  ×
-                </button>
-              </div>
-            )}
-
-            {/* Add Holding Form Card */}
-            <div style={{
-              backgroundColor: '#ffffff',
-              border: '1px solid #e2e8f0',
-              borderRadius: '8px',
-              padding: '1.25rem 1.5rem',
-              marginBottom: '1.5rem',
-              boxShadow: '0 1px 2px rgba(0,0,0,0.02)'
-            }}>
-              <h3 style={{ margin: '0 0 0.85rem 0', fontSize: '0.98rem', fontWeight: 600, color: '#0f172a' }}>
-                Thêm tài sản vào danh mục
-              </h3>
-
-              {addHoldingError && (
-                <div style={{
-                  backgroundColor: '#fef2f2',
-                  border: '1px solid #fecaca',
-                  borderRadius: '6px',
-                  padding: '0.6rem 0.85rem',
-                  marginBottom: '1rem',
-                  fontSize: '0.82rem',
-                  color: '#991b1b'
-                }}>
-                  {addHoldingError}
-                </div>
-              )}
-
-              <form onSubmit={handleAddHolding}>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem', marginBottom: '1rem' }}>
-                  {/* Select Asset */}
-                  <div>
-                    <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, color: '#334155', marginBottom: '0.35rem' }}>
-                      Tài sản
-                    </label>
-                    <select
-                      value={selectedAssetId}
-                      onChange={(e) => {
-                        setSelectedAssetId(e.target.value);
-                        setAddHoldingError(null);
-                      }}
-                      required
-                      style={{
-                        width: '100%',
-                        padding: '8px 10px',
-                        fontSize: '0.88rem',
-                        border: '1px solid #cbd5e1',
-                        borderRadius: '6px',
-                        backgroundColor: '#ffffff',
-                        outline: 'none'
-                      }}
-                    >
-                      <option value="">-- Chọn tài sản --</option>
-                      {assets.map((asset) => {
-                        const alreadyHeld = holdings.some((h) => h.asset_id === asset.id);
-                        return (
-                          <option key={asset.id} value={asset.id} disabled={alreadyHeld}>
-                            {asset.symbol} - {asset.name} ({formatAssetType(asset.asset_type)}) {alreadyHeld ? '(Đã có)' : ''}
-                          </option>
-                        );
-                      })}
-                    </select>
-                  </div>
-
-                  {/* Quantity */}
-                  <div>
-                    <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, color: '#334155', marginBottom: '0.35rem' }}>
-                      Số lượng
-                    </label>
-                    <input
-                      type="number"
-                      min="0.0001"
-                      step="any"
-                      placeholder="Ví dụ: 1000"
-                      value={newQuantity}
-                      onChange={(e) => {
-                        setNewQuantity(e.target.value);
-                        setAddHoldingError(null);
-                      }}
-                      required
-                      style={{
-                        width: '100%',
-                        padding: '8px 10px',
-                        fontSize: '0.88rem',
-                        border: '1px solid #cbd5e1',
-                        borderRadius: '6px',
-                        outline: 'none',
-                        boxSizing: 'border-box'
-                      }}
-                    />
-                  </div>
-
-                  {/* Average Purchase Price */}
-                  <div>
-                    <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, color: '#334155', marginBottom: '0.35rem' }}>
-                      Giá mua trung bình (VNĐ)
-                    </label>
-                    <input
-                      type="number"
-                      min="0"
-                      step="100"
-                      placeholder="Ví dụ: 58000"
-                      value={newAverageCost}
-                      onChange={(e) => {
-                        setNewAverageCost(e.target.value);
-                        setAddHoldingError(null);
-                      }}
-                      required
-                      style={{
-                        width: '100%',
-                        padding: '8px 10px',
-                        fontSize: '0.88rem',
-                        border: '1px solid #cbd5e1',
-                        borderRadius: '6px',
-                        outline: 'none',
-                        boxSizing: 'border-box'
-                      }}
-                    />
-                  </div>
-                </div>
-
-                {/* Calculation preview and submit button */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
-                  <div>
-                    {Number(newQuantity) > 0 && Number(newAverageCost) >= 0 && (
-                      <span style={{ fontSize: '0.85rem', color: '#2563eb', fontWeight: 500 }}>
-                        Tổng vốn dự kiến: {(Number(newQuantity) * Number(newAverageCost)).toLocaleString('vi-VN')} ₫
-                      </span>
-                    )}
-                  </div>
-
-                  <button
-                    type="submit"
-                    disabled={addHoldingLoading}
-                    style={{
-                      padding: '8px 18px',
-                      fontSize: '0.85rem',
-                      fontWeight: 600,
-                      backgroundColor: addHoldingLoading ? '#93c5fd' : '#2563eb',
-                      color: '#ffffff',
-                      border: 'none',
-                      borderRadius: '6px',
-                      cursor: addHoldingLoading ? 'default' : 'pointer',
-                      boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
-                      transition: 'all 0.15s ease'
-                    }}
-                  >
-                    {addHoldingLoading ? 'Đang thêm...' : '+ Thêm vào danh mục'}
-                  </button>
-                </div>
-              </form>
-            </div>
-
-            {/* Holdings Table */}
-            <div style={{
-              backgroundColor: '#ffffff',
-              border: '1px solid #e2e8f0',
-              borderRadius: '8px',
-              overflow: 'hidden',
-              boxShadow: '0 1px 2px rgba(0,0,0,0.02)'
-            }}>
-              <div style={{ padding: '0.85rem 1.25rem', borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: '0.9rem', fontWeight: 600, color: '#0f172a' }}>
-                  Danh sách tài sản đang nắm giữ ({holdings.length})
-                </span>
-                <button
-                  onClick={() => fetchHoldings(false)}
-                  disabled={holdingsLoading}
-                  style={{
-                    padding: '4px 10px',
-                    fontSize: '0.78rem',
-                    fontWeight: 500,
-                    backgroundColor: '#ffffff',
-                    color: '#475569',
-                    border: '1px solid #cbd5e1',
-                    borderRadius: '4px',
-                    cursor: holdingsLoading ? 'default' : 'pointer'
-                  }}
-                >
-                  {holdingsLoading ? 'Đang tải...' : 'Làm mới'}
-                </button>
-              </div>
-
-              {editHoldingError && (
-                <div style={{
-                  backgroundColor: '#fef2f2',
-                  borderBottom: '1px solid #fecaca',
-                  padding: '0.6rem 1.25rem',
-                  fontSize: '0.82rem',
-                  color: '#991b1b'
-                }}>
-                  {editHoldingError}
-                </div>
-              )}
-
-              {holdingsLoading && holdings.length === 0 && (
-                <div style={{ padding: '2.5rem', textAlign: 'center', color: '#64748b', fontSize: '0.88rem' }}>
-                  Đang tải danh mục tài sản...
-                </div>
-              )}
-
-              {!holdingsLoading && holdings.length === 0 && (
-                <div style={{ padding: '2.5rem 1.5rem', textAlign: 'center', color: '#64748b' }}>
-                  <p style={{ margin: '0 0 0.5rem 0', fontSize: '0.9rem' }}>Chưa có tài sản nào trong danh mục.</p>
-                  <p style={{ margin: 0, fontSize: '0.82rem', color: '#94a3b8' }}>
-                    Sử dụng biểu mẫu phía trên để ghi nhận các khoản đầu tư bạn đang sở hữu.
-                  </p>
-                </div>
-              )}
-
-              {holdings.length > 0 && (
-                <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.88rem' }}>
-                  <thead>
-                    <tr style={{ backgroundColor: '#f8fafc', borderBottom: '1px solid #e2e8f0', color: '#64748b', fontSize: '0.78rem', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                      <th style={{ padding: '10px 16px', fontWeight: 600 }}>Tài sản</th>
-                      <th style={{ padding: '10px 16px', fontWeight: 600 }}>Số lượng</th>
-                      <th style={{ padding: '10px 16px', fontWeight: 600 }}>Giá mua TB</th>
-                      <th style={{ padding: '10px 16px', fontWeight: 600 }}>Tổng giá trị vốn</th>
-                      <th style={{ padding: '10px 16px', fontWeight: 600, textAlign: 'right' }}>Thao tác</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {holdings.map((h) => {
-                      const isEditing = editingHoldingId === h.id;
-                      const asset = h.asset || {};
-                      const totalCost = Number(h.quantity) * Number(h.average_cost);
-
-                      return (
-                        <tr key={h.id} style={{ borderBottom: '1px solid #f1f5f9', backgroundColor: isEditing ? '#f8fafc' : '#ffffff' }}>
-                          {/* Column 1: Asset symbol & name */}
-                          <td style={{ padding: '12px 16px' }}>
-                            <div style={{ fontWeight: 700, color: '#0f172a', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                              <span>{asset.symbol || 'N/A'}</span>
-                              {asset.asset_type && (
-                                <span style={{
-                                  fontSize: '0.7rem',
-                                  fontWeight: 500,
-                                  padding: '1px 6px',
-                                  borderRadius: '3px',
-                                  backgroundColor: '#f1f5f9',
-                                  color: '#475569'
-                                }}>
-                                  {formatAssetType(asset.asset_type)}
-                                </span>
-                              )}
-                            </div>
-                            <div style={{ fontSize: '0.78rem', color: '#64748b', marginTop: '2px' }}>
-                              {asset.name || 'Tài sản'}
-                            </div>
-                          </td>
-
-                          {/* Column 2: Quantity */}
-                          <td style={{ padding: '12px 16px' }}>
-                            {isEditing ? (
-                              <input
-                                type="number"
-                                min="0.0001"
-                                step="any"
-                                value={editQuantity}
-                                onChange={(e) => setEditQuantity(e.target.value)}
-                                style={{
-                                  width: '100px',
-                                  padding: '4px 8px',
-                                  fontSize: '0.85rem',
-                                  border: '1px solid #2563eb',
-                                  borderRadius: '4px'
-                                }}
-                              />
-                            ) : (
-                              <span style={{ fontWeight: 600, color: '#0f172a' }}>
-                                {Number(h.quantity).toLocaleString('vi-VN')}
-                              </span>
-                            )}
-                          </td>
-
-                          {/* Column 3: Average Cost */}
-                          <td style={{ padding: '12px 16px' }}>
-                            {isEditing ? (
-                              <input
-                                type="number"
-                                min="0"
-                                step="100"
-                                value={editAverageCost}
-                                onChange={(e) => setEditAverageCost(e.target.value)}
-                                style={{
-                                  width: '120px',
-                                  padding: '4px 8px',
-                                  fontSize: '0.85rem',
-                                  border: '1px solid #2563eb',
-                                  borderRadius: '4px'
-                                }}
-                              />
-                            ) : (
-                              <span style={{ color: '#334155' }}>
-                                {Number(h.average_cost).toLocaleString('vi-VN')} ₫
-                              </span>
-                            )}
-                          </td>
-
-                          {/* Column 4: Total Cost Basis */}
-                          <td style={{ padding: '12px 16px' }}>
-                            {isEditing ? (
-                              <span style={{ fontSize: '0.82rem', color: '#2563eb' }}>
-                                {Number(editQuantity) > 0 && Number(editAverageCost) >= 0
-                                  ? `${(Number(editQuantity) * Number(editAverageCost)).toLocaleString('vi-VN')} ₫`
-                                  : '---'}
-                              </span>
-                            ) : (
-                              <span style={{ fontWeight: 600, color: '#0f172a' }}>
-                                {totalCost.toLocaleString('vi-VN')} ₫
-                              </span>
-                            )}
-                          </td>
-
-                          {/* Column 5: Actions */}
-                          <td style={{ padding: '12px 16px', textAlign: 'right' }}>
-                            {isEditing ? (
-                              <div style={{ display: 'inline-flex', gap: '6px' }}>
-                                <button
-                                  onClick={() => handleSaveEditHolding(h.id)}
-                                  disabled={editHoldingLoading}
-                                  style={{
-                                    padding: '4px 10px',
-                                    fontSize: '0.8rem',
-                                    fontWeight: 600,
-                                    backgroundColor: '#2563eb',
-                                    color: '#ffffff',
-                                    border: 'none',
-                                    borderRadius: '4px',
-                                    cursor: 'pointer'
-                                  }}
-                                >
-                                  {editHoldingLoading ? '...' : 'Lưu'}
-                                </button>
-                                <button
-                                  onClick={handleCancelEdit}
-                                  disabled={editHoldingLoading}
-                                  style={{
-                                    padding: '4px 10px',
-                                    fontSize: '0.8rem',
-                                    fontWeight: 500,
-                                    backgroundColor: '#ffffff',
-                                    color: '#64748b',
-                                    border: '1px solid #cbd5e1',
-                                    borderRadius: '4px',
-                                    cursor: 'pointer'
-                                  }}
-                                >
-                                  Hủy
-                                </button>
-                              </div>
-                            ) : (
-                              <div style={{ display: 'inline-flex', gap: '6px' }}>
-                                <button
-                                  onClick={() => handleStartEditHolding(h)}
-                                  style={{
-                                    padding: '4px 10px',
-                                    fontSize: '0.8rem',
-                                    fontWeight: 500,
-                                    backgroundColor: '#ffffff',
-                                    color: '#2563eb',
-                                    border: '1px solid #cbd5e1',
-                                    borderRadius: '4px',
-                                    cursor: 'pointer'
-                                  }}
-                                >
-                                  Chỉnh sửa
-                                </button>
-                                <button
-                                  onClick={() => handleDeleteHolding(h.id, asset.symbol)}
-                                  disabled={deletingHoldingId === h.id}
-                                  style={{
-                                    padding: '4px 10px',
-                                    fontSize: '0.8rem',
-                                    fontWeight: 500,
-                                    backgroundColor: '#ffffff',
-                                    color: '#dc2626',
-                                    border: '1px solid #fecaca',
-                                    borderRadius: '4px',
-                                    cursor: 'pointer'
-                                  }}
-                                >
-                                  {deletingHoldingId === h.id ? '...' : 'Xóa'}
-                                </button>
-                              </div>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              )}
-            </div>
-          </section>
-        )}
-
+        </AnimatePresence>
       </main>
     </div>
   );
