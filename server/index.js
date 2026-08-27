@@ -372,10 +372,14 @@ app.get('/api/market/:symbol/history', async (req, res) => {
     });
   } catch (error) {
     const statusCode = error.status || 500;
-    return res.status(statusCode).json({
+    const response = {
       status: 'error',
       message: error.message || 'Failed to fetch market history'
-    });
+    };
+    if (error.warnings && Array.isArray(error.warnings) && error.warnings.length > 0) {
+      response.warnings = error.warnings;
+    }
+    return res.status(statusCode).json(response);
   }
 });
 

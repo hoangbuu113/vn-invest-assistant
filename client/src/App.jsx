@@ -1451,7 +1451,7 @@ function App() {
                             <div className="metric-label">Thay đổi</div>
                             <div className="metric-value" style={{ fontSize: '1.1rem' }}>
                               {historyData.metrics?.absoluteChange !== null && historyData.metrics?.absoluteChange !== undefined
-                                ? `${historyData.metrics.absoluteChange > 0 ? '+' : ''}${historyData.metrics.absoluteChange.toLocaleString('vi-VN')} ₫`
+                                ? `${historyData.metrics.absoluteChange > 0 ? '+' : ''}${Number(historyData.metrics.absoluteChange).toLocaleString('vi-VN', { maximumFractionDigits: 2 })} ₫`
                                 : 'N/A'}
                             </div>
                           </div>
@@ -1470,7 +1470,7 @@ function App() {
                             <div className="metric-label">% Thay đổi</div>
                             <div className="metric-value" style={{ fontSize: '1.1rem' }}>
                               {historyData.metrics?.percentageChange !== null && historyData.metrics?.percentageChange !== undefined
-                                ? `${historyData.metrics.percentageChange > 0 ? '+' : ''}${historyData.metrics.percentageChange}%`
+                                ? `${historyData.metrics.percentageChange > 0 ? '+' : ''}${Number(historyData.metrics.percentageChange).toFixed(2)}%`
                                 : 'N/A'}
                             </div>
                           </div>
@@ -1480,7 +1480,7 @@ function App() {
                             <div className="metric-label">Cao nhất</div>
                             <div className="metric-value" style={{ fontSize: '1.1rem' }}>
                               {historyData.metrics?.periodHigh !== null && historyData.metrics?.periodHigh !== undefined
-                                ? `${historyData.metrics.periodHigh.toLocaleString('vi-VN')} ₫`
+                                ? `${Number(historyData.metrics.periodHigh).toLocaleString('vi-VN')} ₫`
                                 : 'N/A'}
                             </div>
                           </div>
@@ -1490,7 +1490,7 @@ function App() {
                             <div className="metric-label">Thấp nhất</div>
                             <div className="metric-value" style={{ fontSize: '1.1rem' }}>
                               {historyData.metrics?.periodLow !== null && historyData.metrics?.periodLow !== undefined
-                                ? `${historyData.metrics.periodLow.toLocaleString('vi-VN')} ₫`
+                                ? `${Number(historyData.metrics.periodLow).toLocaleString('vi-VN')} ₫`
                                 : 'N/A'}
                             </div>
                           </div>
