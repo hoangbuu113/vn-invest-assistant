@@ -9,8 +9,9 @@
     "dev": "node --watch index.js"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.112.4",
     "cors": "^2.8.5",
+    "dotenv": "^17.4.2",
     "express": "^4.21.2"
   }
 }
-
