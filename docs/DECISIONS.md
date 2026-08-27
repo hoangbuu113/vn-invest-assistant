@@ -10,6 +10,13 @@ The following architectural and product decisions are confirmed:
   - Bank deposits
   - Bonds
 - **Scope of Execution**: No trade execution and no broker integration; analysis and ranking only.
+- **Investor Profile (Feature 04)**:
+  - **V1 Model**: Exactly ONE singleton investor profile without authentication or multi-user accounts.
+  - **Available Capital**: Stored as `cash_available` (money currently available to deploy into investments).
+  - **Risk Tolerance Values**: `low`, `moderate`, `high`.
+  - **Investment Horizon Values**: `short`, `medium`, `long`.
+  - **Holdings Model**: Stored in `public.holdings` referencing profile and asset (`asset_id`, `quantity` > 0, `average_cost` >= 0) with unique asset-per-profile constraint.
+  - **Localization**: All user-facing UI is in Vietnamese; internal code, API routes, and database identifiers remain in English.
 - **Personalization Factors**: Analysis personalized using:
   - Available capital
   - Risk tolerance

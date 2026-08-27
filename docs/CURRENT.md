@@ -1,7 +1,7 @@
 # Current Project Status
 
 ## LATEST VERIFIED CHECKPOINT
-- **Commit**: `cbba8de`
+- **Commit**: `145479d`
 - **Branch**: `main`
 
 ## CURRENT PHASE
@@ -20,6 +20,12 @@ BUILD
   - Deterministic investment relevance filtering (removes accidents, crime, lifestyle, and non-financial noise)
   - Polished News Feed UI with loading, error, and empty states
   - Manual news refresh control
+- **Feature 04 — Investor Profile**
+  - Core single-user investor profile with real Supabase persistence (`GET`/`PUT /api/profile`)
+  - Profile preferences: available investment cash (`cash_available`), risk tolerance (`risk_tolerance`: `low`/`moderate`/`high`), and horizon (`investment_horizon`: `short`/`medium`/`long`)
+  - Current asset portfolio holdings management with server validation (`GET`/`POST`/`PUT`/`DELETE /api/holdings`)
+  - Vietnamese localized user interface ("Hồ sơ đầu tư" & "Danh mục hiện có") with full CRUD support
 
 ## CURRENT STATE
-Feature 03 is complete and verified.
+Feature 04 is complete and verified.
+
