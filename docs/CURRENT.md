@@ -1,21 +1,22 @@
 # Current Project Status
 
 ## LATEST VERIFIED CHECKPOINT
-- **Commit**: `18b9f11`
+- **Commit**: `231773f`
 - **Branch**: `main`
 
 ## COMPLETED
-- Initial idea & product discovery
 - Project foundation, rules, and governance setup
-- Frontend skeleton: React + Vite (`localhost:5173`)
-- Backend API skeleton: Node.js + Express (`localhost:5000`)
-- Supabase PostgreSQL integration configured and verified
-- `public.assets` master table created with RLS and reproducible schema
-- Idempotent seed dataset applied: `VCB`, `FPT`, `HPG`, `VNM`, `E1VFVN30`
-- End-to-end data flow verified: **Supabase → Express → React**
-- Verified endpoints: `GET /api/health`, `GET /api/db-health`, `GET /api/assets`
-- Frontend UI renders the live assets list with loading and error states
-- Production frontend build verified
+- React + Vite frontend and Node.js + Express backend skeleton
+- Supabase PostgreSQL connection configured and verified
+- `public.assets` master schema created with reproducible SQL and idempotent seed
+- `GET /api/assets` endpoint querying real Supabase database
+- First end-to-end Asset Browser display in React with loading, error, and empty states
 
 ## CURRENT PHASE
-Core Full-Stack Foundation & Data Flow Verified
+BUILD
+
+## CURRENT FEATURE
+Feature 01 — Asset Browser
+
+## CURRENT STATE
+The asset list is displayed from real Supabase data.
