@@ -23,6 +23,8 @@ import PriceAlertModal from './components/PriceAlertModal.jsx';
 import AlertCenterSection from './components/AlertCenterSection.jsx';
 import TransactionModal from './components/TransactionModal.jsx';
 import TransactionHistorySection from './components/TransactionHistorySection.jsx';
+import CashMovementModal from './components/CashMovementModal.jsx';
+import CashManagementSection from './components/CashManagementSection.jsx';
 
 const CATEGORY_STYLES = {
   market: { label: 'Thị trường', bg: '#eff6ff', color: '#1d4ed8', border: '#bfdbfe', accent: '#2563eb' },
@@ -196,7 +198,6 @@ function App() {
   const [profileSuccess, setProfileSuccess] = useState(false);
 
   // Form states
-  const [cashAvailable, setCashAvailable] = useState('');
   const [riskTolerance, setRiskTolerance] = useState('moderate');
   const [investmentHorizon, setInvestmentHorizon] = useState('medium');
 
@@ -267,6 +268,18 @@ function App() {
   const [transactionModalDefaultType, setTransactionModalDefaultType] = useState('BUY');
   const [transactionModalDefaultAsset, setTransactionModalDefaultAsset] = useState(null);
 
+  // Cash / Capital Ledger state (Feature 15)
+  const [cashOverview, setCashOverview] = useState(null);
+  const [cashOverviewLoading, setCashOverviewLoading] = useState(true);
+  const [cashOverviewRefreshing, setCashOverviewRefreshing] = useState(false);
+  const [cashOverviewError, setCashOverviewError] = useState(null);
+  const [cashLedger, setCashLedger] = useState([]);
+  const [cashLedgerLoading, setCashLedgerLoading] = useState(true);
+  const [cashLedgerRefreshing, setCashLedgerRefreshing] = useState(false);
+  const [cashLedgerError, setCashLedgerError] = useState(null);
+  const [isCashModalOpen, setIsCashModalOpen] = useState(false);
+  const [cashModalMode, setCashModalMode] = useState('DEPOSIT'); // 'DEPOSIT' | 'WITHDRAWAL'
+
   // Request controller refs for stale response protection
   const activeMarketReqRef = useRef(null);
   const activeHistoryReqRef = useRef(null);
@@ -323,7 +336,6 @@ function App() {
       .then((json) => {
         if (json.status === 'ok' && json.data) {
           setProfile(json.data);
-          setCashAvailable(json.data.cash_available !== undefined ? String(json.data.cash_available) : '0');
           setRiskTolerance(json.data.risk_tolerance || 'moderate');
           setInvestmentHorizon(json.data.investment_horizon || 'medium');
         } else {
@@ -343,16 +355,9 @@ function App() {
     fetchProfile(true);
   }, [fetchProfile]);
 
-  // Handle saving profile changes
+  // Handle saving profile changes (preferences only; cash is ledger-authoritative)
   const handleSaveProfile = (e) => {
     if (e && e.preventDefault) e.preventDefault();
-
-    const numericCash = Number(cashAvailable);
-    if (cashAvailable === '' || isNaN(numericCash) || !isFinite(numericCash) || numericCash < 0) {
-      setProfileError('Tiền sẵn sàng đầu tư phải là số hợp lệ không âm.');
-      setProfileSuccess(false);
-      return;
-    }
 
     setProfileSaving(true);
     setProfileError(null);
@@ -364,7 +369,6 @@ function App() {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        cash_available: numericCash,
         risk_tolerance: riskTolerance,
         investment_horizon: investmentHorizon
       })
@@ -381,7 +385,6 @@ function App() {
       .then((json) => {
         if (json.status === 'ok' && json.data) {
           setProfile(json.data);
-          setCashAvailable(String(json.data.cash_available));
           setRiskTolerance(json.data.risk_tolerance);
           setInvestmentHorizon(json.data.investment_horizon);
           setProfileSuccess(true);
@@ -785,20 +788,92 @@ function App() {
       });
   }, []);
 
+  // Fetch cash overview (Feature 15)
+  const fetchCashOverview = useCallback((isInitial = false) => {
+    if (isInitial) {
+      setCashOverviewLoading(true);
+    } else {
+      setCashOverviewRefreshing(true);
+    }
+    setCashOverviewError(null);
+
+    fetch('/api/cash/overview')
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
+      .then((json) => {
+        if (json.status === 'ok' && json.data) {
+          setCashOverview(json.data);
+        } else {
+          throw new Error(json.message || 'Không thể tải tổng quan tiền mặt');
+        }
+      })
+      .catch((err) => {
+        setCashOverviewError(err.message || 'Không thể tải dữ liệu tổng quan tiền mặt');
+      })
+      .finally(() => {
+        setCashOverviewLoading(false);
+        setCashOverviewRefreshing(false);
+      });
+  }, []);
+
+  // Fetch cash ledger (Feature 15)
+  const fetchCashLedger = useCallback((isInitial = false) => {
+    if (isInitial) {
+      setCashLedgerLoading(true);
+    } else {
+      setCashLedgerRefreshing(true);
+    }
+    setCashLedgerError(null);
+
+    fetch('/api/cash/ledger')
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
+      .then((json) => {
+        if (json.status === 'ok' && Array.isArray(json.data)) {
+          setCashLedger(json.data);
+        } else {
+          throw new Error(json.message || 'Không thể tải sổ lệnh tiền mặt');
+        }
+      })
+      .catch((err) => {
+        setCashLedgerError(err.message || 'Không thể tải dữ liệu sổ lệnh tiền mặt');
+      })
+      .finally(() => {
+        setCashLedgerLoading(false);
+        setCashLedgerRefreshing(false);
+      });
+  }, []);
+
+  const handleCashMovementSuccess = useCallback(() => {
+    fetchCashOverview(false);
+    fetchCashLedger(false);
+    fetchPortfolio(false);
+    fetchComposition(false);
+    fetchProfile(false);
+  }, [fetchCashOverview, fetchCashLedger, fetchPortfolio, fetchComposition, fetchProfile]);
+
   const handleTransactionRecorded = useCallback(() => {
     fetchHoldings(false);
     fetchPortfolio(false);
     fetchComposition(false);
     fetchTransactions(false);
+    fetchCashOverview(false);
+    fetchCashLedger(false);
     fetchPersonalizedNews(false);
-  }, [fetchHoldings, fetchPortfolio, fetchComposition, fetchTransactions, fetchPersonalizedNews]);
+  }, [fetchHoldings, fetchPortfolio, fetchComposition, fetchTransactions, fetchCashOverview, fetchCashLedger, fetchPersonalizedNews]);
 
-  // Fetch portfolio, composition & transactions on initial mount
+  // Fetch portfolio, composition, transactions & cash on initial mount
   useEffect(() => {
     fetchPortfolio(true);
     fetchComposition(true);
     fetchTransactions(true);
-  }, [fetchPortfolio, fetchComposition, fetchTransactions]);
+    fetchCashOverview(true);
+    fetchCashLedger(true);
+  }, [fetchPortfolio, fetchComposition, fetchTransactions, fetchCashOverview, fetchCashLedger]);
 
   // Periodic 5-minute auto-refresh when on portfolio tab
   useEffect(() => {
@@ -806,13 +881,17 @@ function App() {
     fetchPortfolio(false);
     fetchComposition(false);
     fetchTransactions(false);
+    fetchCashOverview(false);
+    fetchCashLedger(false);
     const intervalId = setInterval(() => {
       fetchPortfolio(false);
       fetchComposition(false);
       fetchTransactions(false);
+      fetchCashOverview(false);
+      fetchCashLedger(false);
     }, 5 * 60 * 1000);
     return () => clearInterval(intervalId);
-  }, [activeTab, fetchPortfolio, fetchComposition, fetchTransactions]);
+  }, [activeTab, fetchPortfolio, fetchComposition, fetchTransactions, fetchCashOverview, fetchCashLedger]);
 
   // Fetch delayed market data for watchlist items (Feature 08)
   const fetchWatchlistMarketData = useCallback((items) => {
@@ -1728,14 +1807,16 @@ function App() {
                     fetchPortfolio(false);
                     fetchComposition(false);
                     fetchTransactions(false);
+                    fetchCashOverview(false);
+                    fetchCashLedger(false);
                   }}
-                  disabled={portfolioRefreshing || compositionRefreshing || transactionsRefreshing || portfolioLoading}
+                  disabled={portfolioRefreshing || compositionRefreshing || transactionsRefreshing || cashOverviewRefreshing || cashLedgerRefreshing || portfolioLoading}
                   className="fintech-btn btn-secondary btn-sm"
                 >
-                  <span className={portfolioRefreshing || compositionRefreshing || transactionsRefreshing ? 'spin-icon' : ''}>
-                    {portfolioRefreshing || compositionRefreshing || transactionsRefreshing ? '⟳' : '↻'}
+                  <span className={portfolioRefreshing || compositionRefreshing || transactionsRefreshing || cashOverviewRefreshing || cashLedgerRefreshing ? 'spin-icon' : ''}>
+                    {portfolioRefreshing || compositionRefreshing || transactionsRefreshing || cashOverviewRefreshing || cashLedgerRefreshing ? '⟳' : '↻'}
                   </span>
-                  <span>{portfolioRefreshing || compositionRefreshing || transactionsRefreshing ? 'Đang làm mới...' : 'Làm mới'}</span>
+                  <span>{portfolioRefreshing || compositionRefreshing || transactionsRefreshing || cashOverviewRefreshing || cashLedgerRefreshing ? 'Đang làm mới...' : 'Làm mới'}</span>
                 </MagneticButton>
               </motion.div>
 
@@ -1784,6 +1865,28 @@ function App() {
               {/* Content when loaded */}
               {!portfolioLoading && portfolioOverview && (
                 <>
+                  {/* Feature 15: Cash Management Section (Overview, Deposit/Withdraw, Cash Ledger) */}
+                  <CashManagementSection
+                    cashOverview={cashOverview}
+                    cashOverviewLoading={cashOverviewLoading}
+                    cashOverviewError={cashOverviewError}
+                    cashLedger={cashLedger}
+                    cashLedgerLoading={cashLedgerLoading}
+                    cashLedgerError={cashLedgerError}
+                    onOpenDeposit={() => {
+                      setCashModalMode('DEPOSIT');
+                      setIsCashModalOpen(true);
+                    }}
+                    onOpenWithdraw={() => {
+                      setCashModalMode('WITHDRAWAL');
+                      setIsCashModalOpen(true);
+                    }}
+                    onRefresh={() => {
+                      fetchCashOverview(false);
+                      fetchCashLedger(false);
+                    }}
+                  />
+
                   {/* Metric Summary Cards with 3D Tilt & Dynamic Radial Sheen */}
                   <motion.div variants={sectionItemVariants} className="metrics-grid">
                     {/* Metric 1: Cash Available */}
@@ -3317,42 +3420,46 @@ function App() {
                 <motion.div variants={sectionItemVariants}>
                   <TiltCard className="fintech-card" style={{ padding: '1.75rem', marginBottom: '2.5rem' }} tiltMax={2.5}>
                     <form onSubmit={handleSaveProfile}>
-                      {/* Field 1: Available Cash */}
+                      {/* Field 1: Read-only Current Cash (Feature 15 Ledger-Authoritative) */}
                       <div style={{ marginBottom: '1.75rem' }}>
-                        <label style={{ display: 'block', fontSize: '0.92rem', fontWeight: 800, color: 'var(--color-slate-900)', marginBottom: '0.25rem' }}>
-                          Tiền sẵn sàng đầu tư
-                        </label>
-                        <p style={{ margin: '0 0 0.65rem 0', fontSize: '0.82rem', color: 'var(--color-slate-500)' }}>
-                          Số tiền bạn hiện có thể sử dụng để đầu tư (tính theo VNĐ).
-                        </p>
-                        <div className="input-suffix-group">
-                          <input
-                            type="number"
-                            min="0"
-                            step="100000"
-                            value={cashAvailable}
-                            onChange={(e) => {
-                              setCashAvailable(e.target.value);
-                              setProfileSuccess(false);
-                              setProfileError(null);
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem', flexWrap: 'wrap', gap: '8px' }}>
+                          <label style={{ fontSize: '0.92rem', fontWeight: 800, color: 'var(--color-slate-900)' }}>
+                            Tiền mặt hiện tại
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setActiveTab('portfolio');
+                              window.scrollTo({ top: 0, behavior: 'smooth' });
                             }}
-                            required
-                            placeholder="Ví dụ: 100000000"
-                            className="fintech-input"
-                          />
-                          <span className="input-suffix-badge">VNĐ</span>
-                        </div>
-
-                        {/* Live Formatted VND Preview */}
-                        {!isNaN(Number(cashAvailable)) && cashAvailable !== '' && Number(cashAvailable) >= 0 && (
-                          <motion.div
-                            initial={{ opacity: 0, y: 4 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            style={{ marginTop: '0.45rem', fontSize: '0.85rem', color: 'var(--color-brand-600)', fontWeight: 700 }}
+                            className="fintech-btn btn-secondary btn-sm"
+                            style={{ padding: '0.25rem 0.65rem', fontSize: '0.78rem', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
                           >
-                            ≈ <CountUp value={Number(cashAvailable)} suffix=" ₫" />
-                          </motion.div>
-                        )}
+                            <span>Quản lý dòng tiền</span>
+                            <span>→</span>
+                          </button>
+                        </div>
+                        <p style={{ margin: '0 0 0.65rem 0', fontSize: '0.82rem', color: 'var(--color-slate-500)' }}>
+                          Tiền mặt được cập nhật tự động từ lịch sử Nạp / Rút / Mua / Bán.
+                        </p>
+                        <div
+                          style={{
+                            padding: '0.85rem 1.1rem',
+                            backgroundColor: 'var(--color-slate-50, #f8fafc)',
+                            border: '1px solid var(--border-default, #cbd5e1)',
+                            borderRadius: '10px',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center'
+                          }}
+                        >
+                          <div style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--color-slate-900)' }}>
+                            <CountUp value={cashOverview?.currentCash ?? profile?.cash_available ?? 0} suffix=" ₫" />
+                          </div>
+                          <span className="fintech-badge badge-neutral" style={{ fontSize: '0.75rem', fontWeight: 700 }}>
+                            Từ sổ dòng tiền
+                          </span>
+                        </div>
                       </div>
 
                       {/* Field 2: Risk Tolerance */}
@@ -3823,6 +3930,15 @@ function App() {
           defaultType={transactionModalDefaultType}
           defaultAsset={transactionModalDefaultAsset}
           onTransactionRecorded={handleTransactionRecorded}
+        />
+
+        {/* Feature 15: Cash Movement Modal Dialog (Deposit / Withdraw) */}
+        <CashMovementModal
+          isOpen={isCashModalOpen}
+          onClose={() => setIsCashModalOpen(false)}
+          mode={cashModalMode}
+          currentCash={cashOverview?.currentCash ?? profile?.cash_available ?? 0}
+          onMovementSuccess={handleCashMovementSuccess}
         />
       </main>
     </div>
