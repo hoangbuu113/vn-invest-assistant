@@ -54,6 +54,24 @@ function createBars({
 
 const DETERMINISTIC_NOW = new Date('2026-08-28T07:00:00.000Z'); // Vietnam date: 2026-08-28
 
+async function resolveYahooVietnamFixture(symbol) {
+  return {
+    asset: {
+      id: `asset-${symbol.toLowerCase()}`,
+      symbol,
+      assetType: symbol === 'E1VFVN30' ? 'etf' : 'stock',
+      quoteCurrency: 'VND',
+      marketPolicy: 'VN_EXCHANGE',
+      marketTimezone: 'Asia/Ho_Chi_Minh',
+      isActive: true
+    },
+    mapping: {
+      provider: 'yahoo',
+      providerSymbol: `${symbol}.VN`
+    }
+  };
+}
+
 describe('Feature 07 — Deterministic Asset Analysis Engine (Core + API + Tests)', () => {
 
   // =========================================================================
@@ -940,7 +958,10 @@ describe('Feature 07 — Deterministic Asset Analysis Engine (Core + API + Tests
         };
       };
 
-      const result = await getAnalysisHistory('FPT', { fetchFn: fakeFetch });
+      const result = await getAnalysisHistory('FPT', {
+        fetchFn: fakeFetch,
+        resolveProviderMappingFn: resolveYahooVietnamFixture
+      });
 
       assert.ok(interceptedUrl.includes('interval=1d'));
       assert.ok(interceptedUrl.includes('range=2y'));
@@ -1063,7 +1084,10 @@ describe('Feature 07 — Deterministic Asset Analysis Engine (Core + API + Tests
 
       let normalizedHistory = null;
       const productionAnalysisHistory = async (symbol) => {
-        normalizedHistory = await getAnalysisHistory(symbol, { fetchFn: fakeFetch });
+        normalizedHistory = await getAnalysisHistory(symbol, {
+          fetchFn: fakeFetch,
+          resolveProviderMappingFn: resolveYahooVietnamFixture
+        });
         return normalizedHistory;
       };
 

@@ -1,10 +1,4 @@
-const SYMBOL_MAP = {
-  FPT: 'FPT.VN',
-  VCB: 'VCB.VN',
-  HPG: 'HPG.VN',
-  VNM: 'VNM.VN',
-  E1VFVN30: 'E1VFVN30.VN'
-};
+import { resolveProviderMapping } from './assets.js';
 
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
@@ -108,7 +102,21 @@ export function normalizeMarketSnapshot(meta, symbol) {
  * Fetches and normalizes a delayed market data snapshot from Yahoo Finance.
  * @param {string} rawSymbol - The internal asset symbol (e.g. 'FPT')
  */
-export async function getMarketSnapshot(rawSymbol) {
+async function resolveYahooContext(symbol, options = {}) {
+  const resolver = options.resolveProviderMappingFn || resolveProviderMapping;
+  return resolver(symbol, 'yahoo', options.providerResolverOptions || {});
+}
+
+function assertVietnamHistoryPolicy(asset) {
+  if (asset.marketPolicy !== 'VN_EXCHANGE') {
+    const err = new Error(`Historical market data policy '${asset.marketPolicy || 'unavailable'}' is unsupported for '${asset.symbol}'`);
+    err.status = 422;
+    err.code = 'UNSUPPORTED_MARKET_POLICY';
+    throw err;
+  }
+}
+
+export async function getMarketSnapshot(rawSymbol, options = {}) {
   if (!rawSymbol || typeof rawSymbol !== 'string') {
     const err = new Error('Invalid symbol parameter');
     err.status = 400;
@@ -116,15 +124,17 @@ export async function getMarketSnapshot(rawSymbol) {
   }
 
   const symbol = rawSymbol.trim().toUpperCase();
-  const yahooSymbol = SYMBOL_MAP[symbol] || (symbol.endsWith('.VN') ? symbol : `${symbol}.VN`);
+  const { mapping } = await resolveYahooContext(symbol, options);
+  const yahooSymbol = mapping.providerSymbol;
 
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooSymbol)}?interval=1m&range=1d`;
+  const fetchFn = options.fetchFn || fetch;
 
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 8000);
 
-    const response = await fetch(url, {
+    const response = await fetchFn(url, {
       signal: controller.signal,
       headers: {
         'User-Agent': USER_AGENT
@@ -348,7 +358,7 @@ export function normalizeHistoricalData(result, symbol, range) {
  * @param {string} rawSymbol - The asset symbol (e.g. 'FPT')
  * @param {string} rawRange - Requested range (defaults to '1M')
  */
-export async function getMarketHistory(rawSymbol, rawRange = '1M') {
+export async function getMarketHistory(rawSymbol, rawRange = '1M', options = {}) {
   if (!rawSymbol || typeof rawSymbol !== 'string') {
     const err = new Error('Invalid symbol parameter');
     err.status = 400;
@@ -365,14 +375,17 @@ export async function getMarketHistory(rawSymbol, rawRange = '1M') {
     throw err;
   }
 
-  const yahooSymbol = SYMBOL_MAP[symbol] || (symbol.endsWith('.VN') ? symbol : `${symbol}.VN`);
+  const { asset, mapping } = await resolveYahooContext(symbol, options);
+  assertVietnamHistoryPolicy(asset);
+  const yahooSymbol = mapping.providerSymbol;
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooSymbol)}?interval=1d&range=${encodeURIComponent(yahooRange)}`;
+  const fetchFn = options.fetchFn || fetch;
 
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 8000);
 
-    const response = await fetch(url, {
+    const response = await fetchFn(url, {
       signal: controller.signal,
       headers: {
         'User-Agent': USER_AGENT
@@ -425,7 +438,9 @@ export async function getAnalysisHistory(rawSymbol, options = {}) {
   }
 
   const symbol = rawSymbol.trim().toUpperCase();
-  const yahooSymbol = SYMBOL_MAP[symbol] || (symbol.endsWith('.VN') ? symbol : `${symbol}.VN`);
+  const { asset, mapping } = await resolveYahooContext(symbol, options);
+  assertVietnamHistoryPolicy(asset);
+  const yahooSymbol = mapping.providerSymbol;
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooSymbol)}?interval=1d&range=2y`;
 
   const fetchFn = options.fetchFn || fetch;

@@ -16,6 +16,7 @@ const SINGLETON_PROFILE_ID = '11111111-1111-4111-8111-111111111111';
 const FOREIGN_PROFILE_ID = '22222222-2222-4222-8222-222222222222';
 const FPT_ASSET_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const VCB_ASSET_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+const BTC_ASSET_ID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 
 function cloneRows(rows) {
   return rows.map(row => ({ ...row }));
@@ -27,8 +28,9 @@ function createFakeTransactionDatabase({
   failAfterTransactionInsert = false
 } = {}) {
   const assets = [
-    { id: FPT_ASSET_ID, symbol: 'FPT', name: 'FPT Corporation', asset_type: 'stock' },
-    { id: VCB_ASSET_ID, symbol: 'VCB', name: 'Vietcombank', asset_type: 'stock' }
+    { id: FPT_ASSET_ID, symbol: 'FPT', name: 'FPT Corporation', asset_type: 'stock', quote_currency: 'VND' },
+    { id: VCB_ASSET_ID, symbol: 'VCB', name: 'Vietcombank', asset_type: 'stock', quote_currency: 'VND' },
+    { id: BTC_ASSET_ID, symbol: 'BTC/USD', name: 'Bitcoin / US Dollar', asset_type: 'crypto', quote_currency: 'USD' }
   ];
 
   const state = {
@@ -99,6 +101,9 @@ function createFakeTransactionDatabase({
       ? assets.find(candidate => candidate.id === assetId)
       : assets.find(candidate => candidate.symbol === symbol);
     if (!asset) return rpcError('PT001', 'asset not found');
+    if (asset.quote_currency !== 'VND') {
+      return rpcError('PT005', 'non-VND asset transactions are unsupported until FX accounting exists');
+    }
 
     const stagedHoldings = cloneRows(state.holdings);
     const stagedTransactions = cloneRows(state.transactions);
@@ -287,6 +292,33 @@ describe('Feature 14 — Transaction Ledger Core + Atomic Production Path', () =
     assert.notEqual(result.holding.averageCost, Math.round(expected * 100) / 100);
   });
 
+  test('C2. fractional quantity 0.001 remains valid on the generic VND transaction path', async () => {
+    const { client } = createFakeTransactionDatabase();
+    const result = await createPortfolioTransaction({
+      symbol: 'FPT', transactionType: 'BUY', quantity: 0.001, price: 1000
+    }, client);
+
+    assert.equal(result.transaction.quantity, 0.001);
+    assert.equal(result.holding.quantity, 0.001);
+  });
+
+  test('C3. non-VND asset is rejected before transaction, holding, or VND cash mutation', async () => {
+    const { client, state } = createFakeTransactionDatabase();
+    const startingCash = state.cashAvailable;
+
+    await assert.rejects(
+      createPortfolioTransaction({
+        symbol: 'BTC/USD', transactionType: 'BUY', quantity: 0.001, price: 60000
+      }, client),
+      error => error.statusCode === 400 && error.code === 'PT005'
+    );
+
+    assert.equal(state.transactions.length, 0);
+    assert.equal(state.holdings.length, 0);
+    assert.equal(state.cashLedger.length, 0);
+    assert.equal(state.cashAvailable, startingCash);
+  });
+
   test('D/E. partial SELL preserves average cost and persists realized gain', async () => {
     const { client, state } = createFakeTransactionDatabase({ holdings: [startingHolding()] });
     const result = await createPortfolioTransaction({
@@ -437,6 +469,20 @@ describe('Feature 14 — Transaction Ledger Core + Atomic Production Path', () =
     assert.match(migration, /ALTER COLUMN average_cost TYPE NUMERIC/);
     assert.doesNotMatch(migration, /INSERT INTO public\.portfolio_transactions[\s\S]*INSERT INTO public\.portfolio_transactions/);
     assert.doesNotMatch(productionModule, /\.from\(['"](?:holdings|portfolio_transactions)['"]\)/);
+  });
+
+  test('Feature 16 migration enforces the VND-only transaction guard before ledger insertion', () => {
+    const migrationPath = fileURLToPath(new URL(
+      '../../supabase/migrations/20260828210000_canonical_multi_asset_foundation.sql',
+      import.meta.url
+    ));
+    const migration = readFileSync(migrationPath, 'utf8');
+
+    assert.match(migration, /CREATE OR REPLACE FUNCTION public\.enforce_vnd_portfolio_transaction_asset/);
+    assert.match(migration, /v_quote_currency IS DISTINCT FROM 'VND'/);
+    assert.match(migration, /ERRCODE = 'PT005'/);
+    assert.match(migration, /BEFORE INSERT ON public\.portfolio_transactions/);
+    assert.doesNotMatch(migration, /INSERT INTO public\.(?:cash_ledger_entries|portfolio_transactions|holdings)/);
   });
 });
 

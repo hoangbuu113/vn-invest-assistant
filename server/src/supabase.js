@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import dotenv from 'dotenv';
 import { evaluateAlertsBatch } from './alerts.js';
 import { getMarketSnapshot } from './market.js';
+import { normalizeAsset, normalizeProviderMapping } from './assets.js';
 
 dotenv.config();
 
@@ -24,6 +25,22 @@ export const isSupabaseConfigured = Boolean(
 export const supabase = isSupabaseConfigured
   ? createClient(supabaseUrl, supabaseKey)
   : null;
+
+const ASSET_SELECT_FIELDS = [
+  'id',
+  'symbol',
+  'name',
+  'asset_type',
+  'exchange',
+  'market_code',
+  'quote_currency',
+  'base_currency',
+  'market_policy',
+  'market_timezone',
+  'quantity_unit',
+  'is_active',
+  'created_at'
+].join(', ');
 
 /**
  * Verifies actual communication with Supabase.
@@ -88,14 +105,14 @@ export async function getAssets(client = supabase) {
 
   const { data, error } = await db
     .from('assets')
-    .select('id, symbol, name, asset_type, exchange, created_at')
+    .select(ASSET_SELECT_FIELDS)
     .order('symbol', { ascending: true });
 
   if (error) {
     throw new Error(`Database query error: ${error.message} (code: ${error.code || 'UNKNOWN'})`);
   }
 
-  return data || [];
+  return (data || []).map(normalizeAsset);
 }
 
 /**
@@ -115,7 +132,7 @@ export async function getAssetBySymbol(symbol, client = supabase) {
 
   const { data, error } = await db
     .from('assets')
-    .select('id, symbol, name, asset_type, exchange, created_at')
+    .select(ASSET_SELECT_FIELDS)
     .eq('symbol', normalizedSymbol)
     .maybeSingle();
 
@@ -123,7 +140,38 @@ export async function getAssetBySymbol(symbol, client = supabase) {
     throw new Error(`Database query error: ${error.message} (code: ${error.code || 'UNKNOWN'})`);
   }
 
-  return data;
+  return data ? normalizeAsset(data) : null;
+}
+
+/**
+ * Fetches one explicit provider identity for a canonical asset.
+ * No provider symbol is inferred when a mapping is absent.
+ */
+export async function getAssetProviderMapping(assetId, provider, client = supabase) {
+  const db = client || supabase;
+  if (!db) {
+    throw new Error('Supabase credentials are not configured. Please set SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY in server/.env');
+  }
+
+  if (
+    typeof assetId !== 'string' || !assetId.trim() ||
+    typeof provider !== 'string' || !provider.trim()
+  ) {
+    return null;
+  }
+
+  const { data, error } = await db
+    .from('asset_provider_mappings')
+    .select('id, asset_id, provider, provider_symbol, provider_market, created_at')
+    .eq('asset_id', assetId.trim())
+    .eq('provider', provider.trim().toLowerCase())
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Database query error: ${error.message} (code: ${error.code || 'UNKNOWN'})`);
+  }
+
+  return data ? normalizeProviderMapping(data) : null;
 }
 
 /**

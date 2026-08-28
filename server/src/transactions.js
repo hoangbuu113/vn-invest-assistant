@@ -107,7 +107,7 @@ function normalizeHoldingState(row) {
 function transactionDatabaseError(error, fallbackMessage) {
   const err = new Error(error?.message || fallbackMessage);
   err.code = error?.code;
-  if (['PT001', 'PT002', 'PT003', 'PT004', 'CL001'].includes(error?.code)) {
+  if (['PT001', 'PT002', 'PT003', 'PT004', 'PT005', 'CL001'].includes(error?.code)) {
     err.statusCode = 400;
   }
   return err;
