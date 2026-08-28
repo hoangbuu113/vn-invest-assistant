@@ -21,6 +21,8 @@ import { PortfolioCompositionSection } from './components/PortfolioCompositionSe
 import { AssetComparisonSection } from './components/AssetComparisonSection.jsx';
 import PriceAlertModal from './components/PriceAlertModal.jsx';
 import AlertCenterSection from './components/AlertCenterSection.jsx';
+import TransactionModal from './components/TransactionModal.jsx';
+import TransactionHistorySection from './components/TransactionHistorySection.jsx';
 
 const CATEGORY_STYLES = {
   market: { label: 'Thị trường', bg: '#eff6ff', color: '#1d4ed8', border: '#bfdbfe', accent: '#2563eb' },
@@ -255,6 +257,15 @@ function App() {
   const [isViewingAlerts, setIsViewingAlerts] = useState(false);
   const [isAlertModalOpen, setIsAlertModalOpen] = useState(false);
   const [alertTargetAsset, setAlertTargetAsset] = useState(null);
+
+  // Transaction Ledger state (Feature 14)
+  const [transactions, setTransactions] = useState([]);
+  const [transactionsLoading, setTransactionsLoading] = useState(true);
+  const [transactionsRefreshing, setTransactionsRefreshing] = useState(false);
+  const [transactionsError, setTransactionsError] = useState(null);
+  const [isTransactionModalOpen, setIsTransactionModalOpen] = useState(false);
+  const [transactionModalDefaultType, setTransactionModalDefaultType] = useState('BUY');
+  const [transactionModalDefaultAsset, setTransactionModalDefaultAsset] = useState(null);
 
   // Request controller refs for stale response protection
   const activeMarketReqRef = useRef(null);
@@ -744,23 +755,64 @@ function App() {
       });
   }, []);
 
-  // Fetch portfolio & composition on initial mount
+  // Fetch portfolio transactions (Feature 14)
+  const fetchTransactions = useCallback((isInitial = false) => {
+    if (isInitial) {
+      setTransactionsLoading(true);
+    } else {
+      setTransactionsRefreshing(true);
+    }
+    setTransactionsError(null);
+
+    fetch('/api/transactions')
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
+      .then((json) => {
+        if (json.status === 'ok' && Array.isArray(json.data)) {
+          setTransactions(json.data);
+        } else {
+          throw new Error(json.message || 'Không thể tải lịch sử giao dịch');
+        }
+      })
+      .catch((err) => {
+        setTransactionsError(err.message || 'Không thể tải dữ liệu lịch sử giao dịch');
+      })
+      .finally(() => {
+        setTransactionsLoading(false);
+        setTransactionsRefreshing(false);
+      });
+  }, []);
+
+  const handleTransactionRecorded = useCallback(() => {
+    fetchHoldings(false);
+    fetchPortfolio(false);
+    fetchComposition(false);
+    fetchTransactions(false);
+    fetchPersonalizedNews(false);
+  }, [fetchHoldings, fetchPortfolio, fetchComposition, fetchTransactions, fetchPersonalizedNews]);
+
+  // Fetch portfolio, composition & transactions on initial mount
   useEffect(() => {
     fetchPortfolio(true);
     fetchComposition(true);
-  }, [fetchPortfolio, fetchComposition]);
+    fetchTransactions(true);
+  }, [fetchPortfolio, fetchComposition, fetchTransactions]);
 
   // Periodic 5-minute auto-refresh when on portfolio tab
   useEffect(() => {
     if (activeTab !== 'portfolio') return;
     fetchPortfolio(false);
     fetchComposition(false);
+    fetchTransactions(false);
     const intervalId = setInterval(() => {
       fetchPortfolio(false);
       fetchComposition(false);
+      fetchTransactions(false);
     }, 5 * 60 * 1000);
     return () => clearInterval(intervalId);
-  }, [activeTab, fetchPortfolio, fetchComposition]);
+  }, [activeTab, fetchPortfolio, fetchComposition, fetchTransactions]);
 
   // Fetch delayed market data for watchlist items (Feature 08)
   const fetchWatchlistMarketData = useCallback((items) => {
@@ -1675,14 +1727,15 @@ function App() {
                   onClick={() => {
                     fetchPortfolio(false);
                     fetchComposition(false);
+                    fetchTransactions(false);
                   }}
-                  disabled={portfolioRefreshing || compositionRefreshing || portfolioLoading}
+                  disabled={portfolioRefreshing || compositionRefreshing || transactionsRefreshing || portfolioLoading}
                   className="fintech-btn btn-secondary btn-sm"
                 >
-                  <span className={portfolioRefreshing || compositionRefreshing ? 'spin-icon' : ''}>
-                    {portfolioRefreshing || compositionRefreshing ? '⟳' : '↻'}
+                  <span className={portfolioRefreshing || compositionRefreshing || transactionsRefreshing ? 'spin-icon' : ''}>
+                    {portfolioRefreshing || compositionRefreshing || transactionsRefreshing ? '⟳' : '↻'}
                   </span>
-                  <span>{portfolioRefreshing || compositionRefreshing ? 'Đang làm mới...' : 'Làm mới'}</span>
+                  <span>{portfolioRefreshing || compositionRefreshing || transactionsRefreshing ? 'Đang làm mới...' : 'Làm mới'}</span>
                 </MagneticButton>
               </motion.div>
 
@@ -1977,6 +2030,61 @@ function App() {
                       </div>
                     )}
                   </motion.div>
+
+                  {/* Action Bar: Ghi nhận giao dịch */}
+                  <motion.div
+                    variants={sectionItemVariants}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      backgroundColor: 'var(--color-surface, #ffffff)',
+                      border: '1px solid var(--border-default, #cbd5e1)',
+                      borderRadius: '14px',
+                      padding: '0.85rem 1.25rem',
+                      marginTop: '1.25rem',
+                      boxShadow: 'var(--shadow-sm)',
+                      flexWrap: 'wrap',
+                      gap: '10px'
+                    }}
+                  >
+                    <div>
+                      <div style={{ fontWeight: 800, color: 'var(--color-slate-900)', fontSize: '0.95rem' }}>
+                        Ghi nhận giao dịch
+                      </div>
+                      <div style={{ fontSize: '0.8rem', color: 'var(--color-slate-500)', marginTop: '2px' }}>
+                        Ghi lại giao dịch mua hoặc bán để cập nhật danh mục.
+                      </div>
+                    </div>
+                    <MagneticButton
+                      onClick={() => {
+                        setTransactionModalDefaultType('BUY');
+                        setTransactionModalDefaultAsset(null);
+                        setIsTransactionModalOpen(true);
+                      }}
+                      className="fintech-btn btn-primary btn-sm"
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                    >
+                      <span>+</span>
+                      <span>Ghi nhận giao dịch</span>
+                    </MagneticButton>
+                  </motion.div>
+
+                  {/* Feature 14: Lịch sử giao dịch (Transaction History) */}
+                  <TransactionHistorySection
+                    transactions={transactions}
+                    loading={transactionsLoading}
+                    refreshing={transactionsRefreshing}
+                    error={transactionsError}
+                    holdingsCount={portfolioOverview.holdings.length}
+                    onOpenTransactionModal={() => {
+                      setTransactionModalDefaultType('BUY');
+                      setTransactionModalDefaultAsset(null);
+                      setIsTransactionModalOpen(true);
+                    }}
+                    onRetry={() => fetchTransactions(true)}
+                    onRefresh={() => fetchTransactions(false)}
+                  />
 
                   {/* Feature 10: Cơ cấu danh mục (Portfolio Composition & Concentration) */}
                   <PortfolioCompositionSection
@@ -3701,6 +3809,20 @@ function App() {
           onAlertCreated={() => {
             // Callback when alert is created
           }}
+        />
+
+        {/* Feature 14: Transaction Entry Modal Dialog */}
+        <TransactionModal
+          isOpen={isTransactionModalOpen}
+          onClose={() => {
+            setIsTransactionModalOpen(false);
+            setTransactionModalDefaultAsset(null);
+          }}
+          assets={assets}
+          holdings={portfolioOverview?.holdings || holdings}
+          defaultType={transactionModalDefaultType}
+          defaultAsset={transactionModalDefaultAsset}
+          onTransactionRecorded={handleTransactionRecorded}
         />
       </main>
     </div>
