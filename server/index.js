@@ -13,7 +13,12 @@ import {
   deleteHolding,
   getWatchlist,
   addToWatchlist,
-  removeFromWatchlist
+  removeFromWatchlist,
+  getAlerts,
+  createAlert,
+  deleteAlert,
+  reactivateAlert,
+  evaluateAndPersistAlerts
 } from './src/supabase.js';
 import { getMarketSnapshot, getMarketHistory, getAnalysisHistory } from './src/market.js';
 import { getNewsFeed } from './src/news.js';
@@ -55,7 +60,12 @@ export function createApp(services = {}) {
     getAssetAnalysisFn = getAssetAnalysis,
     getWatchlistFn = getWatchlist,
     addToWatchlistFn = addToWatchlist,
-    removeFromWatchlistFn = removeFromWatchlist
+    removeFromWatchlistFn = removeFromWatchlist,
+    getAlertsFn = getAlerts,
+    createAlertFn = createAlert,
+    deleteAlertFn = deleteAlert,
+    reactivateAlertFn = reactivateAlert,
+    evaluateAndPersistAlertsFn = evaluateAndPersistAlerts
   } = services;
 
   const app = express();
@@ -531,6 +541,143 @@ export function createApp(services = {}) {
       return res.status(statusCode).json({
         status: 'error',
         message: error.message || 'Failed to remove from watchlist',
+        details: error.message
+      });
+    }
+  });
+
+  // Price Alerts endpoints (Feature 12)
+  app.get('/api/alerts', async (req, res) => {
+    try {
+      const alerts = await getAlertsFn();
+      return res.json({
+        status: 'ok',
+        count: alerts.length,
+        data: alerts
+      });
+    } catch (error) {
+      return res.status(500).json({
+        status: 'error',
+        message: 'Failed to fetch price alerts',
+        details: error.message
+      });
+    }
+  });
+
+  app.post('/api/alerts', async (req, res) => {
+    try {
+      const { asset_id, symbol, direction, target_price } = req.body || {};
+      const errors = [];
+
+      if (
+        (!asset_id || typeof asset_id !== 'string' || asset_id.trim() === '') &&
+        (!symbol || typeof symbol !== 'string' || symbol.trim() === '')
+      ) {
+        errors.push('Either asset_id or symbol is required and must be a non-empty string');
+      }
+
+      if (typeof direction !== 'string' || !['above', 'below'].includes(direction.trim().toLowerCase())) {
+        errors.push("direction must be 'above' or 'below'");
+      }
+
+      if (!isValidFinancialNumber(target_price, { allowZero: false })) {
+        errors.push('target_price must be a positive finite number');
+      }
+
+      if (errors.length > 0) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'Invalid price alert payload',
+          errors
+        });
+      }
+
+      const alert = await createAlertFn({
+        asset_id: typeof asset_id === 'string' ? asset_id.trim() : undefined,
+        symbol: typeof symbol === 'string' ? symbol.trim() : undefined,
+        direction: direction.trim().toLowerCase(),
+        target_price
+      });
+
+      return res.status(201).json({
+        status: 'ok',
+        data: alert
+      });
+    } catch (error) {
+      const statusCode = error.statusCode || 500;
+      return res.status(statusCode).json({
+        status: 'error',
+        message: error.message || 'Failed to create price alert',
+        details: error.message
+      });
+    }
+  });
+
+  app.delete('/api/alerts/:id', async (req, res) => {
+    const { id } = req.params;
+    try {
+      if (!id || typeof id !== 'string' || id.trim() === '') {
+        return res.status(400).json({
+          status: 'error',
+          message: 'Valid alert ID is required'
+        });
+      }
+
+      const result = await deleteAlertFn(id.trim());
+      return res.json({
+        status: 'ok',
+        message: 'Price alert deleted',
+        data: result
+      });
+    } catch (error) {
+      const statusCode = error.statusCode || 500;
+      return res.status(statusCode).json({
+        status: 'error',
+        message: error.message || 'Failed to delete price alert',
+        details: error.message
+      });
+    }
+  });
+
+  app.post('/api/alerts/evaluate', async (req, res) => {
+    try {
+      const summary = await evaluateAndPersistAlertsFn({
+        getMarketSnapshotFn
+      });
+      return res.json({
+        status: 'ok',
+        data: summary
+      });
+    } catch (error) {
+      return res.status(500).json({
+        status: 'error',
+        message: 'Failed to evaluate price alerts',
+        details: error.message
+      });
+    }
+  });
+
+  app.post('/api/alerts/:id/reactivate', async (req, res) => {
+    const { id } = req.params;
+    try {
+      if (!id || typeof id !== 'string' || id.trim() === '') {
+        return res.status(400).json({
+          status: 'error',
+          message: 'Valid alert ID is required'
+        });
+      }
+
+      const alert = await reactivateAlertFn(id.trim());
+      return res.json({
+        status: 'ok',
+        message: 'Price alert reactivated',
+        data: alert
+      });
+    } catch (error) {
+      const statusCode = error.statusCode || 500;
+      return res.status(statusCode).json({
+        status: 'error',
+        message: error.message || 'Failed to reactivate price alert',
         details: error.message
       });
     }

@@ -158,3 +158,59 @@ CREATE POLICY "Allow public delete access to watchlist_items"
     ON public.watchlist_items
     FOR DELETE
     USING (true);
+
+-- ==========================================================
+-- Schema Migration: 005_create_price_alerts_table.sql (Feature 12)
+-- Purpose: User persistent price alert conditions table
+-- ==========================================================
+
+CREATE TABLE IF NOT EXISTS public.price_alerts (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    profile_id UUID NOT NULL REFERENCES public.investor_profile(id) ON DELETE CASCADE,
+    asset_id UUID NOT NULL REFERENCES public.assets(id) ON DELETE CASCADE,
+    direction VARCHAR(10) NOT NULL CHECK (direction IN ('above', 'below')),
+    target_price NUMERIC(15, 2) NOT NULL CHECK (target_price > 0),
+    status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'triggered')),
+    last_evaluated_price NUMERIC(15, 2) DEFAULT NULL,
+    last_evaluated_at TIMESTAMPTZ DEFAULT NULL,
+    triggered_at TIMESTAMPTZ DEFAULT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_price_alerts_identity UNIQUE (profile_id, asset_id, direction, target_price)
+);
+
+-- Index for fast lookups by profile_id, asset_id, and status
+CREATE INDEX IF NOT EXISTS idx_price_alerts_profile_id ON public.price_alerts (profile_id);
+CREATE INDEX IF NOT EXISTS idx_price_alerts_asset_id ON public.price_alerts (asset_id);
+CREATE INDEX IF NOT EXISTS idx_price_alerts_status ON public.price_alerts (status);
+
+-- Enable Row Level Security (RLS)
+ALTER TABLE public.price_alerts ENABLE ROW LEVEL SECURITY;
+
+-- Allow public read access to price_alerts table
+DROP POLICY IF EXISTS "Allow public read access to price_alerts" ON public.price_alerts;
+CREATE POLICY "Allow public read access to price_alerts"
+    ON public.price_alerts
+    FOR SELECT
+    USING (true);
+
+-- Allow public insert access to price_alerts table
+DROP POLICY IF EXISTS "Allow public insert access to price_alerts" ON public.price_alerts;
+CREATE POLICY "Allow public insert access to price_alerts"
+    ON public.price_alerts
+    FOR INSERT
+    WITH CHECK (true);
+
+-- Allow public update access to price_alerts table
+DROP POLICY IF EXISTS "Allow public update access to price_alerts" ON public.price_alerts;
+CREATE POLICY "Allow public update access to price_alerts"
+    ON public.price_alerts
+    FOR UPDATE
+    USING (true)
+    WITH CHECK (true);
+
+-- Allow public delete access to price_alerts table
+DROP POLICY IF EXISTS "Allow public delete access to price_alerts" ON public.price_alerts;
+CREATE POLICY "Allow public delete access to price_alerts"
+    ON public.price_alerts
+    FOR DELETE
+    USING (true);

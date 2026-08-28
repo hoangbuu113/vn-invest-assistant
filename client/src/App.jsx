@@ -19,6 +19,8 @@ import { PriceHistoryChart } from './components/PriceHistoryChart.jsx';
 import { AssetAnalysisSection } from './components/AssetAnalysisSection.jsx';
 import { PortfolioCompositionSection } from './components/PortfolioCompositionSection.jsx';
 import { AssetComparisonSection } from './components/AssetComparisonSection.jsx';
+import PriceAlertModal from './components/PriceAlertModal.jsx';
+import AlertCenterSection from './components/AlertCenterSection.jsx';
 
 const CATEGORY_STYLES = {
   market: { label: 'Thị trường', bg: '#eff6ff', color: '#1d4ed8', border: '#bfdbfe', accent: '#2563eb' },
@@ -248,6 +250,11 @@ function App() {
   // Asset Comparison state (Feature 11)
   const [isComparingAssets, setIsComparingAssets] = useState(false);
   const [comparePresetSymbols, setComparePresetSymbols] = useState(['FPT', 'VCB']);
+
+  // Price Alerts state (Feature 12)
+  const [isViewingAlerts, setIsViewingAlerts] = useState(false);
+  const [isAlertModalOpen, setIsAlertModalOpen] = useState(false);
+  const [alertTargetAsset, setAlertTargetAsset] = useState(null);
 
   // Request controller refs for stale response protection
   const activeMarketReqRef = useRef(null);
@@ -1142,7 +1149,11 @@ function App() {
           <AnimatedNavTabs
             tabs={NAV_TABS}
             activeTab={activeTab}
-            onChange={(tabId) => setActiveTab(tabId)}
+            onChange={(tabId) => {
+              setIsViewingAlerts(false);
+              setIsComparingAssets(false);
+              setActiveTab(tabId);
+            }}
           />
         </div>
       </header>
@@ -1958,15 +1969,30 @@ function App() {
                   </div>
                 </div>
 
-                {/* Refresh Button */}
-                <MagneticButton
-                  onClick={() => fetchWatchlist(false)}
-                  disabled={watchlistRefreshing || watchlistLoading}
-                  className="fintech-btn btn-secondary btn-sm"
-                >
-                  <span className={watchlistRefreshing ? 'spin-icon' : ''}>{watchlistRefreshing ? '⟳' : '↻'}</span>
-                  <span>{watchlistRefreshing ? 'Đang làm mới...' : 'Làm mới'}</span>
-                </MagneticButton>
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                  {/* Feature 12: Price Alerts Entry */}
+                  <MagneticButton
+                    onClick={() => {
+                      setActiveTab('assets');
+                      setIsViewingAlerts(true);
+                    }}
+                    className="fintech-btn btn-secondary btn-sm"
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                  >
+                    <span>🔔</span>
+                    <span>Cảnh báo giá</span>
+                  </MagneticButton>
+
+                  {/* Refresh Button */}
+                  <MagneticButton
+                    onClick={() => fetchWatchlist(false)}
+                    disabled={watchlistRefreshing || watchlistLoading}
+                    className="fintech-btn btn-secondary btn-sm"
+                  >
+                    <span className={watchlistRefreshing ? 'spin-icon' : ''}>{watchlistRefreshing ? '⟳' : '↻'}</span>
+                    <span>{watchlistRefreshing ? 'Đang làm mới...' : 'Làm mới'}</span>
+                  </MagneticButton>
+                </div>
               </motion.div>
 
               {/* Loading State */}
@@ -2113,7 +2139,24 @@ function App() {
 
                               {/* 7. Quick Actions */}
                               <td style={{ textAlign: 'right' }}>
-                                <div style={{ display: 'inline-flex', gap: '6px' }}>
+                                <div style={{ display: 'inline-flex', gap: '6px', alignItems: 'center' }}>
+                                  <MagneticButton
+                                    onClick={() => {
+                                      setAlertTargetAsset({
+                                        id: item.asset_id || item.id,
+                                        symbol: sym,
+                                        name: asset.name || sym,
+                                        exchange: asset.exchange,
+                                        asset_type: asset.asset_type
+                                      });
+                                      setIsAlertModalOpen(true);
+                                    }}
+                                    className="fintech-btn btn-secondary btn-sm"
+                                    title="Đặt cảnh báo giá"
+                                    style={{ padding: '0.35rem 0.6rem' }}
+                                  >
+                                    🔔
+                                  </MagneticButton>
                                   <MagneticButton
                                     onClick={() => handleSelectAsset(sym)}
                                     className="fintech-btn btn-secondary btn-sm"
@@ -2308,7 +2351,16 @@ function App() {
               animate="animate"
               exit="exit"
             >
-              {isComparingAssets ? (
+              {isViewingAlerts ? (
+                /* Feature 12: Price Alerts View */
+                <AlertCenterSection
+                  onSelectAsset={(sym) => {
+                    setIsViewingAlerts(false);
+                    handleSelectAsset(sym);
+                  }}
+                  onBackToAssets={() => setIsViewingAlerts(false)}
+                />
+              ) : isComparingAssets ? (
                 /* Feature 11: Asset Comparison View */
                 <AssetComparisonSection
                   availableAssets={assets}
@@ -2355,35 +2407,50 @@ function App() {
                           </span>
                         </div>
 
-                        {/* Feature 08: Compact Watchlist Action Button */}
-                        {(() => {
-                          const isFollowed = watchlist.some(
-                            (w) => w.asset?.symbol === assetDetail.symbol || w.asset_id === assetDetail.id
-                          );
-                          const isLoadingThis =
-                            watchlistActionLoading === assetDetail.symbol ||
-                            watchlistActionLoading === assetDetail.id;
+                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                          {/* Feature 08: Compact Watchlist Action Button */}
+                          {(() => {
+                            const isFollowed = watchlist.some(
+                              (w) => w.asset?.symbol === assetDetail.symbol || w.asset_id === assetDetail.id
+                            );
+                            const isLoadingThis =
+                              watchlistActionLoading === assetDetail.symbol ||
+                              watchlistActionLoading === assetDetail.id;
 
-                          return (
-                            <MagneticButton
-                              onClick={() => handleToggleWatchlist(assetDetail.id, assetDetail.symbol)}
-                              disabled={isLoadingThis}
-                              className={`fintech-btn btn-sm ${isFollowed ? 'btn-watchlist-active' : 'btn-secondary'}`}
-                              style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
-                            >
-                              {isLoadingThis ? (
-                                <span className="spin-icon">⟳</span>
-                              ) : isFollowed ? (
-                                <span>✓</span>
-                              ) : (
-                                <span>＋</span>
-                              )}
-                              <span>
-                                {isLoadingThis ? 'Đang cập nhật...' : isFollowed ? 'Đang theo dõi' : 'Theo dõi'}
-                              </span>
-                            </MagneticButton>
-                          );
-                        })()}
+                            return (
+                              <MagneticButton
+                                onClick={() => handleToggleWatchlist(assetDetail.id, assetDetail.symbol)}
+                                disabled={isLoadingThis}
+                                className={`fintech-btn btn-sm ${isFollowed ? 'btn-watchlist-active' : 'btn-secondary'}`}
+                                style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                              >
+                                {isLoadingThis ? (
+                                  <span className="spin-icon">⟳</span>
+                                ) : isFollowed ? (
+                                  <span>✓</span>
+                                ) : (
+                                  <span>＋</span>
+                                )}
+                                <span>
+                                  {isLoadingThis ? 'Đang cập nhật...' : isFollowed ? 'Đang theo dõi' : 'Theo dõi'}
+                                </span>
+                              </MagneticButton>
+                            );
+                          })()}
+
+                          {/* Feature 12: Compact Price Alert Action Button */}
+                          <MagneticButton
+                            onClick={() => {
+                              setAlertTargetAsset(assetDetail);
+                              setIsAlertModalOpen(true);
+                            }}
+                            className="fintech-btn btn-secondary btn-sm"
+                            style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                          >
+                            <span>🔔</span>
+                            <span>Đặt cảnh báo</span>
+                          </MagneticButton>
+                        </div>
                       </div>
                       <p style={{ margin: '0 0 1rem 0', fontSize: '0.95rem', color: 'var(--color-slate-600)', fontWeight: 600 }}>
                         {assetDetail.name}
@@ -2661,18 +2728,32 @@ function App() {
                       </p>
                     </div>
 
-                    {/* Feature 11: Secondary Action */}
-                    <MagneticButton
-                      onClick={() => {
-                        setComparePresetSymbols(['FPT', 'VCB']);
-                        setIsComparingAssets(true);
-                      }}
-                      className="fintech-btn btn-secondary btn-sm"
-                      style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
-                    >
-                      <span>⚖️</span>
-                      <span>So sánh tài sản</span>
-                    </MagneticButton>
+                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                      {/* Feature 12: Price Alerts Entry */}
+                      <MagneticButton
+                        onClick={() => {
+                          setIsViewingAlerts(true);
+                        }}
+                        className="fintech-btn btn-secondary btn-sm"
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                      >
+                        <span>🔔</span>
+                        <span>Cảnh báo giá</span>
+                      </MagneticButton>
+
+                      {/* Feature 11: Secondary Action */}
+                      <MagneticButton
+                        onClick={() => {
+                          setComparePresetSymbols(['FPT', 'VCB']);
+                          setIsComparingAssets(true);
+                        }}
+                        className="fintech-btn btn-secondary btn-sm"
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                      >
+                        <span>⚖️</span>
+                        <span>So sánh tài sản</span>
+                      </MagneticButton>
+                    </div>
                   </motion.div>
 
                   {loading && (
@@ -3315,6 +3396,26 @@ function App() {
           )}
 
         </AnimatePresence>
+
+        {/* Feature 12: Price Alert Modal Dialog */}
+        <PriceAlertModal
+          isOpen={isAlertModalOpen}
+          onClose={() => {
+            setIsAlertModalOpen(false);
+            setAlertTargetAsset(null);
+          }}
+          asset={alertTargetAsset}
+          currentPrice={
+            alertTargetAsset?.symbol === selectedSymbol && marketData?.price
+              ? marketData.price
+              : alertTargetAsset?.symbol && watchlistMarketData[alertTargetAsset.symbol]?.price
+              ? watchlistMarketData[alertTargetAsset.symbol].price
+              : null
+          }
+          onAlertCreated={() => {
+            // Callback when alert is created
+          }}
+        />
       </main>
     </div>
   );

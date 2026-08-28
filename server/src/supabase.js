@@ -1,5 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import dotenv from 'dotenv';
+import { evaluateAlertsBatch } from './alerts.js';
+import { getMarketSnapshot } from './market.js';
 
 dotenv.config();
 
@@ -638,5 +640,349 @@ export async function removeFromWatchlist(assetIdentifier, client = supabase) {
     asset_id: existing.asset_id,
     deleted: true,
     removed: true
+  };
+}
+
+/**
+ * Normalizes a price alert row from Supabase.
+ */
+export function normalizeAlert(row) {
+  if (!row) return null;
+  const asset = row.assets || row.asset || {};
+  return {
+    id: row.id,
+    profile_id: row.profile_id,
+    asset_id: row.asset_id,
+    direction: row.direction,
+    target_price: typeof row.target_price === 'number' ? row.target_price : Number(row.target_price),
+    status: row.status,
+    last_evaluated_price: row.last_evaluated_price !== null && row.last_evaluated_price !== undefined
+      ? (typeof row.last_evaluated_price === 'number' ? row.last_evaluated_price : Number(row.last_evaluated_price))
+      : null,
+    last_evaluated_at: row.last_evaluated_at || null,
+    triggered_at: row.triggered_at || null,
+    created_at: row.created_at,
+    asset: asset.id ? {
+      id: asset.id,
+      symbol: asset.symbol,
+      name: asset.name,
+      asset_type: asset.asset_type,
+      exchange: asset.exchange
+    } : undefined
+  };
+}
+
+/**
+ * Fetches all price alerts for the singleton investor profile.
+ */
+export async function getAlerts(client = supabase) {
+  const db = client || supabase;
+  if (!db) {
+    throw new Error('Supabase credentials are not configured. Please set SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY in server/.env');
+  }
+
+  const profile = await getInvestorProfile(db);
+
+  const { data, error } = await db
+    .from('price_alerts')
+    .select('id, profile_id, asset_id, direction, target_price, status, last_evaluated_price, last_evaluated_at, triggered_at, created_at, assets (id, symbol, name, asset_type, exchange)')
+    .eq('profile_id', profile.id)
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    throw new Error(`Database query error: ${error.message} (code: ${error.code || 'UNKNOWN'})`);
+  }
+
+  return (data || []).map(normalizeAlert);
+}
+
+/**
+ * Creates a new one-shot price alert for the singleton investor profile.
+ * Prevents exact duplicates deterministically (returns existing alert without error).
+ */
+export async function createAlert({ symbol, asset_id, direction, target_price }, client = supabase) {
+  const db = client || supabase;
+  if (!db) {
+    throw new Error('Supabase credentials are not configured. Please set SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY in server/.env');
+  }
+
+  const cleanDir = typeof direction === 'string' ? direction.trim().toLowerCase() : '';
+  if (cleanDir !== 'above' && cleanDir !== 'below') {
+    const err = new Error("direction must be 'above' or 'below'");
+    err.statusCode = 400;
+    throw err;
+  }
+
+  if (typeof target_price !== 'number' || !Number.isFinite(target_price) || target_price <= 0) {
+    const err = new Error('target_price must be a positive finite number');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  if ((!asset_id || typeof asset_id !== 'string') && (!symbol || typeof symbol !== 'string')) {
+    const err = new Error('Either asset_id or symbol is required');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const profile = await getInvestorProfile(db);
+
+  // Look up asset
+  let assetQuery = db.from('assets').select('id, symbol, name, asset_type, exchange');
+  if (asset_id && typeof asset_id === 'string' && asset_id.trim()) {
+    assetQuery = assetQuery.eq('id', asset_id.trim());
+  } else if (symbol && typeof symbol === 'string' && symbol.trim()) {
+    assetQuery = assetQuery.eq('symbol', symbol.trim().toUpperCase());
+  }
+
+  const { data: asset, error: assetErr } = await assetQuery.maybeSingle();
+
+  if (assetErr) {
+    throw new Error(`Database query error: ${assetErr.message} (code: ${assetErr.code || 'UNKNOWN'})`);
+  }
+
+  if (!asset) {
+    const notFoundErr = new Error(`Asset '${asset_id || symbol}' not found`);
+    notFoundErr.statusCode = 400;
+    throw notFoundErr;
+  }
+
+  // Check for exact duplicate alert: (profile_id, asset_id, direction, target_price)
+  const { data: existing, error: existingErr } = await db
+    .from('price_alerts')
+    .select('id, profile_id, asset_id, direction, target_price, status, last_evaluated_price, last_evaluated_at, triggered_at, created_at, assets (id, symbol, name, asset_type, exchange)')
+    .eq('profile_id', profile.id)
+    .eq('asset_id', asset.id)
+    .eq('direction', cleanDir)
+    .eq('target_price', target_price)
+    .maybeSingle();
+
+  if (existingErr) {
+    throw new Error(`Database query error: ${existingErr.message}`);
+  }
+
+  if (existing) {
+    return normalizeAlert(existing);
+  }
+
+  // Insert alert
+  const { data, error } = await db
+    .from('price_alerts')
+    .insert([
+      {
+        profile_id: profile.id,
+        asset_id: asset.id,
+        direction: cleanDir,
+        target_price,
+        status: 'active'
+      }
+    ])
+    .select('id, profile_id, asset_id, direction, target_price, status, last_evaluated_price, last_evaluated_at, triggered_at, created_at, assets (id, symbol, name, asset_type, exchange)')
+    .single();
+
+  if (error) {
+    if (error.code === '23505') {
+      const { data: refetched } = await db
+        .from('price_alerts')
+        .select('id, profile_id, asset_id, direction, target_price, status, last_evaluated_price, last_evaluated_at, triggered_at, created_at, assets (id, symbol, name, asset_type, exchange)')
+        .eq('profile_id', profile.id)
+        .eq('asset_id', asset.id)
+        .eq('direction', cleanDir)
+        .eq('target_price', target_price)
+        .maybeSingle();
+      if (refetched) return normalizeAlert(refetched);
+    }
+    throw new Error(`Database insert error: ${error.message} (code: ${error.code || 'UNKNOWN'})`);
+  }
+
+  return normalizeAlert(data);
+}
+
+/**
+ * Deletes a price alert by ID scoped to the singleton investor profile.
+ */
+export async function deleteAlert(alertId, client = supabase) {
+  const db = client || supabase;
+  if (!db) {
+    throw new Error('Supabase credentials are not configured. Please set SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY in server/.env');
+  }
+
+  if (!alertId || typeof alertId !== 'string' || !alertId.trim()) {
+    const err = new Error('Valid alert ID is required');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const profile = await getInvestorProfile(db);
+
+  const { data: existing, error: findErr } = await db
+    .from('price_alerts')
+    .select('id, profile_id, asset_id')
+    .eq('id', alertId.trim())
+    .eq('profile_id', profile.id)
+    .maybeSingle();
+
+  if (findErr) {
+    throw new Error(`Database query error: ${findErr.message}`);
+  }
+
+  if (!existing) {
+    return {
+      id: alertId.trim(),
+      deleted: false,
+      message: `Alert '${alertId}' not found or belongs to another profile`
+    };
+  }
+
+  const { error: deleteErr } = await db
+    .from('price_alerts')
+    .delete()
+    .eq('id', existing.id)
+    .eq('profile_id', profile.id);
+
+  if (deleteErr) {
+    throw new Error(`Database delete error: ${deleteErr.message} (code: ${deleteErr.code || 'UNKNOWN'})`);
+  }
+
+  return {
+    id: existing.id,
+    deleted: true
+  };
+}
+
+/**
+ * Reactivates a triggered alert back to active status.
+ */
+export async function reactivateAlert(alertId, client = supabase) {
+  const db = client || supabase;
+  if (!db) {
+    throw new Error('Supabase credentials are not configured. Please set SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY in server/.env');
+  }
+
+  if (!alertId || typeof alertId !== 'string' || !alertId.trim()) {
+    const err = new Error('Valid alert ID is required');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const profile = await getInvestorProfile(db);
+
+  const { data, error } = await db
+    .from('price_alerts')
+    .update({
+      status: 'active',
+      triggered_at: null,
+      last_evaluated_price: null,
+      last_evaluated_at: null
+    })
+    .eq('id', alertId.trim())
+    .eq('profile_id', profile.id)
+    .select('id, profile_id, asset_id, direction, target_price, status, last_evaluated_price, last_evaluated_at, triggered_at, created_at, assets (id, symbol, name, asset_type, exchange)')
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Database update error: ${error.message}`);
+  }
+
+  if (!data) {
+    const notFoundErr = new Error(`Alert '${alertId}' not found`);
+    notFoundErr.statusCode = 404;
+    throw notFoundErr;
+  }
+
+  return normalizeAlert(data);
+}
+
+/**
+ * Evaluates all active alerts for the singleton profile against market snapshots and persists any state changes.
+ */
+export async function evaluateAndPersistAlerts({ getMarketSnapshotFn = getMarketSnapshot, now = new Date() } = {}, client = supabase) {
+  const db = client || supabase;
+  if (!db) {
+    throw new Error('Supabase credentials are not configured. Please set SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY in server/.env');
+  }
+
+  const profile = await getInvestorProfile(db);
+
+  // 1. Fetch all alerts for singleton profile
+  const { data: alertsData, error: alertsErr } = await db
+    .from('price_alerts')
+    .select('id, profile_id, asset_id, direction, target_price, status, last_evaluated_price, last_evaluated_at, triggered_at, created_at, assets (id, symbol, name, asset_type, exchange)')
+    .eq('profile_id', profile.id)
+    .order('created_at', { ascending: false });
+
+  if (alertsErr) {
+    throw new Error(`Database query error: ${alertsErr.message}`);
+  }
+
+  const allAlerts = (alertsData || []).map(normalizeAlert);
+  const activeAlerts = allAlerts.filter((a) => a.status === 'active');
+
+  if (activeAlerts.length === 0) {
+    return {
+      evaluatedCount: 0,
+      triggeredCount: 0,
+      unavailableCount: 0,
+      alerts: allAlerts
+    };
+  }
+
+  // 2. Fetch market snapshots in parallel with failure isolation
+  const uniqueSymbols = [...new Set(activeAlerts.map((a) => a.asset?.symbol).filter(Boolean))];
+  const marketSnapshotsMap = {};
+
+  await Promise.allSettled(
+    uniqueSymbols.map(async (sym) => {
+      try {
+        const snap = await getMarketSnapshotFn(sym);
+        if (snap && typeof snap === 'object') {
+          marketSnapshotsMap[sym] = snap;
+        }
+      } catch {
+        marketSnapshotsMap[sym] = null;
+      }
+    })
+  );
+
+  // 3. Evaluate using deterministic evaluation engine
+  const { evaluatedCount, triggeredCount, unavailableCount, updatedAlerts } = evaluateAlertsBatch(
+    activeAlerts,
+    marketSnapshotsMap,
+    { now }
+  );
+
+  // 4. Persist any state changes for evaluated or triggered alerts
+  for (const updated of updatedAlerts) {
+    if (updated.status === 'triggered') {
+      await db
+        .from('price_alerts')
+        .update({
+          status: 'triggered',
+          triggered_at: updated.triggered_at,
+          last_evaluated_price: updated.last_evaluated_price,
+          last_evaluated_at: updated.last_evaluated_at
+        })
+        .eq('id', updated.id)
+        .eq('profile_id', profile.id);
+    } else if (updated.last_evaluated_at) {
+      await db
+        .from('price_alerts')
+        .update({
+          last_evaluated_price: updated.last_evaluated_price,
+          last_evaluated_at: updated.last_evaluated_at
+        })
+        .eq('id', updated.id)
+        .eq('profile_id', profile.id);
+    }
+  }
+
+  // 5. Re-fetch all alerts to return up-to-date list
+  const refreshedAlerts = await getAlerts(db);
+
+  return {
+    evaluatedCount,
+    triggeredCount,
+    unavailableCount,
+    alerts: refreshedAlerts
   };
 }
