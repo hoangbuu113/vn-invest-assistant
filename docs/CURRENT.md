@@ -1,7 +1,7 @@
 # Current Project Status
 
 ## LATEST VERIFIED CHECKPOINT
-- **Commit**: `a3ddedf`
+- **Commit**: `b4a89ac`
 - **Branch**: `main`
 
 ## CURRENT PHASE
@@ -74,6 +74,16 @@ BUILD
   - Descriptive "Cơ cấu danh mục" UI in Portfolio page featuring interactive 2.5D Donut, clear numeric legends, unpriced holding visibility, and non-redundant concentration metrics.
   - Backend checkpoint `36fc24e`, UI checkpoint `a3ddedf`.
   - 137/137 automated tests passing.
+- **Feature 11 — Asset Comparison / So sánh tài sản**
+  - Dedicated Vietnamese comparison view ("So sánh tài sản") accessible via clean secondary action from the Tài sản page.
+  - Side-by-side comparison supporting 2 to 4 assets with duplicate prevention and search selection.
+  - Shared period lookback (`1W`, `1M`, `3M`, `6M`, `1Y`) synchronizing deterministic metrics across all compared assets simultaneously.
+  - Reuses existing verified endpoints (`GET /api/assets`, `GET /api/market/:symbol`, `GET /api/analysis/:symbol`, `GET /api/market/:symbol/history`) without formula modification or client-side recalculation.
+  - Deterministic metrics displayed: Giá gần nhất, Biến động giá, Khoảng giá, Vị trí trong vùng giá (`rangePositionPct` slider track: `Thấp ───────●──── Cao`), Cách đỉnh giai đoạn (`distanceBelowHighPct`), Số phiên dữ liệu, Giai đoạn tăng giá (`crossPeriod`), and Mức độ đầy đủ dữ liệu (`dataCompleteness`).
+  - Base-100 normalized relative price chart ("Diễn biến giá tương đối — mốc đầu kỳ = 100").
+  - Pure descriptive comparison without scoring, ranking, winner/loser labels, or BUY/SELL/HOLD advice.
+  - Full per-asset failure isolation and stale-response protection with `AbortController`.
+  - 147/147 automated tests passing.
 
 ## PRE-FEATURE-07 HARDENING (COMPLETED)
 - **Historical Market Normalization Hardened** (Patch 06-2, checkpoint `d38ee60`): Deterministic deduplication, exact fractional volumes, robust boundary handling, clean null propagation for missing OHLCV.
@@ -91,5 +101,5 @@ BUILD
   - Default server automated tests are fully isolated from real Supabase and exercise actual production-path query predicates.
 
 ## CURRENT STATE
-Feature 10 (Portfolio Composition & Concentration) is **COMPLETE** (backend checkpoint `36fc24e`, UI commit `a3ddedf`, 137/137 tests PASS, client build clean).
+Feature 11 (Asset Comparison / So sánh tài sản) is **COMPLETE** (checkpoint `b4a89ac`, 147/147 tests PASS, client build clean).
 The next feature has not been selected yet; awaiting Project Director decision.

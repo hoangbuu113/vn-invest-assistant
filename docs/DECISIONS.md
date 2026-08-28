@@ -93,3 +93,12 @@ The following architectural and product decisions are confirmed:
   - **Unpriced Holdings Integrity**: Holdings with unavailable market prices are preserved in full view and are never treated as zero or omitted.
   - **Descriptive Concentration Model**: Concentration metrics (largest holding and top 3 concentration) are purely descriptive facts. No diversification score, concentration score, risk rating, low/medium/high classification, or rebalance recommendations are created.
   - **Client Role**: Frontend consumes backend composition metrics without client-side formula recalculation, rendering an interactive 2.5D SVG Donut and clear tabular breakdowns.
+- **Asset Comparison / So sánh tài sản (Feature 11)**:
+  - **Descriptive Comparison Invariant**: Comparison is strictly descriptive. No ranking, winner/loser labels, scores, ratings, performance predictions, or BUY/SELL/HOLD advice.
+  - **Selection Constraints**: Supports comparing 2 to 4 assets side-by-side with case-insensitive duplicate prevention.
+  - **Shared Lookback Period**: Exactly one shared period selector (`1W`, `1M`, `3M`, `6M`, `1Y`) updates all selected assets synchronously.
+  - **Backend Metric Authority**: Deterministic Feature 07 metrics are consumed directly from the backend without client-side recalculation in React.
+  - **Normalized Chart Semantics**: The relative price chart normalizes prices to base = 100 at the start of the period for visual relative-price comparison only; it is not total return or investment performance.
+  - **Failure Isolation**: Each compared asset fetches in parallel with independent `AbortController` and error boundaries. A failed request on one asset never breaks other compared assets.
+  - **Data Availability & Non-Zero Integrity**: Missing or unavailable values remain `null`/unavailable ("Chưa đủ dữ liệu" / "—") and are never converted to zero.
+  - **Concise Scope**: Detailed historical charts, news feeds, and raw asset records remain in Asset Detail; comparison provides high-level alignment with direct "Xem chi tiết" navigation.
