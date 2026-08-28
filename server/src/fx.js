@@ -146,13 +146,43 @@ export function normalizeFxRate(rawRate, requestedBaseCurrency, requestedQuoteCu
 }
 
 /**
- * Feature 19 intentionally has no production FX provider. Non-VND consumers
- * receive an explicit unavailable quote until a provider adapter is configured.
+ * Resolves a direct FX quote for converting non-VND asset prices into VND reporting currency.
+ * Dispatches USD -> VND to Twelve Data FX provider.
+ *
+ * @param {string} baseCurrency - Source quote currency (e.g. 'USD')
+ * @param {string} [quoteCurrency=REPORTING_CURRENCY] - Target reporting currency (defaults to 'VND')
+ * @param {Object} [options] - Options containing fetchFn, apiKey, getFxRateFn etc.
+ * @returns {Promise<Object>} Normalized FX rate object
  */
-export async function getFxRate(baseCurrency, quoteCurrency = REPORTING_CURRENCY) {
+export async function getFxRate(baseCurrency, quoteCurrency = REPORTING_CURRENCY, options = {}) {
+  const requestedBase = normalizeCurrencyCode(baseCurrency);
+  const requestedQuote = normalizeCurrencyCode(quoteCurrency);
+
+  if (!requestedBase || !requestedQuote) {
+    return createUnavailableFxRate(requestedBase, requestedQuote, 'FX_PAIR_MISMATCH');
+  }
+
+  if (requestedBase === requestedQuote) {
+    return {
+      baseCurrency: requestedBase,
+      quoteCurrency: requestedQuote,
+      rate: 1.0,
+      provider: 'identity',
+      sourceTimestamp: new Date().toISOString(),
+      availability: 'available',
+      freshness: 'current',
+      reason: null
+    };
+  }
+
+  if (requestedBase === 'USD' && requestedQuote === 'VND') {
+    const { getTwelveDataFxRate } = await import('./providers/twelvedata.js');
+    return getTwelveDataFxRate(requestedBase, requestedQuote, options);
+  }
+
   return createUnavailableFxRate(
-    baseCurrency,
-    quoteCurrency,
-    'FX_PROVIDER_UNCONFIGURED'
+    requestedBase,
+    requestedQuote,
+    'FX_PAIR_UNSUPPORTED'
   );
 }

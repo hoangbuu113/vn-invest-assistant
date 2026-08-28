@@ -126,11 +126,6 @@ function unavailableError(message, code, status = 422) {
 }
 
 export async function resolveProviderMapping(assetOrSymbol, provider, options = {}) {
-  const normalizedProvider = typeof provider === 'string' ? provider.trim().toLowerCase() : '';
-  if (!PROVIDER_PATTERN.test(normalizedProvider)) {
-    throw unavailableError('Invalid provider identifier', 'INVALID_PROVIDER', 400);
-  }
-
   let getAssetBySymbolFn = options.getAssetBySymbolFn;
   let getAssetProviderMappingFn = options.getAssetProviderMappingFn;
   if (!getAssetBySymbolFn || !getAssetProviderMappingFn) {
@@ -153,10 +148,24 @@ export async function resolveProviderMapping(assetOrSymbol, provider, options = 
     throw unavailableError(`Asset '${normalizedAsset.symbol}' is inactive`, 'ASSET_INACTIVE');
   }
 
-  const mappingRow = await getAssetProviderMappingFn(normalizedAsset.id, normalizedProvider);
+  const resolvedProvider = typeof provider === 'string' && provider.trim()
+    ? provider.trim().toLowerCase()
+    : (normalizedAsset.assetType === 'crypto'
+        ? 'coingecko'
+        : normalizedAsset.assetType === 'gold'
+          ? 'alphavantage'
+          : normalizedAsset.assetType === 'fx'
+            ? 'twelvedata'
+            : 'yahoo');
+
+  if (!PROVIDER_PATTERN.test(resolvedProvider)) {
+    throw unavailableError('Invalid provider identifier', 'INVALID_PROVIDER', 400);
+  }
+
+  const mappingRow = await getAssetProviderMappingFn(normalizedAsset.id, resolvedProvider);
   if (!mappingRow) {
     throw unavailableError(
-      `Provider '${normalizedProvider}' is unsupported for asset '${normalizedAsset.symbol}'`,
+      `Provider '${resolvedProvider}' is unsupported for asset '${normalizedAsset.symbol}'`,
       'UNSUPPORTED_PROVIDER'
     );
   }

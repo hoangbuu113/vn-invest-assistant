@@ -54,7 +54,7 @@ export async function getMarketSnapshot(rawSymbol, options = {}) {
 
   const symbol = rawSymbol.trim().toUpperCase();
   const resolver = options.resolveProviderMappingFn || resolveProviderMapping;
-  const { asset, mapping } = await resolver(symbol, options.provider || 'yahoo', options.providerResolverOptions || {});
+  const { asset, mapping } = await resolver(symbol, options.provider || null, options.providerResolverOptions || {});
 
   const adapter = resolveAdapter(mapping, asset, options);
   if (typeof adapter.getSnapshot !== 'function') {
@@ -93,7 +93,7 @@ export async function getMarketHistory(rawSymbol, rawRange = '1M', options = {})
   }
 
   const resolver = options.resolveProviderMappingFn || resolveProviderMapping;
-  const { asset, mapping } = await resolver(symbol, options.provider || 'yahoo', options.providerResolverOptions || {});
+  const { asset, mapping } = await resolver(symbol, options.provider || null, options.providerResolverOptions || {});
 
   assertVietnamHistoryPolicy(asset);
 
@@ -126,7 +126,7 @@ export async function getAnalysisHistory(rawSymbol, options = {}) {
 
   const symbol = rawSymbol.trim().toUpperCase();
   const resolver = options.resolveProviderMappingFn || resolveProviderMapping;
-  const { asset, mapping } = await resolver(symbol, options.provider || 'yahoo', options.providerResolverOptions || {});
+  const { asset, mapping } = await resolver(symbol, options.provider || null, options.providerResolverOptions || {});
 
   assertVietnamHistoryPolicy(asset);
 

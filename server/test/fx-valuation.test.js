@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
 import { calculatePortfolioComposition, getPortfolioComposition } from '../src/composition.js';
-import { normalizeFxRate } from '../src/fx.js';
+import { createUnavailableFxRate, normalizeFxRate } from '../src/fx.js';
 import { calculatePortfolioValuation, getPortfolioOverview } from '../src/portfolio.js';
 
 const FX_TIMESTAMP = '2026-08-28T10:00:00.000Z';
@@ -132,7 +132,8 @@ describe('Feature 19 — FX and VND portfolio valuation foundation', () => {
   test('D. missing FX keeps the holding visible and makes reporting valuation partial', async () => {
     const overview = await getPortfolioOverview(portfolioDependencies({
       holdings: [holding({ id: 'btc', symbol: 'BTC/USD', currency: 'USD' })],
-      snapshots: { 'BTC/USD': { price: 100, currency: 'USD' } }
+      snapshots: { 'BTC/USD': { price: 100, currency: 'USD' } },
+      getFxRateFn: async (base, quote) => createUnavailableFxRate(base, quote, 'FX_PROVIDER_UNCONFIGURED')
     }));
 
     const valued = overview.holdings[0];
