@@ -1,23 +1,22 @@
 # Current Project Status
 
 ## LATEST VERIFIED CHECKPOINT
-- **Commit**: `4608ddc`
+- **Commit**: `c2f75f6`
 - **Branch**: `main`
-- **Feature 15 Backend Checkpoint**: `7fa3c7a`
-- **Feature 15 UI Checkpoint**: `4608ddc`
-- **Automated Test Suite**: 219/219 PASS
+- **Feature 16 Commit**: `c2f75f6`
+- **Automated Test Suite**: 232/232 PASS
 - **Client Build**: Production build clean
 - **Git Working Tree**: Clean at baseline
 
 ## CURRENT PHASE
-REBASELINE / MULTI-ASSET FOUNDATION PREPARATION
+MULTI-ASSET FOUNDATION
 
 ## CURRENT NEXT PROJECT TASK
-Documentation reconciliation, then canonical multi-asset foundation.
+Feature 17 — Ledger Authority & Position Integrity (architecture audit first).
 
 ---
 
-## COMPLETED FEATURES SUMMARY (01–15)
+## COMPLETED FEATURES SUMMARY (01–16)
 
 - **Features 01–03**: Asset Browser (`/api/assets`), Market Snapshot (delayed Yahoo Finance `/api/market/:symbol`), News Feed (CafeF RSS `/api/news`).
 - **Feature 04**: Investor Profile (`GET`/`PUT /api/profile`), singleton enforcement, holdings management (`GET`/`POST`/`PUT`/`DELETE /api/holdings`).
@@ -31,11 +30,14 @@ Documentation reconciliation, then canonical multi-asset foundation.
 - **Feature 12**: Price Alerts V1 / Cảnh báo giá (`/api/alerts`), one-shot lifecycle, deterministic batch evaluation.
 - **Feature 13**: Personalized Relevant News / Tin của tôi (`/api/news/personalized`), dynamic holdings + watchlist token matching.
 - **Feature 14**: Transaction Ledger / Sổ lệnh giao dịch (`/api/transactions`), immutable transaction log, atomic PostgreSQL RPC, weighted-average cost, realized P/L tracking.
-- **Feature 15**: Cash / Capital Ledger / Sổ dòng tiền (`/api/cash/overview`, `/api/cash/ledger`, `/api/cash/deposit`, `/api/cash/withdraw`):
-  - Immutable cash ledger table `public.cash_ledger_entries`.
-  - Opening cash baseline preserving pre-Feature-15 balance without fabricated historical transactions.
-  - DEPOSIT and WITHDRAWAL movements.
-  - BUY cash outflow and SELL cash inflow reconciled atomically with transaction and holding mutations in PostgreSQL.
-  - Current cash is strictly ledger-authoritative; profile cash field serves only as a synchronized read cache.
-  - Frontend cash management UI in Portfolio ("Danh mục") with overview, deposit/withdraw modals, and filterable ledger history.
-  - Direct cash editing removed from "Hồ sơ đầu tư" (profile form submits non-cash preferences only).
+- **Feature 15**: Cash / Capital Ledger / Sổ dòng tiền (`/api/cash/overview`, `/api/cash/ledger`, `/api/cash/deposit`, `/api/cash/withdraw`), atomic cash ledger, opening baseline, direct cash edit removed.
+- **Feature 16**: Canonical Multi-Asset Foundation (COMPLETE):
+  - Canonical asset UUID (`assets.id`) remains the authoritative internal asset identity.
+  - Canonical asset metadata now includes `market_code`, `quote_currency`, `base_currency`, `market_policy`, `market_timezone`, `quantity_unit`, and `is_active`.
+  - Provider-specific identity is cleanly decoupled via `public.asset_provider_mappings`.
+  - Five existing VN assets (`E1VFVN30`, `FPT`, `HPG`, `VCB`, `VNM`) migrated in place with stable UUIDs and verified Yahoo `.VN` mappings.
+  - Implicit `.VN` inference removed from market code; unknown assets without mappings fail safely.
+  - VN market snapshot and historical bar behavior preserved through explicit provider mappings.
+  - Non-VND BUY/SELL transactions blocked at database level until multi-currency FX accounting exists.
+  - No gold/FX/crypto production assets onboarded yet (foundation preparation).
+  - 100% of existing financial and user state (holdings, transactions, cash ledger, watchlist, alerts) preserved.

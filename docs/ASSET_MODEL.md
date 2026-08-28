@@ -4,7 +4,30 @@ This document defines the canonical architectural and conceptual model for multi
 
 ---
 
-## 1. Asset Identity
+## 1. Current Implementation Status (Feature 16)
+
+Feature 16 establishes the canonical schema and provider abstraction foundation:
+
+- **Implemented Capabilities**:
+  - Authoritative internal asset identity via UUID (`public.assets.id`).
+  - Canonical metadata schema: `market_code`, `quote_currency`, `base_currency`, `market_policy`, `market_timezone`, `quantity_unit`, and `is_active`.
+  - Provider mapping table `public.asset_provider_mappings` decoupling internal assets from external symbols.
+  - Explicit verified Yahoo mappings for the 5 existing Vietnamese assets (`E1VFVN30.VN`, `FPT.VN`, `HPG.VN`, `VCB.VN`, `VNM.VN`).
+  - Removal of implicit `.VN` symbol appending from market adapters.
+  - Fractional quantity-compatible transaction and ledger foundation.
+  - Database trigger guard enforcing VND-only transaction accounting until FX support is implemented.
+
+- **Current Intentional Limitations**:
+  - Only the 5 existing Vietnamese assets are currently onboarded in production data.
+  - No production gold, FX, or crypto assets have been inserted yet.
+  - Market data and history pipelines currently support verified `VN_EXCHANGE` Yahoo flows; specialized adapters for crypto, FX, gold, and funds are deferred to subsequent feature phases.
+  - Portfolio reporting remains strictly VND; explicit FX conversion is not yet implemented.
+  - Non-VND BUY/SELL transactions are strictly blocked at database level.
+  - The single VND cash ledger remains authoritative for all cash operations.
+
+---
+
+## 2. Asset Identity
 
 The internal canonical identity of an asset is strictly decoupled from third-party provider symbols (such as Yahoo's `.VN` suffix).
 
@@ -24,7 +47,7 @@ The internal canonical identity of an asset is strictly decoupled from third-par
 
 ---
 
-## 2. Priority Asset Types
+## 3. Priority Asset Types
 
 The conceptual model accommodates the following priority asset classes:
 
@@ -35,11 +58,9 @@ The conceptual model accommodates the following priority asset classes:
 - **FX**: Foreign exchange currency pairs (initially USD/VND).
 - **Crypto**: Liquid major cryptocurrencies (~Top 40 assets by market liquidity).
 
-*(Note: Concrete database schema enum identifiers will be finalized during implementation; conceptual contracts apply universally).*
-
 ---
 
-## 3. Market-Time Semantics
+## 4. Market-Time Semantics
 
 Trading hours, session closures, and candle boundaries vary fundamentally by asset class:
 
@@ -54,7 +75,7 @@ Trading hours, session closures, and candle boundaries vary fundamentally by ass
 
 ---
 
-## 4. Price Semantics
+## 5. Price Semantics
 
 All normalized market price data must explicitly carry provenance:
 
@@ -69,7 +90,7 @@ All normalized market price data must explicitly carry provenance:
 
 ---
 
-## 5. Historical Bar Semantics
+## 6. Historical Bar Semantics
 
 Historical time series analysis requires asset-aware handling:
 
@@ -79,7 +100,7 @@ Historical time series analysis requires asset-aware handling:
 
 ---
 
-## 6. Portfolio Currency & FX Semantics
+## 7. Portfolio Currency & FX Semantics
 
 - **Reporting Currency**: **VND** is the authoritative reporting currency for aggregate portfolio valuation.
 - **Valuation Pipeline for Non-VND Assets**:
@@ -91,7 +112,7 @@ Historical time series analysis requires asset-aware handling:
 
 ---
 
-## 7. Ledger Authority & Financial Mutations
+## 8. Ledger Authority & Financial Mutations
 
 The double-ledger architecture is the sole authoritative mechanism for portfolio balance mutations:
 
@@ -103,14 +124,14 @@ The double-ledger architecture is the sole authoritative mechanism for portfolio
 
 ---
 
-## 8. Quantity Semantics
+## 9. Quantity Semantics
 
 - The asset model must support **fractional quantities** with full numeric precision for asset classes that permit fractions (Crypto, Gold, Funds, FX).
 - Integer-share restrictions apply strictly as asset-class specific validation rules (e.g. Vietnamese stock lot sizes) and must not be imposed globally across the architecture.
 
 ---
 
-## 9. Provider Abstraction
+## 10. Provider Abstraction
 
 - Feature components (Dashboard, Portfolio, Analysis, Alerts, Watchlist) request data through normalized service contracts (`getMarketSnapshot(asset)`, `getHistoricalBars(asset, range)`).
 - Specific provider adapters (Yahoo Finance, RSS parsers, future crypto/FX providers) encapsulate provider-specific network protocols, ticker formats, rate limits, and parsing logic.
@@ -118,7 +139,7 @@ The double-ledger architecture is the sole authoritative mechanism for portfolio
 
 ---
 
-## 10. News Semantics
+## 11. News Semantics
 
 - News feed contracts share a unified normalized schema (`id`, `title`, `summary`, `url`, `publishedAt`, `category`, `matchedAssets`).
 - Different source families and category classifications are utilized for different asset markets (e.g. CafeF for Vietnamese corporate/macro news; specialized feeds for global FX or crypto).
@@ -126,7 +147,7 @@ The double-ledger architecture is the sole authoritative mechanism for portfolio
 
 ---
 
-## 11. Quantitative Analysis Semantics
+## 12. Quantitative Analysis Semantics
 
 - Analysis metrics must be mathematically valid for the underlying asset class.
 - Metrics may be:
@@ -136,7 +157,7 @@ The double-ledger architecture is the sole authoritative mechanism for portfolio
 
 ---
 
-## 12. Known Unresolved Architectural Decisions (Explicit UNKNOWN)
+## 13. Known Unresolved Architectural Decisions (Explicit UNKNOWN)
 
 The following items are intentionally open questions and must remain classified as `UNKNOWN` until explicitly decided:
 

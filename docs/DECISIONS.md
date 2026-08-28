@@ -29,7 +29,33 @@ The following architectural and product decisions are confirmed and authoritativ
 
 ---
 
-## 3. Financial Authority & Double-Ledger Architecture
+## 3. Canonical Multi-Asset Foundation (Feature 16)
+- **Canonical Asset Identity**:
+  - The internal asset UUID (`public.assets.id`) is the sole canonical asset identifier across all application modules.
+  - Canonical symbol (`symbol`) represents the universal human-readable ticker and is decoupled from provider-specific symbols.
+  - Third-party provider symbols are stored explicitly in `public.asset_provider_mappings` (`asset_id`, `provider`, `provider_symbol`, `provider_market`).
+- **Implemented Canonical Metadata**:
+  - `market_code`: Canonical market or venue code (e.g. `HOSE`, `HNX`).
+  - `quote_currency`: Currency in which prices are quoted (e.g. `VND`, `USD`).
+  - `base_currency`: Base asset currency for pairs (e.g. `USD` in `USD/VND`, `BTC` in `BTC/USD`), or `NULL` for single instruments.
+  - `market_policy`: Market trading schedule policy (`VN_EXCHANGE`, `CONTINUOUS_24_7`, `GLOBAL_24_5`, `NAV_SCHEDULED`, `INSTRUMENT_DEFINED`).
+  - `market_timezone`: Standard IANA timezone string (e.g. `Asia/Ho_Chi_Minh`, `UTC`).
+  - `quantity_unit`: Unit of position quantity (e.g. `share`, `unit`, `oz`, `coin`).
+  - `is_active`: Operational status flag for active trading/tracking.
+  - *Note*: The legacy `exchange` column is retained temporarily solely for backwards compatibility with un-migrated consumers; `market_code` is the canonical field.
+- **Strict Provider Mappings & No Implicit Inference**:
+  - Market data and history fetching require an explicit provider mapping in `public.asset_provider_mappings`.
+  - Implicit symbol manipulation (such as automatically appending `.VN`) is completely removed. Unknown assets without explicit mappings fail safely without provider calls.
+- **Multi-Asset Accounting Guard**:
+  - The current single cash ledger and portfolio transaction engine operate strictly in `VND`.
+  - Non-VND BUY/SELL transactions are blocked at the database trigger level (`enforce_vnd_portfolio_transaction_asset`) until multi-currency FX accounting is implemented. No silent currency conversion is permitted.
+- **Zero-Loss Data Migration**:
+  - Existing asset UUIDs are preserved in place without deletion or re-creation.
+  - All existing holdings, portfolio transactions, cash ledger entries, watchlist items, and price alerts remain linked to their original asset UUIDs.
+
+---
+
+## 4. Financial Authority & Double-Ledger Architecture
 - **Position Authority (Transaction Ledger — Feature 14)**:
   - `public.portfolio_transactions` is the canonical immutable record of position changes (BUY / SELL).
   - Positions use the **weighted-average cost** method: `((prevQty * prevAvgCost) + (buyQty * buyPrice)) / (prevQty + buyQty)`.
@@ -49,7 +75,7 @@ The following architectural and product decisions are confirmed and authoritativ
 
 ---
 
-## 4. Valuation, Market Data & Precision Invariants
+## 5. Valuation, Market Data & Precision Invariants
 - **Valuation Strategy (Feature 05)**:
   - Portfolio metrics (cost basis, market value, unrealized P/L, total portfolio value) are computed on demand from authoritative holdings + latest prices. They are not stored as independent persisted truth.
   - A holding is priced only when market price is finite and > 0.
@@ -59,7 +85,7 @@ The following architectural and product decisions are confirmed and authoritativ
 
 ---
 
-## 5. Cross-Feature Relationships
+## 6. Cross-Feature Relationships
 - **Portfolio Overview (Feature 05)**: Combines holdings + cash overview + market data on demand.
 - **Portfolio Composition (Feature 10)**: Derives allocations and concentration metrics purely from Feature 05 portfolio valuation.
 - **Asset Comparison (Feature 11)**: Consumes canonical Feature 07 analysis and historical price metrics across 2–4 selected assets without client-side formula recalculation.
