@@ -4,9 +4,9 @@ This document defines the canonical architectural and conceptual model for multi
 
 ---
 
-## 1. Current Implementation Status (Feature 16)
+## 1. Current Implementation Status (Features 16–18)
 
-Feature 16 establishes the canonical schema and provider abstraction foundation:
+Features 16 through 18 establish the canonical schema, ledger authority, and provider abstraction foundation:
 
 - **Implemented Capabilities**:
   - Authoritative internal asset identity via UUID (`public.assets.id`).
@@ -14,6 +14,9 @@ Feature 16 establishes the canonical schema and provider abstraction foundation:
   - Provider mapping table `public.asset_provider_mappings` decoupling internal assets from external symbols.
   - Explicit verified Yahoo mappings for the 5 existing Vietnamese assets (`E1VFVN30.VN`, `FPT.VN`, `HPG.VN`, `VCB.VN`, `VNM.VN`).
   - Removal of implicit `.VN` symbol appending from market adapters.
+  - Dedicated opening-position baseline authority (`public.position_opening_baselines`) with locked correction upon subsequent ledger activity.
+  - Market provider abstraction (`server/src/providers/`):
+    $$\text{Canonical Asset} \longrightarrow \text{Explicit Provider Mapping} \longrightarrow \text{Provider Adapter} \longrightarrow \text{Normalized Snapshot / History}$$
   - Fractional quantity-compatible transaction and ledger foundation.
   - Database trigger guard enforcing VND-only transaction accounting until FX support is implemented.
 

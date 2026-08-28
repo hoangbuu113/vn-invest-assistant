@@ -56,11 +56,12 @@ The following architectural and product decisions are confirmed and authoritativ
 ---
 
 ## 4. Financial Authority & Double-Ledger Architecture
-- **Position Authority (Transaction Ledger — Feature 14)**:
+- **Position Authority & Ledger Enforcement (Features 14 & 17)**:
   - `public.portfolio_transactions` is the canonical immutable record of position changes (BUY / SELL).
   - Positions use the **weighted-average cost** method: `((prevQty * prevAvgCost) + (buyQty * buyPrice)) / (prevQty + buyQty)`.
   - Realized P/L is computed upon SELL as `(sellPrice - preSellAvgCost) * sellQuantity` and persisted directly on the transaction record.
-  - Existing holdings predating Feature 14 are valid opening positions; historical transactions are not fabricated.
+  - The `holdings` table serves purely as a synchronized projection / read model derived from opening baselines plus immutable transaction history. Direct application-role DML on `holdings` is denied at PostgreSQL level; mutations execute exclusively via SECURITY DEFINER RPCs.
+  - Generic public holdings mutation endpoints (`POST`/`PUT`/`DELETE /api/holdings`) are retired; `GET /api/holdings` remains as read model query.
 - **Cash Authority (Cash Ledger — Feature 15)**:
   - `public.cash_ledger_entries` is the authoritative source of truth for cash capital.
   - Opening cash baseline represents cash at Feature 15 activation, **NOT** lifetime starting wealth or initial deposit.
@@ -69,16 +70,15 @@ The following architectural and product decisions are confirmed and authoritativ
   - No negative cash balances are permitted in V1 (withdrawals or buys exceeding available cash are rejected).
   - The `investor_profile.cash_available` column and `holdings` table serve strictly as synchronized read caches / compatibility layers, not competing independent financial authorities.
   - The frontend never calculates authoritative cash totals or positions itself.
-- **Opening Position Authority & Baseline Integrity (Feature 17 — Approved Architecture)**:
-  - Opening positions represent explicit baselines for already-owned assets predating active ledger tracking.
+- **Opening Position Authority & Baseline Integrity (Feature 17)**:
+  - Opening positions represent explicit baselines for already-owned assets predating active ledger tracking (`public.position_opening_baselines`).
   - Recording an opening position creates or updates the holding baseline but generates **NO** portfolio transaction record and **NO** cash movement (avoiding cash duplication and historical BUY fabrication).
   - Opening-position corrections or cancellations are permitted only prior to subsequent ledger activity for that asset. The first subsequent BUY or SELL transaction permanently locks the opening baseline.
   - After ledger activation on a position, all subsequent quantity and cost basis mutations must proceed exclusively through immutable BUY/SELL transactions in the Transaction Ledger.
-  - The `holdings` table serves purely as a synchronized projection / read model derived from the opening baseline plus transaction history.
-  - Existing mixed positions (such as the verified `E1VFVN30` position with subsequent SELL history) are migrated and preserved at Feature 17 activation without replaying history or reconstructing synthetic prior quantities.
+  - Existing mixed positions (such as the verified `E1VFVN30` position with subsequent SELL history) are migrated and preserved at Feature 17 activation with a permanently locked baseline without replaying history or reconstructing synthetic prior quantities.
 - **Deprecation of Direct Mutations**:
   - Direct user-facing cash editing is removed. Cash changes must go through deposit/withdrawal ledger operations.
-  - Direct generic holdings CRUD (`POST`/`PUT`/`DELETE /api/holdings`) will be retired in favor of explicit opening-position and transaction-driven operations.
+  - Direct generic holdings CRUD (`POST`/`PUT`/`DELETE /api/holdings`) is retired in favor of explicit opening-position and transaction-driven operations.
 
 ---
 
@@ -87,6 +87,13 @@ The following architectural and product decisions are confirmed and authoritativ
   - Portfolio metrics (cost basis, market value, unrealized P/L, total portfolio value) are computed on demand from authoritative holdings + latest prices. They are not stored as independent persisted truth.
   - A holding is priced only when market price is finite and > 0.
   - Missing market data or FX rates produce explicit partial valuation (`valuationStatus: 'partial'`), never fake 0 prices or fabricated valuations.
+- **Market Provider Abstraction (Feature 18)**:
+  - Provider-specific market acquisition is decoupled behind provider adapters (`server/src/providers/`).
+  - Market consumers (`/api/market/:symbol`, `/api/market/:symbol/history`, portfolio valuation, deterministic analysis) interact strictly through a provider-neutral boundary (`getMarketSnapshot`, `getMarketHistory`, `getAnalysisHistory`).
+  - Each adapter (e.g. Yahoo) owns its provider-specific URLs, request headers, response payload parsing, and error normalization.
+  - Asset identity resolution uses canonical asset metadata + explicit mappings in `public.asset_provider_mappings`. No implicit symbol transformation (such as appending `.VN`) is allowed.
+  - No fallback provider orchestration is implemented yet (clean unsupported errors if provider mapping is absent or unsupported).
+  - Adding a future provider must not require consumer or business logic to construct provider symbols.
 - **Numerical Precision**: Intermediate financial calculations retain full floating-point/numeric precision without premature two-decimal rounding. Rounding is presentation-only.
 - **Data Labeling**: Market snapshots are clearly disclosed as delayed (~15 min for equities) with explicit timestamp provenance. Missing source timestamps remain `null`.
 

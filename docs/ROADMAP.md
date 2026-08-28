@@ -14,7 +14,7 @@ This document serves as the durable strategic memory for project sequencing, fea
 
 ---
 
-## 2. Completed Features (01–16)
+## 2. Completed Features (01–18)
 
 - **Feature 01**: Asset Browser
 - **Feature 02**: Market Snapshot
@@ -32,32 +32,26 @@ This document serves as the durable strategic memory for project sequencing, fea
 - **Feature 14**: Transaction Ledger / Sổ lệnh giao dịch
 - **Feature 15**: Cash / Capital Ledger / Sổ dòng tiền
 - **Feature 16**: Canonical Multi-Asset Foundation
+- **Feature 17**: Ledger Authority & Position Integrity (COMPLETE)
+- **Feature 18**: Market Provider Abstraction (COMPLETE)
 
 ---
 
-## 3. Current Feature: Feature 17
+## 3. Current Feature: Feature 19
 
-### Feature 17 — Ledger Authority & Position Integrity
-- **Status**: ARCHITECTURE APPROVED — IMPLEMENTATION NEXT.
+### Feature 19 — FX & Cross-Currency Valuation Foundation
+- **Status**: HIGH-RISK ARCHITECTURE & INTEGRITY AUDIT NEXT.
 - **Core Invariant**:
-  $$\text{Opening Position Baseline} + \text{Subsequent Immutable BUY/SELL Transactions} \longrightarrow \text{Holdings Read Model} \longrightarrow \text{Portfolio Valuation}$$
-- **Key Architectural Decisions**:
-  - Normal position changes must occur through the Transaction Ledger. Arbitrary direct editing of holding quantity or average cost is retired as a user-facing financial authority.
-  - Dedicated opening-position baseline flow allows recording already-owned assets without fabricating historical BUY transactions or mutating current cash.
-  - Opening positions create holding baselines but generate no transaction records and no cash movements.
-  - Opening-position corrections or cancellations are permitted only prior to subsequent ledger activity (the first BUY or SELL permanently locks opening baseline correction).
-  - Generic public holdings `POST`/`PUT`/`DELETE` REST endpoints will be retired in favor of ledger-driven RPCs; the `holdings` table remains a synchronized read model.
-- **Existing Position Migration**:
-  - Current real/test position (`E1VFVN30`: `111,003` shares @ `35,000` VND) and historical SELL transaction (`12,121` shares @ `40,000` VND) are preserved exactly.
-  - No historical pre-sell quantity (`123,124`) is reconstructed and no historical BUY is fabricated.
-  - Migrated legacy baseline represents the known position at Feature 17 activation and is permanently locked because subsequent ledger activity already exists.
+  $$\text{Native Asset Valuation} \xrightarrow{\text{Authoritative FX Rate}} \text{VND Reporting Valuation}$$
+- **Key Objectives**:
+  - Model explicit FX conversion for multi-currency asset pricing into VND reporting currency.
+  - Implement deterministic missing FX handling (missing FX yields explicit partial/unavailable valuation, never silent 1:1 fallback).
+  - Lay multi-currency foundation for upcoming non-VND asset universe.
 
 ---
 
-## 4. Ordered Roadmap (Features 18–30)
+## 4. Ordered Roadmap (Features 20–30)
 
-- **Feature 18 — Market Provider Abstraction**: Decouple market snapshot and historical bar fetching behind provider-neutral adapter interfaces.
-- **Feature 19 — FX & Cross-Currency Valuation Foundation**: Explicit multi-currency pipeline ($\text{Native Value} \xrightarrow{\text{FX Rate}} \text{VND Reporting Value}$); missing FX yields explicit partial/unavailable valuation.
 - **Feature 20 — Real Multi-Asset Universe**: Onboard verified production assets across VN stocks, ETFs, funds, gold, USD/FX (USD/VND), and crypto (~Top 40 major/liquid assets).
 - **Feature 21 — Asset-Class Market & History Semantics**: Implement class-specific calendar rules, trading session hours, 24/7 crypto candles, NAV strike points, and bar completion logic.
 - **Feature 22 — Deterministic Asset Analysis V2**: Generalize quantitative analysis across asset classes with shared, specialized, and explicitly unavailable metrics.
