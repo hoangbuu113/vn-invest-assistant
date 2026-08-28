@@ -23,6 +23,26 @@ function formatVND(value) {
   return `${Number(value).toLocaleString('vi-VN')} ₫`;
 }
 
+function formatCompactVND(value) {
+  if (value === null || value === undefined || isNaN(value)) return '—';
+
+  const numericValue = Number(value);
+  const absoluteValue = Math.abs(numericValue);
+  const compactOptions = { minimumFractionDigits: 0, maximumFractionDigits: 2 };
+
+  if (absoluteValue >= 1_000_000_000) {
+    return `${(numericValue / 1_000_000_000).toLocaleString('vi-VN', compactOptions)} tỷ ₫`;
+  }
+  if (absoluteValue >= 1_000_000) {
+    return `${(numericValue / 1_000_000).toLocaleString('vi-VN', compactOptions)} triệu ₫`;
+  }
+  if (absoluteValue >= 1_000) {
+    return `${(numericValue / 1_000).toLocaleString('vi-VN', compactOptions)} nghìn ₫`;
+  }
+
+  return `${numericValue.toLocaleString('vi-VN', compactOptions)} ₫`;
+}
+
 function formatPercentVN(val) {
   if (val === null || val === undefined || isNaN(val)) return '—';
   return `${Number(val).toLocaleString('vi-VN', { minimumFractionDigits: 1, maximumFractionDigits: 2 })}%`;
@@ -52,29 +72,26 @@ function CompositionDonut25D({
   const strokeWidth = 18;
   const center = 100;
   const radius = 72; // radius 72 + strokeWidth/2 (9) = 81, fits cleanly inside 100
-  const circumference = 2 * Math.PI * radius;
 
   const validCashPct = cashWeightPct !== null && !isNaN(cashWeightPct) ? Math.max(0, Math.min(100, cashWeightPct)) : 0;
   const validPricedPct = pricedAssetsWeightPct !== null && !isNaN(pricedAssetsWeightPct) ? Math.max(0, Math.min(100, pricedAssetsWeightPct)) : 0;
 
   const hasData = validCashPct > 0 || validPricedPct > 0;
-  const cashStrokeLength = hasData ? (validCashPct / 100) * circumference : 0;
-  const pricedStrokeLength = hasData ? (validPricedPct / 100) * circumference : 0;
 
   // Center display data
   let centerTitle = isKnownValueOnly ? 'Giá trị đã biết' : 'Tổng danh mục';
-  let centerValue = formatVND(knownAllocationValue);
+  let centerValue = formatCompactVND(knownAllocationValue);
   let centerPct = null;
   let centerDotClass = null;
 
   if (hoveredSegment === 'cash') {
     centerTitle = 'Tiền mặt';
-    centerValue = formatVND(cashValue);
+    centerValue = formatCompactVND(cashValue);
     centerPct = formatPercentVN(cashWeightPct);
     centerDotClass = 'dot-cash';
   } else if (hoveredSegment === 'invested') {
     centerTitle = 'Tài sản định giá';
-    centerValue = formatVND(pricedHoldingsMarketValue);
+    centerValue = formatCompactVND(pricedHoldingsMarketValue);
     centerPct = formatPercentVN(pricedAssetsWeightPct);
     centerDotClass = 'dot-invested';
   }
@@ -91,157 +108,80 @@ function CompositionDonut25D({
         className="donut-svg"
       >
         <defs>
-          {/* Depth Drop Shadow Filter */}
-          <filter id="donutDepthShadow" x="-20%" y="-20%" width="140%" height="140%">
+          <filter id="donutNeutralShadow" x="-20%" y="-20%" width="140%" height="140%">
             <feDropShadow dx="0" dy="4" stdDeviation="4" floodColor="#0f172a" floodOpacity="0.1" />
           </filter>
-
-          {/* Cash Gradients */}
-          <linearGradient id="cashSurfaceGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stopColor="#60a5fa" />
-            <stop offset="100%" stopColor="#2563eb" />
-          </linearGradient>
-          <linearGradient id="cashBaseGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stopColor="#1d4ed8" />
-            <stop offset="100%" stopColor="#1e3a8a" />
-          </linearGradient>
-
-          {/* Invested Asset Gradients */}
-          <linearGradient id="investedSurfaceGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stopColor="#a78bfa" />
-            <stop offset="100%" stopColor="#7c3aed" />
-          </linearGradient>
-          <linearGradient id="investedBaseGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stopColor="#6d28d9" />
-            <stop offset="100%" stopColor="#4c1d95" />
-          </linearGradient>
-
-          {/* Gloss Top Specular Highlight */}
-          <linearGradient id="glossHighlight" x1="0%" y1="0%" x2="0%" y2="100%">
-            <stop offset="0%" stopColor="#ffffff" stopOpacity="0.3" />
-            <stop offset="40%" stopColor="#ffffff" stopOpacity="0.05" />
-            <stop offset="100%" stopColor="#ffffff" stopOpacity="0" />
-          </linearGradient>
         </defs>
 
-        {/* 1. Base / Extrusion Shadow Layer (Shifted Down 3px for 2.5D Depth) */}
-        <g transform="translate(0, 3)" filter="url(#donutDepthShadow)">
+        {/* 1. Neutral depth only; semantic color belongs exclusively to the data arcs. */}
+        <circle
+          cx={center}
+          cy={center + 3}
+          r={radius}
+          fill="none"
+          stroke="var(--color-slate-300)"
+          strokeWidth={strokeWidth}
+          opacity="0.45"
+          filter="url(#donutNeutralShadow)"
+        />
+
+        {/* 2. Neutral background track. */}
+        <circle
+          cx={center}
+          cy={center}
+          r={radius}
+          fill="none"
+          stroke="var(--color-slate-100)"
+          strokeWidth={strokeWidth}
+        />
+
+        {/* 3. Cash data arc: its path length maps directly to the backend percentage. */}
+        {hasData && validCashPct > 0 && (
           <circle
             cx={center}
             cy={center}
             r={radius}
+            pathLength="100"
             fill="none"
-            stroke="var(--color-slate-200)"
-            strokeWidth={strokeWidth}
-            opacity="0.5"
+            stroke="#3b82f6"
+            strokeWidth={hoveredSegment === 'cash' ? strokeWidth + 3 : strokeWidth}
+            strokeDasharray={`${validCashPct} ${100 - validCashPct}`}
+            strokeDashoffset="0"
+            strokeLinecap="butt"
+            transform={`rotate(-90 ${center} ${center})`}
+            onMouseEnter={() => setHoveredSegment('cash')}
+            onMouseLeave={() => setHoveredSegment(null)}
+            style={{
+              cursor: 'pointer',
+              transition: 'stroke-width 0.2s ease, filter 0.2s ease',
+              filter: hoveredSegment === 'cash' ? 'drop-shadow(0 0 6px rgba(59, 130, 246, 0.4))' : 'none'
+            }}
           />
-          {hasData && (
-            <>
-              {validCashPct > 0 && (
-                <circle
-                  cx={center}
-                  cy={center}
-                  r={radius}
-                  fill="none"
-                  stroke="url(#cashBaseGrad)"
-                  strokeWidth={strokeWidth}
-                  strokeDasharray={`${cashStrokeLength} ${circumference}`}
-                  strokeDashoffset="0"
-                  transform={`rotate(-90 ${center} ${center})`}
-                />
-              )}
-              {validPricedPct > 0 && (
-                <circle
-                  cx={center}
-                  cy={center}
-                  r={radius}
-                  fill="none"
-                  stroke="url(#investedBaseGrad)"
-                  strokeWidth={strokeWidth}
-                  strokeDasharray={`${pricedStrokeLength} ${circumference}`}
-                  strokeDashoffset={`-${cashStrokeLength}`}
-                  transform={`rotate(-90 ${center} ${center})`}
-                />
-              )}
-            </>
-          )}
-        </g>
+        )}
 
-        {/* 2. Main Top Donut Ring */}
-        <g>
-          {/* Background Track */}
+        {/* 4. Priced-assets data arc begins exactly where the cash arc ends. */}
+        {hasData && validPricedPct > 0 && (
           <circle
             cx={center}
             cy={center}
             r={radius}
+            pathLength="100"
             fill="none"
-            stroke="var(--color-slate-100)"
-            strokeWidth={strokeWidth}
+            stroke="#8b5cf6"
+            strokeWidth={hoveredSegment === 'invested' ? strokeWidth + 3 : strokeWidth}
+            strokeDasharray={`${validPricedPct} ${100 - validPricedPct}`}
+            strokeDashoffset={-validCashPct}
+            strokeLinecap="butt"
+            transform={`rotate(-90 ${center} ${center})`}
+            onMouseEnter={() => setHoveredSegment('invested')}
+            onMouseLeave={() => setHoveredSegment(null)}
+            style={{
+              cursor: 'pointer',
+              transition: 'stroke-width 0.2s ease, filter 0.2s ease',
+              filter: hoveredSegment === 'invested' ? 'drop-shadow(0 0 6px rgba(139, 92, 246, 0.4))' : 'none'
+            }}
           />
-
-          {/* Cash Arc */}
-          {validCashPct > 0 && (
-            <motion.circle
-              cx={center}
-              cy={center}
-              r={radius}
-              fill="none"
-              stroke="url(#cashSurfaceGrad)"
-              strokeWidth={hoveredSegment === 'cash' ? strokeWidth + 3 : strokeWidth}
-              strokeDasharray={`${cashStrokeLength} ${circumference}`}
-              strokeDashoffset="0"
-              transform={`rotate(-90 ${center} ${center})`}
-              className="donut-segment"
-              onMouseEnter={() => setHoveredSegment('cash')}
-              onMouseLeave={() => setHoveredSegment(null)}
-              initial={{ strokeDasharray: `0 ${circumference}` }}
-              animate={{ strokeDasharray: `${cashStrokeLength} ${circumference}` }}
-              transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
-              style={{
-                cursor: 'pointer',
-                transition: 'stroke-width 0.2s ease, filter 0.2s ease',
-                filter: hoveredSegment === 'cash' ? 'drop-shadow(0 0 6px rgba(59, 130, 246, 0.4))' : 'none'
-              }}
-            />
-          )}
-
-          {/* Priced Assets Arc */}
-          {validPricedPct > 0 && (
-            <motion.circle
-              cx={center}
-              cy={center}
-              r={radius}
-              fill="none"
-              stroke="url(#investedSurfaceGrad)"
-              strokeWidth={hoveredSegment === 'invested' ? strokeWidth + 3 : strokeWidth}
-              strokeDasharray={`${pricedStrokeLength} ${circumference}`}
-              strokeDashoffset={`-${cashStrokeLength}`}
-              transform={`rotate(-90 ${center} ${center})`}
-              className="donut-segment"
-              onMouseEnter={() => setHoveredSegment('invested')}
-              onMouseLeave={() => setHoveredSegment(null)}
-              initial={{ strokeDasharray: `0 ${circumference}` }}
-              animate={{ strokeDasharray: `${pricedStrokeLength} ${circumference}` }}
-              transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
-              style={{
-                cursor: 'pointer',
-                transition: 'stroke-width 0.2s ease, filter 0.2s ease',
-                filter: hoveredSegment === 'invested' ? 'drop-shadow(0 0 6px rgba(139, 92, 246, 0.4))' : 'none'
-              }}
-            />
-          )}
-
-          {/* 3. Gloss Top Specular Highlight */}
-          <circle
-            cx={center}
-            cy={center}
-            r={radius}
-            fill="none"
-            stroke="url(#glossHighlight)"
-            strokeWidth={strokeWidth}
-            pointerEvents="none"
-          />
-        </g>
+        )}
       </svg>
 
       {/* 4. Center Disc Content (HTML overlay inside donut hole) */}
@@ -251,10 +191,8 @@ function CompositionDonut25D({
           <span>{centerTitle}</span>
         </div>
         <div className="donut-center-value">{centerValue}</div>
-        {centerPct ? (
+        {centerPct && (
           <div className="donut-center-pct">{centerPct}</div>
-        ) : (
-          <div className="donut-center-sub">100% giá trị đã biết</div>
         )}
       </div>
     </div>
