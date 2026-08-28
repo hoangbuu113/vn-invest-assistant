@@ -33,6 +33,7 @@ CREATE POLICY "Allow public read access to assets"
 
 CREATE TABLE IF NOT EXISTS public.investor_profile (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    singleton_key SMALLINT NOT NULL DEFAULT 1 CHECK (singleton_key = 1) UNIQUE,
     cash_available NUMERIC(15, 2) NOT NULL DEFAULT 0 CHECK (cash_available >= 0),
     risk_tolerance VARCHAR(20) NOT NULL CHECK (risk_tolerance IN ('low', 'moderate', 'high')),
     investment_horizon VARCHAR(20) NOT NULL CHECK (investment_horizon IN ('short', 'medium', 'long')),

@@ -75,12 +75,16 @@ export async function checkSupabaseConnection() {
 /**
  * Fetches all assets from the Supabase assets table.
  */
-export async function getAssets() {
-  if (!isSupabaseConfigured || !supabase) {
+/**
+ * Fetches all assets from the Supabase assets table.
+ */
+export async function getAssets(client = supabase) {
+  const db = client || supabase;
+  if (!db) {
     throw new Error('Supabase credentials are not configured. Please set SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY in server/.env');
   }
 
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from('assets')
     .select('id, symbol, name, asset_type, exchange, created_at')
     .order('symbol', { ascending: true });
@@ -95,8 +99,9 @@ export async function getAssets() {
 /**
  * Fetches a single asset by symbol from the Supabase assets table.
  */
-export async function getAssetBySymbol(symbol) {
-  if (!isSupabaseConfigured || !supabase) {
+export async function getAssetBySymbol(symbol, client = supabase) {
+  const db = client || supabase;
+  if (!db) {
     throw new Error('Supabase credentials are not configured. Please set SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY in server/.env');
   }
 
@@ -106,7 +111,7 @@ export async function getAssetBySymbol(symbol) {
 
   const normalizedSymbol = symbol.trim().toUpperCase();
 
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from('assets')
     .select('id, symbol, name, asset_type, exchange, created_at')
     .eq('symbol', normalizedSymbol)
@@ -136,57 +141,71 @@ function normalizeProfile(row) {
 
 /**
  * Fetches the single investor profile from Supabase.
- * If no profile row exists, seeds and returns a default profile.
+ * Reads the authoritative singleton profile row.
  */
-export async function getInvestorProfile() {
-  if (!isSupabaseConfigured || !supabase) {
+export async function getInvestorProfile(client = supabase) {
+  const db = client || supabase;
+  if (!db) {
     throw new Error('Supabase credentials are not configured. Please set SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY in server/.env');
   }
 
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from('investor_profile')
     .select('id, cash_available, risk_tolerance, investment_horizon, created_at, updated_at')
-    .order('created_at', { ascending: true })
-    .limit(1);
+    .limit(1)
+    .maybeSingle();
 
   if (error) {
     throw new Error(`Database query error: ${error.message} (code: ${error.code || 'UNKNOWN'})`);
   }
 
-  if (!data || data.length === 0) {
+  if (!data) {
     const defaultProfile = {
+      singleton_key: 1,
       cash_available: 0,
       risk_tolerance: 'moderate',
       investment_horizon: 'medium'
     };
 
-    const { data: inserted, error: insertError } = await supabase
+    const { data: inserted, error: insertError } = await db
       .from('investor_profile')
       .insert([defaultProfile])
       .select('id, cash_available, risk_tolerance, investment_horizon, created_at, updated_at')
       .single();
 
     if (insertError) {
+      // If concurrent insert occurred, fetch the existing singleton row
+      if (insertError.code === '23505') {
+        const { data: refetched, error: refetchErr } = await db
+          .from('investor_profile')
+          .select('id, cash_available, risk_tolerance, investment_horizon, created_at, updated_at')
+          .limit(1)
+          .maybeSingle();
+        if (!refetchErr && refetched) {
+          return normalizeProfile(refetched);
+        }
+      }
       throw new Error(`Failed to initialize default investor profile: ${insertError.message}`);
     }
 
     return normalizeProfile(inserted);
   }
 
-  return normalizeProfile(data[0]);
+  return normalizeProfile(data);
 }
 
 /**
  * Updates the single investor profile in Supabase.
  */
-export async function updateInvestorProfile({ cash_available, risk_tolerance, investment_horizon }) {
-  if (!isSupabaseConfigured || !supabase) {
+export async function updateInvestorProfile({ cash_available, risk_tolerance, investment_horizon }, client = supabase) {
+  const db = client || supabase;
+  if (!db) {
     throw new Error('Supabase credentials are not configured. Please set SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY in server/.env');
   }
 
-  const currentProfile = await getInvestorProfile();
+  const currentProfile = await getInvestorProfile(db);
 
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from('investor_profile')
     .update({
       cash_available,
@@ -225,14 +244,15 @@ function normalizeHolding(row) {
 /**
  * Fetches all holdings for the single investor profile with joined asset information.
  */
-export async function getHoldings() {
-  if (!isSupabaseConfigured || !supabase) {
+export async function getHoldings(client = supabase) {
+  const db = client || supabase;
+  if (!db) {
     throw new Error('Supabase credentials are not configured. Please set SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY in server/.env');
   }
 
-  const profile = await getInvestorProfile();
+  const profile = await getInvestorProfile(db);
 
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from('holdings')
     .select('id, profile_id, asset_id, quantity, average_cost, created_at, updated_at, assets (id, symbol, name, asset_type, exchange)')
     .eq('profile_id', profile.id)
@@ -246,24 +266,25 @@ export async function getHoldings() {
 }
 
 /**
- * Adds a new holding for the investor profile.
+ * Adds a new holding for the singleton investor profile.
  */
-export async function addHolding({ asset_id, quantity, average_cost }) {
-  if (!isSupabaseConfigured || !supabase) {
+export async function addHolding({ asset_id, quantity, average_cost }, client = supabase) {
+  const db = client || supabase;
+  if (!db) {
     throw new Error('Supabase credentials are not configured. Please set SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY in server/.env');
   }
 
-  const profile = await getInvestorProfile();
+  const profile = await getInvestorProfile(db);
 
   // Check if asset exists
-  const { data: asset, error: assetErr } = await supabase
+  const { data: asset, error: assetErr } = await db
     .from('assets')
     .select('id, symbol, name, asset_type, exchange')
     .eq('id', asset_id)
     .maybeSingle();
 
   if (assetErr) {
-    throw new Error(`Database query error: ${assetErr.message}`);
+    throw new Error(`Database query error: ${assetErr.message} (code: ${assetErr.code || 'UNKNOWN'})`);
   }
 
   if (!asset) {
@@ -273,7 +294,7 @@ export async function addHolding({ asset_id, quantity, average_cost }) {
   }
 
   // Check if holding for this asset already exists for profile
-  const { data: existing, error: existingErr } = await supabase
+  const { data: existing, error: existingErr } = await db
     .from('holdings')
     .select('id')
     .eq('profile_id', profile.id)
@@ -290,7 +311,7 @@ export async function addHolding({ asset_id, quantity, average_cost }) {
     throw dupErr;
   }
 
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from('holdings')
     .insert([
       {
@@ -304,6 +325,11 @@ export async function addHolding({ asset_id, quantity, average_cost }) {
     .single();
 
   if (error) {
+    if (error.code === '23505') {
+      const dupErr = new Error(`Holding for asset '${asset.symbol}' already exists. Edit the existing holding instead.`);
+      dupErr.statusCode = 400;
+      throw dupErr;
+    }
     throw new Error(`Database insert error: ${error.message} (code: ${error.code || 'UNKNOWN'})`);
   }
 
@@ -311,10 +337,11 @@ export async function addHolding({ asset_id, quantity, average_cost }) {
 }
 
 /**
- * Updates an existing holding by ID.
+ * Updates an existing holding by ID, strictly scoped to the singleton profile.
  */
-export async function updateHolding(id, { quantity, average_cost }) {
-  if (!isSupabaseConfigured || !supabase) {
+export async function updateHolding(id, { quantity, average_cost }, client = supabase) {
+  const db = client || supabase;
+  if (!db) {
     throw new Error('Supabase credentials are not configured. Please set SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY in server/.env');
   }
 
@@ -324,7 +351,9 @@ export async function updateHolding(id, { quantity, average_cost }) {
     throw err;
   }
 
-  const { data, error } = await supabase
+  const profile = await getInvestorProfile(db);
+
+  const { data, error } = await db
     .from('holdings')
     .update({
       quantity,
@@ -332,10 +361,17 @@ export async function updateHolding(id, { quantity, average_cost }) {
       updated_at: new Date().toISOString()
     })
     .eq('id', id)
+    .eq('profile_id', profile.id)
     .select('id, profile_id, asset_id, quantity, average_cost, created_at, updated_at, assets (id, symbol, name, asset_type, exchange)')
     .maybeSingle();
 
   if (error) {
+    // If invalid UUID format or not found in PG
+    if (error.code === '22P02') {
+      const err = new Error(`Holding with ID '${id}' not found`);
+      err.statusCode = 404;
+      throw err;
+    }
     throw new Error(`Database update error: ${error.message} (code: ${error.code || 'UNKNOWN'})`);
   }
 
@@ -349,10 +385,11 @@ export async function updateHolding(id, { quantity, average_cost }) {
 }
 
 /**
- * Deletes a holding by ID.
+ * Deletes a holding by ID, strictly scoped to the singleton profile.
  */
-export async function deleteHolding(id) {
-  if (!isSupabaseConfigured || !supabase) {
+export async function deleteHolding(id, client = supabase) {
+  const db = client || supabase;
+  if (!db) {
     throw new Error('Supabase credentials are not configured. Please set SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY in server/.env');
   }
 
@@ -362,14 +399,22 @@ export async function deleteHolding(id) {
     throw err;
   }
 
-  // Check if holding exists first
-  const { data: existing, error: findErr } = await supabase
+  const profile = await getInvestorProfile(db);
+
+  // Check if holding exists for this profile first
+  const { data: existing, error: findErr } = await db
     .from('holdings')
     .select('id')
     .eq('id', id)
+    .eq('profile_id', profile.id)
     .maybeSingle();
 
   if (findErr) {
+    if (findErr.code === '22P02') {
+      const err = new Error(`Holding with ID '${id}' not found`);
+      err.statusCode = 404;
+      throw err;
+    }
     throw new Error(`Database query error: ${findErr.message}`);
   }
 
@@ -379,10 +424,11 @@ export async function deleteHolding(id) {
     throw err;
   }
 
-  const { error } = await supabase
+  const { error } = await db
     .from('holdings')
     .delete()
-    .eq('id', id);
+    .eq('id', id)
+    .eq('profile_id', profile.id);
 
   if (error) {
     throw new Error(`Database delete error: ${error.message} (code: ${error.code || 'UNKNOWN'})`);
