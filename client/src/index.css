@@ -1289,6 +1289,379 @@ body {
   text-align: center;
 }
 
+/* ==================================================
+   FEATURE 07: DETERMINISTIC ASSET ANALYSIS STYLES
+   ================================================== */
+.analysis-breadth-box {
+  background: var(--color-slate-50);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  padding: 0.85rem 1.15rem;
+}
+
+.breadth-mini-bar {
+  width: 100%;
+  height: 6px;
+  background: var(--color-slate-200);
+  border-radius: var(--radius-full);
+  overflow: hidden;
+}
+
+.breadth-mini-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--color-gain-500), var(--color-gain-600));
+  border-radius: var(--radius-full);
+  transition: width 0.3s ease;
+}
+
+.breadth-segments-track {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 6px;
+}
+
+.breadth-segment-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 0.5rem 0.25rem;
+  border-radius: var(--radius-sm);
+  border: 1.5px solid transparent;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  user-select: none;
+}
+
+.breadth-segment-item:hover {
+  transform: translateY(-2px);
+}
+
+.breadth-segment-item.selected {
+  box-shadow: 0 0 0 2px var(--color-brand-600);
+}
+
+.breadth-segment-label {
+  font-size: 0.72rem;
+  font-weight: 800;
+  margin-bottom: 2px;
+}
+
+.breadth-segment-status {
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.segment-positive {
+  background-color: var(--color-gain-50);
+  border-color: var(--color-gain-200);
+  color: var(--color-gain-700);
+}
+
+.segment-negative {
+  background-color: var(--color-loss-50);
+  border-color: var(--color-loss-200);
+  color: var(--color-loss-700);
+}
+
+.segment-neutral {
+  background-color: var(--color-slate-100);
+  border-color: var(--color-slate-300);
+  color: var(--color-slate-600);
+}
+
+.segment-unavailable {
+  background-color: var(--color-slate-100);
+  border-color: var(--border-default);
+  border-style: dashed;
+  color: var(--color-slate-400);
+}
+
+.period-tabs-bar {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+}
+
+.period-tab-card {
+  position: relative;
+  display: block;
+  width: 100%;
+  padding: 0.75rem 0.5rem;
+  background: var(--color-slate-100);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  text-align: center;
+  font-family: inherit;
+  transition: border-color var(--transition-fast), transform var(--transition-fast);
+  outline: none;
+}
+
+.period-tab-card:hover:not(.active) {
+  background: var(--color-slate-200);
+  border-color: var(--color-slate-300);
+}
+
+.period-tab-card.active {
+  border-color: var(--color-brand-500);
+  box-shadow: var(--shadow-sm);
+}
+
+.period-tab-active-bg {
+  position: absolute;
+  inset: 0;
+  background: #ffffff;
+  border-radius: calc(var(--radius-md) - 1px);
+  border: 1.5px solid var(--color-brand-600);
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.1);
+  z-index: 0;
+}
+
+.period-tab-name {
+  font-size: 0.95rem;
+  font-weight: 800;
+  color: var(--color-slate-900);
+  line-height: 1.2;
+}
+
+.period-tab-sub {
+  font-size: 0.7rem;
+  color: var(--color-slate-500);
+  margin-bottom: 4px;
+}
+
+.period-tab-change {
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 1px 4px;
+  border-radius: var(--radius-xs);
+  display: inline-block;
+}
+
+.analysis-period-card {
+  background: #ffffff;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  padding: 1.25rem 1.35rem;
+  box-shadow: var(--shadow-xs);
+}
+
+.period-badge-large {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: var(--radius-md);
+  background: var(--color-brand-50);
+  border: 1.5px solid var(--color-brand-200);
+  color: var(--color-brand-700);
+  font-size: 1rem;
+  font-weight: 800;
+}
+
+/* Range Line Visual */
+.range-visual-box {
+  background: var(--color-slate-50);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 1.1rem 1.25rem;
+  margin-top: 1rem;
+}
+
+.range-track-container {
+  position: relative;
+  padding: 1.75rem 0.5rem 0.5rem 0.5rem;
+}
+
+.range-track-bar {
+  position: relative;
+  width: 100%;
+  height: 8px;
+  background: var(--color-slate-200);
+  border-radius: var(--radius-full);
+}
+
+.range-track-fill {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  background: linear-gradient(90deg, var(--color-brand-400), var(--color-brand-600));
+  border-radius: var(--radius-full);
+}
+
+.range-indicator-dot {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.range-dot-core {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--color-brand-600);
+  border: 3px solid #ffffff;
+  box-shadow: 0 0 0 2px var(--color-brand-500), 0 2px 6px rgba(15, 23, 42, 0.25);
+  animation: pulseGlow 2.5s infinite ease-in-out;
+}
+
+.range-dot-badge {
+  position: absolute;
+  bottom: 22px;
+  background: var(--color-slate-900);
+  color: #ffffff;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+  box-shadow: var(--shadow-sm);
+}
+
+.range-dot-badge::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border-width: 4px;
+  border-style: solid;
+  border-color: var(--color-slate-900) transparent transparent transparent;
+}
+
+.range-track-labels {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-top: 10px;
+  font-size: 0.8rem;
+}
+
+.range-label-left, .range-label-right {
+  display: flex;
+  flex-direction: column;
+}
+
+.range-label-right {
+  align-items: flex-end;
+}
+
+.label-title {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--color-slate-400);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.label-price {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--color-slate-800);
+}
+
+.range-description-note {
+  margin-top: 0.85rem;
+  padding-top: 0.75rem;
+  border-top: 1px dashed var(--border-strong);
+  font-size: 0.82rem;
+  color: var(--color-slate-600);
+  line-height: 1.45;
+}
+
+/* Unavailable Period Box */
+.unavailable-period-box {
+  padding: 2.2rem 1.5rem;
+  text-align: center;
+  background: var(--color-slate-50);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-md);
+}
+
+.unavailable-reasons-list {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 4px;
+  text-align: left;
+  background: #ffffff;
+  padding: 0.65rem 1rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-default);
+  margin-top: 0.5rem;
+}
+
+.unavailable-reason-chip {
+  font-size: 0.8rem;
+  color: var(--color-warn-800);
+  font-weight: 600;
+}
+
+/* Methodology Section */
+.methodology-section {
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--color-slate-50);
+  overflow: hidden;
+}
+
+.methodology-toggle-btn {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background-color var(--transition-fast);
+}
+
+.methodology-toggle-btn:hover {
+  background-color: var(--color-slate-100);
+}
+
+.methodology-content {
+  padding: 0.25rem 1.25rem 1rem 1.25rem;
+  border-top: 1px solid var(--border-subtle);
+  background: #ffffff;
+}
+
+.methodology-list {
+  margin: 0.5rem 0 0 0;
+  padding-left: 1.2rem;
+  font-size: 0.82rem;
+  color: var(--color-slate-600);
+  line-height: 1.6;
+}
+
+.methodology-list li {
+  margin-bottom: 0.35rem;
+}
+
+.methodology-list strong {
+  color: var(--color-slate-800);
+}
+
+/* Disclaimer Notice */
+.analysis-disclaimer-card {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.65rem 0.95rem;
+  background: var(--color-brand-50);
+  border: 1px solid var(--color-brand-200);
+  border-radius: var(--radius-md);
+}
+
 /* Responsive adjustments */
 @media (max-width: 680px) {
   .app-header-inner {
@@ -1315,6 +1688,15 @@ body {
 
   .radio-card-grid {
     grid-template-columns: 1fr;
+  }
+
+  .period-tabs-bar {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .breadth-segments-track {
+    grid-template-columns: repeat(5, 1fr);
+    gap: 4px;
   }
 
   .input-suffix-group {

@@ -16,6 +16,7 @@ import {
 } from './components/MotionHelpers.jsx';
 
 import { PriceHistoryChart } from './components/PriceHistoryChart.jsx';
+import { AssetAnalysisSection } from './components/AssetAnalysisSection.jsx';
 
 const CATEGORY_STYLES = {
   market: { label: 'Thị trường', bg: '#eff6ff', color: '#1d4ed8', border: '#bfdbfe', accent: '#2563eb' },
@@ -157,10 +158,16 @@ function App() {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState(null);
 
+  // Deterministic Asset Analysis state (Feature 07)
+  const [analysisData, setAnalysisData] = useState(null);
+  const [analysisLoading, setAnalysisLoading] = useState(false);
+  const [analysisError, setAnalysisError] = useState(null);
+
   // Request controller refs for stale response protection
   const activeMarketReqRef = useRef(null);
   const activeHistoryReqRef = useRef(null);
   const activeAssetDetailReqRef = useRef(null);
+  const activeAnalysisReqRef = useRef(null);
 
   // News feed state
   const [news, setNews] = useState([]);
@@ -645,6 +652,48 @@ function App() {
       });
   }, []);
 
+  // Fetch deterministic asset analysis (Feature 07)
+  const fetchAnalysisData = useCallback((symbol, isInitial = false) => {
+    if (!symbol) return;
+    if (isInitial) {
+      setAnalysisLoading(true);
+      setAnalysisData(null);
+    }
+    setAnalysisError(null);
+
+    if (activeAnalysisReqRef.current) {
+      activeAnalysisReqRef.current.abort();
+    }
+    const controller = new AbortController();
+    activeAnalysisReqRef.current = controller;
+
+    fetch(`/api/analysis/${encodeURIComponent(symbol)}`, { signal: controller.signal })
+      .then((res) => {
+        if (!res.ok) {
+          return res.json().catch(() => ({})).then((json) => {
+            throw new Error(json.message || `HTTP ${res.status}`);
+          });
+        }
+        return res.json();
+      })
+      .then((json) => {
+        if (controller.signal.aborted) return;
+        if (json.status === 'ok' && json.data) {
+          if (json.data.symbol === symbol) {
+            setAnalysisData(json.data);
+          }
+        } else {
+          throw new Error(json.message || 'Không thể tải phân tích tài sản');
+        }
+        setAnalysisLoading(false);
+      })
+      .catch((err) => {
+        if (controller.signal.aborted || err.name === 'AbortError') return;
+        setAnalysisError(err.message || 'Dữ liệu phân tích tài sản không khả dụng');
+        setAnalysisLoading(false);
+      });
+  }, []);
+
   // Handle range change for history chart
   const handleRangeChange = (newRange) => {
     setHistoryRange(newRange);
@@ -657,6 +706,7 @@ function App() {
     if (activeAssetDetailReqRef.current) activeAssetDetailReqRef.current.abort();
     if (activeMarketReqRef.current) activeMarketReqRef.current.abort();
     if (activeHistoryReqRef.current) activeHistoryReqRef.current.abort();
+    if (activeAnalysisReqRef.current) activeAnalysisReqRef.current.abort();
 
     const controller = new AbortController();
     activeAssetDetailReqRef.current = controller;
@@ -666,6 +716,8 @@ function App() {
     setDetailError(null);
     setAssetDetail(null);
     setHistoryRange('1M');
+    setAnalysisData(null);
+    setAnalysisError(null);
 
     fetch(`/api/assets/${encodeURIComponent(symbol)}`, { signal: controller.signal })
       .then((res) => {
@@ -691,12 +743,14 @@ function App() {
 
     fetchMarketData(symbol, true);
     fetchHistoryData(symbol, '1M');
+    fetchAnalysisData(symbol, true);
   };
 
   const handleBackToList = () => {
     if (activeAssetDetailReqRef.current) activeAssetDetailReqRef.current.abort();
     if (activeMarketReqRef.current) activeMarketReqRef.current.abort();
     if (activeHistoryReqRef.current) activeHistoryReqRef.current.abort();
+    if (activeAnalysisReqRef.current) activeAnalysisReqRef.current.abort();
 
     setSelectedSymbol(null);
     setAssetDetail(null);
@@ -708,6 +762,9 @@ function App() {
     setHistoryError(null);
     setHistoryLoading(false);
     setHistoryRange('1M');
+    setAnalysisData(null);
+    setAnalysisError(null);
+    setAnalysisLoading(false);
   };
 
   // Abort all active requests on component unmount
@@ -716,6 +773,7 @@ function App() {
       if (activeAssetDetailReqRef.current) activeAssetDetailReqRef.current.abort();
       if (activeMarketReqRef.current) activeMarketReqRef.current.abort();
       if (activeHistoryReqRef.current) activeHistoryReqRef.current.abort();
+      if (activeAnalysisReqRef.current) activeAnalysisReqRef.current.abort();
     };
   }, []);
 
@@ -1556,6 +1614,15 @@ function App() {
                       </div>
                     )}
                   </TiltCard>
+
+                  {/* Deterministic Asset Analysis (Feature 07) */}
+                  <AssetAnalysisSection
+                    data={analysisData}
+                    loading={analysisLoading}
+                    error={analysisError}
+                    onRetry={() => fetchAnalysisData(selectedSymbol, false)}
+                    symbol={selectedSymbol}
+                  />
                 </div>
               ) : (
                 /* Asset List View */
