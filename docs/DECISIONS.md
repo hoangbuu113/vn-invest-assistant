@@ -107,3 +107,11 @@ The following architectural and product decisions are confirmed:
   - **Non-Zero Provider Failure Isolation**: When market snapshots are unavailable or malformed, active alerts remain in `active` state and are never evaluated against fake 0 values or fabricated prices.
   - **Delayed Market Context**: Market data delay (~15 minutes) is clearly disclosed. Timestamps and evaluation prices (`last_evaluated_price`, `last_evaluated_at`, `triggered_at`) are recorded honestly without fabricating real-time execution.
   - **Singleton Ownership & Duplicate Safety**: Alerts belong exclusively to the singleton profile. Exact duplicate alerts `(profile_id, asset_id, direction, target_price)` are prevented at DB level and handled idempotently by API.
+- **Personalized Relevant News / Tin của tôi (Feature 13)**:
+  - **Asset Universe**: Personalized news derives its asset universe dynamically from the singleton profile's current holdings and watchlist (`holdings` $\cup$ `watchlist`), deduplicated by symbol.
+  - **Single Page UX**: Integrated directly into the existing News page with `[Tin mới]` and `[Tin của tôi]` sub-tabs; no new top-level pages or navigation items are created.
+  - **Deterministic Textual Association**: Matching is pure deterministic textual association across article titles and summaries using Unicode token boundaries (`\p{L}\p{N}`) to prevent substring false positives.
+  - **Trusted Metadata Only**: V1 matches only against verified asset metadata (`symbol`, `name`, and parenthesized names in metadata); no speculative or manual company alias dictionaries are invented.
+  - **Descriptive Attribution**: Multiple matched assets per article are returned as `matchedAssets: [{ symbol, name }]` and rendered as compact context chips without ranking, scoring, or AI.
+  - **Distinct Empty States**: Strict separation between "user has no holdings/watchlist assets" and "user has assets but no current matched news".
+  - **No Scope Creep**: General news feed, Dashboard news preview, and Asset Detail remain strictly unchanged.

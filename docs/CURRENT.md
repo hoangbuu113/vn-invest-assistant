@@ -93,6 +93,12 @@ BUILD
   - Compact modal ("Đặt cảnh báo giá") accessible from Asset Detail and Watchlist.
   - Dedicated Alert Center section ("Cảnh báo giá") featuring summary KPI cards, simplified tabs (Tất cả, Đang hoạt động, Đã kích hoạt), manual evaluation control ("⚡ Kiểm tra cảnh báo"), price evaluation context, and clear ~15m delay disclosure.
   - 166/166 automated tests passing.
+- **Feature 13 — Personalized Relevant News / Tin của tôi**
+  - Personalized relevance filtering endpoint (`GET /api/news/personalized`) deriving user asset universe dynamically from singleton profile holdings and watchlist with automatic deduplication.
+  - Deterministic Unicode token-boundary matching against trusted asset metadata (`symbol`, `name`, parenthesized subtitles) preventing substring false positives.
+  - Integrated into the existing News page with `[Tin mới]` and `[Tin của tôi]` sub-tabs, matched asset context chips (`[FPT]`, `[VCB]`), and dual empty states (empty user assets vs. no matching current news).
+  - Preserves general News feed, Dashboard news preview, and Asset Detail without AI, sentiment, relevance scores, or recommendations.
+  - 180/180 automated tests passing.
 
 ## PRE-FEATURE-07 HARDENING (COMPLETED)
 - **Historical Market Normalization Hardened** (Patch 06-2, checkpoint `d38ee60`): Deterministic deduplication, exact fractional volumes, robust boundary handling, clean null propagation for missing OHLCV.
@@ -110,5 +116,5 @@ BUILD
   - Default server automated tests are fully isolated from real Supabase and exercise actual production-path query predicates.
 
 ## CURRENT STATE
-Feature 12 (Price Alerts V1 / Cảnh báo giá) is **COMPLETE** (checkpoint `f9eb5ca`, 166/166 tests PASS, client build clean).
+Feature 13 (Personalized Relevant News / Tin của tôi) is **COMPLETE** (checkpoint `2e4103d`, 180/180 tests PASS, client build clean).
 The next feature has not been selected yet; awaiting Project Director decision.
