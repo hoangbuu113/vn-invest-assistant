@@ -14,7 +14,7 @@ This document serves as the durable strategic memory for project sequencing, fea
 
 ---
 
-## 2. Completed Features (01–20A)
+## 2. Completed Features (01–20)
 
 - **Feature 01**: Asset Browser
 - **Feature 02**: Market Snapshot
@@ -35,21 +35,24 @@ This document serves as the durable strategic memory for project sequencing, fea
 - **Feature 17**: Ledger Authority & Position Integrity
 - **Feature 18**: Market Provider Abstraction
 - **Feature 19**: FX & Cross-Currency Valuation Foundation (COMPLETE)
-- **Feature 20A**: Representative Real Multi-Asset Providers (COMPLETE)
+- **Feature 20**: Real Multi-Asset Providers & Controlled Universe (COMPLETE)
+  - **Feature 20A**: Representative Real Multi-Asset Providers (COMPLETE)
+  - **Feature 20B**: Controlled Crypto Universe Expansion (COMPLETE)
 
 ---
 
-## 3. Current Feature: Feature 20B
+## 3. Current Next Feature: Feature 21
 
-### Feature 20B — Controlled Crypto Universe Expansion
-- **Status**: IMPLEMENTATION NEXT.
+### Feature 21 — Asset-Class Market & History Semantics
+- **Status**: NEXT IN SEQUENCE.
 - **Core Invariant**:
-  $$\text{Canonical Crypto Asset} \longrightarrow \text{Explicit CoinGecko Coin ID Mapping} \longrightarrow \text{Normalized 24/7 Snapshot}$$
+  $$\text{Asset Class Schedule} \longrightarrow \text{Session / 24/7 Calendar Rules} \longrightarrow \text{Normalized Historical Bars \& Daily Closes}$$
 - **Key Objectives**:
-  - Expand canonical universe with verified liquid cryptocurrencies (~Top 40 major/liquid assets).
-  - Explicit immutable provider IDs mapped in `public.asset_provider_mappings` (no ticker inference).
-  - Continuous 24/7 market policy and USD quote currency.
-  - Preserve non-VND transaction guard and zero-loss financial baseline.
+  - Implement class-specific calendar rules and trading session boundaries.
+  - Continuous 24/7 crypto candle aggregation and daily bar completion.
+  - Gold spot continuous trading calendar rules.
+  - Prevent non-VN assets from entering Vietnamese equity exchange completion normalization.
+  - Provide clean foundation for Feature 22 (Deterministic Asset Analysis V2).
 
 ---
 

@@ -4,18 +4,17 @@ This document defines the canonical architectural and conceptual model for multi
 
 ---
 
-## 1. Current Implementation Status (Features 16–20A)
+## 1. Current Implementation Status (Features 16–20)
 
-Features 16 through 20A establish the canonical schema, ledger authority, provider abstraction, FX valuation, and representative multi-asset universe:
+Features 16 through 20 establish the canonical schema, ledger authority, provider abstraction, FX valuation, and full controlled multi-asset universe:
 
-- **Verified Production Universe (12 Canonical Assets)**:
+- **Verified Production Universe (49 Canonical Assets)**:
   - **Vietnamese Equities & ETFs** (`VN_EXCHANGE`, `Asia/Ho_Chi_Minh`, `VND`, `share`):
     - `VCB`, `FPT`, `HPG`, `VNM`, `E1VFVN30`, `FUEVFVND`, `FUESSVFL`
     - Provider mapping: `yahoo` $\rightarrow$ `<SYMBOL>.VN`
-  - **Cryptocurrencies** (`CONTINUOUS_24_7`, `UTC`, `USD`, `coin`):
-    - `BTC` (provider: `coingecko` $\rightarrow$ `bitcoin`)
-    - `ETH` (provider: `coingecko` $\rightarrow$ `ethereum`)
-    - `SOL` (provider: `coingecko` $\rightarrow$ `solana`)
+  - **Cryptocurrencies (40 Canonical Assets)** (`CONTINUOUS_24_7`, `UTC`, `USD`, `coin`):
+    - `BTC` (`bitcoin`), `ETH` (`ethereum`), `SOL` (`solana`), `BNB` (`binancecoin`), `XRP` (`ripple`), `TRX` (`tron`), `HYPE` (`hyperliquid`), `ZEC` (`zcash`), `DOGE` (`dogecoin`), `RAIN` (`rain`), `XMR` (`monero`), `LINK` (`chainlink`), `WBT` (`whitebit`), `ADA` (`cardano`), `XLM` (`stellar`), `BCH` (`bitcoin-cash`), `GRAM` (`the-open-network`), `LTC` (`litecoin`), `HBAR` (`hedera-hashgraph`), `AVAX` (`avalanche-2`), `SHIB` (`shiba-inu`), `SUI` (`sui`), `UNI` (`uniswap`), `NEAR` (`near`), `TAO` (`bittensor`), `PUMP` (`pump-fun`), `AAVE` (`aave`), `ASTER` (`aster-2`), `WLFI` (`world-liberty-financial`), `ONDO` (`ondo-finance`), `ENA` (`ethena`), `MORPHO` (`morpho`), `PEPE` (`pepe`), `DOT` (`polkadot`), `WLD` (`worldcoin-wld`), `ETC` (`ethereum-classic`), `POL` (`polygon-ecosystem-token`), `LIT` (`lighter`), `ATOM` (`cosmos`), `JUP` (`jupiter-exchange-solana`)
+    - Provider mapping: `coingecko` $\rightarrow$ `<EXPLICIT_COINGECKO_ID>`
   - **Gold Spot** (`GLOBAL_24_5`, `UTC`, base: `XAU`, quote: `USD`, `oz`):
     - `XAU/USD` (provider: `alphavantage` $\rightarrow$ `XAU` via `GOLD_SILVER_SPOT`)
   - **Foreign Exchange Context** (`GLOBAL_24_5`, `Asia/Ho_Chi_Minh`, base: `USD`, quote: `VND`, unit: `null`):
@@ -31,11 +30,11 @@ Features 16 through 20A establish the canonical schema, ledger authority, provid
   - Database trigger guard (`enforce_vnd_portfolio_transaction_asset`) strictly enforcing VND-only transaction accounting until multi-currency FX accounting is implemented.
 
 - **Current Intentional Limitations**:
-  - Crypto universe expansion beyond representative assets is in progress (Feature 20B).
   - Specialized historical session, calendar, and candlestick rules for 24/7 crypto and global gold/FX are deferred to Feature 21; history requests for non-VN assets return explicit `UNSUPPORTED_MARKET_POLICY`.
   - Non-VND cost basis and unrealized P/L remain unavailable until acquisition-time FX accounting exists.
   - Non-VND BUY/SELL transactions are strictly blocked at database trigger level.
   - The single VND cash ledger remains authoritative for all cash operations (no multi-currency cash balances).
+  - No automatic crypto-universe synchronization (universe maintenance is controlled and intentional).
   - Open-ended mutual funds (NAV scheduled) remain deferred.
 
 ---

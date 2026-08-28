@@ -113,6 +113,26 @@ The following architectural and product decisions are confirmed and authoritativ
   - Asset calendar policies: crypto uses `CONTINUOUS_24_7` with `UTC` timezone; Gold Spot uses `GLOBAL_24_5` with `UTC` timezone.
   - Crypto and gold spot historical bars remain explicitly unsupported (`UNSUPPORTED_MARKET_POLICY`) until Feature 21.
   - Open-ended NAV mutual funds remain deferred.
+- **Controlled Crypto Universe Expansion (Feature 20B)**:
+  - **Universe Scope**: Default canonical crypto universe contains exactly 40 assets (3 existing from Feature 20A: `BTC`, `ETH`, `SOL`; 37 added in Feature 20B).
+  - **Discovery Snapshot Policy**:
+    - Candidate must concurrently satisfy: Top 100 CoinGecko market cap **AND** Top 100 CoinGecko 24h volume.
+    - Deterministic category exclusions: verified stablecoins, wrapped assets, bridged representations, liquid staking derivatives, tokenized offchain funds/credit securities, and duplicate commodity exposure (`XAUT`, `PAXG`).
+    - Candidates sorted by market-cap rank ascending, scanning downward until reaching exactly 40 eligible canonical assets.
+  - **Durable Identity Policy**:
+    - Market rank is discovery metadata only; rank is **NOT** persisted as canonical identity metadata.
+    - Future rank changes or market fluctuations do not automatically mutate, delete, or deactivate canonical assets.
+    - Canonical UUIDs are explicit, deterministic, and permanently stable across migrations, development seeds, and remote databases.
+    - Explicit CoinGecko IDs (`provider_symbol`) in `public.asset_provider_mappings` represent provider identity; no ticker inference or runtime scraping.
+    - Future universe expansions or deactivations require deliberate, controlled maintenance.
+  - **Migration & Identity Safety Policy**:
+    - Absent identity $\rightarrow$ INSERT.
+    - Exact existing identity $\rightarrow$ NO-OP.
+    - Symbol exists under a different UUID $\rightarrow$ FAIL LOUDLY (preflight exception).
+    - UUID exists under a different symbol $\rightarrow$ FAIL LOUDLY (preflight exception).
+    - Existing asset has incompatible semantics $\rightarrow$ FAIL LOUDLY.
+    - Existing provider mapping has conflicting `provider_symbol` $\rightarrow$ FAIL LOUDLY.
+    - `ON CONFLICT (symbol) DO UPDATE` is strictly prohibited for canonical assets to prevent silent identity corruption.
 - **Numerical Precision**: Intermediate financial calculations retain full floating-point/numeric precision without premature two-decimal rounding. Rounding is presentation-only.
 - **Data Labeling**: Market snapshots are clearly disclosed as delayed (~15 min for equities) with explicit timestamp provenance. Missing source timestamps remain `null`.
 

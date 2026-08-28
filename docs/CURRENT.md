@@ -1,13 +1,14 @@
 # Current Project Status
 
 ## LATEST VERIFIED CHECKPOINT
-- **Commit**: `caf1414`
+- **Commit**: `cec1971`
 - **Branch**: `main`
 - **Feature 19 Commit**: `7a2129d`
 - **Feature 20A Commit**: `caf1414`
+- **Feature 20B Commit**: `cec1971`
 - **Automated Test Suite**:
   - Latest Full Backend Regression: 265/265 PASS (at Feature 19 high-risk gate)
-  - Feature 20A Targeted Final Gate: 25/25 PASS + Live End-to-End Application & Provider Verification
+  - Feature 20B Targeted Final Gate: 52/52 PASS + Live End-to-End Application & Remote Provider Verification
 - **Client Build**: Production build clean
 - **Git Working Tree**: Clean
 - **GitHub Remote**: No origin configured / remote state not verified (local git authority)
@@ -16,13 +17,13 @@
 MULTI-ASSET FOUNDATION & UNIVERSE
 
 ## CURRENT NEXT PROJECT TASK
-Feature 20B — Controlled Crypto Universe Expansion (expanding toward Top 40 liquid crypto assets with explicit CoinGecko IDs). See `docs/ROADMAP.md`.
+Feature 21 — Asset-Class Market & Historical Semantics (class-specific calendar rules, trading session hours, 24/7 crypto candles, NAV strike points, and bar completion logic). See `docs/ROADMAP.md`.
 
 ---
 
 ## PRODUCTION & LIVE PROVIDER VERIFIED PATHS
 - **Yahoo Finance**: Vietnamese listed equities & exchange-traded ETFs (`VCB`, `FPT`, `HPG`, `VNM`, `E1VFVN30`, `FUEVFVND`, `FUESSVFL`)
-- **CoinGecko**: Cryptocurrency spot snapshots (`BTC`, `ETH`, `SOL`) via explicit immutable coin IDs (`bitcoin`, `ethereum`, `solana`)
+- **CoinGecko**: Cryptocurrency spot snapshots (40 canonical assets: `BTC`, `ETH`, `SOL`, `BNB`, `XRP`, `TRX`, `HYPE`, `ZEC`, `DOGE`, `RAIN`, `XMR`, `LINK`, `WBT`, `ADA`, `XLM`, `BCH`, `GRAM`, `LTC`, `HBAR`, `AVAX`, `SHIB`, `SUI`, `UNI`, `NEAR`, `TAO`, `PUMP`, `AAVE`, `ASTER`, `WLFI`, `ONDO`, `ENA`, `MORPHO`, `PEPE`, `DOT`, `WLD`, `ETC`, `POL`, `LIT`, `ATOM`, `JUP`) via explicit immutable coin IDs
 - **Alpha Vantage**: Gold Spot snapshot (`XAU/USD`) via `GOLD_SILVER_SPOT` with `symbol=XAU`
 - **Twelve Data**: Direct `USD -> VND` FX exchange rate resolution
 
@@ -31,11 +32,11 @@ Feature 20B — Controlled Crypto Universe Expansion (expanding toward Top 40 li
 - Authoritative Transactions: 1 row (`SELL` `E1VFVN30`: 12,121 @ 40,000 VND)
 - Authoritative Cash Ledger: 3 rows (`OPENING_BALANCE`: 100,000,000; `SELL`: 484,840,000; `DEPOSIT`: 21,212,112)
 - Authoritative Current Cash: 606,052,112 VND
-- Remote Canonical Universe: 12 assets total across 4 verified asset classes
+- Remote Canonical Universe: 49 assets total (40 crypto, 7 VN stocks/ETFs, 1 gold spot, 1 FX context) across 4 verified providers
 
 ---
 
-## COMPLETED FEATURES SUMMARY (01–20A)
+## COMPLETED FEATURES SUMMARY (01–20)
 
 - **Features 01–03**: Asset Browser (`/api/assets`), Market Snapshot (delayed Yahoo Finance `/api/market/:symbol`), News Feed (CafeF RSS `/api/news`).
 - **Feature 04**: Investor Profile (`GET`/`PUT /api/profile`), singleton enforcement, holdings management.
@@ -53,15 +54,7 @@ Feature 20B — Controlled Crypto Universe Expansion (expanding toward Top 40 li
 - **Feature 16**: Canonical Multi-Asset Foundation (authoritative asset UUID, decoupled provider mapping schema, VND transaction guard).
 - **Feature 17**: Ledger Authority & Position Integrity (opening-position baselines without synthetic BUYs, locking upon subsequent trade, direct holdings DML denied).
 - **Feature 18**: Market Provider Abstraction (provider-neutral snapshot/history boundary, adapter modularization).
-- **Feature 19**: FX & Cross-Currency Valuation Foundation:
-  - Universal reporting currency is strictly `VND`.
-  - Native valuation and VND reporting valuation are decoupled.
-  - VND assets bypass FX; non-VND assets require exact direct `quoteCurrency -> VND` quote.
-  - Missing/unavailable FX produces explicit `valuationStatus: 'partial'`, never 1:1 fallback or fake 0s.
-  - Non-VND cost basis and unrealized P/L remain unavailable until acquisition-time FX accounting exists.
-- **Feature 20A**: Representative Real Multi-Asset Providers:
-  - Integrated production providers: Twelve Data (FX `USD/VND`), CoinGecko (`BTC`, `ETH`, `SOL`), Alpha Vantage (`XAU/USD` Gold Spot), Yahoo Finance (`FUEVFVND`, `FUESSVFL`).
-  - Migration applied remotely: 12 canonical assets total, 12 explicit provider mappings, zero duplicate symbols.
-  - Preserved original 5 canonical UUIDs and financial development state.
-  - Explicit unsupported history status for crypto and gold until Feature 21.
-  - Non-VND BUY/SELL remains strictly blocked at database trigger level.
+- **Feature 19**: FX & Cross-Currency Valuation Foundation (VND universal reporting currency, decoupled native/reporting valuation, direct-to-VND conversion, partial valuation on missing FX, blocked non-VND transactions).
+- **Feature 20**: Real Multi-Asset Providers & Controlled Universe (COMPLETE):
+  - **20A**: Real Multi-Asset Provider Onboarding (Twelve Data FX, CoinGecko BTC/ETH/SOL, Alpha Vantage Gold Spot, Yahoo VN ETFs; 12 canonical assets total).
+  - **20B**: Controlled Crypto Universe Expansion (Audited Top 100 Market Cap $\cap$ Top 100 24h Volume snapshot with deterministic exclusions; expanded to exactly 40 liquid canonical crypto assets with explicit CoinGecko provider mappings, fail-fast migration identity preflight assertions, and preserved financial baseline).
