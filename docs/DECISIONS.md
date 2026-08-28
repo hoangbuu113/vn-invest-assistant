@@ -1,124 +1,68 @@
-# Confirmed Decisions
+# Confirmed Product & Architectural Decisions
 
-The following architectural and product decisions are confirmed:
+The following architectural and product decisions are confirmed and authoritative across the project:
 
-- **Target User**: Single-user application (personal use only).
-- **Supported Asset Classes**:
-  - Vietnamese stocks
-  - ETFs / funds
-  - Gold
-  - Bank deposits
-  - Bonds
-- **Scope of Execution**: No trade execution and no broker integration; analysis and ranking only.
-- **Investor Profile & Holdings (Feature 04 & Hardening)**:
-  - **V1 Model**: Exactly ONE singleton investor profile without authentication or multi-user accounts.
-  - **Database Singleton Enforcement**: The single-profile invariant is enforced directly at the database level (`singleton_key SMALLINT NOT NULL DEFAULT 1 CHECK (singleton_key = 1) UNIQUE`).
-  - **Reproducible Migration**: Supabase migration (`supabase/migrations/20260827122345_add_investor_profile_singleton_key.sql`) is the authoritative source for the deployed singleton constraint.
-  - **Available Capital**: Stored as `cash_available` (money currently available to deploy into investments).
-  - **Strict Financial JSON Validation**: Persisted financial JSON fields (`cash_available`, `quantity`, `average_cost`) require real, finite JSON numbers; no `Number(...)` coercion from strings, booleans, or arrays.
-  - **Risk Tolerance Values**: `low`, `moderate`, `high`.
-  - **Investment Horizon Values**: `short`, `medium`, `long`.
-  - **Holdings Model & Scoping**: Stored in `public.holdings` referencing profile and asset (`asset_id`, `quantity` > 0, `average_cost` >= 0) with unique asset-per-profile constraint. All holdings operations (`GET`, `POST`, `PUT`, `DELETE`) are strictly scoped to the singleton profile.
-  - **Localization**: All user-facing UI is in Vietnamese; internal code, API routes, and database identifiers remain in English.
-- **Portfolio Overview (Feature 05 & Hardening)**:
-  - **Pricing Condition**: A holding is priced only when market price is finite and > 0.
-  - **Full Precision Valuation**: Derived portfolio values use full precision; rounding is presentation-only.
-  - **Derived Metrics**: Portfolio metrics (total cost basis, total market value, unrealized P/L, total portfolio value) are calculated on demand, not stored as source-of-truth.
-  - **Missing Prices & Partial Valuation**: Missing/unusable prices produce partial valuation (`valuationStatus: 'partial'`), never fake zero valuation or fabricated price = 0.
-  - **Market Data Labeling**: Yahoo market data remains labeled as delayed with timestamp (~15 min delay).
-  - **Aggregate P/L Calculation**: Aggregate P/L only uses holdings with usable market prices.
-  - **Stale Threshold**: No fixed stale-age threshold in V1.
-  - **Out of Scope for Feature 05**: Feature 05 does not include realized P/L, transaction history, fees/taxes, charts, AI, recommendations, or portfolio optimization.
-- **Market Snapshot & Historical Price (Features 02, 06 & Hardening)**:
-  - **Missing Value Handling**: Never fabricate missing OHLCV or snapshot numeric values. Missing values remain `null`.
-  - **Timestamp Integrity**: Missing source timestamps remain `null`; never substitute request or server time.
-  - **Full Precision Metrics**: Financial percentage calculations use full precision internally without premature rounding.
-  - **Semantic Distinction**: Snapshot price and historical daily-close semantics remain distinct.
-  - **Unavailable Percentages**: Unavailable percentages are shown as unavailable, not 0%.
-  - **Supported Ranges**: V1 historical price ranges are `1W`, `1M`, `3M`, `6M`, `1Y`.
-  - **Interval**: All V1 historical ranges use daily bars (`1d`).
-  - **Provider & Fetching**: Historical price data is fetched on demand from Yahoo Finance.
-  - **Persistence**: Historical bars and derived range metrics are not persisted as source-of-truth.
-  - **Data Integrity**: Missing trading days are not synthesized.
-  - **Error Handling**: Unsupported/missing history returns an unavailable/error state rather than fabricated data.
-  - **Deterministic Metrics**: Period metrics calculated on demand: start price, latest price, absolute change, percentage change, period high, period low, and valid sessions.
-  - **Out of Scope for Feature 06**: No MA, RSI, MACD, support/resistance, bullish/bearish scoring, AI, recommendations, prediction, or backtesting in Feature 06.
-  - **Labeling**: Current/latest historical data keeps delayed-data wording and timestamp; no fixed stale-age threshold.
-- **Personalization Factors**: Analysis personalized using:
-  - Available capital
-  - Risk tolerance
-  - Investment horizon
-  - Current portfolio
-- **Market Data Strategy**:
-  - **V1**: Uses Yahoo Finance delayed market snapshots (~15 min delay) with manual and 5-minute auto-refresh.
-  - **Realtime**: Sub-second broker/provider realtime streaming remains a long-term goal, deferred until stable broker/API access is established.
-- **News Ingestion & Processing**:
-  - **V1 News Source**: CafeF RSS feeds across 4 key categories (`thi-truong-chung-khoan`, `doanh-nghiep`, `vi-mo-dau-tu`, `tai-chinh-quoc-te`).
-  - **V1 Relevance Filtering**: Deterministic keyword and context filtering to eliminate non-investment noise (accidents, crimes, entertainment, sports, lifestyle) and require positive economic/market signals for global items.
-  - **AI Analysis**: Deferred to subsequent phase/feature.
-  - Financial/news detection target around every 30–60 seconds in later iterations.
-- **Testing & Safety Invariants**:
-  - **Default Test Isolation**: Default automated tests must not mutate real Supabase data.
-  - **Production-Path Testing**: Critical financial logic and access controls should use production-path tests where practical. Tests that merely reimplement production ownership logic in-memory are insufficient.
-- **Project Philosophy**: Learning project for full-stack/vibe coding, but must remain practically usable in real life.
-- **Scoring Methodology**: Quantitative scoring should be evidence/data-driven (derived from data, rules, or quantitative models) rather than invented by AI intuition alone.
-- **Deterministic Asset Analysis (Feature 07)**:
-  - **Reference Price & Date**: Analysis uses `analysisPrice` and `analysisAsOf` derived from the last completed daily close; the current-day (or future) Vietnam calendar session is excluded in V1.
-  - **Lookback Windows**: Five standard calendar lookback periods (`1W`, `1M`, `3M`, `6M`, `1Y`) backed by an internal 2Y daily historical bar superset.
-  - **Market Snapshot Separation**: Market snapshot context is fetched optionally and kept strictly separate without participating in or invalidating deterministic historical calculations.
-  - **Data Integrity & No Fabrication**: Missing or insufficient metrics remain `null`/`unavailable`; values are never fabricated or defaulted to 0.
-  - **Metric Semantics**: `priceChangePct` is descriptive unadjusted close change (not total return; excludes cash dividends and full corporate event modeling).
-  - **Distance Below High**: `distanceBelowHighPct` is non-negative percentage distance below period high (0% indicates at period peak).
-  - **Cross-Period Breadth**: `positivePeriodRatio` describes the fraction of available periods with positive price change (requires >= 3 valid periods).
-  - **Pure Descriptive Model**: No overall score, momentum rating, stock recommendation, BUY/SELL/HOLD signal, price target, or AI intuition.
-  - **Client Role**: The client displays backend metrics as authoritative source-of-truth and does not recalculate financial analysis metrics.
-- **Watchlist / Danh sách theo dõi (Feature 08)**:
-  - **Product Meaning**: Represents "Tài sản tôi muốn theo dõi" only. It is NOT a recommendation list, ranking, signal list, or BUY/SELL list.
-  - **Minimal Data Model**: Stored in `public.watchlist_items` referencing `investor_profile(id)` and `assets(id)` with `UNIQUE (profile_id, asset_id)` constraint.
-  - **Singleton Profile Invariant**: Watchlist operations are strictly scoped to the server-determined singleton investor profile. Client-supplied `profile_id` is never accepted or trusted.
-  - **Idempotency & Conflict Safety**: Adding an existing asset returns the existing record deterministically without duplicate creation or error.
-  - **Deterministic Removals**: Removing a nonexistent item returns a clean status without crashing or affecting foreign data.
-  - **Failure Isolation**: One failed market snapshot does not break the watchlist view. Assets with unavailable prices show "Chưa có dữ liệu giá" without fabricating zero values, 0%, or current timestamps.
-  - **No Scope Expansion**: No price alerts, push notifications, email, notes, target prices, AI rankings, or recommendation status.
-- **Personal Investment Dashboard / Tổng quan (Feature 09)**:
-  - **Dashboard Role**: Acts as a high-level cross-app overview answering the investor's current state, watched assets, and latest market news in seconds; it does not duplicate the detailed Portfolio page.
-  - **Holding Details Scope**: Detailed holding breakdown and cost-basis analysis stay exclusively in "Danh mục". The Dashboard summary shows only high-level totals and holding counts.
-  - **Holding Count Invariant**: Holding count is derived strictly from real holdings collection length (`holdings.length`); unavailable prices never make a holding count become zero.
-  - **Section-Level Failure Isolation**: Portfolio overview, watchlist market snapshots, and news feed load in parallel with section-level error isolation so that an issue in one feed never blanks other dashboard components.
-  - **Watchlist Movers Semantics**: Descriptive sorting of available delayed percentage changes only. Omitted gracefully if fewer than 2 valid quotes exist. Never labeled as recommendations, buy signals, or top picks.
-  - **Data Integrity**: Missing values are preserved as unavailable and not converted to zero; market prices remain clearly labeled as delayed (~15m).
-- **Portfolio Composition & Concentration (Feature 10)**:
-  - **Valuation Basis**: Composition is derived exclusively from the existing portfolio overview valuation on known value basis (`full_portfolio_value`, `known_value_only`, `cash_only`, `no_known_value`).
-  - **Partial Valuation Transparency**: Partial valuation remains explicit (`valuationCoverageLevel: 'partial'`), with clear notes indicating percentages represent known/priced value only.
-  - **Unpriced Holdings Integrity**: Holdings with unavailable market prices are preserved in full view and are never treated as zero or omitted.
-  - **Descriptive Concentration Model**: Concentration metrics (largest holding and top 3 concentration) are purely descriptive facts. No diversification score, concentration score, risk rating, low/medium/high classification, or rebalance recommendations are created.
-  - **Client Role**: Frontend consumes backend composition metrics without client-side formula recalculation, rendering an interactive 2.5D SVG Donut and clear tabular breakdowns.
-- **Asset Comparison / So sánh tài sản (Feature 11)**:
-  - **Descriptive Comparison Invariant**: Comparison is strictly descriptive. No ranking, winner/loser labels, scores, ratings, performance predictions, or BUY/SELL/HOLD advice.
-  - **Selection Constraints**: Supports comparing 2 to 4 assets side-by-side with case-insensitive duplicate prevention.
-  - **Shared Lookback Period**: Exactly one shared period selector (`1W`, `1M`, `3M`, `6M`, `1Y`) updates all selected assets synchronously.
-  - **Backend Metric Authority**: Deterministic Feature 07 metrics are consumed directly from the backend without client-side recalculation in React.
-  - **Normalized Chart Semantics**: The relative price chart normalizes prices to base = 100 at the start of the period for visual relative-price comparison only; it is not total return or investment performance.
-  - **Failure Isolation**: Each compared asset fetches in parallel with independent `AbortController` and error boundaries. A failed request on one asset never breaks other compared assets.
-- **Price Alerts V1 / Cảnh báo giá (Feature 12)**:
-  - **Persistent One-Shot Lifecycle**: Alerts are stored persistently in `public.price_alerts` with a one-shot lifecycle (`active` -> `triggered`). Once triggered, alerts remain visible and do not automatically re-arm; users can manually reactivate them.
-  - **Explicit Evaluation Semantics**: Alerts are evaluated deterministically when the app or user explicitly refreshes/evaluates them (`POST /api/alerts/evaluate`). No daemon, cron, worker, push notifications, email, or SMS exist in V1.
-  - **Condition Operators**: `above` triggers iff `validPrice >= targetPrice` ("Giá đạt hoặc vượt"); `below` triggers iff `validPrice <= targetPrice` ("Giá giảm xuống hoặc thấp hơn").
-  - **Non-Zero Provider Failure Isolation**: When market snapshots are unavailable or malformed, active alerts remain in `active` state and are never evaluated against fake 0 values or fabricated prices.
-  - **Delayed Market Context**: Market data delay (~15 minutes) is clearly disclosed. Timestamps and evaluation prices (`last_evaluated_price`, `last_evaluated_at`, `triggered_at`) are recorded honestly without fabricating real-time execution.
-  - **Singleton Ownership & Duplicate Safety**: Alerts belong exclusively to the singleton profile. Exact duplicate alerts `(profile_id, asset_id, direction, target_price)` are prevented at DB level and handled idempotently by API.
-- **Personalized Relevant News / Tin của tôi (Feature 13)**:
-  - **Asset Universe**: Personalized news derives its asset universe dynamically from the singleton profile's current holdings and watchlist (`holdings` $\cup$ `watchlist`), deduplicated by symbol.
-  - **Single Page UX**: Integrated directly into the existing News page with `[Tin mới]` and `[Tin của tôi]` sub-tabs; no new top-level pages or navigation items are created.
-  - **Deterministic Textual Association**: Matching is pure deterministic textual association across article titles and summaries using Unicode token boundaries (`\p{L}\p{N}`) to prevent substring false positives.
-  - **Trusted Metadata Only**: V1 matches only against verified asset metadata (`symbol`, `name`, and parenthesized names in metadata); no speculative or manual company alias dictionaries are invented.
-  - **Descriptive Attribution**: Multiple matched assets per article are returned as `matchedAssets: [{ symbol, name }]` and rendered as compact context chips without ranking, scoring, or AI.
-  - **Distinct Empty States**: Strict separation between "user has no holdings/watchlist assets" and "user has assets but no current matched news".
-  - **No Scope Creep**: General news feed, Dashboard news preview, and Asset Detail remain strictly unchanged.
-- **Transaction Ledger / Sổ lệnh giao dịch (Feature 14)**:
-  - **Immutable Ledger in V1**: Transaction records in `public.portfolio_transactions` are immutable; no update, edit, delete, or undo actions exist in V1.
-  - **Atomic Database Mutation**: BUY/SELL activity and holdings quantity/cost basis mutations execute atomically inside a single PostgreSQL `SECURITY DEFINER` RPC (`create_portfolio_transaction`). Direct REST mutations on holdings are deprecated in favor of atomic transaction logging.
-  - **Weighted-Average Cost Method**: Holdings average cost is updated on BUY using exact weighted-average formula: `((prevQty * prevAvgCost) + (buyQty * buyPrice)) / (prevQty + buyQty)`.
-  - **Pre-Sell Realized P/L**: SELL realized P/L is computed as `(sellPrice - preSellAverageCost) * sellQuantity` and persisted directly on the SELL transaction record. The holding's average cost remains unchanged upon partial sell.
-  - **Opening Position Semantics**: Existing holdings may predate the Feature 14 ledger; no historical BUY transactions are fabricated for existing holdings.
-  - **Frontend Responsibility**: The frontend strictly consumes backend calculations as authoritative source-of-truth and never recalculates weighted average cost, realized P/L, resulting holding quantities, or portfolio financials in React.
+---
+
+## 1. General Product & User Model
+- **Target User**: Single-user application (personal use only; no multi-tenant or authentication complexity in V1).
+- **Reporting Currency**: **VND** is the universal portfolio reporting currency. Native quote currencies are preserved and converted using explicit FX rates. Missing FX rates produce partial/unavailable valuations, never assumed 1:1 conversions.
+- **Scope of Execution**: Strictly analysis, tracking, and decision support. No trade execution, no broker order placement, and no automated fund management.
+- **AI Principles**: All quantitative metrics, valuations, and rankings are deterministic facts computed by models/formulas. LLMs explain and summarize facts; they never fabricate financial figures or ratings.
+
+---
+
+## 2. Multi-Asset Strategy & Market Semantics
+- **Priority Asset Universe**:
+  1. Vietnamese stocks
+  2. ETFs / funds
+  3. Gold
+  4. USD / FX (initially USD/VND)
+  5. Crypto (~Top 40 major/liquid assets)
+- **Market Calendars & Time Semantics**:
+  - Vietnam equities follow exchange session trading hours.
+  - Crypto operates 24/7 with no exchange session closes.
+  - FX and commodities have independent global trading sessions.
+  - There is no single universal "daily bar completion" rule; market calendars and completed-bar logic are asset-class specific.
+- **Symbol & Provider Independence**: Canonical asset identity (`id`, `symbol`, `name`, `asset_type`, `quote_currency`) is decoupled from provider-specific ticker symbols (such as Yahoo `.VN`). Feature code must not construct provider-specific ticker strings.
+- **Analysis Specialization**: Quantitative analysis rules must be tailored to asset-class mechanics; equity-specific metrics are not blindly applied to crypto, gold, or FX.
+
+---
+
+## 3. Financial Authority & Double-Ledger Architecture
+- **Position Authority (Transaction Ledger — Feature 14)**:
+  - `public.portfolio_transactions` is the canonical immutable record of position changes (BUY / SELL).
+  - Positions use the **weighted-average cost** method: `((prevQty * prevAvgCost) + (buyQty * buyPrice)) / (prevQty + buyQty)`.
+  - Realized P/L is computed upon SELL as `(sellPrice - preSellAvgCost) * sellQuantity` and persisted directly on the transaction record.
+  - Existing holdings predating Feature 14 are valid opening positions; historical transactions are not fabricated.
+- **Cash Authority (Cash Ledger — Feature 15)**:
+  - `public.cash_ledger_entries` is the authoritative source of truth for cash capital.
+  - Opening cash baseline represents cash at Feature 15 activation, **NOT** lifetime starting wealth or initial deposit.
+  - Movements: `OPENING_BALANCE`, `DEPOSIT`, `WITHDRAWAL`, `BUY` (cash outflow), `SELL` (cash inflow).
+  - BUY and SELL cash mutations execute atomically with portfolio transaction logging and holding updates in PostgreSQL.
+  - No negative cash balances are permitted in V1 (withdrawals or buys exceeding available cash are rejected).
+  - The `investor_profile.cash_available` column and `holdings` table serve strictly as synchronized read caches / compatibility layers, not competing independent financial authorities.
+  - The frontend never calculates authoritative cash totals or positions itself.
+- **Deprecation of Direct Mutations**:
+  - Direct user-facing cash editing is removed. Cash changes must go through deposit/withdrawal ledger operations.
+  - Direct holdings CRUD (`POST`/`PUT`/`DELETE /api/holdings`) is retained solely for legacy backend compatibility; new position changes are recorded via immutable transactions.
+
+---
+
+## 4. Valuation, Market Data & Precision Invariants
+- **Valuation Strategy (Feature 05)**:
+  - Portfolio metrics (cost basis, market value, unrealized P/L, total portfolio value) are computed on demand from authoritative holdings + latest prices. They are not stored as independent persisted truth.
+  - A holding is priced only when market price is finite and > 0.
+  - Missing market data or FX rates produce explicit partial valuation (`valuationStatus: 'partial'`), never fake 0 prices or fabricated valuations.
+- **Numerical Precision**: Intermediate financial calculations retain full floating-point/numeric precision without premature two-decimal rounding. Rounding is presentation-only.
+- **Data Labeling**: Market snapshots are clearly disclosed as delayed (~15 min for equities) with explicit timestamp provenance. Missing source timestamps remain `null`.
+
+---
+
+## 5. Cross-Feature Relationships
+- **Portfolio Overview (Feature 05)**: Combines holdings + cash overview + market data on demand.
+- **Portfolio Composition (Feature 10)**: Derives allocations and concentration metrics purely from Feature 05 portfolio valuation.
+- **Asset Comparison (Feature 11)**: Consumes canonical Feature 07 analysis and historical price metrics across 2–4 selected assets without client-side formula recalculation.
+- **Price Alerts (Feature 12)**: One-shot persistent alert lifecycle (`active` -> `triggered`) evaluated deterministically against canonical market snapshots.
+- **Personalized Relevant News (Feature 13)**: Dynamic token matching against current holdings and watchlist assets; acts as a filtered view of the canonical news feed without a separate ingestion pipeline.
+- **Personal Investment Dashboard (Feature 09)**: High-level overview coordinating summary metrics, watchlist movers, and latest news. Expansion is frozen until multi-asset foundation contracts are established.

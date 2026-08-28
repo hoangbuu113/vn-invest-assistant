@@ -4,6 +4,7 @@ All AI agents and contributors working in this repository must strictly adhere t
 
 ## 1. Documentation & Source of Truth
 - **Read First**: Always read relevant project documentation (`docs/PROJECT.md`, `docs/CURRENT.md`, `docs/DECISIONS.md`, `docs/BACKLOG.md`) before undertaking significant work.
+- **Multi-Asset Architecture Contract**: For any work involving assets, market data, history, portfolio valuation, transactions, cash, comparison, or alerts, agents must read `docs/ASSET_MODEL.md` before making architecture assumptions.
 - **Source of Truth**: Current source code is the implementation source of truth. Documentation represents intended product decisions.
 - **Conflict Resolution**: If code and documentation conflict, **STOP and report the conflict** immediately. Do not silently choose one.
 - **No Hallucinations / Inventions**: Never invent missing requirements.
@@ -35,4 +36,3 @@ At completion, report:
 - **Verification performed**: Exact steps and tests executed.
 - **Remaining risks**: Potential failure points or edge cases.
 - **Assumptions / unknowns**: Any unresolved items or working assumptions.
-
