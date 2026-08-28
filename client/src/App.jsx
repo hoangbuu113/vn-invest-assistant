@@ -17,6 +17,7 @@ import {
 
 import { PriceHistoryChart } from './components/PriceHistoryChart.jsx';
 import { AssetAnalysisSection } from './components/AssetAnalysisSection.jsx';
+import { PortfolioCompositionSection } from './components/PortfolioCompositionSection.jsx';
 
 const CATEGORY_STYLES = {
   market: { label: 'Thị trường', bg: '#eff6ff', color: '#1d4ed8', border: '#bfdbfe', accent: '#2563eb' },
@@ -261,6 +262,13 @@ function App() {
   const [portfolioRefreshing, setPortfolioRefreshing] = useState(false);
   const [portfolioError, setPortfolioError] = useState(null);
 
+  // Portfolio composition state (Feature 10)
+  const [compositionData, setCompositionData] = useState(null);
+  const [compositionLoading, setCompositionLoading] = useState(true);
+  const [compositionRefreshing, setCompositionRefreshing] = useState(false);
+  const [compositionError, setCompositionError] = useState(null);
+  const activeCompositionReqRef = useRef(null);
+
   // Watchlist state (Feature 08)
   const [watchlist, setWatchlist] = useState([]);
   const [watchlistLoading, setWatchlistLoading] = useState(true);
@@ -348,6 +356,7 @@ function App() {
           setInvestmentHorizon(json.data.investment_horizon);
           setProfileSuccess(true);
           fetchPortfolio(false);
+          fetchComposition(false);
         } else {
           throw new Error(json.message || 'Không thể lưu hồ sơ đầu tư');
         }
@@ -440,6 +449,7 @@ function App() {
           setNewAverageCost('');
           setHoldingsSuccess(`Đã thêm ${json.data.asset?.symbol || 'tài sản'} vào danh mục thành công.`);
           fetchPortfolio(false);
+          fetchComposition(false);
         }
       })
       .catch((err) => {
@@ -506,6 +516,7 @@ function App() {
           setEditingHoldingId(null);
           setHoldingsSuccess(`Đã cập nhật ${json.data.asset?.symbol || 'tài sản'} thành công.`);
           fetchPortfolio(false);
+          fetchComposition(false);
         }
       })
       .catch((err) => {
@@ -542,6 +553,7 @@ function App() {
           setHoldings((prev) => prev.filter((h) => h.id !== id));
           setHoldingsSuccess(`Đã xóa ${symbol || 'tài sản'} khỏi danh mục.`);
           fetchPortfolio(false);
+          fetchComposition(false);
         }
       })
       .catch((err) => {
@@ -638,19 +650,63 @@ function App() {
       });
   }, []);
 
-  // Fetch portfolio on initial mount
+  // Fetch portfolio composition data (Feature 10)
+  const fetchComposition = useCallback((isInitial = false) => {
+    if (activeCompositionReqRef.current) {
+      activeCompositionReqRef.current.abort();
+    }
+    const controller = new AbortController();
+    activeCompositionReqRef.current = controller;
+
+    if (isInitial) {
+      setCompositionLoading(true);
+    } else {
+      setCompositionRefreshing(true);
+    }
+    setCompositionError(null);
+
+    fetch('/api/portfolio/composition', { signal: controller.signal })
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
+      .then((json) => {
+        if (json.status === 'ok' && json.data) {
+          setCompositionData(json.data);
+        } else {
+          throw new Error(json.message || 'Không thể tải cơ cấu danh mục');
+        }
+      })
+      .catch((err) => {
+        if (err.name === 'AbortError') return;
+        setCompositionError(err.message || 'Không thể tải dữ liệu cơ cấu danh mục');
+      })
+      .finally(() => {
+        if (activeCompositionReqRef.current === controller) {
+          activeCompositionReqRef.current = null;
+          setCompositionLoading(false);
+          setCompositionRefreshing(false);
+        }
+      });
+  }, []);
+
+  // Fetch portfolio & composition on initial mount
   useEffect(() => {
     fetchPortfolio(true);
-  }, [fetchPortfolio]);
+    fetchComposition(true);
+  }, [fetchPortfolio, fetchComposition]);
 
   // Periodic 5-minute auto-refresh when on portfolio tab
   useEffect(() => {
     if (activeTab !== 'portfolio') return;
+    fetchPortfolio(false);
+    fetchComposition(false);
     const intervalId = setInterval(() => {
       fetchPortfolio(false);
+      fetchComposition(false);
     }, 5 * 60 * 1000);
     return () => clearInterval(intervalId);
-  }, [activeTab, fetchPortfolio]);
+  }, [activeTab, fetchPortfolio, fetchComposition]);
 
   // Fetch delayed market data for watchlist items (Feature 08)
   const fetchWatchlistMarketData = useCallback((items) => {
@@ -747,12 +803,13 @@ function App() {
     setDashboardRefreshing(true);
     Promise.allSettled([
       fetchPortfolio(false),
+      fetchComposition(false),
       fetchWatchlist(false),
       fetchNews(false)
     ]).finally(() => {
       setDashboardRefreshing(false);
     });
-  }, [fetchPortfolio, fetchWatchlist, fetchNews]);
+  }, [fetchPortfolio, fetchComposition, fetchWatchlist, fetchNews]);
 
   // Periodic 5-minute auto-refresh when on dashboard tab
   useEffect(() => {
@@ -1553,12 +1610,17 @@ function App() {
 
                 {/* Refresh Button */}
                 <MagneticButton
-                  onClick={() => fetchPortfolio(false)}
-                  disabled={portfolioRefreshing || portfolioLoading}
+                  onClick={() => {
+                    fetchPortfolio(false);
+                    fetchComposition(false);
+                  }}
+                  disabled={portfolioRefreshing || compositionRefreshing || portfolioLoading}
                   className="fintech-btn btn-secondary btn-sm"
                 >
-                  <span className={portfolioRefreshing ? 'spin-icon' : ''}>{portfolioRefreshing ? '⟳' : '↻'}</span>
-                  <span>{portfolioRefreshing ? 'Đang làm mới...' : 'Làm mới'}</span>
+                  <span className={portfolioRefreshing || compositionRefreshing ? 'spin-icon' : ''}>
+                    {portfolioRefreshing || compositionRefreshing ? '⟳' : '↻'}
+                  </span>
+                  <span>{portfolioRefreshing || compositionRefreshing ? 'Đang làm mới...' : 'Làm mới'}</span>
                 </MagneticButton>
               </motion.div>
 
@@ -1853,6 +1915,14 @@ function App() {
                       </div>
                     )}
                   </motion.div>
+
+                  {/* Feature 10: Cơ cấu danh mục (Portfolio Composition & Concentration) */}
+                  <PortfolioCompositionSection
+                    data={compositionData}
+                    loading={compositionLoading}
+                    error={compositionError}
+                    onRetry={() => fetchComposition(true)}
+                  />
                 </>
               )}
             </motion.section>
