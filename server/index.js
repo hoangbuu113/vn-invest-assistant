@@ -10,7 +10,10 @@ import {
   getHoldings,
   addHolding,
   updateHolding,
-  deleteHolding
+  deleteHolding,
+  getWatchlist,
+  addToWatchlist,
+  removeFromWatchlist
 } from './src/supabase.js';
 import { getMarketSnapshot, getMarketHistory, getAnalysisHistory } from './src/market.js';
 import { getNewsFeed } from './src/news.js';
@@ -47,7 +50,10 @@ export function createApp(services = {}) {
     getPortfolioOverviewFn = getPortfolioOverview,
     checkSupabaseConnectionFn = checkSupabaseConnection,
     getAnalysisHistoryFn = getAnalysisHistory,
-    getAssetAnalysisFn = getAssetAnalysis
+    getAssetAnalysisFn = getAssetAnalysis,
+    getWatchlistFn = getWatchlist,
+    addToWatchlistFn = addToWatchlist,
+    removeFromWatchlistFn = removeFromWatchlist
   } = services;
 
   const app = express();
@@ -425,6 +431,89 @@ export function createApp(services = {}) {
         response.warnings = error.warnings;
       }
       return res.status(statusCode).json(response);
+    }
+  });
+
+  // Watchlist endpoints (Feature 08)
+  app.get('/api/watchlist', async (req, res) => {
+    try {
+      const items = await getWatchlistFn();
+      return res.json({
+        status: 'ok',
+        count: items.length,
+        data: items
+      });
+    } catch (error) {
+      return res.status(500).json({
+        status: 'error',
+        message: 'Failed to fetch watchlist',
+        details: error.message
+      });
+    }
+  });
+
+  app.post('/api/watchlist', async (req, res) => {
+    try {
+      const { asset_id, symbol } = req.body || {};
+      const errors = [];
+
+      if (
+        (!asset_id || typeof asset_id !== 'string' || asset_id.trim() === '') &&
+        (!symbol || typeof symbol !== 'string' || symbol.trim() === '')
+      ) {
+        errors.push('Either asset_id or symbol is required and must be a non-empty string');
+      }
+
+      if (errors.length > 0) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'Invalid watchlist payload',
+          errors
+        });
+      }
+
+      const item = await addToWatchlistFn({
+        asset_id: typeof asset_id === 'string' ? asset_id.trim() : undefined,
+        symbol: typeof symbol === 'string' ? symbol.trim() : undefined
+      });
+
+      return res.status(201).json({
+        status: 'ok',
+        data: item
+      });
+    } catch (error) {
+      const statusCode = error.statusCode || 500;
+      return res.status(statusCode).json({
+        status: 'error',
+        message: error.message || 'Failed to add to watchlist',
+        details: error.message
+      });
+    }
+  });
+
+  app.delete('/api/watchlist/:assetId', async (req, res) => {
+    const { assetId } = req.params;
+    try {
+      if (!assetId || typeof assetId !== 'string' || assetId.trim() === '') {
+        return res.status(400).json({
+          status: 'error',
+          message: 'Valid asset ID or symbol is required'
+        });
+      }
+
+      const result = await removeFromWatchlistFn(assetId.trim());
+      return res.json({
+        status: 'ok',
+        message: 'Asset removed from watchlist',
+        data: result
+      });
+    } catch (error) {
+      const statusCode = error.statusCode || 500;
+      return res.status(statusCode).json({
+        status: 'error',
+        message: error.message || 'Failed to remove from watchlist',
+        details: error.message
+      });
     }
   });
 

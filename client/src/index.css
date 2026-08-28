@@ -889,6 +889,19 @@ body {
   border-color: var(--color-loss-500);
 }
 
+.btn-watchlist-active {
+  background-color: var(--color-gain-50);
+  color: var(--color-gain-700);
+  border-color: var(--color-gain-200);
+  font-weight: 700;
+}
+
+.btn-watchlist-active:hover:not(:disabled) {
+  background-color: var(--color-loss-50);
+  color: var(--color-loss-700);
+  border-color: var(--color-loss-200);
+}
+
 .btn-sm {
   padding: 0.35rem 0.75rem;
   font-size: 0.8rem;

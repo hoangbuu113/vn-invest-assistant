@@ -437,4 +437,206 @@ export async function deleteHolding(id, client = supabase) {
   return { id, deleted: true };
 }
 
+/**
+ * Normalizes a watchlist_item row from Supabase.
+ */
+function normalizeWatchlistItem(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    profile_id: row.profile_id,
+    asset_id: row.asset_id,
+    created_at: row.created_at,
+    asset: row.assets || null
+  };
+}
 
+/**
+ * Fetches all watchlist items for the single investor profile with joined asset metadata.
+ */
+export async function getWatchlist(client = supabase) {
+  const db = client || supabase;
+  if (!db) {
+    throw new Error('Supabase credentials are not configured. Please set SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY in server/.env');
+  }
+
+  const profile = await getInvestorProfile(db);
+
+  const { data, error } = await db
+    .from('watchlist_items')
+    .select('id, profile_id, asset_id, created_at, assets (id, symbol, name, asset_type, exchange)')
+    .eq('profile_id', profile.id)
+    .order('created_at', { ascending: true });
+
+  if (error) {
+    throw new Error(`Database query error: ${error.message} (code: ${error.code || 'UNKNOWN'})`);
+  }
+
+  return (data || []).map(normalizeWatchlistItem);
+}
+
+/**
+ * Adds an asset to the singleton investor profile's watchlist.
+ * Deterministic and idempotent.
+ */
+export async function addToWatchlist({ asset_id, symbol }, client = supabase) {
+  const db = client || supabase;
+  if (!db) {
+    throw new Error('Supabase credentials are not configured. Please set SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY in server/.env');
+  }
+
+  if ((!asset_id || typeof asset_id !== 'string') && (!symbol || typeof symbol !== 'string')) {
+    const err = new Error('Either asset_id or symbol is required');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const profile = await getInvestorProfile(db);
+
+  // Look up asset by asset_id or symbol
+  let assetQuery = db.from('assets').select('id, symbol, name, asset_type, exchange');
+  if (asset_id && typeof asset_id === 'string' && asset_id.trim()) {
+    assetQuery = assetQuery.eq('id', asset_id.trim());
+  } else if (symbol && typeof symbol === 'string' && symbol.trim()) {
+    assetQuery = assetQuery.eq('symbol', symbol.trim().toUpperCase());
+  }
+
+  const { data: asset, error: assetErr } = await assetQuery.maybeSingle();
+
+  if (assetErr) {
+    throw new Error(`Database query error: ${assetErr.message} (code: ${assetErr.code || 'UNKNOWN'})`);
+  }
+
+  if (!asset) {
+    const notFoundErr = new Error(`Asset '${asset_id || symbol}' not found`);
+    notFoundErr.statusCode = 400;
+    throw notFoundErr;
+  }
+
+  // Check if already in watchlist (idempotent)
+  const { data: existing, error: existingErr } = await db
+    .from('watchlist_items')
+    .select('id, profile_id, asset_id, created_at, assets (id, symbol, name, asset_type, exchange)')
+    .eq('profile_id', profile.id)
+    .eq('asset_id', asset.id)
+    .maybeSingle();
+
+  if (existingErr) {
+    throw new Error(`Database query error: ${existingErr.message}`);
+  }
+
+  if (existing) {
+    return normalizeWatchlistItem(existing);
+  }
+
+  // Insert into watchlist
+  const { data, error } = await db
+    .from('watchlist_items')
+    .insert([
+      {
+        profile_id: profile.id,
+        asset_id: asset.id
+      }
+    ])
+    .select('id, profile_id, asset_id, created_at, assets (id, symbol, name, asset_type, exchange)')
+    .single();
+
+  if (error) {
+    // Handle concurrent insertion conflict gracefully
+    if (error.code === '23505') {
+      const { data: refetched, error: refetchErr } = await db
+        .from('watchlist_items')
+        .select('id, profile_id, asset_id, created_at, assets (id, symbol, name, asset_type, exchange)')
+        .eq('profile_id', profile.id)
+        .eq('asset_id', asset.id)
+        .maybeSingle();
+      if (!refetchErr && refetched) {
+        return normalizeWatchlistItem(refetched);
+      }
+    }
+    throw new Error(`Database insert error: ${error.message} (code: ${error.code || 'UNKNOWN'})`);
+  }
+
+  return normalizeWatchlistItem(data);
+}
+
+/**
+ * Removes an asset from the singleton investor profile's watchlist.
+ * assetIdentifier can be an asset UUID, symbol, or watchlist item ID.
+ * Returns deterministic sensible result even if item not in watchlist.
+ */
+export async function removeFromWatchlist(assetIdentifier, client = supabase) {
+  const db = client || supabase;
+  if (!db) {
+    throw new Error('Supabase credentials are not configured. Please set SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY in server/.env');
+  }
+
+  if (!assetIdentifier || typeof assetIdentifier !== 'string' || !assetIdentifier.trim()) {
+    const err = new Error('Valid asset identifier is required');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const targetId = assetIdentifier.trim();
+  const profile = await getInvestorProfile(db);
+
+  // 1. First check if targetId matches a watchlist_item directly by asset_id or id
+  let { data: existing, error: findErr } = await db
+    .from('watchlist_items')
+    .select('id, profile_id, asset_id')
+    .eq('profile_id', profile.id)
+    .or(`id.eq.${targetId},asset_id.eq.${targetId}`)
+    .maybeSingle();
+
+  // If error is invalid UUID syntax (e.g. symbol passed like 'FPT'), or not found, try lookup by symbol
+  if (findErr || !existing) {
+    const { data: assetBySymbol, error: symbolErr } = await db
+      .from('assets')
+      .select('id')
+      .eq('symbol', targetId.toUpperCase())
+      .maybeSingle();
+
+    if (!symbolErr && assetBySymbol) {
+      const { data: byAssetId, error: byAssetErr } = await db
+        .from('watchlist_items')
+        .select('id, profile_id, asset_id')
+        .eq('profile_id', profile.id)
+        .eq('asset_id', assetBySymbol.id)
+        .maybeSingle();
+
+      if (!byAssetErr && byAssetId) {
+        existing = byAssetId;
+        findErr = null;
+      }
+    }
+  }
+
+  if (findErr && findErr.code !== '22P02') {
+    throw new Error(`Database query error: ${findErr.message}`);
+  }
+
+  if (!existing) {
+    return {
+      removed: false,
+      deleted: false,
+      message: `Asset '${targetId}' was not in watchlist`
+    };
+  }
+
+  const { error: deleteErr } = await db
+    .from('watchlist_items')
+    .delete()
+    .eq('id', existing.id)
+    .eq('profile_id', profile.id);
+
+  if (deleteErr) {
+    throw new Error(`Database delete error: ${deleteErr.message} (code: ${deleteErr.code || 'UNKNOWN'})`);
+  }
+
+  return {
+    id: existing.id,
+    asset_id: existing.asset_id,
+    deleted: true,
+    removed: true
+  };
+}

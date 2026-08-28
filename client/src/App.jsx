@@ -35,6 +35,7 @@ const HISTORY_RANGES = [
 
 const NAV_TABS = [
   { id: 'portfolio', label: 'Danh mục', icon: '📊' },
+  { id: 'watchlist', label: 'Theo dõi', icon: '⭐' },
   { id: 'news', label: 'Tin tức', icon: '📰' },
   { id: 'assets', label: 'Tài sản', icon: '📈' },
   { id: 'profile', label: 'Hồ sơ đầu tư', icon: '👤' }
@@ -180,6 +181,15 @@ function App() {
   const [portfolioLoading, setPortfolioLoading] = useState(true);
   const [portfolioRefreshing, setPortfolioRefreshing] = useState(false);
   const [portfolioError, setPortfolioError] = useState(null);
+
+  // Watchlist state (Feature 08)
+  const [watchlist, setWatchlist] = useState([]);
+  const [watchlistLoading, setWatchlistLoading] = useState(true);
+  const [watchlistRefreshing, setWatchlistRefreshing] = useState(false);
+  const [watchlistError, setWatchlistError] = useState(null);
+  const [watchlistActionLoading, setWatchlistActionLoading] = useState(null);
+  const [watchlistMarketData, setWatchlistMarketData] = useState({});
+  const [watchlistMarketLoading, setWatchlistMarketLoading] = useState(false);
 
   // Fetch investor profile data
   const fetchProfile = useCallback((isInitial = false) => {
@@ -563,6 +573,161 @@ function App() {
     return () => clearInterval(intervalId);
   }, [activeTab, fetchPortfolio]);
 
+  // Fetch delayed market data for watchlist items (Feature 08)
+  const fetchWatchlistMarketData = useCallback((items) => {
+    if (!items || items.length === 0) {
+      setWatchlistMarketLoading(false);
+      return;
+    }
+
+    const symbols = [...new Set(items.map((i) => i.asset?.symbol).filter(Boolean))];
+    if (symbols.length === 0) {
+      setWatchlistMarketLoading(false);
+      return;
+    }
+
+    setWatchlistMarketLoading(true);
+
+    Promise.allSettled(
+      symbols.map((sym) =>
+        fetch(`/api/market/${encodeURIComponent(sym)}`)
+          .then((res) => {
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            return res.json();
+          })
+          .then((json) => {
+            if (json.status === 'ok' && json.data) {
+              return { symbol: sym, data: json.data };
+            }
+            return { symbol: sym, data: null };
+          })
+          .catch(() => ({ symbol: sym, data: null }))
+      )
+    ).then((results) => {
+      const newMarketData = {};
+      results.forEach((r) => {
+        if (r.status === 'fulfilled' && r.value) {
+          newMarketData[r.value.symbol] = r.value.data;
+        }
+      });
+      setWatchlistMarketData((prev) => ({ ...prev, ...newMarketData }));
+      setWatchlistMarketLoading(false);
+    });
+  }, []);
+
+  // Fetch watchlist items
+  const fetchWatchlist = useCallback((isInitial = false) => {
+    if (isInitial) {
+      setWatchlistLoading(true);
+    } else {
+      setWatchlistRefreshing(true);
+    }
+    setWatchlistError(null);
+
+    fetch('/api/watchlist')
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
+      .then((json) => {
+        if (json.status === 'ok' && Array.isArray(json.data)) {
+          setWatchlist(json.data);
+          fetchWatchlistMarketData(json.data);
+        } else {
+          throw new Error(json.message || 'Không thể tải danh sách theo dõi');
+        }
+      })
+      .catch((err) => {
+        setWatchlistError(err.message || 'Không thể tải danh sách theo dõi');
+      })
+      .finally(() => {
+        setWatchlistLoading(false);
+        setWatchlistRefreshing(false);
+      });
+  }, [fetchWatchlistMarketData]);
+
+  // Fetch watchlist on initial mount
+  useEffect(() => {
+    fetchWatchlist(true);
+  }, [fetchWatchlist]);
+
+  // Periodic 5-minute auto-refresh when on watchlist tab
+  useEffect(() => {
+    if (activeTab !== 'watchlist') return;
+    const intervalId = setInterval(() => {
+      fetchWatchlist(false);
+    }, 5 * 60 * 1000);
+    return () => clearInterval(intervalId);
+  }, [activeTab, fetchWatchlist]);
+
+  // Toggle or add/remove asset from watchlist
+  const handleToggleWatchlist = (assetId, symbol) => {
+    const isFollowed = watchlist.some(
+      (w) => (symbol && w.asset?.symbol === symbol) || (assetId && w.asset_id === assetId)
+    );
+
+    const targetIdentifier = symbol || assetId;
+    if (!targetIdentifier) return;
+
+    setWatchlistActionLoading(targetIdentifier);
+
+    if (isFollowed) {
+      fetch(`/api/watchlist/${encodeURIComponent(targetIdentifier)}`, {
+        method: 'DELETE'
+      })
+        .then((res) => {
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          return res.json();
+        })
+        .then((json) => {
+          if (json.status === 'ok') {
+            setWatchlist((prev) =>
+              prev.filter(
+                (w) =>
+                  !((symbol && w.asset?.symbol === symbol) || (assetId && w.asset_id === assetId))
+              )
+            );
+          }
+        })
+        .catch((err) => {
+          console.error('Error removing from watchlist:', err);
+        })
+        .finally(() => {
+          setWatchlistActionLoading(null);
+        });
+    } else {
+      fetch('/api/watchlist', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          asset_id: assetId || undefined,
+          symbol: symbol || undefined
+        })
+      })
+        .then((res) => {
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          return res.json();
+        })
+        .then((json) => {
+          if (json.status === 'ok' && json.data) {
+            setWatchlist((prev) => {
+              if (prev.some((w) => w.id === json.data.id)) return prev;
+              return [...prev, json.data];
+            });
+            if (symbol && !watchlistMarketData[symbol]) {
+              fetchWatchlistMarketData([json.data]);
+            }
+          }
+        })
+        .catch((err) => {
+          console.error('Error adding to watchlist:', err);
+        })
+        .finally(() => {
+          setWatchlistActionLoading(null);
+        });
+    }
+  };
+
   const fetchMarketData = useCallback((symbol, isInitial = false) => {
     if (!symbol) return;
 
@@ -703,6 +868,7 @@ function App() {
   };
 
   const handleSelectAsset = (symbol) => {
+    setActiveTab('assets');
     if (activeAssetDetailReqRef.current) activeAssetDetailReqRef.current.abort();
     if (activeMarketReqRef.current) activeMarketReqRef.current.abort();
     if (activeHistoryReqRef.current) activeHistoryReqRef.current.abort();
@@ -1157,7 +1323,212 @@ function App() {
             </motion.section>
           )}
 
-          {/* TAB 2: NEWS FEED */}
+          {/* TAB: WATCHLIST / DANH SÁCH THEO DÕI (Feature 08) */}
+          {activeTab === 'watchlist' && (
+            <motion.section
+              key="watchlist-view"
+              variants={pageVariants}
+              initial="initial"
+              animate="animate"
+              exit="exit"
+            >
+              {/* Section Header */}
+              <motion.div variants={sectionItemVariants} className="section-header" style={{ alignItems: 'center' }}>
+                <div>
+                  <h2 className="section-title">Danh sách theo dõi</h2>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                    <span className="section-subtitle">
+                      Các tài sản bạn quan tâm theo dõi nhanh
+                    </span>
+                    <span className="fintech-badge badge-neutral">
+                      Dữ liệu thị trường có độ trễ (~15p)
+                    </span>
+                  </div>
+                </div>
+
+                {/* Refresh Button */}
+                <MagneticButton
+                  onClick={() => fetchWatchlist(false)}
+                  disabled={watchlistRefreshing || watchlistLoading}
+                  className="fintech-btn btn-secondary btn-sm"
+                >
+                  <span className={watchlistRefreshing ? 'spin-icon' : ''}>{watchlistRefreshing ? '⟳' : '↻'}</span>
+                  <span>{watchlistRefreshing ? 'Đang làm mới...' : 'Làm mới'}</span>
+                </MagneticButton>
+              </motion.div>
+
+              {/* Loading State */}
+              {watchlistLoading && (
+                <div className="state-box">
+                  <div className="state-icon spin-icon">⏳</div>
+                  <h3 className="state-title">Đang tải danh sách theo dõi...</h3>
+                </div>
+              )}
+
+              {/* Fatal Error State */}
+              {watchlistError && !watchlistLoading && watchlist.length === 0 && (
+                <div className="fintech-banner banner-error">
+                  <div>
+                    <strong style={{ display: 'block', marginBottom: '0.2rem' }}>Không thể tải danh sách theo dõi</strong>
+                    <span style={{ fontSize: '0.85rem' }}>{watchlistError}</span>
+                  </div>
+                  <MagneticButton
+                    onClick={() => fetchWatchlist(true)}
+                    className="fintech-btn btn-danger btn-sm"
+                  >
+                    Thử lại
+                  </MagneticButton>
+                </div>
+              )}
+
+              {/* Empty State (Section 6) */}
+              {!watchlistLoading && watchlist.length === 0 && (
+                <motion.div variants={sectionItemVariants} className="state-box">
+                  <div className="state-icon float-icon">⭐</div>
+                  <h3 className="state-title">Bạn chưa theo dõi tài sản nào.</h3>
+                  <p className="state-desc" style={{ marginBottom: '1.25rem' }}>
+                    Thêm các mã bạn quan tâm để xem lại nhanh hơn.
+                  </p>
+                  <MagneticButton
+                    onClick={() => {
+                      handleBackToList();
+                      setActiveTab('assets');
+                    }}
+                    className="fintech-btn btn-primary btn-sm"
+                  >
+                    Khám phá danh sách tài sản &rarr;
+                  </MagneticButton>
+                </motion.div>
+              )}
+
+              {/* Saved Assets Table (Section 5, 7, 8) */}
+              {!watchlistLoading && watchlist.length > 0 && (
+                <motion.div variants={sectionItemVariants} className="fintech-card" style={{ overflow: 'hidden' }}>
+                  <div className="card-header">
+                    <span style={{ fontSize: '0.95rem', fontWeight: 800, color: 'var(--color-slate-900)' }}>
+                      Tài sản đang theo dõi ({watchlist.length})
+                    </span>
+                  </div>
+
+                  <div className="table-container">
+                    <table className="fintech-table">
+                      <thead>
+                        <tr>
+                          <th>Mã & Tài sản</th>
+                          <th>Loại tài sản</th>
+                          <th>Sàn giao dịch</th>
+                          <th style={{ textAlign: 'right' }}>Giá gần nhất</th>
+                          <th style={{ textAlign: 'right' }}>Biến động</th>
+                          <th style={{ textAlign: 'right' }}>Cập nhật</th>
+                          <th style={{ textAlign: 'right' }}>Thao tác</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {watchlist.map((item) => {
+                          const asset = item.asset || {};
+                          const sym = asset.symbol || 'N/A';
+                          const mkt = watchlistMarketData[sym];
+                          const hasPrice = mkt && typeof mkt.price === 'number' && isFinite(mkt.price) && mkt.price > 0;
+                          const isGain = hasPrice && (mkt.change || 0) > 0;
+                          const isLoss = hasPrice && (mkt.change || 0) < 0;
+                          const isActionLoading =
+                            watchlistActionLoading === sym || watchlistActionLoading === item.asset_id;
+
+                          return (
+                            <tr key={item.id || item.asset_id}>
+                              {/* 1. Symbol & Name */}
+                              <td>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                  <span style={{
+                                    padding: '2px 8px',
+                                    borderRadius: '4px',
+                                    backgroundColor: 'var(--color-brand-50)',
+                                    color: 'var(--color-brand-700)',
+                                    border: '1px solid var(--color-brand-200)',
+                                    fontWeight: 800
+                                  }}>
+                                    {sym}
+                                  </span>
+                                </div>
+                                <div style={{ fontSize: '0.78rem', color: 'var(--color-slate-500)', marginTop: '2px' }}>
+                                  {asset.name || 'Tài sản'}
+                                </div>
+                              </td>
+
+                              {/* 2. Asset Type */}
+                              <td>
+                                <span className="fintech-badge badge-neutral">
+                                  {formatAssetType(asset.asset_type)}
+                                </span>
+                              </td>
+
+                              {/* 3. Exchange */}
+                              <td style={{ color: 'var(--color-slate-500)' }}>
+                                {asset.exchange || 'N/A'}
+                              </td>
+
+                              {/* 4. Latest Market Price (Failure-isolated) */}
+                              <td style={{ textAlign: 'right' }}>
+                                {hasPrice ? (
+                                  <span style={{ fontWeight: 800, color: 'var(--color-slate-900)', fontSize: '0.95rem' }}>
+                                    {mkt.price.toLocaleString('vi-VN')} {mkt.currency ? `${mkt.currency}` : '₫'}
+                                  </span>
+                                ) : (
+                                  <span style={{ fontSize: '0.8rem', color: 'var(--color-slate-400)', fontStyle: 'italic' }}>
+                                    Chưa có dữ liệu giá
+                                  </span>
+                                )}
+                              </td>
+
+                              {/* 5. Change & % Change */}
+                              <td style={{ textAlign: 'right' }}>
+                                {hasPrice && mkt.change !== null && mkt.change !== undefined ? (
+                                  <span className={`fintech-badge ${isGain ? 'badge-gain' : isLoss ? 'badge-loss' : 'badge-neutral'}`}>
+                                    {isGain ? '+' : ''}{Number(mkt.change).toLocaleString('vi-VN', { maximumFractionDigits: 2 })}
+                                    {mkt.changePercent !== null && mkt.changePercent !== undefined
+                                      ? ` (${mkt.changePercent > 0 ? '+' : ''}${Number(mkt.changePercent).toFixed(2)}%)`
+                                      : ''}
+                                  </span>
+                                ) : (
+                                  <span style={{ color: 'var(--color-slate-400)' }}>—</span>
+                                )}
+                              </td>
+
+                              {/* 6. Market Updated Time */}
+                              <td style={{ textAlign: 'right', fontSize: '0.78rem', color: 'var(--color-slate-500)' }}>
+                                {hasPrice && mkt.updatedAt ? formatPublishedTime(mkt.updatedAt) : '—'}
+                              </td>
+
+                              {/* 7. Quick Actions */}
+                              <td style={{ textAlign: 'right' }}>
+                                <div style={{ display: 'inline-flex', gap: '6px' }}>
+                                  <MagneticButton
+                                    onClick={() => handleSelectAsset(sym)}
+                                    className="fintech-btn btn-secondary btn-sm"
+                                  >
+                                    Xem chi tiết ↗
+                                  </MagneticButton>
+                                  <MagneticButton
+                                    onClick={() => handleToggleWatchlist(item.asset_id, sym)}
+                                    disabled={isActionLoading}
+                                    className="fintech-btn btn-danger btn-sm"
+                                  >
+                                    {isActionLoading ? '...' : 'Bỏ theo dõi'}
+                                  </MagneticButton>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </motion.div>
+              )}
+            </motion.section>
+          )}
+
+          {/* TAB 3: NEWS FEED */}
           {activeTab === 'news' && (
             <motion.section
               key="news-view"
@@ -1351,13 +1722,45 @@ function App() {
 
                   {assetDetail && (
                     <TiltCard className="fintech-card" style={{ padding: '1.35rem 1.5rem', marginBottom: '1.25rem' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.85rem' }}>
-                        <h3 style={{ margin: 0, fontSize: '1.35rem', fontWeight: 800, color: 'var(--color-slate-900)' }}>
-                          {assetDetail.symbol}
-                        </h3>
-                        <span className="fintech-badge badge-brand">
-                          {formatAssetType(assetDetail.asset_type)}
-                        </span>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', marginBottom: '0.85rem' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                          <h3 style={{ margin: 0, fontSize: '1.35rem', fontWeight: 800, color: 'var(--color-slate-900)' }}>
+                            {assetDetail.symbol}
+                          </h3>
+                          <span className="fintech-badge badge-brand">
+                            {formatAssetType(assetDetail.asset_type)}
+                          </span>
+                        </div>
+
+                        {/* Feature 08: Compact Watchlist Action Button */}
+                        {(() => {
+                          const isFollowed = watchlist.some(
+                            (w) => w.asset?.symbol === assetDetail.symbol || w.asset_id === assetDetail.id
+                          );
+                          const isLoadingThis =
+                            watchlistActionLoading === assetDetail.symbol ||
+                            watchlistActionLoading === assetDetail.id;
+
+                          return (
+                            <MagneticButton
+                              onClick={() => handleToggleWatchlist(assetDetail.id, assetDetail.symbol)}
+                              disabled={isLoadingThis}
+                              className={`fintech-btn btn-sm ${isFollowed ? 'btn-watchlist-active' : 'btn-secondary'}`}
+                              style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                            >
+                              {isLoadingThis ? (
+                                <span className="spin-icon">⟳</span>
+                              ) : isFollowed ? (
+                                <span>✓</span>
+                              ) : (
+                                <span>＋</span>
+                              )}
+                              <span>
+                                {isLoadingThis ? 'Đang cập nhật...' : isFollowed ? 'Đang theo dõi' : 'Theo dõi'}
+                              </span>
+                            </MagneticButton>
+                          );
+                        })()}
                       </div>
                       <p style={{ margin: '0 0 1rem 0', fontSize: '0.95rem', color: 'var(--color-slate-600)', fontWeight: 600 }}>
                         {assetDetail.name}
