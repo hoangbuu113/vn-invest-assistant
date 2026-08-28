@@ -92,13 +92,23 @@ BUILD
   - One-shot lifecycle: `active` -> `triggered` upon explicit app evaluation. Triggered alerts persist and can be manually reactivated.
   - Compact modal ("Đặt cảnh báo giá") accessible from Asset Detail and Watchlist.
   - Dedicated Alert Center section ("Cảnh báo giá") featuring summary KPI cards, simplified tabs (Tất cả, Đang hoạt động, Đã kích hoạt), manual evaluation control ("⚡ Kiểm tra cảnh báo"), price evaluation context, and clear ~15m delay disclosure.
-  - 166/166 automated tests passing.
 - **Feature 13 — Personalized Relevant News / Tin của tôi**
   - Personalized relevance filtering endpoint (`GET /api/news/personalized`) deriving user asset universe dynamically from singleton profile holdings and watchlist with automatic deduplication.
   - Deterministic Unicode token-boundary matching against trusted asset metadata (`symbol`, `name`, parenthesized subtitles) preventing substring false positives.
   - Integrated into the existing News page with `[Tin mới]` and `[Tin của tôi]` sub-tabs, matched asset context chips (`[FPT]`, `[VCB]`), and dual empty states (empty user assets vs. no matching current news).
   - Preserves general News feed, Dashboard news preview, and Asset Detail without AI, sentiment, relevance scores, or recommendations.
   - 180/180 automated tests passing.
+- **Feature 14 — Transaction Ledger / Sổ lệnh giao dịch**
+  - Immutable transaction ledger table `public.portfolio_transactions` (`profile_id`, `asset_id`, `transaction_type`, `quantity`, `price`, `realized_pnl`, `executed_at`, `created_at`).
+  - Atomic BUY/SELL mutations and holdings position updates in a single PostgreSQL `SECURITY DEFINER` RPC (`create_portfolio_transaction`).
+  - Backend-owned weighted-average cost basis and pre-sell average cost realized P/L calculation (`(sellPrice - preSellAverageCost) * sellQuantity`).
+  - Full numeric precision retained without premature intermediate rounding.
+  - Deterministic error handling: oversell rejection (`PT003`), non-held SELL rejection (`PT002`), invalid asset lookup (`PT001`).
+  - Valid opening position semantics preserving existing holdings that predate Feature 14 without fabricating historical BUY records.
+  - Endpoints: `GET /api/transactions` (newest-first, optional symbol filter), `POST /api/transactions` (atomic ledger insertion + position update).
+  - Transaction modal UI ("Ghi nhận giao dịch") supporting Mua/Bán, asset search, held-position context on SELL, and strict numeric JSON submission.
+  - Transaction history section ("Lịch sử giao dịch") integrated into Portfolio page with single persistent header CTA, Mua/Bán filtering, realized P/L semantics, immutability disclosure, and opening position empty state.
+  - 199/199 automated tests passing.
 
 ## PRE-FEATURE-07 HARDENING (COMPLETED)
 - **Historical Market Normalization Hardened** (Patch 06-2, checkpoint `d38ee60`): Deterministic deduplication, exact fractional volumes, robust boundary handling, clean null propagation for missing OHLCV.
@@ -116,5 +126,5 @@ BUILD
   - Default server automated tests are fully isolated from real Supabase and exercise actual production-path query predicates.
 
 ## CURRENT STATE
-Feature 13 (Personalized Relevant News / Tin của tôi) is **COMPLETE** (checkpoint `2e4103d`, 180/180 tests PASS, client build clean).
+Feature 14 (Transaction Ledger / Sổ lệnh giao dịch) is **COMPLETE** (backend checkpoint `d2bf5d7`, UI checkpoint `243262c`, 199/199 tests PASS, client build clean).
 The next feature has not been selected yet; awaiting Project Director decision.

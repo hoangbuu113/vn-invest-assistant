@@ -115,3 +115,10 @@ The following architectural and product decisions are confirmed:
   - **Descriptive Attribution**: Multiple matched assets per article are returned as `matchedAssets: [{ symbol, name }]` and rendered as compact context chips without ranking, scoring, or AI.
   - **Distinct Empty States**: Strict separation between "user has no holdings/watchlist assets" and "user has assets but no current matched news".
   - **No Scope Creep**: General news feed, Dashboard news preview, and Asset Detail remain strictly unchanged.
+- **Transaction Ledger / Sổ lệnh giao dịch (Feature 14)**:
+  - **Immutable Ledger in V1**: Transaction records in `public.portfolio_transactions` are immutable; no update, edit, delete, or undo actions exist in V1.
+  - **Atomic Database Mutation**: BUY/SELL activity and holdings quantity/cost basis mutations execute atomically inside a single PostgreSQL `SECURITY DEFINER` RPC (`create_portfolio_transaction`). Direct REST mutations on holdings are deprecated in favor of atomic transaction logging.
+  - **Weighted-Average Cost Method**: Holdings average cost is updated on BUY using exact weighted-average formula: `((prevQty * prevAvgCost) + (buyQty * buyPrice)) / (prevQty + buyQty)`.
+  - **Pre-Sell Realized P/L**: SELL realized P/L is computed as `(sellPrice - preSellAverageCost) * sellQuantity` and persisted directly on the SELL transaction record. The holding's average cost remains unchanged upon partial sell.
+  - **Opening Position Semantics**: Existing holdings may predate the Feature 14 ledger; no historical BUY transactions are fabricated for existing holdings.
+  - **Frontend Responsibility**: The frontend strictly consumes backend calculations as authoritative source-of-truth and never recalculates weighted average cost, realized P/L, resulting holding quantities, or portfolio financials in React.
