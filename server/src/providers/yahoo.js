@@ -1,11 +1,13 @@
+import { getCanonicalDate, normalizeDailyHistory } from '../history.js';
+
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
 const RANGE_MAP = Object.freeze({
-  '1W': '5d',
-  '1M': '1mo',
-  '3M': '3mo',
-  '6M': '6mo',
-  '1Y': '1y',
+  '1W': '1mo',
+  '1M': '3mo',
+  '3M': '6mo',
+  '6M': '1y',
+  '1Y': '2y',
   '2Y': '2y',
   '2y': '2y'
 });
@@ -16,8 +18,7 @@ const RANGE_MAP = Object.freeze({
  * @returns {string} - YYYY-MM-DD
  */
 export function getVietnamSessionKey(timestampSec) {
-  const d = new Date((timestampSec + 7 * 3600) * 1000);
-  return d.toISOString().slice(0, 10);
+  return getCanonicalDate(new Date(timestampSec * 1000), 'Asia/Ho_Chi_Minh');
 }
 
 /**
@@ -128,10 +129,11 @@ export function normalizeMarketSnapshot(meta, symbol) {
  *    - periodLow = min of valid low numbers across bars, or null if no valid lows
  * 6. updatedAt = timestamp of the most recent normalized historical bar actually returned.
  */
-export function normalizeHistoricalData(result, symbol, range) {
+export function normalizeHistoricalData(result, symbol, range, options = {}) {
   if (!result || typeof result !== 'object') {
     const err = new Error(`No historical data available for '${symbol}'`);
     err.status = 404;
+    err.code = 'HISTORY_NOT_FOUND';
     throw err;
   }
 
@@ -143,139 +145,38 @@ export function normalizeHistoricalData(result, symbol, range) {
   const closes = Array.isArray(quote.close) ? quote.close : [];
   const volumes = Array.isArray(quote.volume) ? quote.volume : [];
 
-  const sessionMap = new Map();
-  const warnings = [];
-
+  const records = [];
   for (let i = 0; i < timestamps.length; i++) {
     const ts = timestamps[i];
-    if (typeof ts !== 'number' || isNaN(ts) || !isFinite(ts) || ts <= 0) continue;
-
-    const c = closes[i];
-    // Close is required to be finite and > 0
-    if (typeof c !== 'number' || isNaN(c) || !isFinite(c) || c <= 0) {
-      continue;
-    }
-
-    // Optional fields: finite and valid -> preserve; otherwise -> null
-    const o = typeof opens[i] === 'number' && !isNaN(opens[i]) && isFinite(opens[i]) && opens[i] > 0 ? opens[i] : null;
-    const h = typeof highs[i] === 'number' && !isNaN(highs[i]) && isFinite(highs[i]) && highs[i] > 0 ? highs[i] : null;
-    const l = typeof lows[i] === 'number' && !isNaN(lows[i]) && isFinite(lows[i]) && lows[i] > 0 ? lows[i] : null;
-    const v = typeof volumes[i] === 'number' && !isNaN(volumes[i]) && isFinite(volumes[i]) && volumes[i] >= 0 ? volumes[i] : null;
-
-    const dateIso = new Date(ts * 1000).toISOString();
-    const sessionKey = getVietnamSessionKey(ts);
-
-    const currentBar = {
-      timestamp: dateIso,
-      open: o,
-      high: h,
-      low: l,
-      close: c,
-      volume: v
-    };
-
-    if (!sessionMap.has(sessionKey)) {
-      sessionMap.set(sessionKey, {
-        status: 'valid',
-        bar: currentBar,
-        tsVal: ts
-      });
-    } else {
-      const existing = sessionMap.get(sessionKey);
-      if (existing.status === 'conflict') {
-        // Already marked as conflicting, ignore further entries for this session
-        continue;
-      }
-
-      // Check if identical
-      const isIdentical =
-        existing.bar.open === currentBar.open &&
-        existing.bar.high === currentBar.high &&
-        existing.bar.low === currentBar.low &&
-        existing.bar.close === currentBar.close &&
-        existing.bar.volume === currentBar.volume;
-
-      if (isIdentical) {
-        // Collapse to one session using the earliest valid source timestamp
-        if (ts < existing.tsVal) {
-          existing.tsVal = ts;
-          existing.bar.timestamp = dateIso;
-        }
-        continue;
-      } else {
-        // Conflicting duplicate session -> invalidate and drop
-        existing.status = 'conflict';
-        warnings.push({
-          code: 'CONFLICTING_DUPLICATE_SESSION',
-          sessionKey,
-          message: `Conflicting duplicate records found for session ${sessionKey}. Dropping session.`
-        });
-      }
-    }
+    records.push({
+      timestamp: typeof ts === 'number' && Number.isFinite(ts) && ts > 0
+        ? new Date(ts * 1000).toISOString()
+        : null,
+      open: opens[i],
+      high: highs[i],
+      low: lows[i],
+      close: closes[i],
+      volume: volumes[i]
+    });
   }
 
-  // Filter only valid (non-conflicting) sessions and sort chronologically
-  const sortedBars = Array.from(sessionMap.values())
-    .filter((s) => s.status === 'valid')
-    .sort((a, b) => a.tsVal - b.tsVal)
-    .map((s) => s.bar);
-
-  if (sortedBars.length === 0) {
-    const err = new Error(`No valid historical price records found for '${symbol}'`);
-    err.status = 404;
-    if (warnings.length > 0) {
-      err.warnings = warnings;
-    }
-    throw err;
-  }
-
-  // Calculate metrics
-  const validSessions = sortedBars.length;
-  const periodStartPrice = sortedBars[0].close;
-  const latestPrice = sortedBars[validSessions - 1].close;
-
-  const validHighs = sortedBars.map((b) => b.high).filter((val) => typeof val === 'number' && isFinite(val) && val > 0);
-  const validLows = sortedBars.map((b) => b.low).filter((val) => typeof val === 'number' && isFinite(val) && val > 0);
-
-  const periodHigh = validHighs.length > 0 ? Math.max(...validHighs) : null;
-  const periodLow = validLows.length > 0 ? Math.min(...validLows) : null;
-
-  let absoluteChange = null;
-  let percentageChange = null;
-
-  if (validSessions >= 2) {
-    absoluteChange = latestPrice - periodStartPrice;
-    if (periodStartPrice > 0) {
-      percentageChange = ((latestPrice / periodStartPrice) - 1) * 100;
-    }
-  }
-
-  // Historical updatedAt MUST represent the timestamp of the most recent normalized historical bar actually returned
-  const updatedAt = sortedBars[validSessions - 1].timestamp;
-
-  const responsePayload = {
-    symbol: symbol,
-    range: range,
-    interval: '1d',
-    freshness: 'delayed',
-    updatedAt: updatedAt,
-    bars: sortedBars,
-    metrics: {
-      periodStartPrice,
-      latestPrice,
-      absoluteChange,
-      percentageChange,
-      periodHigh,
-      periodLow,
-      validSessions
-    }
+  const asset = options.asset || {
+    symbol,
+    quoteCurrency: 'VND',
+    marketPolicy: 'VN_EXCHANGE',
+    marketTimezone: 'Asia/Ho_Chi_Minh'
   };
 
-  if (warnings.length > 0) {
-    responsePayload.warnings = warnings;
-  }
-
-  return responsePayload;
+  return normalizeDailyHistory({
+    asset,
+    provider: 'yahoo',
+    range,
+    records,
+    now: options.now || new Date(),
+    freshness: 'delayed',
+    applyRangeFilter: options.applyRangeFilter === true,
+    excludeIncomplete: options.excludeIncomplete !== false
+  });
 }
 
 /**
@@ -354,6 +255,12 @@ export async function getHistory(asset, mapping, options = {}) {
     err.code = 'UNSUPPORTED_PROVIDER';
     throw err;
   }
+  if (asset?.marketPolicy !== 'VN_EXCHANGE' || asset?.marketTimezone !== 'Asia/Ho_Chi_Minh') {
+    const err = new Error(`Yahoo history is unsupported for market policy '${asset?.marketPolicy || 'unavailable'}'`);
+    err.status = 422;
+    err.code = 'UNSUPPORTED_MARKET_POLICY';
+    throw err;
+  }
 
   const requestedRange = (options.range || '1M').toString().trim();
   const yahooRange = RANGE_MAP[requestedRange] || requestedRange;
@@ -374,7 +281,8 @@ export async function getHistory(asset, mapping, options = {}) {
 
     if (!response.ok) {
       const err = new Error(response.status === 404 ? `Historical market data for '${symbol}' not found` : `Upstream market provider returned status ${response.status}`);
-      err.status = response.status === 404 ? 404 : 502;
+      err.status = response.status === 404 ? 404 : response.status === 429 ? 503 : 502;
+      err.code = response.status === 404 ? 'HISTORY_NOT_FOUND' : response.status === 429 ? 'PROVIDER_RATE_LIMIT' : 'PROVIDER_ERROR';
       throw err;
     }
 
@@ -385,8 +293,20 @@ export async function getHistory(asset, mapping, options = {}) {
       err.status = 404;
       throw err;
     }
+    const providerCurrency = typeof result.meta.currency === 'string' ? result.meta.currency.trim().toUpperCase() : null;
+    if (providerCurrency && asset.quoteCurrency && providerCurrency !== asset.quoteCurrency) {
+      const err = new Error(`Yahoo history currency '${providerCurrency}' conflicts with canonical currency '${asset.quoteCurrency}'`);
+      err.status = 502;
+      err.code = 'PROVIDER_CURRENCY_MISMATCH';
+      throw err;
+    }
 
-    return normalizeHistoricalData(result, symbol, options.normalizedRange || requestedRange);
+    return normalizeHistoricalData(result, symbol, options.normalizedRange || requestedRange, {
+      asset,
+      now: options.now || new Date(),
+      applyRangeFilter: requestedRange.toLowerCase() !== '2y',
+      excludeIncomplete: true
+    });
   } catch (err) {
     if (err.status) {
       throw err;
@@ -394,10 +314,12 @@ export async function getHistory(asset, mapping, options = {}) {
     if (err.name === 'AbortError') {
       const timeoutErr = new Error('Market history request timed out');
       timeoutErr.status = 504;
+      timeoutErr.code = 'PROVIDER_TIMEOUT';
       throw timeoutErr;
     }
     const internalErr = new Error(err.message || 'Error fetching market history');
-    internalErr.status = 500;
+    internalErr.status = 502;
+    internalErr.code = 'PROVIDER_ERROR';
     throw internalErr;
   }
 }

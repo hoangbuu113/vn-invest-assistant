@@ -574,7 +574,7 @@ export function createApp(services = {}) {
     }
   });
 
-  // Historical market data endpoint (daily bars & period metrics from Yahoo Finance)
+  // Provider-neutral completed daily market history endpoint
   app.get('/api/market/:symbol/history', async (req, res) => {
     const { symbol } = req.params;
     const { range = '1M' } = req.query;
@@ -590,6 +590,9 @@ export function createApp(services = {}) {
         status: 'error',
         message: error.message || 'Failed to fetch market history'
       };
+      if (error.code) {
+        response.code = error.code;
+      }
       if (error.warnings && Array.isArray(error.warnings) && error.warnings.length > 0) {
         response.warnings = error.warnings;
       }

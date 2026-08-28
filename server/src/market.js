@@ -1,6 +1,13 @@
 import { resolveProviderMapping } from './assets.js';
 import { getProviderAdapter, MARKET_PROVIDERS } from './providers/index.js';
 import {
+  getCanonicalDate,
+  getHistoryRangeStart,
+  getHistoryWindow,
+  normalizeDailyHistory,
+  PUBLIC_HISTORY_RANGES
+} from './history.js';
+import {
   getVietnamSessionKey,
   normalizeHistoricalData,
   normalizeMarketSnapshot
@@ -8,13 +15,26 @@ import {
 
 export {
   getProviderAdapter,
+  getCanonicalDate,
+  getHistoryRangeStart,
+  getHistoryWindow,
   getVietnamSessionKey,
   MARKET_PROVIDERS,
+  normalizeDailyHistory,
   normalizeHistoricalData,
   normalizeMarketSnapshot
 };
 
-const PUBLIC_RANGES = Object.freeze(['1W', '1M', '3M', '6M', '1Y']);
+const PUBLIC_RANGES = PUBLIC_HISTORY_RANGES;
+
+function assertSupportedHistoryPolicy(asset) {
+  if (!['VN_EXCHANGE', 'CONTINUOUS_24_7', 'GLOBAL_24_5'].includes(asset.marketPolicy)) {
+    const err = new Error(`Historical market data policy '${asset.marketPolicy || 'unavailable'}' is unsupported for '${asset.symbol}'`);
+    err.status = 422;
+    err.code = 'UNSUPPORTED_MARKET_POLICY';
+    throw err;
+  }
+}
 
 function assertVietnamHistoryPolicy(asset) {
   if (asset.marketPolicy !== 'VN_EXCHANGE') {
@@ -35,6 +55,17 @@ function resolveAdapter(mapping, asset, options = {}) {
     throw err;
   }
   return adapter;
+}
+
+function resolveHistoryNow(options) {
+  if (options.now === undefined) return new Date();
+  if (!(options.now instanceof Date) || !Number.isFinite(options.now.getTime())) {
+    const err = new TypeError('History now must be a valid Date object');
+    err.status = 400;
+    err.code = 'INVALID_TIME_CONTEXT';
+    throw err;
+  }
+  return options.now;
 }
 
 /**
@@ -95,7 +126,7 @@ export async function getMarketHistory(rawSymbol, rawRange = '1M', options = {})
   const resolver = options.resolveProviderMappingFn || resolveProviderMapping;
   const { asset, mapping } = await resolver(symbol, options.provider || null, options.providerResolverOptions || {});
 
-  assertVietnamHistoryPolicy(asset);
+  assertSupportedHistoryPolicy(asset);
 
   const adapter = resolveAdapter(mapping, asset, options);
   if (typeof adapter.getHistory !== 'function') {
@@ -105,7 +136,8 @@ export async function getMarketHistory(rawSymbol, rawRange = '1M', options = {})
     throw err;
   }
 
-  return adapter.getHistory(asset, mapping, { ...options, range });
+  const now = resolveHistoryNow(options);
+  return adapter.getHistory(asset, mapping, { ...options, range, now });
 }
 
 /**
@@ -138,5 +170,6 @@ export async function getAnalysisHistory(rawSymbol, options = {}) {
     throw err;
   }
 
-  return adapter.getHistory(asset, mapping, { ...options, range: '2y', normalizedRange: '1Y' });
+  const now = resolveHistoryNow(options);
+  return adapter.getHistory(asset, mapping, { ...options, range: '2y', normalizedRange: '1Y', now });
 }

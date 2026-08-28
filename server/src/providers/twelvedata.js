@@ -109,3 +109,17 @@ export async function getTwelveDataFxRate(baseCurrency, quoteCurrency = REPORTIN
     });
   }
 }
+
+export async function getHistory(asset) {
+  const error = new Error(
+    `Historical market data for '${asset?.symbol || 'USD/VND'}' is unsupported because Twelve Data daily timezone semantics are not compatible with the canonical market timezone`
+  );
+  error.status = 422;
+  error.code = 'UNSUPPORTED_HISTORY';
+  throw error;
+}
+
+export const twelvedataProvider = Object.freeze({
+  name: 'twelvedata',
+  getHistory
+});

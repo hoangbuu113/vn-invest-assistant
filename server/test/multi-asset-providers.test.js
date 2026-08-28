@@ -216,28 +216,49 @@ describe('Feature 20A — Real Multi-Asset Providers & Representative Assets', (
     }
   });
 
-  // G. crypto does not silently enter VN history/session semantics
-  it('G. crypto history requests reject with explicit UNSUPPORTED_MARKET_POLICY', async () => {
+  // G. crypto history uses its explicit 24/7 UTC policy instead of Vietnam sessions
+  it('G. crypto history requests use explicit CoinGecko daily data and CONTINUOUS_24_7 semantics', async () => {
     const asset = {
       id: 'uuid-btc',
       symbol: 'BTC',
+      quote_currency: 'USD',
+      quoteCurrency: 'USD',
       market_policy: 'CONTINUOUS_24_7',
-      marketPolicy: 'CONTINUOUS_24_7'
+      marketPolicy: 'CONTINUOUS_24_7',
+      market_timezone: 'UTC',
+      marketTimezone: 'UTC'
     };
     const mapping = { provider: 'coingecko', providerSymbol: 'bitcoin' };
+    const now = new Date('2026-08-29T12:00:00.000Z');
+    const prices = [
+      [Date.parse('2026-07-20T00:00:00.000Z'), 60000],
+      [Date.parse('2026-08-01T00:00:00.000Z'), 62000],
+      [Date.parse('2026-08-28T00:00:00.000Z'), 65000],
+      [Date.parse('2026-08-29T00:00:00.000Z'), 66000]
+    ];
+    const fetchFn = async () => ({
+      ok: true,
+      json: async () => ({ prices, market_caps: [], total_volumes: [] })
+    });
 
-    await assert.rejects(
-      () => coingeckoProvider.getHistory(asset, mapping),
-      (err) => err.code === 'UNSUPPORTED_MARKET_POLICY' && err.status === 422
-    );
+    const direct = await coingeckoProvider.getHistory(asset, mapping, {
+      apiKey: 'test-key',
+      fetchFn,
+      now,
+      range: '1M'
+    });
+    assert.deepEqual(direct.bars.map((bar) => bar.date), ['2026-08-01', '2026-08-28']);
+    assert.ok(direct.bars.every((bar) => bar.open === null && bar.high === null && bar.low === null && bar.volume === null));
 
-    await assert.rejects(
-      () => getMarketHistory('BTC', '1M', {
-        resolveProviderMappingFn: async () => ({ asset, mapping }),
-        getProviderAdapterFn: () => coingeckoProvider
-      }),
-      (err) => err.code === 'UNSUPPORTED_MARKET_POLICY' && err.status === 422
-    );
+    const throughMarket = await getMarketHistory('BTC', '1M', {
+      resolveProviderMappingFn: async () => ({ asset, mapping }),
+      getProviderAdapterFn: () => coingeckoProvider,
+      apiKey: 'test-key',
+      fetchFn,
+      now
+    });
+    assert.equal(throughMarket.marketPolicy, 'CONTINUOUS_24_7');
+    assert.equal(throughMarket.marketTimezone, 'UTC');
   });
 
   // H. Alpha Vantage XAU maps to Gold Spot, not GC futures
@@ -426,10 +447,11 @@ describe('Feature 20A — Real Multi-Asset Providers & Representative Assets', (
   });
 
   // N. Registry lookup verifies all provider adapters
-  it('N. provider registry correctly resolves yahoo, coingecko, and alphavantage adapters', () => {
+  it('N. provider registry resolves market adapters including explicit unsupported FX history', () => {
     assert.equal(getProviderAdapter('yahoo')?.name, 'yahoo');
     assert.equal(getProviderAdapter('coingecko')?.name, 'coingecko');
     assert.equal(getProviderAdapter('alphavantage')?.name, 'alphavantage');
+    assert.equal(getProviderAdapter('twelvedata')?.name, 'twelvedata');
     assert.equal(getProviderAdapter('unknown'), null);
   });
 });

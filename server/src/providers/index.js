@@ -1,11 +1,13 @@
 import { yahooProvider } from './yahoo.js';
 import { coingeckoProvider } from './coingecko.js';
 import { alphavantageProvider } from './alphavantage.js';
+import { twelvedataProvider } from './twelvedata.js';
 
 export const MARKET_PROVIDERS = Object.freeze({
   yahoo: yahooProvider,
   coingecko: coingeckoProvider,
-  alphavantage: alphavantageProvider
+  alphavantage: alphavantageProvider,
+  twelvedata: twelvedataProvider
 });
 
 /**

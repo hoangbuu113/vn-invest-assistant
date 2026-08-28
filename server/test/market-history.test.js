@@ -288,7 +288,7 @@ describe('Feature 06 - Historical Data Integrity Hardening (Patch 2)', () => {
       () => normalizeHistoricalData(fixture, 'FPT', '1W'),
       (err) => {
         assert.equal(err.status, 404);
-        assert.match(err.message, /No valid historical price records found/);
+        assert.match(err.message, /No usable completed historical price records found/);
         return true;
       }
     );

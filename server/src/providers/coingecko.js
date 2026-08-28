@@ -1,3 +1,5 @@
+import { addCalendarDays, getHistoryWindow, normalizeDailyHistory } from '../history.js';
+
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
 /**
@@ -119,14 +121,115 @@ export async function getSnapshot(asset, mapping, options = {}) {
   }
 }
 
-/**
- * Historical bar fetching is deferred to Feature 21 for 24/7 crypto calendar semantics.
- */
 export async function getHistory(asset, mapping, options = {}) {
-  const err = new Error(`Historical market data for crypto provider 'coingecko' is not supported yet (scheduled for Feature 21)`);
-  err.status = 422;
-  err.code = 'UNSUPPORTED_MARKET_POLICY';
-  throw err;
+  const symbol = asset?.symbol || 'CRYPTO';
+  const coinId = mapping?.providerSymbol ?? mapping?.provider_symbol;
+  if (!coinId || typeof coinId !== 'string' || !coinId.trim()) {
+    const err = new Error(`No CoinGecko coin ID mapping available for '${symbol}'`);
+    err.status = 422;
+    err.code = 'UNSUPPORTED_PROVIDER';
+    throw err;
+  }
+  if (asset?.marketPolicy !== 'CONTINUOUS_24_7' || asset?.marketTimezone !== 'UTC') {
+    const err = new Error(`CoinGecko history is unsupported for market policy '${asset?.marketPolicy || 'unavailable'}'`);
+    err.status = 422;
+    err.code = 'UNSUPPORTED_MARKET_POLICY';
+    throw err;
+  }
+  if (asset?.quoteCurrency !== 'USD') {
+    const err = new Error(`CoinGecko USD history conflicts with canonical currency '${asset?.quoteCurrency || 'unavailable'}'`);
+    err.status = 502;
+    err.code = 'PROVIDER_CURRENCY_MISMATCH';
+    throw err;
+  }
+
+  const now = options.now instanceof Date ? options.now : new Date();
+  const range = (options.range || '1M').toString().trim().toUpperCase();
+  const { startDate } = getHistoryWindow(asset, range, now);
+  const fromDate = addCalendarDays(startDate, -2);
+  const from = Math.floor(Date.parse(`${fromDate}T00:00:00.000Z`) / 1000);
+  const to = Math.floor(now.getTime() / 1000);
+  const normalizedCoinId = coinId.trim().toLowerCase();
+  const apiKey = options.apiKey !== undefined ? options.apiKey : process.env.COINGECKO_API_KEY;
+  const url = `https://api.coingecko.com/api/v3/coins/${encodeURIComponent(normalizedCoinId)}/market_chart/range?vs_currency=usd&from=${from}&to=${to}&interval=daily&precision=full`;
+  const fetchFn = options.fetchFn || fetch;
+  const headers = { 'User-Agent': USER_AGENT };
+  if (apiKey) headers['x-cg-demo-api-key'] = apiKey;
+
+  let timeout;
+  try {
+    const controller = new AbortController();
+    timeout = setTimeout(() => controller.abort(), 8000);
+    const response = await fetchFn(url, { signal: controller.signal, headers });
+
+    if (!response.ok) {
+      const err = new Error(
+        response.status === 404
+          ? `Historical market data for '${symbol}' not found on CoinGecko`
+          : response.status === 429
+            ? 'CoinGecko history rate limit exceeded'
+            : `CoinGecko returned status ${response.status}`
+      );
+      err.status = response.status === 404 ? 404 : response.status === 429 ? 503 : 502;
+      err.code = response.status === 404 ? 'HISTORY_NOT_FOUND' : response.status === 429 ? 'PROVIDER_RATE_LIMIT' : 'PROVIDER_ERROR';
+      throw err;
+    }
+
+    const data = await response.json();
+    if (data?.status?.error_code || data?.error) {
+      const err = new Error(data?.status?.error_message || data?.error || 'CoinGecko history provider error');
+      err.status = data?.status?.error_code === 429 ? 503 : 502;
+      err.code = data?.status?.error_code === 429 ? 'PROVIDER_RATE_LIMIT' : 'PROVIDER_ERROR';
+      throw err;
+    }
+    if (!Array.isArray(data?.prices)) {
+      const err = new Error(`Malformed CoinGecko historical response for '${symbol}'`);
+      err.status = 502;
+      err.code = 'MALFORMED_PROVIDER_RESPONSE';
+      throw err;
+    }
+
+    const records = data.prices.map((row) => {
+      const timestampMs = Array.isArray(row) ? row[0] : null;
+      const rawPrice = Array.isArray(row) ? row[1] : null;
+      const price = (typeof rawPrice === 'number' || (typeof rawPrice === 'string' && rawPrice.trim()))
+        ? Number(rawPrice)
+        : null;
+      return {
+        timestamp: typeof timestampMs === 'number' && Number.isFinite(timestampMs) && timestampMs > 0
+          ? new Date(timestampMs).toISOString()
+          : null,
+        open: null,
+        high: null,
+        low: null,
+        close: price,
+        volume: null
+      };
+    });
+
+    return normalizeDailyHistory({
+      asset,
+      provider: 'coingecko',
+      range,
+      records,
+      now,
+      freshness: 'delayed'
+    });
+  } catch (err) {
+    if (err.status) throw err;
+    if (err.name === 'AbortError') {
+      const timeoutErr = new Error('CoinGecko market history request timed out');
+      timeoutErr.status = 504;
+      timeoutErr.code = 'PROVIDER_TIMEOUT';
+      throw timeoutErr;
+    }
+    const internalErr = new Error(err.message || 'Error fetching CoinGecko market history');
+    internalErr.status = 502;
+    internalErr.code = 'PROVIDER_ERROR';
+    throw internalErr;
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
 }
 
 export const coingeckoProvider = Object.freeze({
@@ -134,4 +237,3 @@ export const coingeckoProvider = Object.freeze({
   getSnapshot,
   getHistory
 });
-
