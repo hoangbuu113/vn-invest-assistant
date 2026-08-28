@@ -100,5 +100,10 @@ The following architectural and product decisions are confirmed:
   - **Backend Metric Authority**: Deterministic Feature 07 metrics are consumed directly from the backend without client-side recalculation in React.
   - **Normalized Chart Semantics**: The relative price chart normalizes prices to base = 100 at the start of the period for visual relative-price comparison only; it is not total return or investment performance.
   - **Failure Isolation**: Each compared asset fetches in parallel with independent `AbortController` and error boundaries. A failed request on one asset never breaks other compared assets.
-  - **Data Availability & Non-Zero Integrity**: Missing or unavailable values remain `null`/unavailable ("Chưa đủ dữ liệu" / "—") and are never converted to zero.
-  - **Concise Scope**: Detailed historical charts, news feeds, and raw asset records remain in Asset Detail; comparison provides high-level alignment with direct "Xem chi tiết" navigation.
+- **Price Alerts V1 / Cảnh báo giá (Feature 12)**:
+  - **Persistent One-Shot Lifecycle**: Alerts are stored persistently in `public.price_alerts` with a one-shot lifecycle (`active` -> `triggered`). Once triggered, alerts remain visible and do not automatically re-arm; users can manually reactivate them.
+  - **Explicit Evaluation Semantics**: Alerts are evaluated deterministically when the app or user explicitly refreshes/evaluates them (`POST /api/alerts/evaluate`). No daemon, cron, worker, push notifications, email, or SMS exist in V1.
+  - **Condition Operators**: `above` triggers iff `validPrice >= targetPrice` ("Giá đạt hoặc vượt"); `below` triggers iff `validPrice <= targetPrice` ("Giá giảm xuống hoặc thấp hơn").
+  - **Non-Zero Provider Failure Isolation**: When market snapshots are unavailable or malformed, active alerts remain in `active` state and are never evaluated against fake 0 values or fabricated prices.
+  - **Delayed Market Context**: Market data delay (~15 minutes) is clearly disclosed. Timestamps and evaluation prices (`last_evaluated_price`, `last_evaluated_at`, `triggered_at`) are recorded honestly without fabricating real-time execution.
+  - **Singleton Ownership & Duplicate Safety**: Alerts belong exclusively to the singleton profile. Exact duplicate alerts `(profile_id, asset_id, direction, target_price)` are prevented at DB level and handled idempotently by API.

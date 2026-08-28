@@ -73,7 +73,6 @@ BUILD
   - Holding allocations, asset-type group aggregations, largest holding, and top-3 concentration percentages.
   - Descriptive "Cơ cấu danh mục" UI in Portfolio page featuring interactive 2.5D Donut, clear numeric legends, unpriced holding visibility, and non-redundant concentration metrics.
   - Backend checkpoint `36fc24e`, UI checkpoint `a3ddedf`.
-  - 137/137 automated tests passing.
 - **Feature 11 — Asset Comparison / So sánh tài sản**
   - Dedicated Vietnamese comparison view ("So sánh tài sản") accessible via clean secondary action from the Tài sản page.
   - Side-by-side comparison supporting 2 to 4 assets with duplicate prevention and search selection.
@@ -84,6 +83,16 @@ BUILD
   - Pure descriptive comparison without scoring, ranking, winner/loser labels, or BUY/SELL/HOLD advice.
   - Full per-asset failure isolation and stale-response protection with `AbortController`.
   - 147/147 automated tests passing.
+- **Feature 12 — Price Alerts V1 / Cảnh báo giá**
+  - Minimal persistent price alerts table `public.price_alerts` (`profile_id`, `asset_id`, `direction`, `target_price`, `status`, `last_evaluated_price`, `last_evaluated_at`, `triggered_at`, `created_at`).
+  - Dedicated Supabase migration applied (`supabase/migrations/20260828110000_create_price_alerts_table.sql`) with unique constraint on `(profile_id, asset_id, direction, target_price)`.
+  - Backend endpoints: `GET /api/alerts`, `POST /api/alerts`, `DELETE /api/alerts/:id`, `POST /api/alerts/evaluate`, `POST /api/alerts/:id/reactivate`.
+  - Pure deterministic evaluation engine in `server/src/alerts.js` with batch evaluation and failure isolation across assets.
+  - Strict condition semantics: `above` triggers when `latestPrice >= targetPrice`, `below` triggers when `latestPrice <= targetPrice`.
+  - One-shot lifecycle: `active` -> `triggered` upon explicit app evaluation. Triggered alerts persist and can be manually reactivated.
+  - Compact modal ("Đặt cảnh báo giá") accessible from Asset Detail and Watchlist.
+  - Dedicated Alert Center section ("Cảnh báo giá") featuring summary KPI cards, simplified tabs (Tất cả, Đang hoạt động, Đã kích hoạt), manual evaluation control ("⚡ Kiểm tra cảnh báo"), price evaluation context, and clear ~15m delay disclosure.
+  - 166/166 automated tests passing.
 
 ## PRE-FEATURE-07 HARDENING (COMPLETED)
 - **Historical Market Normalization Hardened** (Patch 06-2, checkpoint `d38ee60`): Deterministic deduplication, exact fractional volumes, robust boundary handling, clean null propagation for missing OHLCV.
@@ -101,5 +110,5 @@ BUILD
   - Default server automated tests are fully isolated from real Supabase and exercise actual production-path query predicates.
 
 ## CURRENT STATE
-Feature 11 (Asset Comparison / So sánh tài sản) is **COMPLETE** (checkpoint `b4a89ac`, 147/147 tests PASS, client build clean).
+Feature 12 (Price Alerts V1 / Cảnh báo giá) is **COMPLETE** (checkpoint `f9eb5ca`, 166/166 tests PASS, client build clean).
 The next feature has not been selected yet; awaiting Project Director decision.
