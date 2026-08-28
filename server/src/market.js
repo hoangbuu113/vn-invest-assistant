@@ -409,3 +409,65 @@ export async function getMarketHistory(rawSymbol, rawRange = '1M') {
     throw internalErr;
   }
 }
+
+/**
+ * Internal helper to fetch 2y daily historical bars for Feature 07 analysis superset.
+ * Normalizes via existing normalizeHistoricalData.
+ * Does not alter Feature 06 public API range constraints on getMarketHistory.
+ * @param {string} rawSymbol - Asset symbol
+ * @param {Object} [options] - Optional overrides (e.g. fetchFn)
+ */
+export async function getAnalysisHistory(rawSymbol, options = {}) {
+  if (!rawSymbol || typeof rawSymbol !== 'string') {
+    const err = new Error('Invalid symbol parameter');
+    err.status = 400;
+    throw err;
+  }
+
+  const symbol = rawSymbol.trim().toUpperCase();
+  const yahooSymbol = SYMBOL_MAP[symbol] || (symbol.endsWith('.VN') ? symbol : `${symbol}.VN`);
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooSymbol)}?interval=1d&range=2y`;
+
+  const fetchFn = options.fetchFn || fetch;
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+
+    const response = await fetchFn(url, {
+      signal: controller.signal,
+      headers: {
+        'User-Agent': USER_AGENT
+      }
+    });
+    clearTimeout(timeout);
+
+    if (!response.ok) {
+      const err = new Error(response.status === 404 ? `Historical market data for '${symbol}' not found` : `Upstream market provider returned status ${response.status}`);
+      err.status = response.status === 404 ? 404 : 502;
+      throw err;
+    }
+
+    const data = await response.json();
+    const result = data?.chart?.result?.[0];
+    if (!result || !result.meta) {
+      const err = new Error(`No historical data available for '${symbol}'`);
+      err.status = 404;
+      throw err;
+    }
+
+    return normalizeHistoricalData(result, symbol, '1Y');
+  } catch (err) {
+    if (err.status) {
+      throw err;
+    }
+    if (err.name === 'AbortError') {
+      const timeoutErr = new Error('Market history request timed out');
+      timeoutErr.status = 504;
+      throw timeoutErr;
+    }
+    const internalErr = new Error(err.message || 'Error fetching market history');
+    internalErr.status = 500;
+    throw internalErr;
+  }
+}

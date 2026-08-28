@@ -12,9 +12,10 @@ import {
   updateHolding,
   deleteHolding
 } from './src/supabase.js';
-import { getMarketSnapshot, getMarketHistory } from './src/market.js';
+import { getMarketSnapshot, getMarketHistory, getAnalysisHistory } from './src/market.js';
 import { getNewsFeed } from './src/news.js';
 import { getPortfolioOverview } from './src/portfolio.js';
+import { getAssetAnalysis } from './src/analysis.js';
 
 dotenv.config();
 
@@ -44,7 +45,9 @@ export function createApp(services = {}) {
     getMarketHistoryFn = getMarketHistory,
     getNewsFeedFn = getNewsFeed,
     getPortfolioOverviewFn = getPortfolioOverview,
-    checkSupabaseConnectionFn = checkSupabaseConnection
+    checkSupabaseConnectionFn = checkSupabaseConnection,
+    getAnalysisHistoryFn = getAnalysisHistory,
+    getAssetAnalysisFn = getAssetAnalysis
   } = services;
 
   const app = express();
@@ -397,6 +400,31 @@ export function createApp(services = {}) {
         message: 'Failed to generate portfolio overview',
         details: error.message
       });
+    }
+  });
+
+  // Deterministic asset analysis endpoint
+  app.get('/api/analysis/:symbol', async (req, res) => {
+    const { symbol } = req.params;
+    try {
+      const analysis = await getAssetAnalysisFn(symbol, {
+        getAnalysisHistoryFn,
+        getMarketSnapshotFn
+      });
+      return res.json({
+        status: 'ok',
+        data: analysis
+      });
+    } catch (error) {
+      const statusCode = error.status || 500;
+      const response = {
+        status: 'error',
+        message: error.message || 'Failed to generate asset analysis'
+      };
+      if (error.warnings && Array.isArray(error.warnings) && error.warnings.length > 0) {
+        response.warnings = error.warnings;
+      }
+      return res.status(statusCode).json(response);
     }
   });
 
