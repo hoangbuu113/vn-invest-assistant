@@ -25,6 +25,13 @@ import { getNewsFeed, getPersonalizedNewsFeed } from './src/news.js';
 import { getPortfolioOverview } from './src/portfolio.js';
 import { getPortfolioComposition } from './src/composition.js';
 import { getAssetAnalysis } from './src/analysis.js';
+import {
+  createPortfolioTransaction,
+  getPortfolioTransactions,
+  normalizeExplicitTimestamp,
+  TRANSACTION_METHODOLOGY,
+  TRANSACTION_TYPES
+} from './src/transactions.js';
 
 dotenv.config();
 
@@ -66,7 +73,10 @@ export function createApp(services = {}) {
     createAlertFn = createAlert,
     deleteAlertFn = deleteAlert,
     reactivateAlertFn = reactivateAlert,
-    evaluateAndPersistAlertsFn = evaluateAndPersistAlerts
+    evaluateAndPersistAlertsFn = evaluateAndPersistAlerts,
+    getPortfolioTransactionsFn = getPortfolioTransactions,
+    createPortfolioTransactionFn = createPortfolioTransaction,
+    transactionClient
   } = services;
 
   const app = express();
@@ -188,6 +198,8 @@ export function createApp(services = {}) {
     }
   });
 
+  // Compatibility endpoint for holdings that may predate Feature 14. New BUY/SELL
+  // activity should use POST /api/transactions so ledger and holdings stay atomic.
   app.post('/api/holdings', async (req, res) => {
     try {
       const { asset_id, quantity, average_cost } = req.body || {};
@@ -299,6 +311,111 @@ export function createApp(services = {}) {
       return res.status(statusCode).json({
         status: 'error',
         message: error.message || 'Failed to delete holding',
+        details: error.message
+      });
+    }
+  });
+
+  // Immutable Feature 14 transaction ledger. Holdings mutation occurs only in
+  // the database RPC so the ledger row and position update share one transaction.
+  app.get('/api/transactions', async (req, res) => {
+    try {
+      const { symbol } = req.query;
+      if (symbol !== undefined && (typeof symbol !== 'string' || symbol.trim() === '')) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'symbol filter must be a non-empty string'
+        });
+      }
+
+      const transactions = await getPortfolioTransactionsFn({
+        symbol: typeof symbol === 'string' ? symbol.trim() : undefined
+      }, transactionClient);
+
+      return res.json({
+        status: 'ok',
+        count: transactions.length,
+        data: transactions,
+        methodology: TRANSACTION_METHODOLOGY
+      });
+    } catch (error) {
+      const statusCode = error.statusCode || 500;
+      return res.status(statusCode).json({
+        status: 'error',
+        message: error.message || 'Failed to fetch portfolio transactions',
+        details: error.message
+      });
+    }
+  });
+
+  app.post('/api/transactions', async (req, res) => {
+    try {
+      const body = req.body || {};
+      const { symbol, assetId, transactionType, quantity, price, executedAt } = body;
+      const errors = [];
+
+      const hasSymbol = typeof symbol === 'string' && symbol.trim() !== '';
+      const hasAssetId = typeof assetId === 'string' && assetId.trim() !== '';
+      if (symbol !== undefined && !hasSymbol) {
+        errors.push('symbol must be a non-empty string when provided');
+      }
+      if (assetId !== undefined && !hasAssetId) {
+        errors.push('assetId must be a non-empty string when provided');
+      }
+      if (hasSymbol === hasAssetId) {
+        errors.push('exactly one of symbol or assetId is required');
+      }
+
+      const normalizedTransactionType = typeof transactionType === 'string'
+        ? transactionType.trim()
+        : null;
+      if (!normalizedTransactionType || !TRANSACTION_TYPES.includes(normalizedTransactionType)) {
+        errors.push('transactionType must be one of: BUY, SELL');
+      }
+
+      if (!isValidFinancialNumber(quantity, { allowZero: false })) {
+        errors.push('quantity must be a finite number greater than 0');
+      }
+
+      if (!isValidFinancialNumber(price, { allowZero: false })) {
+        errors.push('price must be a finite number greater than 0');
+      }
+
+      let normalizedExecutedAt;
+      if (Object.prototype.hasOwnProperty.call(body, 'executedAt')) {
+        normalizedExecutedAt = normalizeExplicitTimestamp(executedAt);
+        if (!normalizedExecutedAt) {
+          errors.push('executedAt must be a valid timestamp with an explicit Z or UTC offset');
+        }
+      }
+
+      if (errors.length > 0) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'Invalid portfolio transaction data',
+          errors
+        });
+      }
+
+      const result = await createPortfolioTransactionFn({
+        symbol: hasSymbol ? symbol.trim() : undefined,
+        assetId: hasAssetId ? assetId.trim() : undefined,
+        transactionType: normalizedTransactionType,
+        quantity,
+        price,
+        executedAt: normalizedExecutedAt
+      }, transactionClient);
+
+      return res.status(201).json({
+        status: 'ok',
+        data: result,
+        methodology: TRANSACTION_METHODOLOGY
+      });
+    } catch (error) {
+      const statusCode = error.statusCode || 500;
+      return res.status(statusCode).json({
+        status: 'error',
+        message: error.message || 'Failed to create portfolio transaction',
         details: error.message
       });
     }
