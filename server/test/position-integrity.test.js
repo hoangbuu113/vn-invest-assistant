@@ -669,7 +669,13 @@ describe('Feature 17A — opening position and ledger authority', () => {
       { cash_available: fake.state.cashAvailable },
       [{
         ...row,
-        asset: { symbol: 'FPT', name: 'FPT Corporation', asset_type: 'stock', exchange: 'HOSE' }
+        asset: {
+          symbol: 'FPT',
+          name: 'FPT Corporation',
+          asset_type: 'stock',
+          exchange: 'HOSE',
+          quote_currency: 'VND'
+        }
       }],
       { FPT: { price: 40000, priceAsOf: '2026-08-28T08:00:00.000Z' } }
     );

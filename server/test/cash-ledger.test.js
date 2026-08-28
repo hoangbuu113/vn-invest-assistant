@@ -35,7 +35,13 @@ function createFakeAccountingDatabase({
   legacyTransactions = [],
   failAfterTransactionInsert = false
 } = {}) {
-  const asset = { id: ASSET_ID, symbol: 'FPT', name: 'FPT Corporation', asset_type: 'stock' };
+  const asset = {
+    id: ASSET_ID,
+    symbol: 'FPT',
+    name: 'FPT Corporation',
+    asset_type: 'stock',
+    quote_currency: 'VND'
+  };
   const openingEntries = cashAvailable > 0
     ? [{
         id: 'cash-opening',

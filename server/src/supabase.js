@@ -343,7 +343,7 @@ export async function getHoldings(client = supabase) {
       average_cost,
       created_at,
       updated_at,
-      assets (id, symbol, name, asset_type, exchange),
+      assets (id, symbol, name, asset_type, exchange, quote_currency),
       opening_position:position_opening_baselines (
         id,
         opening_quantity,

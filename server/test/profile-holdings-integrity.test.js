@@ -177,7 +177,14 @@ describe('Patch B3 - Production-Path Profile & Holdings Integrity Hardening', ()
             opening_position_id: 'opening-fpt',
             quantity: 100,
             average_cost: 60000,
-            assets: { id: 'asset-fpt', symbol: 'FPT', name: 'FPT Corp', asset_type: 'stock', exchange: 'HOSE' },
+            assets: {
+              id: 'asset-fpt',
+              symbol: 'FPT',
+              name: 'FPT Corp',
+              asset_type: 'stock',
+              exchange: 'HOSE',
+              quote_currency: 'VND'
+            },
             opening_position: {
               id: 'opening-fpt',
               opening_quantity: 100,
@@ -201,12 +208,14 @@ describe('Patch B3 - Production-Path Profile & Holdings Integrity Hardening', ()
       assert.equal(result[0].position_origin, 'USER_RECORDED');
       assert.equal(result[0].opening_correction_allowed, true);
       assert.equal(result[0].opening_position.opening_quantity, 100);
+      assert.equal(result[0].asset.quote_currency, 'VND');
 
       // Inspect query issued to Supabase by production getHoldings()
       const holdingsQuery = queryLog.find(q => q.table === 'holdings');
       assert.ok(holdingsQuery, 'Must query holdings table');
       assert.equal(holdingsQuery.action, 'select');
       assert.match(holdingsQuery.selectFields, /position_opening_baselines/);
+      assert.match(holdingsQuery.selectFields, /quote_currency/);
 
       const profileFilter = holdingsQuery.eqFilters.find(f => f.column === 'profile_id');
       assert.ok(profileFilter, 'Production query MUST include profile_id filter');

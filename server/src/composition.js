@@ -54,10 +54,18 @@ export function calculatePortfolioComposition(portfolioOverview) {
     : [];
 
   const holdingAllocations = sourceHoldings.map((holding) => {
-    const hasValidMarketValue = typeof holding?.marketValue === 'number'
-      && Number.isFinite(holding.marketValue)
-      && holding.marketValue >= 0;
-    const isPriced = holding?.pricingStatus === 'available' && hasValidMarketValue;
+    const hasReportingValueField = Object.prototype.hasOwnProperty.call(
+      holding || {},
+      'reportingMarketValue'
+    );
+    const reportingMarketValue = hasReportingValueField
+      ? holding.reportingMarketValue
+      : holding?.marketValue;
+    const reportingValuationStatus = holding?.valuationStatus ?? holding?.pricingStatus;
+    const hasValidMarketValue = typeof reportingMarketValue === 'number'
+      && Number.isFinite(reportingMarketValue)
+      && reportingMarketValue >= 0;
+    const isPriced = reportingValuationStatus === 'available' && hasValidMarketValue;
 
     return {
       id: holding?.id ?? null,
@@ -65,7 +73,7 @@ export function calculatePortfolioComposition(portfolioOverview) {
       symbol: holding?.symbol ?? null,
       name: holding?.name ?? null,
       assetType: normalizedAssetType(holding?.assetType),
-      marketValue: isPriced ? holding.marketValue : null,
+      marketValue: isPriced ? reportingMarketValue : null,
       weightPct: null,
       isPriced,
       pricingStatus: isPriced ? 'available' : 'unavailable'

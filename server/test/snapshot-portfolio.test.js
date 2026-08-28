@@ -189,7 +189,7 @@ describe('Portfolio Valuation Integrity (Patch A & A2)', () => {
       asset_id: 'a1',
       quantity: 100,
       average_cost: 60000,
-      asset: { symbol: 'FPT', name: 'FPT Corp' }
+      asset: { symbol: 'FPT', name: 'FPT Corp', quote_currency: 'VND' }
     }];
     const snapshots = {
       FPT: { price: 72000, priceAsOf: '2026-08-20T02:00:00.000Z' }
@@ -222,7 +222,7 @@ describe('Portfolio Valuation Integrity (Patch A & A2)', () => {
       id: 'h1',
       quantity: 100,
       average_cost: 50000,
-      asset: { symbol: 'FPT' }
+      asset: { symbol: 'FPT', quote_currency: 'VND' }
     }];
     const snapshots = {
       FPT: { price: 0, priceAsOf: '2026-08-20T02:00:00.000Z' }
@@ -245,7 +245,7 @@ describe('Portfolio Valuation Integrity (Patch A & A2)', () => {
       id: 'h1',
       quantity: 100,
       average_cost: 50000,
-      asset: { symbol: 'FPT' }
+      asset: { symbol: 'FPT', quote_currency: 'VND' }
     }];
     const snapshots = {
       FPT: { price: -50000 }
@@ -264,7 +264,7 @@ describe('Portfolio Valuation Integrity (Patch A & A2)', () => {
       id: 'h1',
       quantity: 100,
       average_cost: 50000,
-      asset: { symbol: 'UNKNOWN' }
+      asset: { symbol: 'UNKNOWN', quote_currency: 'VND' }
     }];
     const snapshots = {};
 
@@ -278,8 +278,8 @@ describe('Portfolio Valuation Integrity (Patch A & A2)', () => {
   test('5. Partial valuation when one holding is priced and another cannot be priced', () => {
     const profile = { cash_available: 10000000 };
     const holdings = [
-      { id: 'h1', quantity: 100, average_cost: 50000, asset: { symbol: 'FPT' } },
-      { id: 'h2', quantity: 200, average_cost: 30000, asset: { symbol: 'VCB' } }
+      { id: 'h1', quantity: 100, average_cost: 50000, asset: { symbol: 'FPT', quote_currency: 'VND' } },
+      { id: 'h2', quantity: 200, average_cost: 30000, asset: { symbol: 'VCB', quote_currency: 'VND' } }
     ];
     const snapshots = {
       FPT: { price: 60000, priceAsOf: '2026-08-20T02:00:00.000Z' },
@@ -302,7 +302,7 @@ describe('Portfolio Valuation Integrity (Patch A & A2)', () => {
       id: 'h1',
       quantity: 12.3456,
       average_cost: 65432.1,
-      asset: { symbol: 'FPT' }
+      asset: { symbol: 'FPT', quote_currency: 'VND' }
     }];
     const snapshots = {
       FPT: { price: 70000.5 }
@@ -321,7 +321,7 @@ describe('Portfolio Valuation Integrity (Patch A & A2)', () => {
       id: 'h1',
       quantity: 0.0001,
       average_cost: 0.0001,
-      asset: { symbol: 'MICRO' }
+      asset: { symbol: 'MICRO', quote_currency: 'VND' }
     }];
     const snapshots = {
       MICRO: { price: 0.0002 }
@@ -339,7 +339,7 @@ describe('Portfolio Valuation Integrity (Patch A & A2)', () => {
       id: 'h1',
       quantity: 0,
       average_cost: 0,
-      asset: { symbol: 'ZERO' }
+      asset: { symbol: 'ZERO', quote_currency: 'VND' }
     }];
     const snapshots = {
       ZERO: { price: 10000 }
@@ -356,8 +356,8 @@ describe('Portfolio Valuation Integrity (Patch A & A2)', () => {
   test('9. Aggregate calculations use full precision', () => {
     const profile = { cash_available: 12345.678 };
     const holdings = [
-      { id: 'h1', quantity: 1.111, average_cost: 10.111, asset: { symbol: 'A' } },
-      { id: 'h2', quantity: 2.222, average_cost: 20.222, asset: { symbol: 'B' } }
+      { id: 'h1', quantity: 1.111, average_cost: 10.111, asset: { symbol: 'A', quote_currency: 'VND' } },
+      { id: 'h2', quantity: 2.222, average_cost: 20.222, asset: { symbol: 'B', quote_currency: 'VND' } }
     ];
     const snapshots = {
       A: { price: 15.333 },
@@ -382,7 +382,7 @@ describe('Portfolio Valuation Integrity (Patch A & A2)', () => {
       id: 'h1',
       quantity: 10,
       average_cost: 100,
-      asset: { symbol: 'FPT' }
+      asset: { symbol: 'FPT', quote_currency: 'VND' }
     }];
     const snapshots = {
       FPT: { price: 120, priceAsOf: null, updatedAt: null }
