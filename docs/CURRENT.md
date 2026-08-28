@@ -1,7 +1,7 @@
 # Current Project Status
 
 ## LATEST VERIFIED CHECKPOINT
-- **Commit**: `20ae997`
+- **Commit**: `2dbdf2cb788e83f78b173fc8976083fb99de1041`
 - **Branch**: `main`
 
 ## CURRENT PHASE
@@ -41,6 +41,22 @@ BUILD
   - Asset Detail includes interactive historical price chart and period summary (start price, latest price, absolute change, % change, period high, period low)
   - Data remains labeled as delayed with latest timestamp
 
+## PRE-FEATURE-07 HARDENING (COMPLETED)
+- **Historical Market Normalization Hardened** (Patch 06-2, checkpoint `d38ee60`): Deterministic deduplication, exact fractional volumes, robust boundary handling, clean null propagation for missing OHLCV.
+- **Market Snapshot & Portfolio Integrity Hardened** (Patch A, checkpoint `8aa4e36`):
+  - Strict numeric and timestamp validation; missing source timestamps remain null and are never substituted with server/request time.
+  - Unavailable prices/percentages remain unavailable, never fabricated as zero.
+  - Derived portfolio valuation calculations use full precision without intermediate rounding.
+  - Stale frontend market/history responses are cancelled/guarded to prevent race conditions.
+- **Investor Profile & Holdings Integrity Hardened** (Patch B/B1/B2/B3, checkpoint `2dbdf2cb788e83f78b173fc8976083fb99de1041`):
+  - Investor profile singleton invariant is enforced at database level (`singleton_key SMALLINT NOT NULL DEFAULT 1 CHECK (singleton_key = 1) UNIQUE`) with reproducible Supabase migration (`supabase/migrations/20260827122345_add_investor_profile_singleton_key.sql`).
+  - Strict uncoerced finite JSON numeric validation (no `Number(...)` coercion).
+  - Strict enum validation for `risk_tolerance` and `investment_horizon`.
+  - Holdings operations (`GET`, `POST`, `PUT`, `DELETE`) are strictly scoped to the singleton profile.
+  - Correct error semantics: asset not-found returns client 400, while database/provider query failures propagate as 500.
+  - Default server automated tests are fully isolated from real Supabase and exercise actual production-path query predicates.
+
 ## CURRENT STATE
-Feature 06 (Historical Price & Trend) is complete and verified at checkpoint `20ae997`.
+Pre-Feature-07 hardening is complete and verified at checkpoint `2dbdf2cb788e83f78b173fc8976083fb99de1041`.
+Feature 07 (Opportunities & Ranking Engine) is **READY TO START**.
 

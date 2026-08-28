@@ -10,22 +10,31 @@ The following architectural and product decisions are confirmed:
   - Bank deposits
   - Bonds
 - **Scope of Execution**: No trade execution and no broker integration; analysis and ranking only.
-- **Investor Profile (Feature 04)**:
+- **Investor Profile & Holdings (Feature 04 & Hardening)**:
   - **V1 Model**: Exactly ONE singleton investor profile without authentication or multi-user accounts.
+  - **Database Singleton Enforcement**: The single-profile invariant is enforced directly at the database level (`singleton_key SMALLINT NOT NULL DEFAULT 1 CHECK (singleton_key = 1) UNIQUE`).
+  - **Reproducible Migration**: Supabase migration (`supabase/migrations/20260827122345_add_investor_profile_singleton_key.sql`) is the authoritative source for the deployed singleton constraint.
   - **Available Capital**: Stored as `cash_available` (money currently available to deploy into investments).
+  - **Strict Financial JSON Validation**: Persisted financial JSON fields (`cash_available`, `quantity`, `average_cost`) require real, finite JSON numbers; no `Number(...)` coercion from strings, booleans, or arrays.
   - **Risk Tolerance Values**: `low`, `moderate`, `high`.
   - **Investment Horizon Values**: `short`, `medium`, `long`.
-  - **Holdings Model**: Stored in `public.holdings` referencing profile and asset (`asset_id`, `quantity` > 0, `average_cost` >= 0) with unique asset-per-profile constraint.
+  - **Holdings Model & Scoping**: Stored in `public.holdings` referencing profile and asset (`asset_id`, `quantity` > 0, `average_cost` >= 0) with unique asset-per-profile constraint. All holdings operations (`GET`, `POST`, `PUT`, `DELETE`) are strictly scoped to the singleton profile.
   - **Localization**: All user-facing UI is in Vietnamese; internal code, API routes, and database identifiers remain in English.
-- **Portfolio Overview (Feature 05)**:
+- **Portfolio Overview (Feature 05 & Hardening)**:
+  - **Pricing Condition**: A holding is priced only when market price is finite and > 0.
+  - **Full Precision Valuation**: Derived portfolio values use full precision; rounding is presentation-only.
   - **Derived Metrics**: Portfolio metrics (total cost basis, total market value, unrealized P/L, total portfolio value) are calculated on demand, not stored as source-of-truth.
-  - **Missing Prices**: Missing market prices remain unavailable; never fabricate price = 0.
-  - **Partial Valuation**: If some holdings cannot be priced, portfolio valuation is explicitly partial (`valuationStatus: 'partial'`).
+  - **Missing Prices & Partial Valuation**: Missing/unusable prices produce partial valuation (`valuationStatus: 'partial'`), never fake zero valuation or fabricated price = 0.
   - **Market Data Labeling**: Yahoo market data remains labeled as delayed with timestamp (~15 min delay).
   - **Aggregate P/L Calculation**: Aggregate P/L only uses holdings with usable market prices.
   - **Stale Threshold**: No fixed stale-age threshold in V1.
   - **Out of Scope for Feature 05**: Feature 05 does not include realized P/L, transaction history, fees/taxes, charts, AI, recommendations, or portfolio optimization.
-- **Historical Price & Trend (Feature 06)**:
+- **Market Snapshot & Historical Price (Features 02, 06 & Hardening)**:
+  - **Missing Value Handling**: Never fabricate missing OHLCV or snapshot numeric values. Missing values remain `null`.
+  - **Timestamp Integrity**: Missing source timestamps remain `null`; never substitute request or server time.
+  - **Full Precision Metrics**: Financial percentage calculations use full precision internally without premature rounding.
+  - **Semantic Distinction**: Snapshot price and historical daily-close semantics remain distinct.
+  - **Unavailable Percentages**: Unavailable percentages are shown as unavailable, not 0%.
   - **Supported Ranges**: V1 historical price ranges are `1W`, `1M`, `3M`, `6M`, `1Y`.
   - **Interval**: All V1 historical ranges use daily bars (`1d`).
   - **Provider & Fetching**: Historical price data is fetched on demand from Yahoo Finance.
@@ -48,6 +57,9 @@ The following architectural and product decisions are confirmed:
   - **V1 Relevance Filtering**: Deterministic keyword and context filtering to eliminate non-investment noise (accidents, crimes, entertainment, sports, lifestyle) and require positive economic/market signals for global items.
   - **AI Analysis**: Deferred to subsequent phase/feature.
   - Financial/news detection target around every 30–60 seconds in later iterations.
+- **Testing & Safety Invariants**:
+  - **Default Test Isolation**: Default automated tests must not mutate real Supabase data.
+  - **Production-Path Testing**: Critical financial logic and access controls should use production-path tests where practical. Tests that merely reimplement production ownership logic in-memory are insufficient.
 - **Project Philosophy**: Learning project for full-stack/vibe coding, but must remain practically usable in real life.
 - **Scoring Methodology**: Quantitative scoring should be evidence/data-driven (derived from data, rules, or quantitative models) rather than invented by AI intuition alone.
 
