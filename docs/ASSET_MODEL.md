@@ -4,29 +4,39 @@ This document defines the canonical architectural and conceptual model for multi
 
 ---
 
-## 1. Current Implementation Status (Features 16–18)
+## 1. Current Implementation Status (Features 16–20A)
 
-Features 16 through 18 establish the canonical schema, ledger authority, and provider abstraction foundation:
+Features 16 through 20A establish the canonical schema, ledger authority, provider abstraction, FX valuation, and representative multi-asset universe:
 
-- **Implemented Capabilities**:
+- **Verified Production Universe (12 Canonical Assets)**:
+  - **Vietnamese Equities & ETFs** (`VN_EXCHANGE`, `Asia/Ho_Chi_Minh`, `VND`, `share`):
+    - `VCB`, `FPT`, `HPG`, `VNM`, `E1VFVN30`, `FUEVFVND`, `FUESSVFL`
+    - Provider mapping: `yahoo` $\rightarrow$ `<SYMBOL>.VN`
+  - **Cryptocurrencies** (`CONTINUOUS_24_7`, `UTC`, `USD`, `coin`):
+    - `BTC` (provider: `coingecko` $\rightarrow$ `bitcoin`)
+    - `ETH` (provider: `coingecko` $\rightarrow$ `ethereum`)
+    - `SOL` (provider: `coingecko` $\rightarrow$ `solana`)
+  - **Gold Spot** (`GLOBAL_24_5`, `UTC`, base: `XAU`, quote: `USD`, `oz`):
+    - `XAU/USD` (provider: `alphavantage` $\rightarrow$ `XAU` via `GOLD_SILVER_SPOT`)
+  - **Foreign Exchange Context** (`GLOBAL_24_5`, `Asia/Ho_Chi_Minh`, base: `USD`, quote: `VND`, unit: `null`):
+    - `USD/VND` (provider: `twelvedata` $\rightarrow$ `USD/VND`)
+
+- **Implemented Multi-Asset Capabilities**:
   - Authoritative internal asset identity via UUID (`public.assets.id`).
-  - Canonical metadata schema: `market_code`, `quote_currency`, `base_currency`, `market_policy`, `market_timezone`, `quantity_unit`, and `is_active`.
-  - Provider mapping table `public.asset_provider_mappings` decoupling internal assets from external symbols.
-  - Explicit verified Yahoo mappings for the 5 existing Vietnamese assets (`E1VFVN30.VN`, `FPT.VN`, `HPG.VN`, `VCB.VN`, `VNM.VN`).
-  - Removal of implicit `.VN` symbol appending from market adapters.
+  - Strict decoupling of internal canonical asset identity from third-party provider symbols (`public.asset_provider_mappings`).
   - Dedicated opening-position baseline authority (`public.position_opening_baselines`) with locked correction upon subsequent ledger activity.
-  - Market provider abstraction (`server/src/providers/`):
-    $$\text{Canonical Asset} \longrightarrow \text{Explicit Provider Mapping} \longrightarrow \text{Provider Adapter} \longrightarrow \text{Normalized Snapshot / History}$$
-  - Fractional quantity-compatible transaction and ledger foundation.
-  - Database trigger guard enforcing VND-only transaction accounting until FX support is implemented.
+  - Multi-provider market adapter architecture (`server/src/providers/`):
+    $$\text{Canonical Asset} \longrightarrow \text{Explicit Provider Mapping} \longrightarrow \text{Provider Adapter} \longrightarrow \text{Normalized Snapshot}$$
+  - Universal reporting currency is strictly `VND`; native non-VND asset valuations are converted on demand via direct `quoteCurrency -> VND` FX rates.
+  - Database trigger guard (`enforce_vnd_portfolio_transaction_asset`) strictly enforcing VND-only transaction accounting until multi-currency FX accounting is implemented.
 
 - **Current Intentional Limitations**:
-  - Only the 5 existing Vietnamese assets are currently onboarded in production data.
-  - No production gold, FX, or crypto assets have been inserted yet.
-  - Market data and history pipelines currently support verified `VN_EXCHANGE` Yahoo flows; specialized adapters for crypto, FX, gold, and funds are deferred to subsequent feature phases.
-  - Portfolio reporting remains strictly VND; explicit FX conversion is not yet implemented.
-  - Non-VND BUY/SELL transactions are strictly blocked at database level.
-  - The single VND cash ledger remains authoritative for all cash operations.
+  - Crypto universe expansion beyond representative assets is in progress (Feature 20B).
+  - Specialized historical session, calendar, and candlestick rules for 24/7 crypto and global gold/FX are deferred to Feature 21; history requests for non-VN assets return explicit `UNSUPPORTED_MARKET_POLICY`.
+  - Non-VND cost basis and unrealized P/L remain unavailable until acquisition-time FX accounting exists.
+  - Non-VND BUY/SELL transactions are strictly blocked at database trigger level.
+  - The single VND cash ledger remains authoritative for all cash operations (no multi-currency cash balances).
+  - Open-ended mutual funds (NAV scheduled) remain deferred.
 
 ---
 

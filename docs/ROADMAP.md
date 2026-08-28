@@ -14,7 +14,7 @@ This document serves as the durable strategic memory for project sequencing, fea
 
 ---
 
-## 2. Completed Features (01–18)
+## 2. Completed Features (01–20A)
 
 - **Feature 01**: Asset Browser
 - **Feature 02**: Market Snapshot
@@ -32,27 +32,29 @@ This document serves as the durable strategic memory for project sequencing, fea
 - **Feature 14**: Transaction Ledger / Sổ lệnh giao dịch
 - **Feature 15**: Cash / Capital Ledger / Sổ dòng tiền
 - **Feature 16**: Canonical Multi-Asset Foundation
-- **Feature 17**: Ledger Authority & Position Integrity (COMPLETE)
-- **Feature 18**: Market Provider Abstraction (COMPLETE)
+- **Feature 17**: Ledger Authority & Position Integrity
+- **Feature 18**: Market Provider Abstraction
+- **Feature 19**: FX & Cross-Currency Valuation Foundation (COMPLETE)
+- **Feature 20A**: Representative Real Multi-Asset Providers (COMPLETE)
 
 ---
 
-## 3. Current Feature: Feature 19
+## 3. Current Feature: Feature 20B
 
-### Feature 19 — FX & Cross-Currency Valuation Foundation
-- **Status**: HIGH-RISK ARCHITECTURE & INTEGRITY AUDIT NEXT.
+### Feature 20B — Controlled Crypto Universe Expansion
+- **Status**: IMPLEMENTATION NEXT.
 - **Core Invariant**:
-  $$\text{Native Asset Valuation} \xrightarrow{\text{Authoritative FX Rate}} \text{VND Reporting Valuation}$$
+  $$\text{Canonical Crypto Asset} \longrightarrow \text{Explicit CoinGecko Coin ID Mapping} \longrightarrow \text{Normalized 24/7 Snapshot}$$
 - **Key Objectives**:
-  - Model explicit FX conversion for multi-currency asset pricing into VND reporting currency.
-  - Implement deterministic missing FX handling (missing FX yields explicit partial/unavailable valuation, never silent 1:1 fallback).
-  - Lay multi-currency foundation for upcoming non-VND asset universe.
+  - Expand canonical universe with verified liquid cryptocurrencies (~Top 40 major/liquid assets).
+  - Explicit immutable provider IDs mapped in `public.asset_provider_mappings` (no ticker inference).
+  - Continuous 24/7 market policy and USD quote currency.
+  - Preserve non-VND transaction guard and zero-loss financial baseline.
 
 ---
 
-## 4. Ordered Roadmap (Features 20–30)
+## 4. Ordered Roadmap (Features 21–30)
 
-- **Feature 20 — Real Multi-Asset Universe**: Onboard verified production assets across VN stocks, ETFs, funds, gold, USD/FX (USD/VND), and crypto (~Top 40 major/liquid assets).
 - **Feature 21 — Asset-Class Market & History Semantics**: Implement class-specific calendar rules, trading session hours, 24/7 crypto candles, NAV strike points, and bar completion logic.
 - **Feature 22 — Deterministic Asset Analysis V2**: Generalize quantitative analysis across asset classes with shared, specialized, and explicitly unavailable metrics.
 - **Feature 23 — Multi-Asset News Foundation**: Unified normalized news model with multi-source ingestion (CafeF, global macro/FX, crypto feeds).

@@ -87,13 +87,32 @@ The following architectural and product decisions are confirmed and authoritativ
   - Portfolio metrics (cost basis, market value, unrealized P/L, total portfolio value) are computed on demand from authoritative holdings + latest prices. They are not stored as independent persisted truth.
   - A holding is priced only when market price is finite and > 0.
   - Missing market data or FX rates produce explicit partial valuation (`valuationStatus: 'partial'`), never fake 0 prices or fabricated valuations.
+- **FX & Cross-Currency Valuation Foundation (Feature 19)**:
+  - Reporting currency is strictly **VND**.
+  - Native market value and reporting VND market value are distinct properties.
+  - VND assets bypass FX resolver; non-VND asset valuation requires an explicit, direct `quoteCurrency -> VND` FX rate.
+  - Missing or invalid FX produces explicit partial valuation, never assumed 1:1 fallback or fake 0 prices.
+  - No currency inversion or multi-hop FX conversion in V1.
+  - FX resolution is provider-neutral and executed on demand without a persistent FX database table or caching subsystem in Feature 19.
+  - Non-VND cost basis and unrealized P/L remain unavailable until acquisition-time FX accounting exists; current FX rates must never be used to fabricate historical acquisition-cost P/L.
+  - Portfolio Composition consumes authoritative Feature 05 reporting values and never computes FX conversions independently.
 - **Market Provider Abstraction (Feature 18)**:
   - Provider-specific market acquisition is decoupled behind provider adapters (`server/src/providers/`).
   - Market consumers (`/api/market/:symbol`, `/api/market/:symbol/history`, portfolio valuation, deterministic analysis) interact strictly through a provider-neutral boundary (`getMarketSnapshot`, `getMarketHistory`, `getAnalysisHistory`).
-  - Each adapter (e.g. Yahoo) owns its provider-specific URLs, request headers, response payload parsing, and error normalization.
+  - Each adapter owns its provider-specific URLs, request headers, response payload parsing, and error normalization.
   - Asset identity resolution uses canonical asset metadata + explicit mappings in `public.asset_provider_mappings`. No implicit symbol transformation (such as appending `.VN`) is allowed.
   - No fallback provider orchestration is implemented yet (clean unsupported errors if provider mapping is absent or unsupported).
   - Adding a future provider must not require consumer or business logic to construct provider symbols.
+- **Representative Real Multi-Asset Providers (Feature 20A)**:
+  - **Twelve Data**: Production provider for direct `USD/VND` FX exchange rate resolution.
+  - **CoinGecko**: Production provider for crypto spot snapshots using explicit, immutable coin IDs (`bitcoin`, `ethereum`, `solana`).
+  - **Alpha Vantage**: Production provider for Gold Spot (`XAU/USD`) using `GOLD_SILVER_SPOT` with `symbol=XAU` (spot bullion, NOT COMEX `GC=F` futures).
+  - **Yahoo Finance**: Retained as production provider for Vietnamese equities and exchange-traded ETFs (`FUEVFVND.VN`, `FUESSVFL.VN`).
+  - Canonical `USD/VND` asset is market context only; it is not a cash account and does not enable holding USD cash.
+  - Non-VND asset onboarding does not enable trading; non-VND BUY/SELL transactions remain blocked at the database trigger level (`enforce_vnd_portfolio_transaction_asset`).
+  - Asset calendar policies: crypto uses `CONTINUOUS_24_7` with `UTC` timezone; Gold Spot uses `GLOBAL_24_5` with `UTC` timezone.
+  - Crypto and gold spot historical bars remain explicitly unsupported (`UNSUPPORTED_MARKET_POLICY`) until Feature 21.
+  - Open-ended NAV mutual funds remain deferred.
 - **Numerical Precision**: Intermediate financial calculations retain full floating-point/numeric precision without premature two-decimal rounding. Rounding is presentation-only.
 - **Data Labeling**: Market snapshots are clearly disclosed as delayed (~15 min for equities) with explicit timestamp provenance. Missing source timestamps remain `null`.
 
