@@ -262,11 +262,18 @@ function App() {
   const activeAssetDetailReqRef = useRef(null);
   const activeAnalysisReqRef = useRef(null);
 
-  // News feed state
+  // News feed & Personalized News state (Feature 13)
+  const [newsSubTab, setNewsSubTab] = useState('general'); // 'general' | 'personalized'
   const [news, setNews] = useState([]);
   const [newsLoading, setNewsLoading] = useState(true);
   const [newsRefreshing, setNewsRefreshing] = useState(false);
   const [newsError, setNewsError] = useState(null);
+
+  const [personalizedNews, setPersonalizedNews] = useState([]);
+  const [personalizedLoading, setPersonalizedLoading] = useState(true);
+  const [personalizedRefreshing, setPersonalizedRefreshing] = useState(false);
+  const [personalizedError, setPersonalizedError] = useState(null);
+  const [personalizedUserAssetCount, setPersonalizedUserAssetCount] = useState(0);
 
   // Portfolio overview state
   const [portfolioOverview, setPortfolioOverview] = useState(null);
@@ -462,6 +469,7 @@ function App() {
           setHoldingsSuccess(`Đã thêm ${json.data.asset?.symbol || 'tài sản'} vào danh mục thành công.`);
           fetchPortfolio(false);
           fetchComposition(false);
+          fetchPersonalizedNews(false);
         }
       })
       .catch((err) => {
@@ -529,6 +537,7 @@ function App() {
           setHoldingsSuccess(`Đã cập nhật ${json.data.asset?.symbol || 'tài sản'} thành công.`);
           fetchPortfolio(false);
           fetchComposition(false);
+          fetchPersonalizedNews(false);
         }
       })
       .catch((err) => {
@@ -566,6 +575,7 @@ function App() {
           setHoldingsSuccess(`Đã xóa ${symbol || 'tài sản'} khỏi danh mục.`);
           fetchPortfolio(false);
           fetchComposition(false);
+          fetchPersonalizedNews(false);
         }
       })
       .catch((err) => {
@@ -627,10 +637,42 @@ function App() {
       });
   }, []);
 
+  // Fetch personalized news data (Feature 13)
+  const fetchPersonalizedNews = useCallback((isInitial = false) => {
+    if (isInitial) {
+      setPersonalizedLoading(true);
+    } else {
+      setPersonalizedRefreshing(true);
+    }
+    setPersonalizedError(null);
+
+    fetch('/api/news/personalized')
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
+      .then((json) => {
+        if (json.status === 'ok' && Array.isArray(json.data)) {
+          setPersonalizedNews(json.data);
+          setPersonalizedUserAssetCount(typeof json.userAssetCount === 'number' ? json.userAssetCount : 0);
+        } else {
+          throw new Error(json.message || 'Không thể tải tin tức cá nhân hóa');
+        }
+      })
+      .catch((err) => {
+        setPersonalizedError(err.message || 'Không thể tải tin tức cá nhân hóa');
+      })
+      .finally(() => {
+        setPersonalizedLoading(false);
+        setPersonalizedRefreshing(false);
+      });
+  }, []);
+
   // Fetch news on initial mount
   useEffect(() => {
     fetchNews(true);
-  }, [fetchNews]);
+    fetchPersonalizedNews(true);
+  }, [fetchNews, fetchPersonalizedNews]);
 
   // Fetch portfolio overview data
   const fetchPortfolio = useCallback((isInitial = false) => {
@@ -859,6 +901,7 @@ function App() {
                   !((symbol && w.asset?.symbol === symbol) || (assetId && w.asset_id === assetId))
               )
             );
+            fetchPersonalizedNews(false);
           }
         })
         .catch((err) => {
@@ -889,6 +932,7 @@ function App() {
             if (symbol && !watchlistMarketData[symbol]) {
               fetchWatchlistMarketData([json.data]);
             }
+            fetchPersonalizedNews(false);
           }
         })
         .catch((err) => {
@@ -2183,7 +2227,7 @@ function App() {
             </motion.section>
           )}
 
-          {/* TAB 3: NEWS FEED */}
+          {/* TAB 4: NEWS FEED */}
           {activeTab === 'news' && (
             <motion.section
               key="news-view"
@@ -2195,149 +2239,391 @@ function App() {
               {/* Header */}
               <motion.div variants={sectionItemVariants} className="section-header">
                 <div>
-                  <h2 className="section-title">Tin tức thị trường</h2>
+                  <h2 className="section-title">
+                    {newsSubTab === 'general' ? 'Tin tức thị trường' : 'Tin của tôi'}
+                  </h2>
                   <p className="section-subtitle">
-                    Cập nhật tin tức tài chính, doanh nghiệp và vĩ mô mới nhất · <span style={{ color: 'var(--color-slate-400)' }}>Nguồn: CafeF</span>
+                    {newsSubTab === 'general' ? (
+                      <>
+                        Cập nhật tin tức tài chính, doanh nghiệp và vĩ mô mới nhất ·{' '}
+                        <span style={{ color: 'var(--color-slate-400)' }}>Nguồn: CafeF</span>
+                      </>
+                    ) : (
+                      <>
+                        Tin liên quan đến tài sản bạn đang nắm giữ hoặc theo dõi. ·{' '}
+                        <span style={{ color: 'var(--color-slate-400)' }}>Nguồn: CafeF</span>
+                      </>
+                    )}
                   </p>
                 </div>
 
                 {/* Refresh Button */}
                 <MagneticButton
-                  onClick={() => fetchNews(false)}
-                  disabled={newsRefreshing || newsLoading}
+                  onClick={() => {
+                    if (newsSubTab === 'general') {
+                      fetchNews(false);
+                    } else {
+                      fetchPersonalizedNews(false);
+                    }
+                  }}
+                  disabled={
+                    newsSubTab === 'general'
+                      ? (newsRefreshing || newsLoading)
+                      : (personalizedRefreshing || personalizedLoading)
+                  }
                   className="fintech-btn btn-secondary btn-sm"
                 >
-                  <span className={newsRefreshing ? 'spin-icon' : ''}>{newsRefreshing ? '⟳' : '↻'}</span>
-                  <span>{newsRefreshing ? 'Đang làm mới...' : 'Làm mới'}</span>
+                  <span
+                    className={
+                      (newsSubTab === 'general' ? newsRefreshing : personalizedRefreshing)
+                        ? 'spin-icon'
+                        : ''
+                    }
+                  >
+                    {(newsSubTab === 'general' ? newsRefreshing : personalizedRefreshing) ? '⟳' : '↻'}
+                  </span>
+                  <span>
+                    {(newsSubTab === 'general' ? newsRefreshing : personalizedRefreshing)
+                      ? 'Đang làm mới...'
+                      : 'Làm mới'}
+                  </span>
                 </MagneticButton>
               </motion.div>
 
-              {/* Additive Economic Category Pulse Rail */}
+              {/* Sub-tabs switcher (Tin mới / Tin của tôi) */}
               <motion.div variants={sectionItemVariants}>
-                <EconomicPulseRail />
+                <div className="news-subtabs-bar">
+                  <button
+                    type="button"
+                    onClick={() => setNewsSubTab('general')}
+                    className={`news-subtab-btn ${newsSubTab === 'general' ? 'active' : ''}`}
+                  >
+                    <span>📰 Tin mới</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setNewsSubTab('personalized')}
+                    className={`news-subtab-btn ${newsSubTab === 'personalized' ? 'active' : ''}`}
+                  >
+                    <span>🎯 Tin của tôi</span>
+                    {personalizedNews.length > 0 && (
+                      <span className="news-subtab-badge">{personalizedNews.length}</span>
+                    )}
+                  </button>
+                </div>
               </motion.div>
 
-              {/* Loading State with Shimmer */}
-              {newsLoading && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
-                  {[1, 2, 3].map((i) => (
-                    <div key={i} className="news-card" style={{ '--accent-color': '#e2e8f0' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
-                        <div className="skeleton-shimmer" style={{ width: '80px', height: '20px' }} />
-                        <div className="skeleton-shimmer" style={{ width: '100px', height: '16px' }} />
-                      </div>
-                      <div className="skeleton-shimmer" style={{ width: '85%', height: '22px', marginBottom: '0.65rem' }} />
-                      <div className="skeleton-shimmer" style={{ width: '100%', height: '36px', marginBottom: '0.75rem' }} />
-                      <div className="skeleton-shimmer" style={{ width: '60px', height: '14px' }} />
+              {/* Additive Economic Category Pulse Rail for General Feed */}
+              {newsSubTab === 'general' && (
+                <motion.div variants={sectionItemVariants}>
+                  <EconomicPulseRail />
+                </motion.div>
+              )}
+
+              {/* VIEW 1: GENERAL NEWS ("Tin mới") */}
+              {newsSubTab === 'general' && (
+                <>
+                  {/* Loading State with Shimmer */}
+                  {newsLoading && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+                      {[1, 2, 3].map((i) => (
+                        <div key={i} className="news-card" style={{ '--accent-color': '#e2e8f0' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
+                            <div className="skeleton-shimmer" style={{ width: '80px', height: '20px' }} />
+                            <div className="skeleton-shimmer" style={{ width: '100px', height: '16px' }} />
+                          </div>
+                          <div className="skeleton-shimmer" style={{ width: '85%', height: '22px', marginBottom: '0.65rem' }} />
+                          <div className="skeleton-shimmer" style={{ width: '100%', height: '36px', marginBottom: '0.75rem' }} />
+                          <div className="skeleton-shimmer" style={{ width: '60px', height: '14px' }} />
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
-              )}
+                  )}
 
-              {/* Fatal Error State */}
-              {newsError && !newsLoading && news.length === 0 && (
-                <div className="fintech-banner banner-error">
-                  <div>
-                    <strong style={{ display: 'block', marginBottom: '0.2rem' }}>Không thể tải tin tức</strong>
-                    <span style={{ fontSize: '0.85rem' }}>{newsError}</span>
-                  </div>
-                  <MagneticButton
-                    onClick={() => fetchNews(true)}
-                    className="fintech-btn btn-danger btn-sm"
-                  >
-                    Thử lại
-                  </MagneticButton>
-                </div>
-              )}
-
-              {/* Non-fatal Refresh Error Banner */}
-              {newsError && news.length > 0 && (
-                <div className="fintech-banner banner-warning">
-                  <span>Không thể làm mới nguồn tin ({newsError}). Đang hiển thị các tin tức trước đó.</span>
-                </div>
-              )}
-
-              {/* Empty State */}
-              {!newsLoading && !newsError && news.length === 0 && (
-                <div className="state-box">
-                  <div className="state-icon float-icon">📰</div>
-                  <h3 className="state-title">Hiện chưa có tin tức nào</h3>
-                  <p className="state-desc">Hãy nhấn nút "Làm mới" phía trên để tải nguồn tin mới nhất.</p>
-                </div>
-              )}
-
-              {/* News Articles List with Scroll Reveal */}
-              {!newsLoading && news.length > 0 && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
-                  {news.map((item, idx) => {
-                    const cat = CATEGORY_STYLES[item.category] || { label: item.category, bg: '#f1f5f9', color: '#475569', border: '#cbd5e1', accent: '#94a3b8' };
-                    return (
-                      <motion.article
-                        key={item.id || item.url}
-                        className="news-card"
-                        style={{ '--accent-color': cat.accent }}
-                        initial={{ opacity: 0, y: 16 }}
-                        whileInView={{ opacity: 1, y: 0 }}
-                        viewport={{ once: true, margin: '-20px' }}
-                        transition={{ duration: 0.28, delay: Math.min(idx * 0.03, 0.3) }}
-                        whileHover={{ y: -2 }}
+                  {/* Fatal Error State */}
+                  {newsError && !newsLoading && news.length === 0 && (
+                    <div className="fintech-banner banner-error">
+                      <div>
+                        <strong style={{ display: 'block', marginBottom: '0.2rem' }}>Không thể tải tin tức</strong>
+                        <span style={{ fontSize: '0.85rem' }}>{newsError}</span>
+                      </div>
+                      <MagneticButton
+                        onClick={() => fetchNews(true)}
+                        className="fintech-btn btn-danger btn-sm"
                       >
-                        {/* Meta Row: Category Badge + Timestamp */}
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.65rem' }}>
-                          <span
-                            className="fintech-badge"
-                            style={{
-                              backgroundColor: cat.bg,
-                              color: cat.color,
-                              border: `1px solid ${cat.border}`,
-                              textTransform: 'uppercase'
-                            }}
-                          >
-                            {cat.label}
-                          </span>
+                        Thử lại
+                      </MagneticButton>
+                    </div>
+                  )}
 
-                          <span style={{ fontSize: '0.78rem', color: 'var(--color-slate-400)', fontWeight: 500 }}>
-                            {formatPublishedTime(item.publishedAt)}
-                          </span>
+                  {/* Non-fatal Refresh Error Banner */}
+                  {newsError && news.length > 0 && (
+                    <div className="fintech-banner banner-warning">
+                      <span>Không thể làm mới nguồn tin ({newsError}). Đang hiển thị các tin tức trước đó.</span>
+                    </div>
+                  )}
+
+                  {/* Empty State */}
+                  {!newsLoading && !newsError && news.length === 0 && (
+                    <div className="state-box">
+                      <div className="state-icon float-icon">📰</div>
+                      <h3 className="state-title">Hiện chưa có tin tức nào</h3>
+                      <p className="state-desc">Hãy nhấn nút "Làm mới" phía trên để tải nguồn tin mới nhất.</p>
+                    </div>
+                  )}
+
+                  {/* News Articles List with Scroll Reveal */}
+                  {!newsLoading && news.length > 0 && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+                      {news.map((item, idx) => {
+                        const cat = CATEGORY_STYLES[item.category] || { label: item.category, bg: '#f1f5f9', color: '#475569', border: '#cbd5e1', accent: '#94a3b8' };
+                        return (
+                          <motion.article
+                            key={item.id || item.url}
+                            className="news-card"
+                            style={{ '--accent-color': cat.accent }}
+                            initial={{ opacity: 0, y: 16 }}
+                            whileInView={{ opacity: 1, y: 0 }}
+                            viewport={{ once: true, margin: '-20px' }}
+                            transition={{ duration: 0.28, delay: Math.min(idx * 0.03, 0.3) }}
+                            whileHover={{ y: -2 }}
+                          >
+                            {/* Meta Row: Category Badge + Timestamp */}
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.65rem' }}>
+                              <span
+                                className="fintech-badge"
+                                style={{
+                                  backgroundColor: cat.bg,
+                                  color: cat.color,
+                                  border: `1px solid ${cat.border}`,
+                                  textTransform: 'uppercase'
+                                }}
+                              >
+                                {cat.label}
+                              </span>
+
+                              <span style={{ fontSize: '0.78rem', color: 'var(--color-slate-400)', fontWeight: 500 }}>
+                                {formatPublishedTime(item.publishedAt)}
+                              </span>
+                            </div>
+
+                            {/* Headline Link */}
+                            <h3 className="news-title">
+                              <a
+                                href={item.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="news-title-link"
+                              >
+                                {item.title}
+                              </a>
+                            </h3>
+
+                            {/* Summary */}
+                            {item.summary && (
+                              <p className="news-summary">
+                                {item.summary}
+                              </p>
+                            )}
+
+                            {/* Footer Row: Attribution + Read Original Link */}
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '0.45rem', borderTop: '1px solid var(--border-subtle)' }}>
+                              <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--color-slate-400)' }}>
+                                Nguồn: CafeF
+                              </span>
+                              <a
+                                href={item.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="news-link-action"
+                              >
+                                Đọc bài gốc ↗
+                              </a>
+                            </div>
+                          </motion.article>
+                        );
+                      })}
+                    </div>
+                  )}
+                </>
+              )}
+
+              {/* VIEW 2: PERSONALIZED NEWS ("Tin của tôi") */}
+              {newsSubTab === 'personalized' && (
+                <>
+                  {/* Loading State with Shimmer */}
+                  {personalizedLoading && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+                      {[1, 2, 3].map((i) => (
+                        <div key={i} className="news-card" style={{ '--accent-color': '#e2e8f0' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
+                            <div className="skeleton-shimmer" style={{ width: '120px', height: '20px' }} />
+                            <div className="skeleton-shimmer" style={{ width: '100px', height: '16px' }} />
+                          </div>
+                          <div className="skeleton-shimmer" style={{ width: '85%', height: '22px', marginBottom: '0.65rem' }} />
+                          <div className="skeleton-shimmer" style={{ width: '100%', height: '36px', marginBottom: '0.75rem' }} />
+                          <div className="skeleton-shimmer" style={{ width: '60px', height: '14px' }} />
                         </div>
+                      ))}
+                    </div>
+                  )}
 
-                        {/* Headline Link */}
-                        <h3 className="news-title">
-                          <a
-                            href={item.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="news-title-link"
+                  {/* Fatal Error State */}
+                  {personalizedError && !personalizedLoading && personalizedNews.length === 0 && (
+                    <div className="fintech-banner banner-error">
+                      <div>
+                        <strong style={{ display: 'block', marginBottom: '0.2rem' }}>Không thể tải tin tức cá nhân hóa</strong>
+                        <span style={{ fontSize: '0.85rem' }}>{personalizedError}</span>
+                      </div>
+                      <MagneticButton
+                        onClick={() => fetchPersonalizedNews(true)}
+                        className="fintech-btn btn-danger btn-sm"
+                      >
+                        Thử lại
+                      </MagneticButton>
+                    </div>
+                  )}
+
+                  {/* Non-fatal Refresh Error Banner */}
+                  {personalizedError && personalizedNews.length > 0 && (
+                    <div className="fintech-banner banner-warning">
+                      <span>Không thể làm mới tin tức cá nhân hóa ({personalizedError}). Đang hiển thị các tin tức trước đó.</span>
+                    </div>
+                  )}
+
+                  {/* Empty State A: User has NO holdings and NO watchlist assets */}
+                  {!personalizedLoading && !personalizedError && personalizedUserAssetCount === 0 && (
+                    <div className="state-box">
+                      <div className="state-icon float-icon">🎯</div>
+                      <h3 className="state-title">Bạn chưa có tài sản để cá nhân hóa tin tức.</h3>
+                      <p className="state-desc">
+                        Thêm tài sản vào danh mục nắm giữ hoặc danh sách theo dõi để nhận tin tức phù hợp với danh mục của bạn.
+                      </p>
+                      <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center', marginTop: '1.25rem', flexWrap: 'wrap' }}>
+                        <button
+                          type="button"
+                          onClick={() => setActiveTab('assets')}
+                          className="fintech-btn btn-primary btn-sm"
+                        >
+                          📈 Tài sản
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setActiveTab('watchlist')}
+                          className="fintech-btn btn-secondary btn-sm"
+                        >
+                          ⭐ Theo dõi
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Empty State B: User has assets, but 0 matched articles in current feed */}
+                  {!personalizedLoading && !personalizedError && personalizedUserAssetCount > 0 && personalizedNews.length === 0 && (
+                    <div className="state-box">
+                      <div className="state-icon float-icon">🔍</div>
+                      <h3 className="state-title">Chưa có tin mới liên quan đến các tài sản của bạn.</h3>
+                      <p className="state-desc">
+                        Hiện tại nguồn tin CafeF chưa có bài viết mới nhắc đến các mã tài sản bạn đang nắm giữ hoặc theo dõi.
+                      </p>
+                      <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center', marginTop: '1.25rem' }}>
+                        <button
+                          type="button"
+                          onClick={() => setNewsSubTab('general')}
+                          className="fintech-btn btn-secondary btn-sm"
+                        >
+                          📰 Xem tất cả tin mới
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Personalized Articles List with Scroll Reveal */}
+                  {!personalizedLoading && personalizedNews.length > 0 && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+                      {personalizedNews.map((item, idx) => {
+                        const cat = CATEGORY_STYLES[item.category] || { label: item.category, bg: '#f1f5f9', color: '#475569', border: '#cbd5e1', accent: '#94a3b8' };
+                        return (
+                          <motion.article
+                            key={item.id || item.url}
+                            className="news-card"
+                            style={{ '--accent-color': cat.accent }}
+                            initial={{ opacity: 0, y: 16 }}
+                            whileInView={{ opacity: 1, y: 0 }}
+                            viewport={{ once: true, margin: '-20px' }}
+                            transition={{ duration: 0.28, delay: Math.min(idx * 0.03, 0.3) }}
+                            whileHover={{ y: -2 }}
                           >
-                            {item.title}
-                          </a>
-                        </h3>
+                            {/* Meta Row: Category Badge + Matched Asset Chips + Timestamp */}
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.65rem', flexWrap: 'wrap', gap: '0.4rem' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
+                                <span
+                                  className="fintech-badge"
+                                  style={{
+                                    backgroundColor: cat.bg,
+                                    color: cat.color,
+                                    border: `1px solid ${cat.border}`,
+                                    textTransform: 'uppercase'
+                                  }}
+                                >
+                                  {cat.label}
+                                </span>
 
-                        {/* Summary */}
-                        {item.summary && (
-                          <p className="news-summary">
-                            {item.summary}
-                          </p>
-                        )}
+                                {Array.isArray(item.matchedAssets) && item.matchedAssets.map((matched) => (
+                                  <span
+                                    key={matched.symbol}
+                                    className="matched-asset-chip"
+                                    title={matched.name || matched.symbol}
+                                  >
+                                    {matched.symbol}
+                                  </span>
+                                ))}
+                              </div>
 
-                        {/* Footer Row: Attribution + Read Original Link */}
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '0.45rem', borderTop: '1px solid var(--border-subtle)' }}>
-                          <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--color-slate-400)' }}>
-                            Nguồn: CafeF
-                          </span>
-                          <a
-                            href={item.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="news-link-action"
-                          >
-                            Đọc bài gốc ↗
-                          </a>
-                        </div>
-                      </motion.article>
-                    );
-                  })}
-                </div>
+                              <span style={{ fontSize: '0.78rem', color: 'var(--color-slate-400)', fontWeight: 500 }}>
+                                {formatPublishedTime(item.publishedAt)}
+                              </span>
+                            </div>
+
+                            {/* Headline Link */}
+                            <h3 className="news-title">
+                              <a
+                                href={item.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="news-title-link"
+                              >
+                                {item.title}
+                              </a>
+                            </h3>
+
+                            {/* Summary */}
+                            {item.summary && (
+                              <p className="news-summary">
+                                {item.summary}
+                              </p>
+                            )}
+
+                            {/* Footer Row: Attribution + Read Original Link */}
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '0.45rem', borderTop: '1px solid var(--border-subtle)' }}>
+                              <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--color-slate-400)' }}>
+                                Nguồn: CafeF
+                              </span>
+                              <a
+                                href={item.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="news-link-action"
+                              >
+                                Đọc bài gốc ↗
+                              </a>
+                            </div>
+                          </motion.article>
+                        );
+                      })}
+                    </div>
+                  )}
+                </>
               )}
             </motion.section>
           )}

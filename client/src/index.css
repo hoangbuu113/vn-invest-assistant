@@ -2253,6 +2253,79 @@ body {
   margin-top: 1px;
 }
 
+/* Feature 13 — Personalized News (Tin của tôi) */
+.news-subtabs-bar {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-surface-subtle);
+  padding: 4px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-default);
+  margin-bottom: 1.25rem;
+}
+
+.news-subtab-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: var(--radius-md);
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--color-slate-600);
+  background: transparent;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.news-subtab-btn:hover {
+  color: var(--color-slate-900);
+  background: rgba(255, 255, 255, 0.6);
+}
+
+.news-subtab-btn.active {
+  color: var(--color-blue-700);
+  background: #ffffff;
+  border-color: rgba(37, 99, 235, 0.2);
+  box-shadow: var(--shadow-sm);
+  font-weight: 700;
+}
+
+.news-subtab-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1px 6px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  background: var(--color-blue-50);
+  color: var(--color-blue-700);
+  border-radius: var(--radius-full);
+  border: 1px solid var(--color-blue-200);
+}
+
+.matched-asset-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  font-family: var(--font-mono, monospace);
+  background: #eff6ff;
+  color: #1d4ed8;
+  border: 1px solid #bfdbfe;
+  border-radius: var(--radius-sm);
+  letter-spacing: 0.02em;
+  transition: transform var(--transition-fast);
+}
+
+.matched-asset-chip:hover {
+  transform: translateY(-1px);
+  background: #dbeafe;
+}
+
 /* Respect user's motion preference */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {

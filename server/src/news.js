@@ -210,3 +210,180 @@ export async function getNewsFeed(feeds = CAFEF_FEEDS, limit = 30) {
 
   return allItems.slice(0, limit);
 }
+
+/**
+ * Escapes special regex characters in a string.
+ * @param {string} str
+ * @returns {string}
+ */
+function escapeRegex(str) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Extracts and deduplicates user assets from holdings and watchlist into a normalized asset universe.
+ * @param {Array<object>} [holdings=[]]
+ * @param {Array<object>} [watchlist=[]]
+ * @returns {Array<{ symbol: string, name: string, id: string|null, asset_type: string|null, exchange: string|null }>}
+ */
+export function getUserAssetUniverse(holdings = [], watchlist = []) {
+  const assetMap = new Map();
+
+  const addCandidate = (item) => {
+    if (!item) return;
+    const asset = item.asset || (item.symbol && item.name ? item : null);
+    if (!asset || !asset.symbol) return;
+    const symbol = String(asset.symbol).trim().toUpperCase();
+    if (!symbol) return;
+
+    if (!assetMap.has(symbol)) {
+      assetMap.set(symbol, {
+        id: asset.id || item.asset_id || null,
+        symbol,
+        name: asset.name ? String(asset.name).trim() : symbol,
+        asset_type: asset.asset_type || null,
+        exchange: asset.exchange || null
+      });
+    }
+  };
+
+  if (Array.isArray(holdings)) {
+    for (const h of holdings) addCandidate(h);
+  }
+  if (Array.isArray(watchlist)) {
+    for (const w of watchlist) addCandidate(w);
+  }
+
+  return Array.from(assetMap.values()).sort((a, b) => a.symbol.localeCompare(b.symbol));
+}
+
+/**
+ * Builds Unicode-aware regex boundary patterns for trusted asset metadata (symbol and name).
+ * @param {Array<{ symbol: string, name: string }>} [assets=[]]
+ * @returns {Array<{ asset: { symbol: string, name: string }, patterns: Array<RegExp> }>}
+ */
+export function buildAssetMatchers(assets = []) {
+  return (assets || []).map((asset) => {
+    const symbol = String(asset?.symbol || '').trim();
+    const name = String(asset?.name || '').trim();
+    const patterns = [];
+
+    // 1. Symbol matching with Unicode letter/number boundaries
+    if (symbol.length > 0) {
+      const symEsc = escapeRegex(symbol);
+      // Preceded by start of string or non-letter/non-number character
+      // Followed by end of string or non-letter/non-number character
+      patterns.push(new RegExp(`(?:^|[^\\p{L}\\p{N}])${symEsc}(?=$|[^\\p{L}\\p{N}])`, 'iu'));
+    }
+
+    // 2. Asset name matching from metadata
+    if (name.length > 0 && name.toUpperCase() !== symbol.toUpperCase()) {
+      const nameEsc = escapeRegex(name);
+      patterns.push(new RegExp(`(?:^|[^\\p{L}\\p{N}])${nameEsc}(?=$|[^\\p{L}\\p{N}])`, 'iu'));
+
+      // 3. Parenthesized subtitle inside name metadata e.g. "... (Vietcombank)"
+      const parenMatch = name.match(/\(([^)]+)\)/);
+      if (parenMatch && parenMatch[1]) {
+        const parenTerm = parenMatch[1].trim();
+        if (
+          parenTerm.length >= 2 &&
+          parenTerm.toUpperCase() !== symbol.toUpperCase() &&
+          parenTerm.toUpperCase() !== name.toUpperCase()
+        ) {
+          const parenEsc = escapeRegex(parenTerm);
+          patterns.push(new RegExp(`(?:^|[^\\p{L}\\p{N}])${parenEsc}(?=$|[^\\p{L}\\p{N}])`, 'iu'));
+        }
+      }
+    }
+
+    return {
+      asset: {
+        symbol: symbol || asset?.symbol,
+        name: name || asset?.name || symbol
+      },
+      patterns
+    };
+  });
+}
+
+/**
+ * Deterministically filters news items that match at least one user asset with textual evidence.
+ * Preserves the original chronological order of news items.
+ * @param {Array<object>} newsItems
+ * @param {Array<{ symbol: string, name: string }>} userAssets
+ * @returns {Array<object>}
+ */
+export function filterPersonalizedNews(newsItems = [], userAssets = []) {
+  if (!Array.isArray(newsItems) || newsItems.length === 0 || !Array.isArray(userAssets) || userAssets.length === 0) {
+    return [];
+  }
+
+  const matchers = buildAssetMatchers(userAssets);
+  const personalizedArticles = [];
+
+  for (const item of newsItems) {
+    const text = `${item.title || ''} ${item.summary || ''}`.normalize('NFC');
+    const matchedAssets = [];
+
+    for (const matcher of matchers) {
+      const hasMatch = matcher.patterns.some((p) => p.test(text));
+      if (hasMatch) {
+        matchedAssets.push({
+          symbol: matcher.asset.symbol,
+          name: matcher.asset.name
+        });
+      }
+    }
+
+    if (matchedAssets.length > 0) {
+      personalizedArticles.push({
+        ...item,
+        matchedAssets
+      });
+    }
+  }
+
+  return personalizedArticles;
+}
+
+/**
+ * Coordinates fetching user asset universe and filtering personalized news.
+ * @param {object} options
+ * @param {Function} [options.getNewsFeedFn=getNewsFeed]
+ * @param {Function} options.getHoldingsFn
+ * @param {Function} options.getWatchlistFn
+ * @returns {Promise<{ news: Array<object>, userAssetCount: number, userAssets: Array<{ symbol: string, name: string }> }>}
+ */
+export async function getPersonalizedNewsFeed({
+  getNewsFeedFn = getNewsFeed,
+  getHoldingsFn,
+  getWatchlistFn
+} = {}) {
+  if (!getHoldingsFn || !getWatchlistFn) {
+    throw new Error('getHoldingsFn and getWatchlistFn are required to generate personalized news feed');
+  }
+
+  const [holdings, watchlist] = await Promise.all([
+    getHoldingsFn(),
+    getWatchlistFn()
+  ]);
+
+  const userAssets = getUserAssetUniverse(holdings, watchlist);
+
+  if (userAssets.length === 0) {
+    return {
+      news: [],
+      userAssetCount: 0,
+      userAssets: []
+    };
+  }
+
+  const rawNews = await getNewsFeedFn();
+  const personalizedArticles = filterPersonalizedNews(rawNews, userAssets);
+
+  return {
+    news: personalizedArticles,
+    userAssetCount: userAssets.length,
+    userAssets: userAssets.map((a) => ({ symbol: a.symbol, name: a.name }))
+  };
+}

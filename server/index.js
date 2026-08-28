@@ -21,7 +21,7 @@ import {
   evaluateAndPersistAlerts
 } from './src/supabase.js';
 import { getMarketSnapshot, getMarketHistory, getAnalysisHistory } from './src/market.js';
-import { getNewsFeed } from './src/news.js';
+import { getNewsFeed, getPersonalizedNewsFeed } from './src/news.js';
 import { getPortfolioOverview } from './src/portfolio.js';
 import { getPortfolioComposition } from './src/composition.js';
 import { getAssetAnalysis } from './src/analysis.js';
@@ -53,6 +53,7 @@ export function createApp(services = {}) {
     getMarketSnapshotFn = getMarketSnapshot,
     getMarketHistoryFn = getMarketHistory,
     getNewsFeedFn = getNewsFeed,
+    getPersonalizedNewsFeedFn = getPersonalizedNewsFeed,
     getPortfolioOverviewFn = getPortfolioOverview,
     getPortfolioCompositionFn = getPortfolioComposition,
     checkSupabaseConnectionFn = checkSupabaseConnection,
@@ -399,6 +400,30 @@ export function createApp(services = {}) {
       return res.status(500).json({
         status: 'error',
         message: 'Failed to fetch news feed',
+        details: error.message
+      });
+    }
+  });
+
+  // Personalized news feed endpoint (Feature 13 — deterministic relevance to user holdings and watchlist)
+  app.get('/api/news/personalized', async (req, res) => {
+    try {
+      const result = await getPersonalizedNewsFeedFn({
+        getNewsFeedFn,
+        getHoldingsFn,
+        getWatchlistFn
+      });
+      return res.json({
+        status: 'ok',
+        count: result.news.length,
+        data: result.news,
+        userAssetCount: result.userAssetCount,
+        userAssets: result.userAssets
+      });
+    } catch (error) {
+      return res.status(500).json({
+        status: 'error',
+        message: 'Failed to fetch personalized news feed',
         details: error.message
       });
     }
