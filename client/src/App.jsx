@@ -25,6 +25,7 @@ import TransactionModal from './components/TransactionModal.jsx';
 import TransactionHistorySection from './components/TransactionHistorySection.jsx';
 import CashMovementModal from './components/CashMovementModal.jsx';
 import CashManagementSection from './components/CashManagementSection.jsx';
+import OpeningPositionModal from './components/OpeningPositionModal.jsx';
 
 const CATEGORY_STYLES = {
   market: { label: 'Thị trường', bg: '#eff6ff', color: '#1d4ed8', border: '#bfdbfe', accent: '#2563eb' },
@@ -207,20 +208,10 @@ function App() {
   const [holdingsError, setHoldingsError] = useState(null);
   const [holdingsSuccess, setHoldingsSuccess] = useState(null);
 
-  // Add Holding form state
-  const [selectedAssetId, setSelectedAssetId] = useState('');
-  const [newQuantity, setNewQuantity] = useState('');
-  const [newAverageCost, setNewAverageCost] = useState('');
-  const [addHoldingLoading, setAddHoldingLoading] = useState(false);
-  const [addHoldingError, setAddHoldingError] = useState(null);
-
-  // Edit Holding inline state
-  const [editingHoldingId, setEditingHoldingId] = useState(null);
-  const [editQuantity, setEditQuantity] = useState('');
-  const [editAverageCost, setEditAverageCost] = useState('');
-  const [editHoldingLoading, setEditHoldingLoading] = useState(false);
-  const [editHoldingError, setEditHoldingError] = useState(null);
-  const [deletingHoldingId, setDeletingHoldingId] = useState(null);
+  // Feature 17: Opening Position Modal state
+  const [isOpeningPositionModalOpen, setIsOpeningPositionModalOpen] = useState(false);
+  const [openingPositionModalMode, setOpeningPositionModalMode] = useState('CREATE'); // 'CREATE' | 'CORRECT' | 'CANCEL'
+  const [openingPositionTargetHolding, setOpeningPositionTargetHolding] = useState(null);
 
   // Assets state
   const [assets, setAssets] = useState([]);
@@ -432,172 +423,19 @@ function App() {
     fetchHoldings(true);
   }, [fetchHoldings]);
 
-  // Handle adding a holding
-  const handleAddHolding = (e) => {
-    if (e && e.preventDefault) e.preventDefault();
-
-    if (!selectedAssetId) {
-      setAddHoldingError('Vui lòng chọn một tài sản.');
-      return;
-    }
-
-    const qty = Number(newQuantity);
-    if (newQuantity === '' || isNaN(qty) || !isFinite(qty) || qty <= 0) {
-      setAddHoldingError('Số lượng phải là số lớn hơn 0.');
-      return;
-    }
-
-    const cost = Number(newAverageCost);
-    if (newAverageCost === '' || isNaN(cost) || !isFinite(cost) || cost < 0) {
-      setAddHoldingError('Giá mua trung bình phải là số không âm.');
-      return;
-    }
-
-    setAddHoldingLoading(true);
-    setAddHoldingError(null);
-    setHoldingsSuccess(null);
-
-    fetch('/api/holdings', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        asset_id: selectedAssetId,
-        quantity: qty,
-        average_cost: cost
-      })
-    })
-      .then((res) => {
-        if (!res.ok) {
-          return res.json().then((json) => {
-            throw new Error(json.message || `HTTP ${res.status}`);
-          });
-        }
-        return res.json();
-      })
-      .then((json) => {
-        if (json.status === 'ok' && json.data) {
-          setHoldings((prev) => [...prev, json.data]);
-          setSelectedAssetId('');
-          setNewQuantity('');
-          setNewAverageCost('');
-          setHoldingsSuccess(`Đã thêm ${json.data.asset?.symbol || 'tài sản'} vào danh mục thành công.`);
-          fetchPortfolio(false);
-          fetchComposition(false);
-          fetchPersonalizedNews(false);
-        }
-      })
-      .catch((err) => {
-        setAddHoldingError(err.message || 'Không thể thêm tài sản vào danh mục.');
-      })
-      .finally(() => {
-        setAddHoldingLoading(false);
-      });
+  // Feature 17: Handle opening position modal actions
+  const handleOpenOpeningPositionModal = (mode = 'CREATE', targetHolding = null) => {
+    setOpeningPositionModalMode(mode);
+    setOpeningPositionTargetHolding(targetHolding);
+    setIsOpeningPositionModalOpen(true);
   };
 
-  // Start editing a holding
-  const handleStartEditHolding = (holding) => {
-    setEditingHoldingId(holding.id);
-    setEditQuantity(String(holding.quantity));
-    setEditAverageCost(String(holding.average_cost));
-    setEditHoldingError(null);
-    setHoldingsSuccess(null);
-  };
-
-  // Cancel editing
-  const handleCancelEdit = () => {
-    setEditingHoldingId(null);
-    setEditQuantity('');
-    setEditAverageCost('');
-    setEditHoldingError(null);
-  };
-
-  // Save edited holding
-  const handleSaveEditHolding = (id) => {
-    const qty = Number(editQuantity);
-    if (editQuantity === '' || isNaN(qty) || !isFinite(qty) || qty <= 0) {
-      setEditHoldingError('Số lượng phải là số lớn hơn 0.');
-      return;
-    }
-
-    const cost = Number(editAverageCost);
-    if (editAverageCost === '' || isNaN(cost) || !isFinite(cost) || cost < 0) {
-      setEditHoldingError('Giá mua trung bình phải là số không âm.');
-      return;
-    }
-
-    setEditHoldingLoading(true);
-    setEditHoldingError(null);
-
-    fetch(`/api/holdings/${encodeURIComponent(id)}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        quantity: qty,
-        average_cost: cost
-      })
-    })
-      .then((res) => {
-        if (!res.ok) {
-          return res.json().then((json) => {
-            throw new Error(json.message || `HTTP ${res.status}`);
-          });
-        }
-        return res.json();
-      })
-      .then((json) => {
-        if (json.status === 'ok' && json.data) {
-          setHoldings((prev) => prev.map((h) => (h.id === id ? json.data : h)));
-          setEditingHoldingId(null);
-          setHoldingsSuccess(`Đã cập nhật ${json.data.asset?.symbol || 'tài sản'} thành công.`);
-          fetchPortfolio(false);
-          fetchComposition(false);
-          fetchPersonalizedNews(false);
-        }
-      })
-      .catch((err) => {
-        setEditHoldingError(err.message || 'Không thể cập nhật tài sản.');
-      })
-      .finally(() => {
-        setEditHoldingLoading(false);
-      });
-  };
-
-  // Delete holding
-  const handleDeleteHolding = (id, symbol) => {
-    if (!window.confirm(`Bạn có chắc chắn muốn xóa ${symbol || 'tài sản này'} khỏi danh mục?`)) {
-      return;
-    }
-
-    setDeletingHoldingId(id);
-    setHoldingsError(null);
-    setHoldingsSuccess(null);
-
-    fetch(`/api/holdings/${encodeURIComponent(id)}`, {
-      method: 'DELETE'
-    })
-      .then((res) => {
-        if (!res.ok) {
-          return res.json().then((json) => {
-            throw new Error(json.message || `HTTP ${res.status}`);
-          });
-        }
-        return res.json();
-      })
-      .then((json) => {
-        if (json.status === 'ok') {
-          setHoldings((prev) => prev.filter((h) => h.id !== id));
-          setHoldingsSuccess(`Đã xóa ${symbol || 'tài sản'} khỏi danh mục.`);
-          fetchPortfolio(false);
-          fetchComposition(false);
-          fetchPersonalizedNews(false);
-        }
-      })
-      .catch((err) => {
-        setHoldingsError(err.message || 'Không thể xóa tài sản khỏi danh mục.');
-      })
-      .finally(() => {
-        setDeletingHoldingId(null);
-      });
+  const handleOpeningPositionSuccess = ({ message }) => {
+    setHoldingsSuccess(message || 'Thao tác vị thế ban đầu thành công.');
+    fetchHoldings(false);
+    fetchPortfolio(false);
+    fetchComposition(false);
+    fetchPersonalizedNews(false);
   };
 
   // Load all assets on mount
@@ -1889,21 +1727,7 @@ function App() {
 
                   {/* Metric Summary Cards with 3D Tilt & Dynamic Radial Sheen */}
                   <motion.div variants={sectionItemVariants} className="metrics-grid">
-                    {/* Metric 1: Cash Available */}
-                    <TiltCard className="metric-card" style={{ '--card-accent': '#3b82f6' }}>
-                      <div className="metric-header">
-                        <span className="metric-label">Tiền sẵn sàng đầu tư</span>
-                        <span className="metric-icon">💵</span>
-                      </div>
-                      <div className="metric-value">
-                        <CountUp value={portfolioOverview.summary.cashAvailable} suffix=" ₫" />
-                      </div>
-                      <div className="metric-change" style={{ color: 'var(--color-slate-500)' }}>
-                        Vốn tiền mặt chưa giải ngân
-                      </div>
-                    </TiltCard>
-
-                    {/* Metric 2: Total Cost Basis */}
+                    {/* Metric 1: Total Cost Basis */}
                     <TiltCard className="metric-card" style={{ '--card-accent': '#64748b' }}>
                       <div className="metric-header">
                         <span className="metric-label">Giá vốn đang nắm giữ</span>
@@ -1997,10 +1821,18 @@ function App() {
 
                   {/* Holdings Breakdown Table */}
                   <motion.div variants={sectionItemVariants} className="fintech-card" style={{ overflow: 'hidden' }}>
-                    <div className="card-header">
+                    <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
                       <span style={{ fontSize: '0.95rem', fontWeight: 800, color: 'var(--color-slate-900)' }}>
                         Chi tiết tài sản nắm giữ ({portfolioOverview.holdings.length})
                       </span>
+                      <MagneticButton
+                        onClick={() => handleOpenOpeningPositionModal('CREATE')}
+                        className="fintech-btn btn-secondary btn-sm"
+                        style={{ fontSize: '0.8rem', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                      >
+                        <span>+</span>
+                        <span>Thêm tài sản đã sở hữu từ trước</span>
+                      </MagneticButton>
                     </div>
 
                     {portfolioOverview.holdings.length === 0 ? (
@@ -2008,14 +1840,26 @@ function App() {
                         <div className="state-icon float-icon">💼</div>
                         <h3 className="state-title">Chưa có tài sản nào trong danh mục</h3>
                         <p className="state-desc" style={{ marginBottom: '1.25rem' }}>
-                          Chuyển sang mục <strong>Hồ sơ đầu tư</strong> để thêm các tài sản bạn đang nắm giữ.
+                          Ghi nhận tài sản bạn đã sở hữu từ trước hoặc ghi nhận giao dịch mua mới để bắt đầu theo dõi danh mục.
                         </p>
-                        <MagneticButton
-                          onClick={() => setActiveTab('profile')}
-                          className="fintech-btn btn-primary btn-sm"
-                        >
-                          Đến Hồ sơ đầu tư &rarr;
-                        </MagneticButton>
+                        <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', flexWrap: 'wrap' }}>
+                          <MagneticButton
+                            onClick={() => handleOpenOpeningPositionModal('CREATE')}
+                            className="fintech-btn btn-primary btn-sm"
+                          >
+                            + Thêm tài sản đã sở hữu từ trước
+                          </MagneticButton>
+                          <MagneticButton
+                            onClick={() => {
+                              setTransactionModalDefaultType('BUY');
+                              setTransactionModalDefaultAsset(null);
+                              setIsTransactionModalOpen(true);
+                            }}
+                            className="fintech-btn btn-secondary btn-sm"
+                          >
+                            + Ghi nhận giao dịch mua
+                          </MagneticButton>
+                        </div>
                       </div>
                     ) : (
                       <div className="table-container">
@@ -2037,15 +1881,36 @@ function App() {
                               const isProfit = isPriced && h.unrealizedPnL > 0;
                               const isLoss = isPriced && h.unrealizedPnL < 0;
 
+                              const holdingMeta = holdings.find((item) => item.asset_id === h.assetId || item.id === h.id);
+                              const isEditable = holdingMeta?.opening_correction_allowed === true;
+
                               return (
                                 <tr key={h.id}>
                                   {/* 1. Symbol & Name */}
                                   <td>
-                                    <div style={{ fontWeight: 800, color: 'var(--color-slate-900)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                    <div style={{ fontWeight: 800, color: 'var(--color-slate-900)', display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
                                       <span>{h.symbol || 'N/A'}</span>
                                       {h.assetType && (
                                         <span className="fintech-badge badge-neutral">
                                           {formatAssetType(h.assetType)}
+                                        </span>
+                                      )}
+                                      {isEditable && (
+                                        <span
+                                          className="fintech-badge badge-neutral"
+                                          style={{ fontSize: '0.7rem', color: 'var(--color-brand-700)', backgroundColor: 'var(--color-brand-50)' }}
+                                          title="Vị thế ban đầu ghi nhận trước khi dùng ứng dụng"
+                                        >
+                                          Vị thế ban đầu
+                                        </span>
+                                      )}
+                                      {holdingMeta && !isEditable && (
+                                        <span
+                                          className="fintech-badge badge-neutral"
+                                          style={{ fontSize: '0.7rem', color: 'var(--color-slate-500)' }}
+                                          title="Đã phát sinh giao dịch — thay đổi số lượng qua Ghi nhận giao dịch"
+                                        >
+                                          Đã có giao dịch
                                         </span>
                                       )}
                                     </div>
@@ -2116,7 +1981,7 @@ function App() {
                                   </td>
 
                                   {/* 7. Market Updated Time */}
-                                  <td style={{ textAlign: 'right', fontSize: '0.8rem', color: 'var(--color-slate-500)' }}>
+                                  <td style={{ textAlign: 'right' }}>
                                     {isPriced && h.marketUpdatedAt ? (
                                       formatPublishedTime(h.marketUpdatedAt)
                                     ) : (
@@ -2132,45 +1997,6 @@ function App() {
                         </table>
                       </div>
                     )}
-                  </motion.div>
-
-                  {/* Action Bar: Ghi nhận giao dịch */}
-                  <motion.div
-                    variants={sectionItemVariants}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      backgroundColor: 'var(--color-surface, #ffffff)',
-                      border: '1px solid var(--border-default, #cbd5e1)',
-                      borderRadius: '14px',
-                      padding: '0.85rem 1.25rem',
-                      marginTop: '1.25rem',
-                      boxShadow: 'var(--shadow-sm)',
-                      flexWrap: 'wrap',
-                      gap: '10px'
-                    }}
-                  >
-                    <div>
-                      <div style={{ fontWeight: 800, color: 'var(--color-slate-900)', fontSize: '0.95rem' }}>
-                        Ghi nhận giao dịch
-                      </div>
-                      <div style={{ fontSize: '0.8rem', color: 'var(--color-slate-500)', marginTop: '2px' }}>
-                        Ghi lại giao dịch mua hoặc bán để cập nhật danh mục.
-                      </div>
-                    </div>
-                    <MagneticButton
-                      onClick={() => {
-                        setTransactionModalDefaultType('BUY');
-                        setTransactionModalDefaultAsset(null);
-                        setIsTransactionModalOpen(true);
-                      }}
-                      className="fintech-btn btn-primary btn-sm"
-                      style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
-                    >
-                      <span>+</span>
-                      <span>Ghi nhận giao dịch</span>
-                    </MagneticButton>
                   </motion.div>
 
                   {/* Feature 14: Lịch sử giao dịch (Transaction History) */}
@@ -3575,12 +3401,30 @@ function App() {
               )}
 
               {/* SECTION 2: DANH MỤC HIỆN CÓ (HOLDINGS) */}
-              <motion.div variants={sectionItemVariants} className="section-header">
+              <motion.div variants={sectionItemVariants} className="section-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
                 <div>
                   <h2 className="section-title">Danh mục hiện có</h2>
                   <p className="section-subtitle">
-                    Ghi nhận các mã và tài sản bạn đang nắm giữ thực tế
+                    Danh sách các tài sản và vị thế đang nắm giữ trong danh mục
                   </p>
+                </div>
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                  <MagneticButton
+                    onClick={() => fetchHoldings(false)}
+                    disabled={holdingsLoading}
+                    className="fintech-btn btn-secondary btn-sm"
+                  >
+                    <span className={holdingsLoading ? 'spin-icon' : ''}>{holdingsLoading ? '⟳' : '↻'}</span>
+                    <span>{holdingsLoading ? 'Đang tải...' : 'Làm mới'}</span>
+                  </MagneticButton>
+                  <MagneticButton
+                    onClick={() => handleOpenOpeningPositionModal('CREATE')}
+                    className="fintech-btn btn-primary btn-sm"
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                  >
+                    <span>+</span>
+                    <span>Thêm tài sản đã sở hữu từ trước</span>
+                  </MagneticButton>
                 </div>
               </motion.div>
 
@@ -3616,109 +3460,28 @@ function App() {
                 </div>
               )}
 
-              {/* Add Holding Form Card with Subtle 3D Tilt */}
+              {/* Feature 17: Guidance card for opening positions vs buy/sell */}
               <motion.div variants={sectionItemVariants}>
-                <TiltCard className="fintech-card" style={{ padding: '1.5rem', marginBottom: '1.75rem' }} tiltMax={2}>
-                  <h3 style={{ margin: '0 0 1rem 0', fontSize: '1.02rem', fontWeight: 800, color: 'var(--color-slate-900)' }}>
-                    Thêm tài sản vào danh mục
-                  </h3>
-
-                  {addHoldingError && (
-                    <div className="fintech-banner banner-error">
-                      <span>{addHoldingError}</span>
-                    </div>
-                  )}
-
-                  <form onSubmit={handleAddHolding}>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem', marginBottom: '1.25rem' }}>
-                      {/* Select Asset */}
-                      <div>
-                        <label style={{ display: 'block', fontSize: '0.84rem', fontWeight: 700, color: 'var(--color-slate-700)', marginBottom: '0.35rem' }}>
-                          Tài sản
-                        </label>
-                        <select
-                          value={selectedAssetId}
-                          onChange={(e) => {
-                            setSelectedAssetId(e.target.value);
-                            setAddHoldingError(null);
-                          }}
-                          required
-                          className="fintech-select"
-                        >
-                          <option value="">-- Chọn tài sản --</option>
-                          {assets.map((asset) => {
-                            const alreadyHeld = holdings.some((h) => h.asset_id === asset.id);
-                            return (
-                              <option key={asset.id} value={asset.id} disabled={alreadyHeld}>
-                                {asset.symbol} - {asset.name} ({formatAssetType(asset.asset_type)}) {alreadyHeld ? '(Đã có)' : ''}
-                              </option>
-                            );
-                          })}
-                        </select>
-                      </div>
-
-                      {/* Quantity */}
-                      <div>
-                        <label style={{ display: 'block', fontSize: '0.84rem', fontWeight: 700, color: 'var(--color-slate-700)', marginBottom: '0.35rem' }}>
-                          Số lượng
-                        </label>
-                        <input
-                          type="number"
-                          min="0.0001"
-                          step="any"
-                          placeholder="Ví dụ: 1000"
-                          value={newQuantity}
-                          onChange={(e) => {
-                            setNewQuantity(e.target.value);
-                            setAddHoldingError(null);
-                          }}
-                          required
-                          className="fintech-input"
-                        />
-                      </div>
-
-                      {/* Average Purchase Price */}
-                      <div>
-                        <label style={{ display: 'block', fontSize: '0.84rem', fontWeight: 700, color: 'var(--color-slate-700)', marginBottom: '0.35rem' }}>
-                          Giá mua trung bình (VNĐ)
-                        </label>
-                        <input
-                          type="number"
-                          min="0"
-                          step="100"
-                          placeholder="Ví dụ: 58000"
-                          value={newAverageCost}
-                          onChange={(e) => {
-                            setNewAverageCost(e.target.value);
-                            setAddHoldingError(null);
-                          }}
-                          required
-                          className="fintech-input"
-                        />
-                      </div>
-                    </div>
-
-                    {/* Calculation preview and submit button */}
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
-                      <div>
-                        {Number(newQuantity) > 0 && Number(newAverageCost) >= 0 && (
-                          <span style={{ fontSize: '0.88rem', color: 'var(--color-brand-600)', fontWeight: 700 }}>
-                            Tổng vốn dự kiến: {(Number(newQuantity) * Number(newAverageCost)).toLocaleString('vi-VN')} ₫
-                          </span>
-                        )}
-                      </div>
-
-                      <MagneticButton
-                        type="submit"
-                        disabled={addHoldingLoading}
-                        className="fintech-btn btn-primary"
-                      >
-                        <span className={addHoldingLoading ? 'spin-icon' : ''}>{addHoldingLoading ? '⟳' : '+'}</span>
-                        <span>{addHoldingLoading ? 'Đang thêm...' : 'Thêm vào danh mục'}</span>
-                      </MagneticButton>
-                    </div>
-                  </form>
-                </TiltCard>
+                <div
+                  style={{
+                    padding: '1rem 1.25rem',
+                    backgroundColor: 'var(--color-surface, #ffffff)',
+                    border: '1px solid var(--border-default, #cbd5e1)',
+                    borderRadius: '12px',
+                    marginBottom: '1.5rem',
+                    fontSize: '0.84rem',
+                    color: 'var(--color-slate-600)',
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: '10px',
+                    lineHeight: 1.5
+                  }}
+                >
+                  <span style={{ fontSize: '1.1rem', lineHeight: 1 }}>💡</span>
+                  <div>
+                    <strong style={{ color: 'var(--color-slate-800)' }}>Quy tắc quản lý vị thế:</strong> Các tài sản bạn đã sở hữu trước khi dùng ứng dụng được thêm bằng nút <strong>"Thêm tài sản đã sở hữu từ trước"</strong> (không tạo giao dịch và không thay đổi tiền mặt). Để mua hoặc bán thêm tài sản sau này, hãy sử dụng tính năng <strong>Ghi nhận giao dịch</strong> trên trang Danh mục.
+                  </div>
+                </div>
               </motion.div>
 
               {/* Holdings Table */}
@@ -3727,21 +3490,7 @@ function App() {
                   <span style={{ fontSize: '0.95rem', fontWeight: 800, color: 'var(--color-slate-900)' }}>
                     Danh sách tài sản đang nắm giữ ({holdings.length})
                   </span>
-                  <MagneticButton
-                    onClick={() => fetchHoldings(false)}
-                    disabled={holdingsLoading}
-                    className="fintech-btn btn-secondary btn-sm"
-                  >
-                    <span className={holdingsLoading ? 'spin-icon' : ''}>{holdingsLoading ? '⟳' : '↻'}</span>
-                    <span>{holdingsLoading ? 'Đang tải...' : 'Làm mới'}</span>
-                  </MagneticButton>
                 </div>
-
-                {editHoldingError && (
-                  <div className="fintech-banner banner-error" style={{ margin: '0.75rem 1rem' }}>
-                    <span>{editHoldingError}</span>
-                  </div>
-                )}
 
                 {holdingsLoading && holdings.length === 0 && (
                   <div className="state-box" style={{ border: 'none', boxShadow: 'none' }}>
@@ -3754,9 +3503,15 @@ function App() {
                   <div className="state-box" style={{ border: 'none', boxShadow: 'none' }}>
                     <div className="state-icon float-icon">💼</div>
                     <h3 className="state-title">Chưa có tài sản nào trong danh mục</h3>
-                    <p className="state-desc">
-                      Sử dụng biểu mẫu phía trên để ghi nhận các khoản đầu tư bạn đang sở hữu.
+                    <p className="state-desc" style={{ marginBottom: '1.25rem' }}>
+                      Sử dụng nút "Thêm tài sản đã sở hữu từ trước" phía trên để ghi nhận các khoản đầu tư bạn đang sở hữu.
                     </p>
+                    <MagneticButton
+                      onClick={() => handleOpenOpeningPositionModal('CREATE')}
+                      className="fintech-btn btn-primary btn-sm"
+                    >
+                      + Thêm tài sản đã sở hữu từ trước
+                    </MagneticButton>
                   </div>
                 )}
 
@@ -3766,6 +3521,7 @@ function App() {
                       <thead>
                         <tr>
                           <th>Tài sản</th>
+                          <th>Nguồn gốc</th>
                           <th style={{ textAlign: 'right' }}>Số lượng</th>
                           <th style={{ textAlign: 'right' }}>Giá mua TB</th>
                           <th style={{ textAlign: 'right' }}>Tổng giá trị vốn</th>
@@ -3774,12 +3530,12 @@ function App() {
                       </thead>
                       <tbody>
                         {holdings.map((h) => {
-                          const isEditing = editingHoldingId === h.id;
                           const asset = h.asset || {};
                           const totalCost = Number(h.quantity) * Number(h.average_cost);
+                          const isCorrectionAllowed = h.opening_correction_allowed === true;
 
                           return (
-                            <tr key={h.id} className={isEditing ? 'row-editing' : ''}>
+                            <tr key={h.id}>
                               {/* Column 1: Asset symbol & name */}
                               <td>
                                 <div style={{ fontWeight: 800, color: 'var(--color-slate-900)', display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -3795,93 +3551,72 @@ function App() {
                                 </div>
                               </td>
 
-                              {/* Column 2: Quantity */}
-                              <td style={{ textAlign: 'right' }}>
-                                {isEditing ? (
-                                  <input
-                                    type="number"
-                                    min="0.0001"
-                                    step="any"
-                                    value={editQuantity}
-                                    onChange={(e) => setEditQuantity(e.target.value)}
-                                    className="fintech-input"
-                                    style={{ width: '100px', padding: '4px 8px', fontSize: '0.85rem' }}
-                                  />
+                              {/* Column 2: Origin / Provenance */}
+                              <td>
+                                {isCorrectionAllowed ? (
+                                  <span className="fintech-badge badge-neutral" style={{ fontSize: '0.74rem', color: 'var(--color-brand-700)', backgroundColor: 'var(--color-brand-50)' }}>
+                                    Vị thế ban đầu
+                                  </span>
                                 ) : (
-                                  <span style={{ fontWeight: 800, color: 'var(--color-slate-900)' }}>
-                                    {Number(h.quantity).toLocaleString('vi-VN')}
+                                  <span className="fintech-badge badge-neutral" style={{ fontSize: '0.74rem', color: 'var(--color-slate-600)' }}>
+                                    Đã có giao dịch
                                   </span>
                                 )}
                               </td>
 
-                              {/* Column 3: Average Cost */}
+                              {/* Column 3: Quantity */}
                               <td style={{ textAlign: 'right' }}>
-                                {isEditing ? (
-                                  <input
-                                    type="number"
-                                    min="0"
-                                    step="100"
-                                    value={editAverageCost}
-                                    onChange={(e) => setEditAverageCost(e.target.value)}
-                                    className="fintech-input"
-                                    style={{ width: '120px', padding: '4px 8px', fontSize: '0.85rem' }}
-                                  />
-                                ) : (
-                                  <span style={{ color: 'var(--color-slate-700)', fontWeight: 600 }}>
-                                    {Number(h.average_cost).toLocaleString('vi-VN')} ₫
-                                  </span>
-                                )}
+                                <span style={{ fontWeight: 800, color: 'var(--color-slate-900)' }}>
+                                  {Number(h.quantity).toLocaleString('vi-VN')}
+                                </span>
                               </td>
 
-                              {/* Column 4: Total Cost Basis */}
+                              {/* Column 4: Average Cost */}
                               <td style={{ textAlign: 'right' }}>
-                                {isEditing ? (
-                                  <span style={{ fontSize: '0.84rem', color: 'var(--color-brand-600)', fontWeight: 700 }}>
-                                    {Number(editQuantity) > 0 && Number(editAverageCost) >= 0
-                                      ? `${(Number(editQuantity) * Number(editAverageCost)).toLocaleString('vi-VN')} ₫`
-                                      : '---'}
-                                  </span>
-                                ) : (
-                                  <span style={{ fontWeight: 800, color: 'var(--color-slate-900)' }}>
-                                    {totalCost.toLocaleString('vi-VN')} ₫
-                                  </span>
-                                )}
+                                <span style={{ color: 'var(--color-slate-700)', fontWeight: 600 }}>
+                                  {Number(h.average_cost).toLocaleString('vi-VN')} ₫
+                                </span>
                               </td>
 
-                              {/* Column 5: Actions */}
+                              {/* Column 5: Total Cost Basis */}
                               <td style={{ textAlign: 'right' }}>
-                                {isEditing ? (
-                                  <div style={{ display: 'inline-flex', gap: '6px' }}>
+                                <span style={{ fontWeight: 800, color: 'var(--color-slate-900)' }}>
+                                  {totalCost.toLocaleString('vi-VN')} ₫
+                                </span>
+                              </td>
+
+                              {/* Column 6: Actions */}
+                              <td style={{ textAlign: 'right' }}>
+                                {isCorrectionAllowed ? (
+                                  <div style={{ display: 'inline-flex', gap: '6px', justifyContent: 'flex-end' }}>
                                     <MagneticButton
-                                      onClick={() => handleSaveEditHolding(h.id)}
-                                      disabled={editHoldingLoading}
-                                      className="fintech-btn btn-primary btn-sm"
+                                      onClick={() => handleOpenOpeningPositionModal('CORRECT', h)}
+                                      className="fintech-btn btn-secondary btn-sm"
+                                      style={{ fontSize: '0.76rem', padding: '3px 7px' }}
                                     >
-                                      {editHoldingLoading ? '...' : 'Lưu'}
+                                      Sửa thông tin ban đầu
                                     </MagneticButton>
                                     <MagneticButton
-                                      onClick={handleCancelEdit}
-                                      disabled={editHoldingLoading}
-                                      className="fintech-btn btn-secondary btn-sm"
+                                      onClick={() => handleOpenOpeningPositionModal('CANCEL', h)}
+                                      className="fintech-btn btn-danger btn-sm"
+                                      style={{ fontSize: '0.76rem', padding: '3px 7px' }}
                                     >
-                                      Hủy
+                                      Hủy vị thế ban đầu
                                     </MagneticButton>
                                   </div>
                                 ) : (
-                                  <div style={{ display: 'inline-flex', gap: '6px' }}>
-                                    <MagneticButton
-                                      onClick={() => handleStartEditHolding(h)}
-                                      className="fintech-btn btn-secondary btn-sm"
+                                  <div style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'flex-end' }}>
+                                    <span
+                                      style={{
+                                        fontSize: '0.76rem',
+                                        color: 'var(--color-slate-600)',
+                                        backgroundColor: 'var(--color-slate-100)',
+                                        padding: '3px 8px',
+                                        borderRadius: '6px'
+                                      }}
                                     >
-                                      Chỉnh sửa
-                                    </MagneticButton>
-                                    <MagneticButton
-                                      onClick={() => handleDeleteHolding(h.id, asset.symbol)}
-                                      disabled={deletingHoldingId === h.id}
-                                      className="fintech-btn btn-danger btn-sm"
-                                    >
-                                      {deletingHoldingId === h.id ? '...' : 'Xóa'}
-                                    </MagneticButton>
+                                      Đã có giao dịch — thay đổi bằng Mua/Bán
+                                    </span>
                                   </div>
                                 )}
                               </td>
@@ -3897,6 +3632,20 @@ function App() {
           )}
 
         </AnimatePresence>
+
+        {/* Feature 17: Opening Position Modal Dialog */}
+        <OpeningPositionModal
+          isOpen={isOpeningPositionModalOpen}
+          onClose={() => {
+            setIsOpeningPositionModalOpen(false);
+            setOpeningPositionTargetHolding(null);
+          }}
+          mode={openingPositionModalMode}
+          targetHolding={openingPositionTargetHolding}
+          assets={assets}
+          holdings={holdings}
+          onSuccess={handleOpeningPositionSuccess}
+        />
 
         {/* Feature 12: Price Alert Modal Dialog */}
         <PriceAlertModal
