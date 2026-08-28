@@ -87,3 +87,9 @@ The following architectural and product decisions are confirmed:
   - **Section-Level Failure Isolation**: Portfolio overview, watchlist market snapshots, and news feed load in parallel with section-level error isolation so that an issue in one feed never blanks other dashboard components.
   - **Watchlist Movers Semantics**: Descriptive sorting of available delayed percentage changes only. Omitted gracefully if fewer than 2 valid quotes exist. Never labeled as recommendations, buy signals, or top picks.
   - **Data Integrity**: Missing values are preserved as unavailable and not converted to zero; market prices remain clearly labeled as delayed (~15m).
+- **Portfolio Composition & Concentration (Feature 10)**:
+  - **Valuation Basis**: Composition is derived exclusively from the existing portfolio overview valuation on known value basis (`full_portfolio_value`, `known_value_only`, `cash_only`, `no_known_value`).
+  - **Partial Valuation Transparency**: Partial valuation remains explicit (`valuationCoverageLevel: 'partial'`), with clear notes indicating percentages represent known/priced value only.
+  - **Unpriced Holdings Integrity**: Holdings with unavailable market prices are preserved in full view and are never treated as zero or omitted.
+  - **Descriptive Concentration Model**: Concentration metrics (largest holding and top 3 concentration) are purely descriptive facts. No diversification score, concentration score, risk rating, low/medium/high classification, or rebalance recommendations are created.
+  - **Client Role**: Frontend consumes backend composition metrics without client-side formula recalculation, rendering an interactive 2.5D SVG Donut and clear tabular breakdowns.

@@ -1,7 +1,7 @@
 # Current Project Status
 
 ## LATEST VERIFIED CHECKPOINT
-- **Commit**: `26bbabd`
+- **Commit**: `a3ddedf`
 - **Branch**: `main`
 
 ## CURRENT PHASE
@@ -66,6 +66,14 @@ BUILD
   - Balanced 4-column responsive news preview with localized Vietnamese category chips (`Vĩ mô`, `Thị trường`, `Doanh nghiệp`, `Quốc tế`)
   - Parallel client data coordination with section-level failure isolation and global background refresh
   - 127/127 automated tests passing
+- **Feature 10 — Portfolio Composition & Concentration**
+  - Dedicated composition endpoint (`GET /api/portfolio/composition`) derived purely on demand from portfolio overview valuation without re-fetching or recomputing pricing.
+  - Objective allocation basis: `full_portfolio_value`, `known_value_only`, `cash_only`, or `no_known_value`.
+  - Explicit valuation coverage: `complete`, `partial`, `unavailable`, `not_applicable`.
+  - Holding allocations, asset-type group aggregations, largest holding, and top-3 concentration percentages.
+  - Descriptive "Cơ cấu danh mục" UI in Portfolio page featuring interactive 2.5D Donut, clear numeric legends, unpriced holding visibility, and non-redundant concentration metrics.
+  - Backend checkpoint `36fc24e`, UI checkpoint `a3ddedf`.
+  - 137/137 automated tests passing.
 
 ## PRE-FEATURE-07 HARDENING (COMPLETED)
 - **Historical Market Normalization Hardened** (Patch 06-2, checkpoint `d38ee60`): Deterministic deduplication, exact fractional volumes, robust boundary handling, clean null propagation for missing OHLCV.
@@ -83,5 +91,5 @@ BUILD
   - Default server automated tests are fully isolated from real Supabase and exercise actual production-path query predicates.
 
 ## CURRENT STATE
-Feature 09 (Personal Investment Dashboard / Tổng quan) is **COMPLETE** (127/127 tests PASS, client build clean, dashboard is primary landing page).
+Feature 10 (Portfolio Composition & Concentration) is **COMPLETE** (backend checkpoint `36fc24e`, UI commit `a3ddedf`, 137/137 tests PASS, client build clean).
 The next feature has not been selected yet; awaiting Project Director decision.
