@@ -197,30 +197,32 @@ export async function getInvestorProfile(client = supabase) {
 }
 
 /**
- * Updates the single investor profile in Supabase.
+ * Updates non-cash preferences for the single investor profile.
+ * Feature 15 cash is ledger-managed and cannot be written through this path.
  */
-export async function updateInvestorProfile({ cash_available, risk_tolerance, investment_horizon }, client = supabase) {
+export async function updateInvestorProfile(input, client = supabase) {
   const db = client || supabase;
   if (!db) {
     throw new Error('Supabase credentials are not configured. Please set SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY in server/.env');
   }
 
-  const currentProfile = await getInvestorProfile(db);
+  if (Object.prototype.hasOwnProperty.call(input || {}, 'cash_available')) {
+    const err = new Error('cash_available is ledger-managed; use the cash deposit or withdrawal endpoints');
+    err.statusCode = 409;
+    throw err;
+  }
 
-  const { data, error } = await db
-    .from('investor_profile')
-    .update({
-      cash_available,
-      risk_tolerance,
-      investment_horizon,
-      updated_at: new Date().toISOString()
-    })
-    .eq('id', currentProfile.id)
-    .select('id, cash_available, risk_tolerance, investment_horizon, created_at, updated_at')
-    .single();
+  const { risk_tolerance, investment_horizon } = input || {};
+
+  const { data, error } = await db.rpc('update_investor_profile_preferences', {
+    p_risk_tolerance: risk_tolerance,
+    p_investment_horizon: investment_horizon
+  });
 
   if (error) {
-    throw new Error(`Database update error: ${error.message} (code: ${error.code || 'UNKNOWN'})`);
+    const err = new Error(`Database update error: ${error.message} (code: ${error.code || 'UNKNOWN'})`);
+    if (error.code === 'IP001') err.statusCode = 400;
+    throw err;
   }
 
   return normalizeProfile(data);

@@ -21,7 +21,11 @@ function cloneRows(rows) {
   return rows.map(row => ({ ...row }));
 }
 
-function createFakeTransactionDatabase({ holdings = [], failAfterTransactionInsert = false } = {}) {
+function createFakeTransactionDatabase({
+  holdings = [],
+  cashAvailable = 100000000,
+  failAfterTransactionInsert = false
+} = {}) {
   const assets = [
     { id: FPT_ASSET_ID, symbol: 'FPT', name: 'FPT Corporation', asset_type: 'stock' },
     { id: VCB_ASSET_ID, symbol: 'VCB', name: 'Vietcombank', asset_type: 'stock' }
@@ -30,6 +34,8 @@ function createFakeTransactionDatabase({ holdings = [], failAfterTransactionInse
   const state = {
     holdings: cloneRows(holdings),
     transactions: [],
+    cashLedger: [],
+    cashAvailable,
     rpcCalls: []
   };
 
@@ -96,6 +102,7 @@ function createFakeTransactionDatabase({ holdings = [], failAfterTransactionInse
 
     const stagedHoldings = cloneRows(state.holdings);
     const stagedTransactions = cloneRows(state.transactions);
+    const stagedCashLedger = cloneRows(state.cashLedger);
     const existingIndex = stagedHoldings.findIndex(row => (
       row.profile_id === SINGLETON_PROFILE_ID && row.asset_id === asset.id
     ));
@@ -107,6 +114,9 @@ function createFakeTransactionDatabase({ holdings = [], failAfterTransactionInse
     let holdingRemoved = false;
 
     if (transactionType === 'BUY') {
+      if (quantity * price > state.cashAvailable) {
+        return rpcError('CL001', 'insufficient current cash for BUY transaction');
+      }
       if (existing) {
         newQuantity = existing.quantity + quantity;
         newAverageCost = (
@@ -179,14 +189,35 @@ function createFakeTransactionDatabase({ holdings = [], failAfterTransactionInse
       stagedHoldings[existingIndex] = resultHolding;
     }
 
+    const cashAmount = quantity * price;
+    const cashEntry = {
+      id: `cash-entry-${String(sequence).padStart(4, '0')}`,
+      profile_id: SINGLETON_PROFILE_ID,
+      entry_type: transactionType,
+      amount: cashAmount,
+      portfolio_transaction_id: transaction.id,
+      effective_at: createdAt,
+      created_at: createdAt,
+      metadata: {},
+      symbol: asset.symbol
+    };
+    stagedCashLedger.push(cashEntry);
+    const newCash = transactionType === 'BUY'
+      ? state.cashAvailable - cashAmount
+      : state.cashAvailable + cashAmount;
+
     state.transactions.splice(0, state.transactions.length, ...stagedTransactions);
     state.holdings.splice(0, state.holdings.length, ...stagedHoldings);
+    state.cashLedger.splice(0, state.cashLedger.length, ...stagedCashLedger);
+    state.cashAvailable = newCash;
 
     return {
       data: {
         transaction,
         holding: resultHolding,
-        holdingRemoved
+        holdingRemoved,
+        cashEntry,
+        currentCash: newCash
       },
       error: null
     };

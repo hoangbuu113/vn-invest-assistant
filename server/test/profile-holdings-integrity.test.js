@@ -371,8 +371,7 @@ describe('Patch B3 - Production-Path Profile & Holdings Integrity Hardening', ()
       // Instantiate ACTUAL production routes via createApp factory
       appInstance = createApp({
         getInvestorProfileFn: async () => profilesStore[0],
-        updateInvestorProfileFn: async ({ cash_available, risk_tolerance, investment_horizon }) => {
-          profilesStore[0].cash_available = cash_available;
+        updateInvestorProfileFn: async ({ risk_tolerance, investment_horizon }) => {
           profilesStore[0].risk_tolerance = risk_tolerance;
           profilesStore[0].investment_horizon = investment_horizon;
           return profilesStore[0];
@@ -437,20 +436,36 @@ describe('Patch B3 - Production-Path Profile & Holdings Integrity Hardening', ()
     });
 
     // --- Financial Input Validation on Real Routes ---
-    test('PUT /api/profile validates valid input', async () => {
+    test('PUT /api/profile updates preferences while preserving ledger-managed cash', async () => {
       const res = await fetch(baseUrl + '/api/profile', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          cash_available: 50000000,
-          risk_tolerance: 'moderate',
-          investment_horizon: 'medium'
+          cash_available: 0,
+          risk_tolerance: 'high',
+          investment_horizon: 'long'
         })
       });
       const data = await res.json();
       assert.equal(res.status, 200);
       assert.equal(data.status, 'ok');
-      assert.equal(data.data.cash_available, 50000000);
+      assert.equal(data.data.cash_available, 0);
+      assert.equal(data.data.risk_tolerance, 'high');
+      assert.equal(data.data.investment_horizon, 'long');
+    });
+
+    test('PUT /api/profile rejects direct cash changes without changing stored cash', async () => {
+      const res = await fetch(baseUrl + '/api/profile', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          cash_available: 50000000,
+          risk_tolerance: 'high',
+          investment_horizon: 'long'
+        })
+      });
+      assert.equal(res.status, 409);
+      assert.equal(profilesStore[0].cash_available, 0);
     });
 
     test('PUT /api/profile strictly rejects invalid financial numbers and enums (400)', async () => {

@@ -32,6 +32,13 @@ import {
   TRANSACTION_METHODOLOGY,
   TRANSACTION_TYPES
 } from './src/transactions.js';
+import {
+  CASH_LEDGER_METHODOLOGY,
+  CASH_MOVEMENT_TYPES,
+  createCashMovement,
+  getCashLedger,
+  getCashOverview
+} from './src/cash.js';
 
 dotenv.config();
 
@@ -76,7 +83,11 @@ export function createApp(services = {}) {
     evaluateAndPersistAlertsFn = evaluateAndPersistAlerts,
     getPortfolioTransactionsFn = getPortfolioTransactions,
     createPortfolioTransactionFn = createPortfolioTransaction,
-    transactionClient
+    getCashOverviewFn = getCashOverview,
+    getCashLedgerFn = getCashLedger,
+    createCashMovementFn = createCashMovement,
+    transactionClient,
+    cashClient
   } = services;
 
   const app = express();
@@ -132,8 +143,10 @@ export function createApp(services = {}) {
 
       const errors = [];
 
-      // Strict validation for cash_available (no string/boolean coercion)
-      if (!isValidFinancialNumber(cash_available, { allowZero: true })) {
+      const hasCashAvailable = Object.prototype.hasOwnProperty.call(req.body || {}, 'cash_available');
+
+      // A supplied compatibility value must remain a strict financial number.
+      if (hasCashAvailable && !isValidFinancialNumber(cash_available, { allowZero: true })) {
         errors.push('cash_available must be a non-negative finite number');
       }
 
@@ -161,8 +174,15 @@ export function createApp(services = {}) {
         });
       }
 
+      const currentProfile = await getInvestorProfileFn();
+      if (hasCashAvailable && cash_available !== currentProfile.cash_available) {
+        return res.status(409).json({
+          status: 'error',
+          message: 'cash_available is ledger-managed; use the cash deposit or withdrawal endpoints'
+        });
+      }
+
       const updated = await updateInvestorProfileFn({
-        cash_available,
         risk_tolerance: risk_tolerance.trim().toLowerCase(),
         investment_horizon: investment_horizon.trim().toLowerCase()
       });
@@ -172,7 +192,7 @@ export function createApp(services = {}) {
         data: updated
       });
     } catch (error) {
-      return res.status(500).json({
+      return res.status(error.statusCode || 500).json({
         status: 'error',
         message: 'Failed to update investor profile',
         details: error.message
@@ -420,6 +440,76 @@ export function createApp(services = {}) {
       });
     }
   });
+
+  // Feature 15 immutable cash/capital ledger. All mutations are delegated to
+  // PostgreSQL RPCs that update the compatibility cash cache atomically.
+  app.get('/api/cash/overview', async (req, res) => {
+    try {
+      const overview = await getCashOverviewFn(cashClient);
+      return res.json({
+        status: 'ok',
+        data: overview,
+        methodology: CASH_LEDGER_METHODOLOGY
+      });
+    } catch (error) {
+      return res.status(error.statusCode || 500).json({
+        status: 'error',
+        message: error.message || 'Failed to fetch cash overview',
+        details: error.message
+      });
+    }
+  });
+
+  app.get('/api/cash/ledger', async (req, res) => {
+    try {
+      const entries = await getCashLedgerFn(cashClient);
+      return res.json({
+        status: 'ok',
+        count: entries.length,
+        data: entries,
+        methodology: CASH_LEDGER_METHODOLOGY
+      });
+    } catch (error) {
+      return res.status(error.statusCode || 500).json({
+        status: 'error',
+        message: error.message || 'Failed to fetch cash ledger',
+        details: error.message
+      });
+    }
+  });
+
+  async function handleCashMovement(req, res, entryType) {
+    const { amount } = req.body || {};
+    if (!isValidFinancialNumber(amount, { allowZero: false })) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'amount must be a finite number greater than 0'
+      });
+    }
+
+    try {
+      const result = await createCashMovementFn({ entryType, amount }, cashClient);
+      return res.status(201).json({
+        status: 'ok',
+        data: result,
+        methodology: CASH_LEDGER_METHODOLOGY
+      });
+    } catch (error) {
+      return res.status(error.statusCode || 500).json({
+        status: 'error',
+        message: error.message || `Failed to create ${entryType.toLowerCase()}`,
+        details: error.message
+      });
+    }
+  }
+
+  app.post('/api/cash/deposit', (req, res) => (
+    handleCashMovement(req, res, CASH_MOVEMENT_TYPES[0])
+  ));
+
+  app.post('/api/cash/withdraw', (req, res) => (
+    handleCashMovement(req, res, CASH_MOVEMENT_TYPES[1])
+  ));
 
   // Assets list endpoint
   app.get('/api/assets', async (req, res) => {

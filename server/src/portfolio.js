@@ -1,5 +1,6 @@
-import { getInvestorProfile, getHoldings } from './supabase.js';
+import { getHoldings } from './supabase.js';
 import { getMarketSnapshot } from './market.js';
+import { getCashOverview } from './cash.js';
 
 /**
  * Pure calculation function for portfolio holdings and aggregate summary.
@@ -117,12 +118,17 @@ export function calculatePortfolioValuation(profile, holdings, snapshotsMap = {}
 
 /**
  * Calculates and returns a deterministic portfolio overview.
- * Combines profile cash, holdings, and delayed market prices without mutating or persisting derived metrics.
+ * Combines ledger-authoritative cash, holdings, and delayed market prices without
+ * mutating or persisting derived metrics.
  */
-export async function getPortfolioOverview() {
-  const [profile, holdings] = await Promise.all([
-    getInvestorProfile(),
-    getHoldings()
+export async function getPortfolioOverview({
+  getCashOverviewFn = getCashOverview,
+  getHoldingsFn = getHoldings,
+  getMarketSnapshotFn = getMarketSnapshot
+} = {}) {
+  const [cashOverview, holdings] = await Promise.all([
+    getCashOverviewFn(),
+    getHoldingsFn()
   ]);
 
   // Collect unique symbols
@@ -136,7 +142,7 @@ export async function getPortfolioOverview() {
   const snapshotsEntries = await Promise.all(
     symbols.map(async (symbol) => {
       try {
-        const snapshot = await getMarketSnapshot(symbol);
+        const snapshot = await getMarketSnapshotFn(symbol);
         return [symbol, snapshot];
       } catch {
         return [symbol, null];
@@ -146,5 +152,9 @@ export async function getPortfolioOverview() {
 
   const snapshotsMap = Object.fromEntries(snapshotsEntries);
 
-  return calculatePortfolioValuation(profile, holdings, snapshotsMap);
+  return calculatePortfolioValuation(
+    { cash_available: cashOverview.currentCash },
+    holdings,
+    snapshotsMap
+  );
 }

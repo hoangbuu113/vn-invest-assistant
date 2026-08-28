@@ -1,10 +1,14 @@
 import { supabase } from './supabase.js';
+import { normalizeCashLedgerEntry } from './cash.js';
 
 export const TRANSACTION_TYPES = Object.freeze(['BUY', 'SELL']);
 
 export const TRANSACTION_METHODOLOGY = Object.freeze({
   costBasisMethod: 'weighted_average',
   realizedPnLMethod: '(sellPrice - preSellAverageCost) * sellQuantity',
+  cashAmountMethod: 'quantity * price',
+  cashReconciliation: 'transactions recorded after Feature 15 activation affect current cash atomically at accounting time',
+  legacyTransactionsCashReconciled: false,
   feesIncluded: false,
   taxesIncluded: false,
   legacyHoldingsMayPredateLedger: true,
@@ -103,7 +107,7 @@ function normalizeHoldingState(row) {
 function transactionDatabaseError(error, fallbackMessage) {
   const err = new Error(error?.message || fallbackMessage);
   err.code = error?.code;
-  if (['PT001', 'PT002', 'PT003', 'PT004'].includes(error?.code)) {
+  if (['PT001', 'PT002', 'PT003', 'PT004', 'CL001'].includes(error?.code)) {
     err.statusCode = 400;
   }
   return err;
@@ -160,6 +164,8 @@ export async function createPortfolioTransaction({
   return {
     transaction: normalizeTransaction(data.transaction),
     holding: normalizeHoldingState(data.holding),
-    holdingRemoved: data.holdingRemoved === true
+    holdingRemoved: data.holdingRemoved === true,
+    cashEntry: normalizeCashLedgerEntry(data.cashEntry),
+    currentCash: normalizeDatabaseNumber(data.currentCash, 'current cash')
   };
 }
