@@ -675,6 +675,91 @@ body {
   margin-bottom: 1.5rem;
 }
 
+/* ==========================================================
+   Dashboard Layout (Feature 09)
+   ========================================================== */
+.dashboard-main-grid {
+  display: grid;
+  grid-template-columns: 1fr 1.35fr;
+  gap: 1.25rem;
+  margin-bottom: 1.5rem;
+}
+
+@media (max-width: 960px) {
+  .dashboard-main-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.dashboard-card-footer {
+  padding: 0.85rem 1.25rem;
+  border-top: 1px solid var(--border-subtle);
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  background-color: rgba(248, 250, 252, 0.6);
+}
+
+.dashboard-mover-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+  padding: 0.95rem 1.25rem;
+  border-bottom: 1px solid var(--border-subtle);
+  background: linear-gradient(180deg, rgba(248, 250, 252, 0.7) 0%, rgba(255, 255, 255, 0.9) 100%);
+}
+
+@media (max-width: 600px) {
+  .dashboard-mover-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.dashboard-mover-chip {
+  padding: 0.65rem 0.85rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-default);
+  background-color: #ffffff;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  cursor: pointer;
+  transition: transform var(--transition-fast), box-shadow var(--transition-fast), border-color var(--transition-fast);
+}
+
+.dashboard-mover-chip:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
+}
+
+.dashboard-mover-chip.gain {
+  border-color: var(--color-gain-200);
+  background-color: rgba(236, 253, 245, 0.4);
+}
+
+.dashboard-mover-chip.loss {
+  border-color: var(--color-loss-200);
+  background-color: rgba(254, 242, 242, 0.4);
+}
+
+.dashboard-news-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1rem;
+}
+
+@media (max-width: 1100px) {
+  .dashboard-news-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 600px) {
+  .dashboard-news-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .metric-card {
   background: rgba(255, 255, 255, 0.95);
   backdrop-filter: blur(10px);

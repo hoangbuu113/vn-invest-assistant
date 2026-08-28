@@ -34,6 +34,7 @@ const HISTORY_RANGES = [
 ];
 
 const NAV_TABS = [
+  { id: 'dashboard', label: 'Tổng quan', icon: '⚡' },
   { id: 'portfolio', label: 'Danh mục', icon: '📊' },
   { id: 'watchlist', label: 'Theo dõi', icon: '⭐' },
   { id: 'news', label: 'Tin tức', icon: '📰' },
@@ -73,6 +74,84 @@ function formatAssetType(assetType) {
   return ASSET_TYPE_LABELS[String(assetType).toLowerCase()] || assetType;
 }
 
+const NEWS_CATEGORY_LABELS = {
+  macro: 'Vĩ mô',
+  market: 'Thị trường',
+  company: 'Doanh nghiệp',
+  international: 'Quốc tế'
+};
+
+function formatNewsCategory(category) {
+  if (!category) return null;
+  return NEWS_CATEGORY_LABELS[String(category).toLowerCase()] || null;
+}
+
+/**
+ * Feature 09: Compute top gainer and decliner within watchlist based purely on descriptive percentage changes
+ */
+function computeWatchlistMovers(watchlistItems, marketDataMap = {}) {
+  if (!Array.isArray(watchlistItems) || watchlistItems.length === 0) {
+    return { topGainer: null, topDecliner: null, validCount: 0 };
+  }
+
+  const validItems = [];
+
+  for (const item of watchlistItems) {
+    const sym = item.asset?.symbol || item.symbol;
+    if (!sym || typeof sym !== 'string') continue;
+
+    const mkt = marketDataMap[sym] || item.marketData;
+    if (!mkt || typeof mkt !== 'object') continue;
+
+    const price = typeof mkt.price === 'number' && !isNaN(mkt.price) && Number.isFinite(mkt.price) && mkt.price > 0
+      ? mkt.price
+      : null;
+
+    const change = typeof mkt.change === 'number' && !isNaN(mkt.change) && Number.isFinite(mkt.change)
+      ? mkt.change
+      : null;
+
+    const changePercent = typeof mkt.changePercent === 'number' && !isNaN(mkt.changePercent) && Number.isFinite(mkt.changePercent)
+      ? mkt.changePercent
+      : null;
+
+    if (price !== null && changePercent !== null) {
+      validItems.push({
+        id: item.id || item.asset_id || sym,
+        symbol: sym,
+        name: item.asset?.name || item.name || sym,
+        assetType: item.asset?.asset_type || item.assetType,
+        price,
+        change,
+        changePercent,
+        currency: mkt.currency || 'VND',
+        updatedAt: mkt.updatedAt || null
+      });
+    }
+  }
+
+  if (validItems.length < 2) {
+    return {
+      topGainer: null,
+      topDecliner: null,
+      validCount: validItems.length
+    };
+  }
+
+  const sorted = [...validItems].sort((a, b) => b.changePercent - a.changePercent);
+  const highest = sorted[0];
+  const lowest = sorted[sorted.length - 1];
+
+  const topGainer = highest && highest.changePercent > 0 ? highest : null;
+  const topDecliner = lowest && lowest.changePercent < 0 ? lowest : null;
+
+  return {
+    topGainer,
+    topDecliner,
+    validCount: validItems.length
+  };
+}
+
 const pageVariants = {
   initial: { opacity: 0, scale: 0.985, y: 10, filter: 'blur(4px)' },
   animate: {
@@ -101,7 +180,7 @@ const sectionItemVariants = {
 };
 
 function App() {
-  const [activeTab, setActiveTab] = useState('news'); // 'news' | 'portfolio' | 'assets' | 'profile'
+  const [activeTab, setActiveTab] = useState('dashboard'); // 'dashboard' | 'portfolio' | 'watchlist' | 'news' | 'assets' | 'profile'
 
   // Profile state
   const [profile, setProfile] = useState(null);
@@ -660,6 +739,30 @@ function App() {
     return () => clearInterval(intervalId);
   }, [activeTab, fetchWatchlist]);
 
+  // Dashboard refresh state (Feature 09)
+  const [dashboardRefreshing, setDashboardRefreshing] = useState(false);
+
+  // Global refresh for all dashboard sections
+  const handleRefreshAllDashboard = useCallback(() => {
+    setDashboardRefreshing(true);
+    Promise.allSettled([
+      fetchPortfolio(false),
+      fetchWatchlist(false),
+      fetchNews(false)
+    ]).finally(() => {
+      setDashboardRefreshing(false);
+    });
+  }, [fetchPortfolio, fetchWatchlist, fetchNews]);
+
+  // Periodic 5-minute auto-refresh when on dashboard tab
+  useEffect(() => {
+    if (activeTab !== 'dashboard') return;
+    const intervalId = setInterval(() => {
+      handleRefreshAllDashboard();
+    }, 5 * 60 * 1000);
+    return () => clearInterval(intervalId);
+  }, [activeTab, handleRefreshAllDashboard]);
+
   // Toggle or add/remove asset from watchlist
   const handleToggleWatchlist = (assetId, symbol) => {
     const isFollowed = watchlist.some(
@@ -986,6 +1089,438 @@ function App() {
       {/* Main Content Area with Sequential Coordinated Transitions */}
       <main className="app-main">
         <AnimatePresence mode="wait">
+
+          {/* TAB 0: DASHBOARD / TỔNG QUAN (Feature 09 - De-duplicated cross-app overview) */}
+          {activeTab === 'dashboard' && (
+            <motion.section
+              key="dashboard-view"
+              variants={pageVariants}
+              initial="initial"
+              animate="animate"
+              exit="exit"
+            >
+              {/* SECTION 1: DASHBOARD HERO / PERSONAL SUMMARY */}
+              <motion.div variants={sectionItemVariants} className="section-header" style={{ alignItems: 'center', marginBottom: '1.5rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
+                  <Fintech3DOrb size={68} className="dashboard-3d-accent" />
+                  <div>
+                    <h2 className="section-title">Tổng quan đầu tư</h2>
+                    <p className="section-subtitle">
+                      Các thông tin quan trọng từ danh mục và tài sản bạn đang theo dõi.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Refresh Button */}
+                <MagneticButton
+                  onClick={handleRefreshAllDashboard}
+                  disabled={dashboardRefreshing || portfolioLoading || watchlistLoading || newsLoading}
+                  className="fintech-btn btn-secondary btn-sm"
+                >
+                  <span className={dashboardRefreshing ? 'spin-icon' : ''}>{dashboardRefreshing ? '⟳' : '↻'}</span>
+                  <span>{dashboardRefreshing ? 'Đang làm mới...' : 'Làm mới tất cả'}</span>
+                </MagneticButton>
+              </motion.div>
+
+              {/* SECTION 2 & 3: MAIN GRID (ONE Compact Portfolio Summary Card + Watchlist Snapshot & Movers) */}
+              <div className="dashboard-main-grid">
+
+                {/* CARD 1: DANH MỤC CỦA TÔI (Single Compact Portfolio Summary Card) */}
+                <motion.div variants={sectionItemVariants} className="fintech-card" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+                  <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span style={{ fontSize: '1rem', fontWeight: 800, color: 'var(--color-slate-900)' }}>
+                        Danh mục của tôi
+                      </span>
+                    </div>
+                    <MagneticButton
+                      onClick={() => setActiveTab('portfolio')}
+                      className="fintech-btn btn-secondary btn-sm"
+                    >
+                      Xem danh mục &rarr;
+                    </MagneticButton>
+                  </div>
+
+                  <div style={{ flex: 1, padding: '1.25rem' }}>
+                    {portfolioLoading && !portfolioOverview && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                        <div className="skeleton-shimmer" style={{ width: '45%', height: '16px' }} />
+                        <div className="skeleton-shimmer" style={{ width: '75%', height: '32px' }} />
+                        <div className="skeleton-shimmer" style={{ width: '100%', height: '70px', marginTop: '0.5rem' }} />
+                      </div>
+                    )}
+
+                    {portfolioError && !portfolioOverview && (
+                      <div className="fintech-banner banner-error" style={{ margin: 0 }}>
+                        <div>
+                          <strong>Không thể tải danh mục:</strong> {portfolioError}
+                        </div>
+                        <MagneticButton onClick={() => fetchPortfolio(true)} className="fintech-btn btn-danger btn-sm" style={{ marginTop: '0.5rem' }}>
+                          Thử lại
+                        </MagneticButton>
+                      </div>
+                    )}
+
+                    {portfolioOverview && (() => {
+                      const holdingsList = Array.isArray(portfolioOverview.holdings) ? portfolioOverview.holdings : [];
+                      const holdingsCount = holdingsList.length;
+                      const unpricedCount = holdingsList.filter(
+                        (h) => h.pricingStatus !== 'available' || h.latestPrice === null
+                      ).length;
+
+                      return (
+                        <>
+                          {portfolioOverview.summary.valuationStatus === 'partial' && unpricedCount > 0 && (
+                            <div className="fintech-banner banner-warning" style={{ marginBottom: '1rem', padding: '0.55rem 0.85rem', fontSize: '0.8rem' }}>
+                              <span>⚠️ <strong>Định giá một phần:</strong> {unpricedCount} mã chưa có dữ liệu giá thị trường.</span>
+                            </div>
+                          )}
+
+                          {/* Big Total Portfolio Value */}
+                          <div style={{ marginBottom: '1.25rem' }}>
+                            <span style={{ fontSize: '0.8rem', color: 'var(--color-slate-500)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                              Tổng giá trị
+                            </span>
+                            <div style={{ fontSize: '1.75rem', fontWeight: 900, color: 'var(--color-slate-900)', letterSpacing: '-0.02em', marginTop: '2px' }}>
+                              {portfolioOverview.summary.totalPortfolioValue !== null
+                                ? `${portfolioOverview.summary.totalPortfolioValue.toLocaleString('vi-VN')} đ`
+                                : 'Chưa khả dụng'}
+                            </div>
+                          </div>
+
+                          {/* Stacked key summary figures */}
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', paddingTop: '1rem', borderTop: '1px solid var(--border-subtle)' }}>
+                            {/* Cash Available */}
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <span style={{ fontSize: '0.88rem', color: 'var(--color-slate-500)' }}>Tiền mặt:</span>
+                              <strong style={{ fontSize: '0.95rem', color: 'var(--color-slate-900)' }}>
+                                {portfolioOverview.summary.cashAvailable.toLocaleString('vi-VN')} đ
+                              </strong>
+                            </div>
+
+                            {/* Unrealized P/L */}
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <span style={{ fontSize: '0.88rem', color: 'var(--color-slate-500)' }}>Lãi/lỗ tạm tính:</span>
+                              <div style={{ textAlign: 'right' }}>
+                                {portfolioOverview.summary.totalUnrealizedPnL !== null ? (
+                                  <span style={{
+                                    fontWeight: 800,
+                                    fontSize: '0.95rem',
+                                    color: portfolioOverview.summary.totalUnrealizedPnL > 0
+                                      ? 'var(--color-gain-700)'
+                                      : portfolioOverview.summary.totalUnrealizedPnL < 0
+                                        ? 'var(--color-loss-700)'
+                                        : 'var(--color-slate-700)'
+                                  }}>
+                                    {portfolioOverview.summary.totalUnrealizedPnL > 0 ? '+' : ''}
+                                    {portfolioOverview.summary.totalUnrealizedPnL.toLocaleString('vi-VN')} đ
+                                    {portfolioOverview.summary.totalUnrealizedPnLPercent !== null && (
+                                      <span style={{ fontSize: '0.82rem', marginLeft: '4px', fontWeight: 700 }}>
+                                        ({portfolioOverview.summary.totalUnrealizedPnLPercent > 0 ? '+' : ''}
+                                        {portfolioOverview.summary.totalUnrealizedPnLPercent.toFixed(2).replace('.', ',')}%)
+                                      </span>
+                                    )}
+                                  </span>
+                                ) : (
+                                  <span style={{ color: 'var(--color-slate-400)' }}>—</span>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Holdings count indicator (derived directly from real holdings array length) */}
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '0.35rem' }}>
+                              <span style={{ fontSize: '0.85rem', color: 'var(--color-slate-500)', display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                                <span>💼</span>
+                                <span>
+                                  {holdingsCount > 0
+                                    ? `${holdingsCount} tài sản đang nắm giữ`
+                                    : 'Chưa có tài sản nắm giữ'}
+                                </span>
+                              </span>
+                            </div>
+                          </div>
+                        </>
+                      );
+                    })()}
+                  </div>
+
+                  <div className="dashboard-card-footer">
+                    <MagneticButton
+                      onClick={() => setActiveTab('portfolio')}
+                      className="fintech-btn btn-primary btn-sm"
+                      style={{ width: '100%', justifyContent: 'center' }}
+                    >
+                      Xem danh mục &rarr;
+                    </MagneticButton>
+                  </div>
+                </motion.div>
+
+                {/* CARD 2: ĐANG THEO DÕI (Watchlist Snapshot & Movers) */}
+                <motion.div variants={sectionItemVariants} className="fintech-card" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+                  <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span style={{ fontSize: '1rem', fontWeight: 800, color: 'var(--color-slate-900)' }}>
+                        Đang theo dõi
+                      </span>
+                      {watchlist.length > 0 && (
+                        <span className="fintech-badge badge-neutral">
+                          {watchlist.length} mã
+                        </span>
+                      )}
+                    </div>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--color-slate-400)' }}>Độ trễ ~15p</span>
+                  </div>
+
+                  {/* Section 5: Watchlist Movers Highlights */}
+                  {(() => {
+                    const movers = computeWatchlistMovers(watchlist, watchlistMarketData);
+                    if (!movers.topGainer && !movers.topDecliner) return null;
+
+                    return (
+                      <div className="dashboard-mover-grid">
+                        {movers.topGainer && (
+                          <div
+                            className="dashboard-mover-chip gain"
+                            onClick={() => handleSelectAsset(movers.topGainer.symbol)}
+                            title="Nhấn để xem chi tiết tài sản"
+                          >
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <span style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--color-gain-700)' }}>
+                                ▲ Tăng mạnh nhất
+                              </span>
+                              <span style={{ fontWeight: 800, color: 'var(--color-gain-800)', fontSize: '0.82rem' }}>
+                                +{Number(movers.topGainer.changePercent).toFixed(2)}%
+                              </span>
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginTop: '2px' }}>
+                              <strong style={{ fontSize: '0.95rem', color: 'var(--color-slate-900)' }}>
+                                {movers.topGainer.symbol}
+                              </strong>
+                              <span style={{ fontSize: '0.8rem', color: 'var(--color-slate-600)' }}>
+                                {movers.topGainer.price.toLocaleString('vi-VN')} ₫
+                              </span>
+                            </div>
+                          </div>
+                        )}
+
+                        {movers.topDecliner && (
+                          <div
+                            className="dashboard-mover-chip loss"
+                            onClick={() => handleSelectAsset(movers.topDecliner.symbol)}
+                            title="Nhấn để xem chi tiết tài sản"
+                          >
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <span style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--color-loss-700)' }}>
+                                ▼ Giảm mạnh nhất
+                              </span>
+                              <span style={{ fontWeight: 800, color: 'var(--color-loss-800)', fontSize: '0.82rem' }}>
+                                {Number(movers.topDecliner.changePercent).toFixed(2)}%
+                              </span>
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginTop: '2px' }}>
+                              <strong style={{ fontSize: '0.95rem', color: 'var(--color-slate-900)' }}>
+                                {movers.topDecliner.symbol}
+                              </strong>
+                              <span style={{ fontSize: '0.8rem', color: 'var(--color-slate-600)' }}>
+                                {movers.topDecliner.price.toLocaleString('vi-VN')} ₫
+                              </span>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+
+                  <div style={{ flex: 1, padding: '0.75rem 1rem' }}>
+                    {watchlistLoading && watchlist.length === 0 && (
+                      <div className="skeleton-shimmer" style={{ width: '100%', height: '120px', borderRadius: '8px' }} />
+                    )}
+
+                    {watchlist.length === 0 && !watchlistLoading && (
+                      <div className="state-box" style={{ padding: '1.5rem 1rem', border: 'none', boxShadow: 'none' }}>
+                        <div className="state-icon float-icon" style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>⭐</div>
+                        <h4 className="state-title" style={{ fontSize: '1rem', marginBottom: '0.35rem' }}>Chưa có tài sản theo dõi</h4>
+                        <p className="state-desc" style={{ fontSize: '0.85rem', marginBottom: '1rem' }}>
+                          Lưu các mã bạn quan tâm để theo dõi biến động nhanh.
+                        </p>
+                        <MagneticButton
+                          onClick={() => {
+                            handleBackToList();
+                            setActiveTab('assets');
+                          }}
+                          className="fintech-btn btn-primary btn-sm"
+                        >
+                          Khám phá tài sản &rarr;
+                        </MagneticButton>
+                      </div>
+                    )}
+
+                    {watchlist.length > 0 && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                        {watchlist.slice(0, 5).map((item) => {
+                          const asset = item.asset || {};
+                          const sym = asset.symbol || 'N/A';
+                          const mkt = watchlistMarketData[sym];
+                          const hasPrice = mkt && typeof mkt.price === 'number' && Number.isFinite(mkt.price) && mkt.price > 0;
+                          const isGain = hasPrice && (mkt.change || 0) > 0;
+                          const isLoss = hasPrice && (mkt.change || 0) < 0;
+
+                          return (
+                            <div
+                              key={item.id || item.asset_id}
+                              style={{
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center',
+                                padding: '0.65rem 0.85rem',
+                                borderRadius: 'var(--radius-md)',
+                                backgroundColor: 'rgba(248, 250, 252, 0.7)',
+                                border: '1px solid var(--border-subtle)',
+                                cursor: 'pointer',
+                                transition: 'background-color var(--transition-fast)'
+                              }}
+                              onClick={() => handleSelectAsset(sym)}
+                            >
+                              <div>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                  <span style={{
+                                    padding: '1px 6px',
+                                    borderRadius: '4px',
+                                    backgroundColor: 'var(--color-brand-50)',
+                                    color: 'var(--color-brand-700)',
+                                    border: '1px solid var(--color-brand-200)',
+                                    fontWeight: 800,
+                                    fontSize: '0.85rem'
+                                  }}>
+                                    {sym}
+                                  </span>
+                                  <span style={{ fontSize: '0.82rem', color: 'var(--color-slate-700)', fontWeight: 600 }}>
+                                    {asset.name || 'Tài sản'}
+                                  </span>
+                                </div>
+                              </div>
+
+                              <div style={{ textAlign: 'right' }}>
+                                <div style={{ fontWeight: 700, color: 'var(--color-slate-900)', fontSize: '0.9rem' }}>
+                                  {hasPrice ? `${mkt.price.toLocaleString('vi-VN')} ₫` : 'Chưa có giá'}
+                                </div>
+                                <div style={{ marginTop: '2px' }}>
+                                  {hasPrice && mkt.changePercent !== null && mkt.changePercent !== undefined ? (
+                                    <span className={`fintech-badge ${isGain ? 'badge-gain' : isLoss ? 'badge-loss' : 'badge-neutral'}`} style={{ fontSize: '0.72rem', padding: '1px 6px' }}>
+                                      {isGain ? '+' : ''}{Number(mkt.changePercent).toFixed(2)}%
+                                    </span>
+                                  ) : (
+                                    <span style={{ fontSize: '0.75rem', color: 'var(--color-slate-400)' }}>—</span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="dashboard-card-footer">
+                    <MagneticButton
+                      onClick={() => setActiveTab('watchlist')}
+                      className="fintech-btn btn-secondary btn-sm"
+                    >
+                      Xem tất cả theo dõi &rarr;
+                    </MagneticButton>
+                  </div>
+                </motion.div>
+              </div>
+
+              {/* SECTION 4: TIN MỚI (News Preview - 4 Balanced Responsive Columns) */}
+              <motion.div variants={sectionItemVariants} className="fintech-card" style={{ padding: '1.25rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                  <div>
+                    <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 800, color: 'var(--color-slate-900)' }}>
+                      Tin tức tài chính mới nhất
+                    </h3>
+                    <span style={{ fontSize: '0.78rem', color: 'var(--color-slate-400)' }}>Cập nhật từ CafeF</span>
+                  </div>
+
+                  <MagneticButton
+                    onClick={() => setActiveTab('news')}
+                    className="fintech-btn btn-secondary btn-sm"
+                  >
+                    Xem tất cả tin tức &rarr;
+                  </MagneticButton>
+                </div>
+
+                {newsLoading && news.length === 0 && (
+                  <div className="dashboard-news-grid">
+                    {[1, 2, 3, 4].map((i) => (
+                      <div key={i} className="skeleton-shimmer" style={{ width: '100%', height: '80px', borderRadius: '6px' }} />
+                    ))}
+                  </div>
+                )}
+
+                {newsError && news.length === 0 && !newsLoading && (
+                  <div className="fintech-banner banner-warning" style={{ margin: 0 }}>
+                    <span>Không thể tải tin tức mới nhất: {newsError}</span>
+                  </div>
+                )}
+
+                {news.length > 0 && (
+                  <div className="dashboard-news-grid">
+                    {news.slice(0, 4).map((item) => {
+                      const catLabel = formatNewsCategory(item.category);
+
+                      return (
+                        <div
+                          key={item.id || item.url}
+                          style={{
+                            padding: '0.85rem',
+                            borderRadius: 'var(--radius-md)',
+                            backgroundColor: 'rgba(248, 250, 252, 0.7)',
+                            border: '1px solid var(--border-subtle)',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            justifyContent: 'space-between',
+                            gap: '0.5rem'
+                          }}
+                        >
+                          <div>
+                            {catLabel && (
+                              <span className="fintech-badge badge-neutral" style={{ fontSize: '0.7rem', padding: '1px 6px', marginBottom: '4px', display: 'inline-block' }}>
+                                {catLabel}
+                              </span>
+                            )}
+                            <a
+                              href={item.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              style={{
+                                color: 'var(--color-slate-900)',
+                                fontWeight: 700,
+                                fontSize: '0.88rem',
+                                lineHeight: 1.35,
+                                textDecoration: 'none',
+                                display: '-webkit-box',
+                                WebkitLineClamp: 2,
+                                WebkitBoxOrient: 'vertical',
+                                overflow: 'hidden'
+                              }}
+                              className="news-title-link"
+                            >
+                              {item.title}
+                            </a>
+                          </div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.75rem', color: 'var(--color-slate-400)', marginTop: '4px' }}>
+                            <span>{item.source || 'CafeF'}</span>
+                            <span>{formatPublishedTime(item.publishedAt)}</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </motion.div>
+            </motion.section>
+          )}
 
           {/* TAB 1: PORTFOLIO OVERVIEW */}
           {activeTab === 'portfolio' && (
