@@ -18,6 +18,7 @@ import {
 import { getMarketSnapshot, getMarketHistory, getAnalysisHistory } from './src/market.js';
 import { getNewsFeed } from './src/news.js';
 import { getPortfolioOverview } from './src/portfolio.js';
+import { getPortfolioComposition } from './src/composition.js';
 import { getAssetAnalysis } from './src/analysis.js';
 
 dotenv.config();
@@ -48,6 +49,7 @@ export function createApp(services = {}) {
     getMarketHistoryFn = getMarketHistory,
     getNewsFeedFn = getNewsFeed,
     getPortfolioOverviewFn = getPortfolioOverview,
+    getPortfolioCompositionFn = getPortfolioComposition,
     checkSupabaseConnectionFn = checkSupabaseConnection,
     getAnalysisHistoryFn = getAnalysisHistory,
     getAssetAnalysisFn = getAssetAnalysis,
@@ -404,6 +406,23 @@ export function createApp(services = {}) {
       return res.status(500).json({
         status: 'error',
         message: 'Failed to generate portfolio overview',
+        details: error.message
+      });
+    }
+  });
+
+  // Portfolio composition endpoint (derived exclusively from portfolio overview valuation)
+  app.get('/api/portfolio/composition', async (req, res) => {
+    try {
+      const composition = await getPortfolioCompositionFn({ getPortfolioOverviewFn });
+      return res.json({
+        status: 'ok',
+        data: composition
+      });
+    } catch (error) {
+      return res.status(500).json({
+        status: 'error',
+        message: 'Failed to generate portfolio composition',
         details: error.message
       });
     }
