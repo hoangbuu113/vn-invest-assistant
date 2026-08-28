@@ -2222,6 +2222,37 @@ body {
   }
 }
 
+/* Feature 11 — Asset Comparison (So sánh tài sản) */
+.comparison-metric-row-label {
+  min-height: 56px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 8px 12px;
+  border-bottom: 1px dashed var(--border-subtle);
+}
+
+.comparison-metric-cell {
+  min-height: 56px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 8px 4px;
+  border-bottom: 1px dashed var(--border-subtle);
+}
+
+.comparison-metric-row-label .metric-label-title {
+  font-size: 0.85rem;
+  font-weight: 800;
+  color: var(--color-slate-800);
+}
+
+.comparison-metric-row-label .metric-label-sub {
+  font-size: 0.72rem;
+  color: var(--color-slate-400);
+  margin-top: 1px;
+}
+
 /* Respect user's motion preference */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {

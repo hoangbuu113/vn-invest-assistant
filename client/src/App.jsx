@@ -18,6 +18,7 @@ import {
 import { PriceHistoryChart } from './components/PriceHistoryChart.jsx';
 import { AssetAnalysisSection } from './components/AssetAnalysisSection.jsx';
 import { PortfolioCompositionSection } from './components/PortfolioCompositionSection.jsx';
+import { AssetComparisonSection } from './components/AssetComparisonSection.jsx';
 
 const CATEGORY_STYLES = {
   market: { label: 'Thị trường', bg: '#eff6ff', color: '#1d4ed8', border: '#bfdbfe', accent: '#2563eb' },
@@ -243,6 +244,10 @@ function App() {
   const [analysisData, setAnalysisData] = useState(null);
   const [analysisLoading, setAnalysisLoading] = useState(false);
   const [analysisError, setAnalysisError] = useState(null);
+
+  // Asset Comparison state (Feature 11)
+  const [isComparingAssets, setIsComparingAssets] = useState(false);
+  const [comparePresetSymbols, setComparePresetSymbols] = useState(['FPT', 'VCB']);
 
   // Request controller refs for stale response protection
   const activeMarketReqRef = useRef(null);
@@ -1029,6 +1034,7 @@ function App() {
 
   const handleSelectAsset = (symbol) => {
     setActiveTab('assets');
+    setIsComparingAssets(false);
     if (activeAssetDetailReqRef.current) activeAssetDetailReqRef.current.abort();
     if (activeMarketReqRef.current) activeMarketReqRef.current.abort();
     if (activeHistoryReqRef.current) activeHistoryReqRef.current.abort();
@@ -1073,6 +1079,7 @@ function App() {
   };
 
   const handleBackToList = () => {
+    setIsComparingAssets(false);
     if (activeAssetDetailReqRef.current) activeAssetDetailReqRef.current.abort();
     if (activeMarketReqRef.current) activeMarketReqRef.current.abort();
     if (activeHistoryReqRef.current) activeHistoryReqRef.current.abort();
@@ -2301,8 +2308,19 @@ function App() {
               animate="animate"
               exit="exit"
             >
-              {/* Detail View */}
-              {selectedSymbol ? (
+              {isComparingAssets ? (
+                /* Feature 11: Asset Comparison View */
+                <AssetComparisonSection
+                  availableAssets={assets}
+                  initialSymbols={comparePresetSymbols}
+                  onBack={() => setIsComparingAssets(false)}
+                  onSelectAsset={(sym) => {
+                    setIsComparingAssets(false);
+                    handleSelectAsset(sym);
+                  }}
+                />
+              ) : selectedSymbol ? (
+                /* Detail View */
                 <div>
                   <MagneticButton
                     onClick={handleBackToList}
@@ -2635,13 +2653,26 @@ function App() {
               ) : (
                 /* Asset List View */
                 <div>
-                  <motion.div variants={sectionItemVariants} className="section-header">
+                  <motion.div variants={sectionItemVariants} className="section-header" style={{ alignItems: 'center' }}>
                     <div>
                       <h2 className="section-title">Danh sách tài sản</h2>
                       <p className="section-subtitle">
                         Danh sách tài sản đang theo dõi trong hệ thống ({assets.length} mã)
                       </p>
                     </div>
+
+                    {/* Feature 11: Secondary Action */}
+                    <MagneticButton
+                      onClick={() => {
+                        setComparePresetSymbols(['FPT', 'VCB']);
+                        setIsComparingAssets(true);
+                      }}
+                      className="fintech-btn btn-secondary btn-sm"
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                    >
+                      <span>⚖️</span>
+                      <span>So sánh tài sản</span>
+                    </MagneticButton>
                   </motion.div>
 
                   {loading && (
