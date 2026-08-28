@@ -281,15 +281,43 @@ export async function updateInvestorProfile(input, client = supabase) {
  */
 function normalizeHolding(row) {
   if (!row) return null;
+  const openingPosition = row.opening_position || null;
+  const openingCorrectionAllowed = Boolean(
+    openingPosition && !openingPosition.locked_at && !openingPosition.cancelled_at
+  );
+
   return {
     id: row.id,
     profile_id: row.profile_id,
     asset_id: row.asset_id,
+    opening_position_id: row.opening_position_id || null,
     quantity: typeof row.quantity === 'number' ? row.quantity : Number(row.quantity),
     average_cost: typeof row.average_cost === 'number' ? row.average_cost : Number(row.average_cost),
     created_at: row.created_at,
     updated_at: row.updated_at,
-    asset: row.assets || null
+    asset: row.assets || null,
+    position_origin: openingPosition && !openingPosition.cancelled_at
+      ? openingPosition.provenance_type
+      : 'LEDGER',
+    opening_correction_allowed: openingCorrectionAllowed,
+    opening_position: openingPosition
+      ? {
+          id: openingPosition.id,
+          opening_quantity: typeof openingPosition.opening_quantity === 'number'
+            ? openingPosition.opening_quantity
+            : Number(openingPosition.opening_quantity),
+          opening_average_cost: typeof openingPosition.opening_average_cost === 'number'
+            ? openingPosition.opening_average_cost
+            : Number(openingPosition.opening_average_cost),
+          accounting_cutoff_at: openingPosition.accounting_cutoff_at,
+          provenance_type: openingPosition.provenance_type,
+          locked_at: openingPosition.locked_at || null,
+          cancelled_at: openingPosition.cancelled_at || null,
+          correction_allowed: openingCorrectionAllowed,
+          created_at: openingPosition.created_at,
+          updated_at: openingPosition.updated_at
+        }
+      : null
   };
 }
 
@@ -306,7 +334,28 @@ export async function getHoldings(client = supabase) {
 
   const { data, error } = await db
     .from('holdings')
-    .select('id, profile_id, asset_id, quantity, average_cost, created_at, updated_at, assets (id, symbol, name, asset_type, exchange)')
+    .select(`
+      id,
+      profile_id,
+      asset_id,
+      opening_position_id,
+      quantity,
+      average_cost,
+      created_at,
+      updated_at,
+      assets (id, symbol, name, asset_type, exchange),
+      opening_position:position_opening_baselines (
+        id,
+        opening_quantity,
+        opening_average_cost,
+        accounting_cutoff_at,
+        provenance_type,
+        locked_at,
+        cancelled_at,
+        created_at,
+        updated_at
+      )
+    `)
     .eq('profile_id', profile.id)
     .order('created_at', { ascending: true });
 

@@ -8,9 +8,6 @@ import {
   getInvestorProfile,
   updateInvestorProfile,
   getHoldings,
-  addHolding,
-  updateHolding,
-  deleteHolding,
   getWatchlist,
   addToWatchlist,
   removeFromWatchlist,
@@ -39,6 +36,11 @@ import {
   getCashLedger,
   getCashOverview
 } from './src/cash.js';
+import {
+  cancelOpeningPosition,
+  correctOpeningPosition,
+  createOpeningPosition
+} from './src/positions.js';
 
 dotenv.config();
 
@@ -59,9 +61,6 @@ export function createApp(services = {}) {
     getInvestorProfileFn = getInvestorProfile,
     updateInvestorProfileFn = updateInvestorProfile,
     getHoldingsFn = getHoldings,
-    addHoldingFn = addHolding,
-    updateHoldingFn = updateHolding,
-    deleteHoldingFn = deleteHolding,
     getAssetsFn = getAssets,
     getAssetBySymbolFn = getAssetBySymbol,
     getMarketSnapshotFn = getMarketSnapshot,
@@ -86,8 +85,12 @@ export function createApp(services = {}) {
     getCashOverviewFn = getCashOverview,
     getCashLedgerFn = getCashLedger,
     createCashMovementFn = createCashMovement,
+    createOpeningPositionFn = createOpeningPosition,
+    correctOpeningPositionFn = correctOpeningPosition,
+    cancelOpeningPositionFn = cancelOpeningPosition,
     transactionClient,
-    cashClient
+    cashClient,
+    positionClient
   } = services;
 
   const app = express();
@@ -218,119 +221,119 @@ export function createApp(services = {}) {
     }
   });
 
-  // Compatibility endpoint for holdings that may predate Feature 14. New BUY/SELL
-  // activity should use POST /api/transactions so ledger and holdings stay atomic.
-  app.post('/api/holdings', async (req, res) => {
+  // Explicit cash-neutral baseline for assets already owned before ledger tracking.
+  app.post('/api/positions/opening', async (req, res) => {
     try {
-      const { asset_id, quantity, average_cost } = req.body || {};
+      const { assetId, quantity, averageCost } = req.body || {};
       const errors = [];
 
-      if (!asset_id || typeof asset_id !== 'string' || asset_id.trim() === '') {
-        errors.push('asset_id is required and must be a non-empty string');
+      if (!assetId || typeof assetId !== 'string' || assetId.trim() === '') {
+        errors.push('assetId is required and must be a non-empty string');
       }
 
       if (!isValidFinancialNumber(quantity, { allowZero: false })) {
         errors.push('quantity must be a finite number greater than 0');
       }
 
-      if (!isValidFinancialNumber(average_cost, { allowZero: true })) {
-        errors.push('average_cost must be a non-negative finite number');
+      if (!isValidFinancialNumber(averageCost, { allowZero: true })) {
+        errors.push('averageCost must be a non-negative finite number');
       }
 
       if (errors.length > 0) {
         return res.status(400).json({
           status: 'error',
-          message: 'Invalid holding data',
+          message: 'Invalid opening position data',
           errors
         });
       }
 
-      const newHolding = await addHoldingFn({
-        asset_id: asset_id.trim(),
+      const result = await createOpeningPositionFn({
+        assetId: assetId.trim(),
         quantity,
-        average_cost
-      });
+        averageCost
+      }, positionClient);
 
       return res.status(201).json({
         status: 'ok',
-        data: newHolding
-      });
-    } catch (error) {
-      const statusCode = error.statusCode || 500;
-      return res.status(statusCode).json({
-        status: 'error',
-        message: error.message || 'Failed to add holding',
-        details: error.message
-      });
-    }
-  });
-
-  app.put('/api/holdings/:id', async (req, res) => {
-    const { id } = req.params;
-    try {
-      const { quantity, average_cost } = req.body || {};
-      const errors = [];
-
-      if (!id || typeof id !== 'string' || id.trim() === '') {
-        errors.push('Valid holding ID is required');
-      }
-
-      if (!isValidFinancialNumber(quantity, { allowZero: false })) {
-        errors.push('quantity must be a finite number greater than 0');
-      }
-
-      if (!isValidFinancialNumber(average_cost, { allowZero: true })) {
-        errors.push('average_cost must be a non-negative finite number');
-      }
-
-      if (errors.length > 0) {
-        return res.status(400).json({
-          status: 'error',
-          message: 'Invalid holding update data',
-          errors
-        });
-      }
-
-      const updated = await updateHoldingFn(id.trim(), {
-        quantity,
-        average_cost
-      });
-
-      return res.json({
-        status: 'ok',
-        data: updated
-      });
-    } catch (error) {
-      const statusCode = error.statusCode || 500;
-      return res.status(statusCode).json({
-        status: 'error',
-        message: error.message || 'Failed to update holding',
-        details: error.message
-      });
-    }
-  });
-
-  app.delete('/api/holdings/:id', async (req, res) => {
-    const { id } = req.params;
-    try {
-      if (!id || typeof id !== 'string' || id.trim() === '') {
-        return res.status(400).json({
-          status: 'error',
-          message: 'Valid holding ID is required'
-        });
-      }
-
-      const result = await deleteHoldingFn(id.trim());
-      return res.json({
-        status: 'ok',
-        message: 'Holding deleted successfully',
         data: result
       });
     } catch (error) {
       const statusCode = error.statusCode || 500;
       return res.status(statusCode).json({
         status: 'error',
-        message: error.message || 'Failed to delete holding',
+        message: error.message || 'Failed to create opening position',
+        details: error.message
+      });
+    }
+  });
+
+  app.patch('/api/positions/opening/:id', async (req, res) => {
+    const { id } = req.params;
+    try {
+      const { quantity, averageCost } = req.body || {};
+      const errors = [];
+
+      if (!id || typeof id !== 'string' || id.trim() === '') {
+        errors.push('Valid opening position ID is required');
+      }
+
+      if (!isValidFinancialNumber(quantity, { allowZero: false })) {
+        errors.push('quantity must be a finite number greater than 0');
+      }
+
+      if (!isValidFinancialNumber(averageCost, { allowZero: true })) {
+        errors.push('averageCost must be a non-negative finite number');
+      }
+
+      if (errors.length > 0) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'Invalid opening position correction data',
+          errors
+        });
+      }
+
+      const result = await correctOpeningPositionFn({
+        id: id.trim(),
+        quantity,
+        averageCost
+      }, positionClient);
+
+      return res.json({
+        status: 'ok',
+        data: result
+      });
+    } catch (error) {
+      const statusCode = error.statusCode || 500;
+      return res.status(statusCode).json({
+        status: 'error',
+        message: error.message || 'Failed to correct opening position',
+        details: error.message
+      });
+    }
+  });
+
+  app.post('/api/positions/opening/:id/cancel', async (req, res) => {
+    const { id } = req.params;
+    try {
+      if (!id || typeof id !== 'string' || id.trim() === '') {
+        return res.status(400).json({
+          status: 'error',
+          message: 'Valid opening position ID is required'
+        });
+      }
+
+      const result = await cancelOpeningPositionFn({ id: id.trim() }, positionClient);
+      return res.json({
+        status: 'ok',
+        message: 'Opening position cancelled',
+        data: result
+      });
+    } catch (error) {
+      const statusCode = error.statusCode || 500;
+      return res.status(statusCode).json({
+        status: 'error',
+        message: error.message || 'Failed to cancel opening position',
         details: error.message
       });
     }

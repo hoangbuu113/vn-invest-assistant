@@ -1,0 +1,121 @@
+import { supabase } from './supabase.js';
+
+function requireDatabaseClient(client) {
+  if (!client) {
+    throw new Error('Supabase credentials are not configured. Please set SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY in server/.env');
+  }
+  return client;
+}
+
+function normalizeDatabaseNumber(value, field) {
+  const normalized = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(normalized)) {
+    throw new Error(`Database returned invalid ${field}`);
+  }
+  return normalized;
+}
+
+export function normalizeOpeningPosition(row) {
+  if (!row) return null;
+
+  const lockedAt = row.locked_at || null;
+  const cancelledAt = row.cancelled_at || null;
+
+  return {
+    id: row.id,
+    profileId: row.profile_id,
+    assetId: row.asset_id,
+    openingQuantity: normalizeDatabaseNumber(row.opening_quantity, 'opening quantity'),
+    openingAverageCost: normalizeDatabaseNumber(row.opening_average_cost, 'opening average cost'),
+    accountingCutoffAt: row.accounting_cutoff_at,
+    provenanceType: row.provenance_type,
+    lockedAt,
+    cancelledAt,
+    correctionAllowed: lockedAt === null && cancelledAt === null,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+function normalizeHolding(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    profileId: row.profile_id,
+    assetId: row.asset_id,
+    openingPositionId: row.opening_position_id || null,
+    quantity: normalizeDatabaseNumber(row.quantity, 'holding quantity'),
+    averageCost: normalizeDatabaseNumber(row.average_cost, 'holding average cost'),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+function openingPositionDatabaseError(error, fallbackMessage) {
+  const err = new Error(error?.message || fallbackMessage);
+  err.code = error?.code;
+
+  if (['OP001', 'OP002', 'OP003', 'OP004'].includes(error?.code)) {
+    err.statusCode = 400;
+  } else if (error?.code === 'OP005' || error?.code === 'OP007') {
+    err.statusCode = 409;
+  } else if (error?.code === 'OP006') {
+    err.statusCode = 404;
+  }
+
+  return err;
+}
+
+function normalizeOpeningResult(data) {
+  if (!data || typeof data !== 'object' || !data.openingPosition) {
+    throw new Error('Database returned malformed opening position result');
+  }
+
+  return {
+    openingPosition: normalizeOpeningPosition(data.openingPosition),
+    holding: normalizeHolding(data.holding)
+  };
+}
+
+export async function createOpeningPosition({ assetId, quantity, averageCost }, client = supabase) {
+  const db = requireDatabaseClient(client);
+  const { data, error } = await db.rpc('create_opening_position', {
+    p_asset_id: assetId,
+    p_quantity: quantity,
+    p_average_cost: averageCost
+  });
+
+  if (error) {
+    throw openingPositionDatabaseError(error, 'Failed to create opening position');
+  }
+
+  return normalizeOpeningResult(data);
+}
+
+export async function correctOpeningPosition({ id, quantity, averageCost }, client = supabase) {
+  const db = requireDatabaseClient(client);
+  const { data, error } = await db.rpc('correct_opening_position', {
+    p_opening_position_id: id,
+    p_quantity: quantity,
+    p_average_cost: averageCost
+  });
+
+  if (error) {
+    throw openingPositionDatabaseError(error, 'Failed to correct opening position');
+  }
+
+  return normalizeOpeningResult(data);
+}
+
+export async function cancelOpeningPosition({ id }, client = supabase) {
+  const db = requireDatabaseClient(client);
+  const { data, error } = await db.rpc('cancel_opening_position', {
+    p_opening_position_id: id
+  });
+
+  if (error) {
+    throw openingPositionDatabaseError(error, 'Failed to cancel opening position');
+  }
+
+  return normalizeOpeningResult(data);
+}

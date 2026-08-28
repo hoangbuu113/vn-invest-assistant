@@ -174,9 +174,21 @@ describe('Patch B3 - Production-Path Profile & Holdings Integrity Hardening', ()
             id: 'h-1',
             profile_id: SINGLETON_PROFILE_ID,
             asset_id: 'asset-fpt',
+            opening_position_id: 'opening-fpt',
             quantity: 100,
             average_cost: 60000,
-            assets: { id: 'asset-fpt', symbol: 'FPT', name: 'FPT Corp', asset_type: 'stock', exchange: 'HOSE' }
+            assets: { id: 'asset-fpt', symbol: 'FPT', name: 'FPT Corp', asset_type: 'stock', exchange: 'HOSE' },
+            opening_position: {
+              id: 'opening-fpt',
+              opening_quantity: 100,
+              opening_average_cost: 60000,
+              accounting_cutoff_at: '2026-08-28T00:00:00.000Z',
+              provenance_type: 'USER_RECORDED',
+              locked_at: null,
+              cancelled_at: null,
+              created_at: '2026-08-28T00:00:00.000Z',
+              updated_at: '2026-08-28T00:00:00.000Z'
+            }
           }
         ]
       });
@@ -186,11 +198,15 @@ describe('Patch B3 - Production-Path Profile & Holdings Integrity Hardening', ()
 
       assert.equal(result.length, 1);
       assert.equal(result[0].profile_id, SINGLETON_PROFILE_ID);
+      assert.equal(result[0].position_origin, 'USER_RECORDED');
+      assert.equal(result[0].opening_correction_allowed, true);
+      assert.equal(result[0].opening_position.opening_quantity, 100);
 
       // Inspect query issued to Supabase by production getHoldings()
       const holdingsQuery = queryLog.find(q => q.table === 'holdings');
       assert.ok(holdingsQuery, 'Must query holdings table');
       assert.equal(holdingsQuery.action, 'select');
+      assert.match(holdingsQuery.selectFields, /position_opening_baselines/);
 
       const profileFilter = holdingsQuery.eqFilters.find(f => f.column === 'profile_id');
       assert.ok(profileFilter, 'Production query MUST include profile_id filter');
@@ -325,7 +341,6 @@ describe('Patch B3 - Production-Path Profile & Holdings Integrity Hardening', ()
 
     let profilesStore;
     let holdingsStore;
-    let dbErrorOnAsset = false;
 
     before(async () => {
       profilesStore = [
@@ -378,48 +393,6 @@ describe('Patch B3 - Production-Path Profile & Holdings Integrity Hardening', ()
         },
         getHoldingsFn: async () => {
           return holdingsStore.filter(h => h.profile_id === SINGLETON_PROFILE_ID);
-        },
-        addHoldingFn: async ({ asset_id, quantity, average_cost }) => {
-          if (dbErrorOnAsset) {
-            const err = new Error('Database query error: Connection terminated');
-            throw err;
-          }
-          if (asset_id === 'nonexistent') {
-            const err = new Error("Asset with ID '" + asset_id + "' not found");
-            err.statusCode = 400;
-            throw err;
-          }
-          const newHolding = {
-            id: 'h-new-' + Date.now(),
-            profile_id: SINGLETON_PROFILE_ID,
-            asset_id,
-            quantity,
-            average_cost,
-            asset: { id: asset_id, symbol: 'HPG', name: 'Hoa Phat' }
-          };
-          holdingsStore.push(newHolding);
-          return newHolding;
-        },
-        updateHoldingFn: async (id, { quantity, average_cost }) => {
-          const holding = holdingsStore.find(h => h.id === id && h.profile_id === SINGLETON_PROFILE_ID);
-          if (!holding) {
-            const err = new Error("Holding with ID '" + id + "' not found");
-            err.statusCode = 404;
-            throw err;
-          }
-          holding.quantity = quantity;
-          holding.average_cost = average_cost;
-          return holding;
-        },
-        deleteHoldingFn: async id => {
-          const index = holdingsStore.findIndex(h => h.id === id && h.profile_id === SINGLETON_PROFILE_ID);
-          if (index === -1) {
-            const err = new Error("Holding with ID '" + id + "' not found");
-            err.statusCode = 404;
-            throw err;
-          }
-          holdingsStore.splice(index, 1);
-          return { id, deleted: true };
         }
       });
 
@@ -488,50 +461,13 @@ describe('Patch B3 - Production-Path Profile & Holdings Integrity Hardening', ()
       }
     });
 
-    test('POST /api/holdings strictly rejects invalid financial numbers (400)', async () => {
-      const invalidBodies = [
-        { asset_id: 'a-1', quantity: 0, average_cost: 1000 },
-        { asset_id: 'a-1', quantity: -10, average_cost: 1000 },
-        { asset_id: 'a-1', quantity: '10', average_cost: 1000 },
-        { asset_id: 'a-1', quantity: true, average_cost: 1000 },
-        { asset_id: 'a-1', quantity: 10, average_cost: -1000 },
-        { asset_id: 'a-1', quantity: 10, average_cost: '1000' }
-      ];
-
-      for (const body of invalidBodies) {
-        const res = await fetch(baseUrl + '/api/holdings', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body)
-        });
-        assert.equal(res.status, 400, 'Expected 400 for invalid body ' + JSON.stringify(body));
-      }
-    });
-
-    test('POST /api/holdings returns 400 when asset does not exist', async () => {
-      const res = await fetch(baseUrl + '/api/holdings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ asset_id: 'nonexistent', quantity: 10, average_cost: 1000 })
-      });
-      const data = await res.json();
-      assert.equal(res.status, 400);
-      assert.ok(data.message.includes('not found'));
-    });
-
-    test('POST /api/holdings returns 500 when database error occurs during asset lookup', async () => {
-      dbErrorOnAsset = true;
+    test('public generic holdings creation is retired', async () => {
       const res = await fetch(baseUrl + '/api/holdings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ asset_id: 'asset-fpt', quantity: 10, average_cost: 1000 })
       });
-      dbErrorOnAsset = false;
-
-      const data = await res.json();
-      assert.equal(res.status, 500);
-      assert.ok(data.message.includes('Database query error'));
-      assert.ok(!data.message.includes('not found'));
+      assert.equal(res.status, 404);
     });
 
     test('GET /api/holdings returns only singleton holdings through real route', async () => {
@@ -542,8 +478,8 @@ describe('Patch B3 - Production-Path Profile & Holdings Integrity Hardening', ()
       assert.ok(!data.data.some(h => h.id === 'holding-foreign-vcb'));
     });
 
-    test('PUT /api/holdings/:id returns 404 when attempting to mutate foreign profile holding', async () => {
-      const res = await fetch(baseUrl + '/api/holdings/holding-foreign-vcb', {
+    test('public generic holdings update is retired', async () => {
+      const res = await fetch(baseUrl + '/api/holdings/holding-singleton-fpt', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ quantity: 999, average_cost: 1000 })
@@ -551,8 +487,8 @@ describe('Patch B3 - Production-Path Profile & Holdings Integrity Hardening', ()
       assert.equal(res.status, 404);
     });
 
-    test('DELETE /api/holdings/:id returns 404 when attempting to delete foreign profile holding', async () => {
-      const res = await fetch(baseUrl + '/api/holdings/holding-foreign-vcb', {
+    test('public generic holdings delete is retired', async () => {
+      const res = await fetch(baseUrl + '/api/holdings/holding-singleton-fpt', {
         method: 'DELETE'
       });
       assert.equal(res.status, 404);

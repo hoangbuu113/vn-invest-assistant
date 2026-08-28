@@ -97,6 +97,7 @@ function normalizeHoldingState(row) {
     id: row.id,
     profileId: row.profile_id,
     assetId: row.asset_id,
+    openingPositionId: row.opening_position_id || null,
     quantity: normalizeDatabaseNumber(row.quantity, 'holding quantity'),
     averageCost: normalizeDatabaseNumber(row.average_cost, 'holding average cost'),
     createdAt: row.created_at,
