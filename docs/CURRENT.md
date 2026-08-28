@@ -1,7 +1,7 @@
 # Current Project Status
 
 ## LATEST VERIFIED CHECKPOINT
-- **Commit**: `2dbdf2cb788e83f78b173fc8976083fb99de1041`
+- **Commit**: `a35ed90` (UI: `a35ed90`, Backend: `dceae87`)
 - **Branch**: `main`
 
 ## CURRENT PHASE
@@ -40,6 +40,16 @@ BUILD
   - No historical-price warehouse is persisted
   - Asset Detail includes interactive historical price chart and period summary (start price, latest price, absolute change, % change, period high, period low)
   - Data remains labeled as delayed with latest timestamp
+- **Feature 07 — Deterministic Asset Analysis**
+  - Dedicated asset analysis endpoint (`GET /api/analysis/:symbol`)
+  - Analyzes completed historical daily bars across 5 standard lookback windows (`1W`, `1M`, `3M`, `6M`, `1Y`)
+  - Shared authoritative `analysisPrice` and `analysisAsOf` from the last completed daily close (excludes current-day Vietnam calendar session)
+  - Full precision metrics: `priceChangePct`, `rangePositionPct`, `distanceBelowHighPct`, `validSessionCount`
+  - Cross-period positive breadth ratio (`crossPeriod`) and descriptive data completeness assessment (`dataCompleteness`)
+  - Market snapshot context kept strictly separated without polluting historical calculations
+  - Pure deterministic quantitative engine with explicit `options.now` contract (no hidden system clocks)
+  - Asset Detail "Phân tích tài sản" UI: 5-period scannable view, interactive tabs, animated range position track & dot, breadth indicator, comparison table, methodology transparency disclosure, and non-alarming disclaimer
+  - All 106 automated tests passing
 
 ## PRE-FEATURE-07 HARDENING (COMPLETED)
 - **Historical Market Normalization Hardened** (Patch 06-2, checkpoint `d38ee60`): Deterministic deduplication, exact fractional volumes, robust boundary handling, clean null propagation for missing OHLCV.
@@ -57,6 +67,6 @@ BUILD
   - Default server automated tests are fully isolated from real Supabase and exercise actual production-path query predicates.
 
 ## CURRENT STATE
-Pre-Feature-07 hardening is complete and verified at checkpoint `2dbdf2cb788e83f78b173fc8976083fb99de1041`.
-Feature 07 (Opportunities & Ranking Engine) is **READY TO START**.
+Feature 07 (Deterministic Asset Analysis) is **COMPLETE** (Backend checkpoint: `dceae87`, UI commit: `a35ed90`, 106/106 tests PASS).
+The next feature has not been selected yet; awaiting Project Director decision.
 

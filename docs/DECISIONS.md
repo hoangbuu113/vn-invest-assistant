@@ -62,4 +62,14 @@ The following architectural and product decisions are confirmed:
   - **Production-Path Testing**: Critical financial logic and access controls should use production-path tests where practical. Tests that merely reimplement production ownership logic in-memory are insufficient.
 - **Project Philosophy**: Learning project for full-stack/vibe coding, but must remain practically usable in real life.
 - **Scoring Methodology**: Quantitative scoring should be evidence/data-driven (derived from data, rules, or quantitative models) rather than invented by AI intuition alone.
+- **Deterministic Asset Analysis (Feature 07)**:
+  - **Reference Price & Date**: Analysis uses `analysisPrice` and `analysisAsOf` derived from the last completed daily close; the current-day (or future) Vietnam calendar session is excluded in V1.
+  - **Lookback Windows**: Five standard calendar lookback periods (`1W`, `1M`, `3M`, `6M`, `1Y`) backed by an internal 2Y daily historical bar superset.
+  - **Market Snapshot Separation**: Market snapshot context is fetched optionally and kept strictly separate without participating in or invalidating deterministic historical calculations.
+  - **Data Integrity & No Fabrication**: Missing or insufficient metrics remain `null`/`unavailable`; values are never fabricated or defaulted to 0.
+  - **Metric Semantics**: `priceChangePct` is descriptive unadjusted close change (not total return; excludes cash dividends and full corporate event modeling).
+  - **Distance Below High**: `distanceBelowHighPct` is non-negative percentage distance below period high (0% indicates at period peak).
+  - **Cross-Period Breadth**: `positivePeriodRatio` describes the fraction of available periods with positive price change (requires >= 3 valid periods).
+  - **Pure Descriptive Model**: No overall score, momentum rating, stock recommendation, BUY/SELL/HOLD signal, price target, or AI intuition.
+  - **Client Role**: The client displays backend metrics as authoritative source-of-truth and does not recalculate financial analysis metrics.
 
