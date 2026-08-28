@@ -69,9 +69,16 @@ The following architectural and product decisions are confirmed and authoritativ
   - No negative cash balances are permitted in V1 (withdrawals or buys exceeding available cash are rejected).
   - The `investor_profile.cash_available` column and `holdings` table serve strictly as synchronized read caches / compatibility layers, not competing independent financial authorities.
   - The frontend never calculates authoritative cash totals or positions itself.
+- **Opening Position Authority & Baseline Integrity (Feature 17 — Approved Architecture)**:
+  - Opening positions represent explicit baselines for already-owned assets predating active ledger tracking.
+  - Recording an opening position creates or updates the holding baseline but generates **NO** portfolio transaction record and **NO** cash movement (avoiding cash duplication and historical BUY fabrication).
+  - Opening-position corrections or cancellations are permitted only prior to subsequent ledger activity for that asset. The first subsequent BUY or SELL transaction permanently locks the opening baseline.
+  - After ledger activation on a position, all subsequent quantity and cost basis mutations must proceed exclusively through immutable BUY/SELL transactions in the Transaction Ledger.
+  - The `holdings` table serves purely as a synchronized projection / read model derived from the opening baseline plus transaction history.
+  - Existing mixed positions (such as the verified `E1VFVN30` position with subsequent SELL history) are migrated and preserved at Feature 17 activation without replaying history or reconstructing synthetic prior quantities.
 - **Deprecation of Direct Mutations**:
   - Direct user-facing cash editing is removed. Cash changes must go through deposit/withdrawal ledger operations.
-  - Direct holdings CRUD (`POST`/`PUT`/`DELETE /api/holdings`) is retained solely for legacy backend compatibility; new position changes are recorded via immutable transactions.
+  - Direct generic holdings CRUD (`POST`/`PUT`/`DELETE /api/holdings`) will be retired in favor of explicit opening-position and transaction-driven operations.
 
 ---
 

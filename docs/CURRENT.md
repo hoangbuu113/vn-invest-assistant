@@ -12,7 +12,7 @@
 MULTI-ASSET FOUNDATION
 
 ## CURRENT NEXT PROJECT TASK
-Feature 17 — Ledger Authority & Position Integrity (architecture audit first).
+Feature 17 — Ledger Authority & Position Integrity (architecture approved; implementation next). See `docs/ROADMAP.md`.
 
 ---
 
