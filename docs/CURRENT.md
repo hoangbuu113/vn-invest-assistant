@@ -1,7 +1,7 @@
 # Current Project Status
 
 ## LATEST VERIFIED CHECKPOINT
-- **Commit**: `7d84b3d`
+- **Commit**: `26bbabd`
 - **Branch**: `main`
 
 ## CURRENT PHASE
@@ -59,6 +59,13 @@ BUILD
   - Asset Detail compact toggle action: "＋ Theo dõi" / "✓ Đang theo dõi" with loading state and double-click prevention
   - Watchlist page ("Theo dõi") with failure-isolated delayed market snapshots ("Chưa có dữ liệu giá" on failure), empty state, quick view action, and removal action
   - 121/121 automated tests passing
+- **Feature 09 — Personal Investment Dashboard / Tổng quan**
+  - Main landing dashboard ("Tổng quan") coordinating cross-app data
+  - Single compact portfolio summary card with cash, total value, unrealized P/L, and holding count directly derived from real holdings collection
+  - Side-by-side "Đang theo dõi" section with descriptive watchlist movers highlights ("Biến động nổi bật") and up to 5 followed assets
+  - Balanced 4-column responsive news preview with localized Vietnamese category chips (`Vĩ mô`, `Thị trường`, `Doanh nghiệp`, `Quốc tế`)
+  - Parallel client data coordination with section-level failure isolation and global background refresh
+  - 127/127 automated tests passing
 
 ## PRE-FEATURE-07 HARDENING (COMPLETED)
 - **Historical Market Normalization Hardened** (Patch 06-2, checkpoint `d38ee60`): Deterministic deduplication, exact fractional volumes, robust boundary handling, clean null propagation for missing OHLCV.
@@ -76,5 +83,5 @@ BUILD
   - Default server automated tests are fully isolated from real Supabase and exercise actual production-path query predicates.
 
 ## CURRENT STATE
-Feature 08 (Watchlist / Danh sách theo dõi) is **COMPLETE** (121/121 tests PASS, client build clean, migration applied).
+Feature 09 (Personal Investment Dashboard / Tổng quan) is **COMPLETE** (127/127 tests PASS, client build clean, dashboard is primary landing page).
 The next feature has not been selected yet; awaiting Project Director decision.

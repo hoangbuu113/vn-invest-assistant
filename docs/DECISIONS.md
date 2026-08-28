@@ -80,3 +80,10 @@ The following architectural and product decisions are confirmed:
   - **Deterministic Removals**: Removing a nonexistent item returns a clean status without crashing or affecting foreign data.
   - **Failure Isolation**: One failed market snapshot does not break the watchlist view. Assets with unavailable prices show "Chưa có dữ liệu giá" without fabricating zero values, 0%, or current timestamps.
   - **No Scope Expansion**: No price alerts, push notifications, email, notes, target prices, AI rankings, or recommendation status.
+- **Personal Investment Dashboard / Tổng quan (Feature 09)**:
+  - **Dashboard Role**: Acts as a high-level cross-app overview answering the investor's current state, watched assets, and latest market news in seconds; it does not duplicate the detailed Portfolio page.
+  - **Holding Details Scope**: Detailed holding breakdown and cost-basis analysis stay exclusively in "Danh mục". The Dashboard summary shows only high-level totals and holding counts.
+  - **Holding Count Invariant**: Holding count is derived strictly from real holdings collection length (`holdings.length`); unavailable prices never make a holding count become zero.
+  - **Section-Level Failure Isolation**: Portfolio overview, watchlist market snapshots, and news feed load in parallel with section-level error isolation so that an issue in one feed never blanks other dashboard components.
+  - **Watchlist Movers Semantics**: Descriptive sorting of available delayed percentage changes only. Omitted gracefully if fewer than 2 valid quotes exist. Never labeled as recommendations, buy signals, or top picks.
+  - **Data Integrity**: Missing values are preserved as unavailable and not converted to zero; market prices remain clearly labeled as delayed (~15m).
