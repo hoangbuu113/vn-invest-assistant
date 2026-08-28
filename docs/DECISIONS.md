@@ -72,4 +72,11 @@ The following architectural and product decisions are confirmed:
   - **Cross-Period Breadth**: `positivePeriodRatio` describes the fraction of available periods with positive price change (requires >= 3 valid periods).
   - **Pure Descriptive Model**: No overall score, momentum rating, stock recommendation, BUY/SELL/HOLD signal, price target, or AI intuition.
   - **Client Role**: The client displays backend metrics as authoritative source-of-truth and does not recalculate financial analysis metrics.
-
+- **Watchlist / Danh sách theo dõi (Feature 08)**:
+  - **Product Meaning**: Represents "Tài sản tôi muốn theo dõi" only. It is NOT a recommendation list, ranking, signal list, or BUY/SELL list.
+  - **Minimal Data Model**: Stored in `public.watchlist_items` referencing `investor_profile(id)` and `assets(id)` with `UNIQUE (profile_id, asset_id)` constraint.
+  - **Singleton Profile Invariant**: Watchlist operations are strictly scoped to the server-determined singleton investor profile. Client-supplied `profile_id` is never accepted or trusted.
+  - **Idempotency & Conflict Safety**: Adding an existing asset returns the existing record deterministically without duplicate creation or error.
+  - **Deterministic Removals**: Removing a nonexistent item returns a clean status without crashing or affecting foreign data.
+  - **Failure Isolation**: One failed market snapshot does not break the watchlist view. Assets with unavailable prices show "Chưa có dữ liệu giá" without fabricating zero values, 0%, or current timestamps.
+  - **No Scope Expansion**: No price alerts, push notifications, email, notes, target prices, AI rankings, or recommendation status.

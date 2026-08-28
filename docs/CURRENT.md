@@ -1,7 +1,7 @@
 # Current Project Status
 
 ## LATEST VERIFIED CHECKPOINT
-- **Commit**: `a35ed90` (UI: `a35ed90`, Backend: `dceae87`)
+- **Commit**: `7d84b3d`
 - **Branch**: `main`
 
 ## CURRENT PHASE
@@ -50,6 +50,15 @@ BUILD
   - Pure deterministic quantitative engine with explicit `options.now` contract (no hidden system clocks)
   - Asset Detail "Phân tích tài sản" UI: 5-period scannable view, interactive tabs, animated range position track & dot, breadth indicator, comparison table, methodology transparency disclosure, and non-alarming disclaimer
   - All 106 automated tests passing
+- **Feature 08 — Watchlist / Danh sách theo dõi**
+  - Minimal persistent watchlist table `public.watchlist_items` (`profile_id`, `asset_id`, `created_at`, unique per profile-asset)
+  - Dedicated Supabase migration applied (`supabase/migrations/20260828083000_create_watchlist_items_table.sql`)
+  - Backend endpoints: `GET /api/watchlist`, `POST /api/watchlist`, `DELETE /api/watchlist/:assetId`
+  - Strictly scoped to singleton investor profile (client `profile_id` ignored)
+  - Conflict-safe and idempotent additions; deterministic removals
+  - Asset Detail compact toggle action: "＋ Theo dõi" / "✓ Đang theo dõi" with loading state and double-click prevention
+  - Watchlist page ("Theo dõi") with failure-isolated delayed market snapshots ("Chưa có dữ liệu giá" on failure), empty state, quick view action, and removal action
+  - 121/121 automated tests passing
 
 ## PRE-FEATURE-07 HARDENING (COMPLETED)
 - **Historical Market Normalization Hardened** (Patch 06-2, checkpoint `d38ee60`): Deterministic deduplication, exact fractional volumes, robust boundary handling, clean null propagation for missing OHLCV.
@@ -67,6 +76,5 @@ BUILD
   - Default server automated tests are fully isolated from real Supabase and exercise actual production-path query predicates.
 
 ## CURRENT STATE
-Feature 07 (Deterministic Asset Analysis) is **COMPLETE** (Backend checkpoint: `dceae87`, UI commit: `a35ed90`, 106/106 tests PASS).
+Feature 08 (Watchlist / Danh sách theo dõi) is **COMPLETE** (121/121 tests PASS, client build clean, migration applied).
 The next feature has not been selected yet; awaiting Project Director decision.
-
