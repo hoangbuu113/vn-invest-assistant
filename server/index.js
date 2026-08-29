@@ -599,25 +599,32 @@ export function createApp(services = {}) {
     }
   });
 
-  // News feed endpoint (aggregated & normalized from CafeF RSS)
+  // News feed endpoint (Feature 23 — aggregated from CafeF, CoinDesk, Alpha Vantage)
   app.get('/api/news', async (req, res) => {
+    const { limit = 30, assetId } = req.query;
     try {
-      const news = await getNewsFeedFn();
-      return res.json({
-        status: 'ok',
-        count: news.length,
-        data: news
-      });
+      const result = await getNewsFeedFn({ limit, assetId });
+      if (Array.isArray(result)) {
+        return res.json({
+          status: 'ok',
+          count: result.length,
+          data: result
+        });
+      }
+      return res.json(result);
     } catch (error) {
-      return res.status(500).json({
+      const statusCode = error.statusCode || (error.code === 'ASSET_NOT_FOUND' ? 404 : (error.code === 'INVALID_LIMIT' || error.code === 'INVALID_ASSET_ID' ? 400 : (error.code === 'NEWS_SOURCES_UNAVAILABLE' ? 503 : 500)));
+      const response = {
         status: 'error',
-        message: 'Failed to fetch news feed',
-        details: error.message
-      });
+        message: error.message || 'Failed to fetch news feed'
+      };
+      if (error.code) response.code = error.code;
+      if (error.details) response.details = error.details;
+      return res.status(statusCode).json(response);
     }
   });
 
-  // Personalized news feed endpoint (Feature 13 — deterministic relevance to user holdings and watchlist)
+  // Personalized news feed endpoint (Feature 13 & Feature 23 — deterministic relevance to user holdings and watchlist)
   app.get('/api/news/personalized', async (req, res) => {
     try {
       const result = await getPersonalizedNewsFeedFn({
@@ -625,19 +632,28 @@ export function createApp(services = {}) {
         getHoldingsFn,
         getWatchlistFn
       });
-      return res.json({
-        status: 'ok',
-        count: result.news.length,
-        data: result.news,
-        userAssetCount: result.userAssetCount,
-        userAssets: result.userAssets
-      });
+      if (result.news) {
+        return res.json({
+          status: 'ok',
+          count: result.news.length,
+          data: result.news,
+          userAssetCount: result.userAssetCount,
+          userAssets: result.userAssets,
+          partial: result.partial || false,
+          dataAsOf: result.dataAsOf || null,
+          sources: result.sources || []
+        });
+      }
+      return res.json(result);
     } catch (error) {
-      return res.status(500).json({
+      const statusCode = error.statusCode || (error.code === 'NEWS_SOURCES_UNAVAILABLE' ? 503 : 500);
+      const response = {
         status: 'error',
         message: 'Failed to fetch personalized news feed',
         details: error.message
-      });
+      };
+      if (error.code) response.code = error.code;
+      return res.status(statusCode).json(response);
     }
   });
 

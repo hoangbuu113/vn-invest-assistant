@@ -31,7 +31,12 @@ const CATEGORY_STYLES = {
   market: { label: 'Thị trường', bg: '#eff6ff', color: '#1d4ed8', border: '#bfdbfe', accent: '#2563eb' },
   company: { label: 'Doanh nghiệp', bg: '#faf5ff', color: '#7c3aed', border: '#e9d5ff', accent: '#7c3aed' },
   macro: { label: 'Vĩ mô', bg: '#ecfdf5', color: '#047857', border: '#a7f3d0', accent: '#059669' },
-  global: { label: 'Quốc tế', bg: '#fff7ed', color: '#c2410c', border: '#fed7aa', accent: '#ea580c' }
+  global: { label: 'Quốc tế', bg: '#fff7ed', color: '#c2410c', border: '#fed7aa', accent: '#ea580c' },
+  international: { label: 'Quốc tế', bg: '#fff7ed', color: '#c2410c', border: '#fed7aa', accent: '#ea580c' },
+  crypto: { label: 'Crypto', bg: '#f5f3ff', color: '#6d28d9', border: '#ddd6fe', accent: '#7c3aed' },
+  gold: { label: 'Vàng', bg: '#fefce8', color: '#a16207', border: '#fef08a', accent: '#ca8a04' },
+  fx: { label: 'Ngoại hối', bg: '#f0fdf4', color: '#15803d', border: '#bbf7d0', accent: '#16a34a' },
+  general: { label: 'Tin chung', bg: '#f8fafc', color: '#475569', border: '#e2e8f0', accent: '#64748b' }
 };
 
 const HISTORY_RANGES = [
@@ -127,7 +132,12 @@ const NEWS_CATEGORY_LABELS = {
   macro: 'Vĩ mô',
   market: 'Thị trường',
   company: 'Doanh nghiệp',
-  international: 'Quốc tế'
+  global: 'Quốc tế',
+  international: 'Quốc tế',
+  crypto: 'Crypto',
+  gold: 'Vàng',
+  fx: 'Ngoại hối',
+  general: 'Tin chung'
 };
 
 function formatNewsCategory(category) {
@@ -1570,7 +1580,7 @@ function App() {
                     <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 800, color: 'var(--color-slate-900)' }}>
                       Tin tức tài chính mới nhất
                     </h3>
-                    <span style={{ fontSize: '0.78rem', color: 'var(--color-slate-400)' }}>Cập nhật từ CafeF</span>
+                    <span style={{ fontSize: '0.78rem', color: 'var(--color-slate-400)' }}>Cập nhật đa nguồn thị trường</span>
                   </div>
 
                   <MagneticButton
@@ -2325,13 +2335,11 @@ function App() {
                   <p className="section-subtitle">
                     {newsSubTab === 'general' ? (
                       <>
-                        Cập nhật tin tức tài chính, doanh nghiệp và vĩ mô mới nhất ·{' '}
-                        <span style={{ color: 'var(--color-slate-400)' }}>Nguồn: CafeF</span>
+                        Cập nhật tin tức tài chính, doanh nghiệp và vĩ mô mới nhất từ các nguồn uy tín
                       </>
                     ) : (
                       <>
-                        Tin liên quan đến tài sản bạn đang nắm giữ hoặc theo dõi. ·{' '}
-                        <span style={{ color: 'var(--color-slate-400)' }}>Nguồn: CafeF</span>
+                        Tin tức liên quan đến các tài sản bạn đang nắm giữ hoặc theo dõi
                       </>
                     )}
                   </p>
@@ -2509,7 +2517,7 @@ function App() {
                             {/* Footer Row: Attribution + Read Original Link */}
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '0.45rem', borderTop: '1px solid var(--border-subtle)' }}>
                               <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--color-slate-400)' }}>
-                                Nguồn: CafeF
+                                Nguồn: {item.source || 'Tin tức'}
                               </span>
                               <a
                                 href={item.url}
@@ -2604,7 +2612,7 @@ function App() {
                       <div className="state-icon float-icon">🔍</div>
                       <h3 className="state-title">Chưa có tin mới liên quan đến các tài sản của bạn.</h3>
                       <p className="state-desc">
-                        Hiện tại nguồn tin CafeF chưa có bài viết mới nhắc đến các mã tài sản bạn đang nắm giữ hoặc theo dõi.
+                        Hiện tại chưa có bài viết mới nhắc đến các mã tài sản bạn đang nắm giữ hoặc theo dõi.
                       </p>
                       <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center', marginTop: '1.25rem' }}>
                         <button
@@ -2687,7 +2695,7 @@ function App() {
                             {/* Footer Row: Attribution + Read Original Link */}
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '0.45rem', borderTop: '1px solid var(--border-subtle)' }}>
                               <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--color-slate-400)' }}>
-                                Nguồn: CafeF
+                                Nguồn: {item.source || 'Tin tức'}
                               </span>
                               <a
                                 href={item.url}

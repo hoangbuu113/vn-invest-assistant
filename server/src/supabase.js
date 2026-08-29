@@ -144,6 +144,32 @@ export async function getAssetBySymbol(symbol, client = supabase) {
 }
 
 /**
+ * Fetches a single asset by UUID from the Supabase assets table.
+ */
+export async function getAssetById(id, client = supabase) {
+  const db = client || supabase;
+  if (!db) {
+    throw new Error('Supabase credentials are not configured. Please set SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY in server/.env');
+  }
+
+  if (!id || typeof id !== 'string') {
+    return null;
+  }
+
+  const { data, error } = await db
+    .from('assets')
+    .select(ASSET_SELECT_FIELDS)
+    .eq('id', id.trim())
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Database query error: ${error.message} (code: ${error.code || 'UNKNOWN'})`);
+  }
+
+  return data ? normalizeAsset(data) : null;
+}
+
+/**
  * Fetches one explicit provider identity for a canonical asset.
  * No provider symbol is inferred when a mapping is absent.
  */
