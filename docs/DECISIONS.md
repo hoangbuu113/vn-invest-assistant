@@ -271,3 +271,45 @@ $$\text{Source Adapter} \longrightarrow \text{Canonical Validation / Sanitizatio
 - **Price Alerts (Feature 12)**: One-shot persistent alert lifecycle (`active` -> `triggered`) evaluated deterministically against canonical market snapshots.
 - **Personalized Relevant News (Features 13 & 23)**: Deterministic UUID matching against current holdings and watchlist assets; acts as a filtered view of the canonical multi-asset news feed.
 - **Personal Investment Dashboard (Feature 09)**: High-level overview coordinating summary metrics, watchlist movers, and multi-source market news preview.
+
+---
+
+## 8. Multi-Asset Capability Integration & Crypto Realtime (Feature 24)
+
+### A. Canonical Crypto Snapshot vs Binance Realtime Reference Boundary
+- **Canonical Crypto Snapshot & History**: **CoinGecko** (quoted in `USD`) remains the sole authoritative provider for canonical Crypto market snapshots and completed daily history. Feeds portfolio valuation, holdings, canonical watchlist, price alerts, comparison metrics, and Feature 22 quantitative analysis.
+- **Realtime Crypto Reference**: **Binance Spot public WebSocket** (quoted in `USDT`, `referenceOnly = true`) provides rolling-24h market reference strictly for Asset Detail current-price UX.
+- **Leakage Prevention**: Binance USDT realtime observations must **NEVER** leak into canonical consumers (portfolio valuation, holdings, canonical watchlist valuation, alerts, comparison metrics, Feature 22 analysis, or historical price series).
+- **Binance Service Architecture**:
+  - One shared backend WebSocket connection (`wss://stream.binance.com:9443/ws/!miniTicker@arr`).
+  - Zero browser-direct connections; zero Binance API keys; zero account/trading APIs; zero broker execution.
+  - Asset Detail frontend polls local backend approximately every 2 seconds for active crypto asset.
+  - 5 crypto assets without Binance pairs (`HYPE`, `RAIN`, `WBT`, `XMR`, `LIT`) fall back cleanly to canonical CoinGecko USD snapshot.
+
+### B. CoinGecko Resilience & Calendar Lookback Integrity
+- A `1Y` lookback is a full calendar-year subtraction spanning up to 366 days.
+- CoinGecko public range limitations are handled via deterministic multi-chunk retrieval when needed, merged, deduplicated by canonical date, sorted, and filtered locally to exact Feature 21 calendar boundaries.
+- In-memory cache ensures a 365-day result is never cached as a substitute for a full 366-day calendar-year request.
+- In-flight request coalescing prevents duplicate provider queries.
+
+### C. Frontend Native-Currency Invariant
+- Native market values display using the asset's authoritative `quoteCurrency` (VND for stocks/ETFs, USD for Crypto/Gold, USDT for Binance realtime reference).
+- Portfolio reporting values are strictly `VND`.
+- Exactly one centralized formatting module (`client/src/utils/formatting.js`) governs financial formatting across the frontend.
+- Zero hard-coded `₫`, `VND`, `USD`, `USDT`, or `HOSE` when canonical metadata exists.
+
+### D. Capability-Aware History & Analysis Integration
+- Close-only history (Crypto, Gold) is truthful complete history (`ohlc = false`, `volume = false`); range coverage (`5/5 kỳ có dữ liệu`) is strictly separated from metric capability (`Một số chỉ số nội ngày không áp dụng`).
+- Obsolete Feature 07 `0 / 0` breadth presentation branch is retired in favor of universal V2 metrics.
+- Known unsupported capability (USD/VND history) yields an explicit unsupported state without issuing useless network requests or fabricating charts.
+
+### E. Cross-Asset Comparison Integrity
+- Relative comparison curves use Base 100 on canonical common dates only; zero array-index alignment, zero date borrowing, zero forward-filling, zero synthetic interpolation.
+- Raw price levels across different currencies are not directly comparable; universal V2 metrics are displayed in native currencies. Zero ranking, scoring, or recommendations.
+
+### F. Safe Provider Error Boundary & Universal Freshness
+- Alpha Vantage upstream quota/rate-limit messages are sanitized to `PROVIDER_RATE_LIMITED` with safe Vietnamese messaging, never leaking raw provider bodies, premium advertisements, or URLs.
+- Stale universal `~15 phút` text is removed from Gold, Crypto, Alerts, Watchlist, and Portfolio; replaced with truthful provider-neutral wording: *"Dữ liệu theo thời điểm cập nhật của nhà cung cấp"*.
+
+### G. Ledger Authority & Non-VND Gating
+- BUY/SELL and opening positions remain strictly VND-only at DB trigger/RPC level; frontend gates non-VND assets before submit with clear visible notices. Cash ledger remains VND-only.

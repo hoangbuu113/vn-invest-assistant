@@ -14,7 +14,7 @@ This document serves as the durable strategic memory for project sequencing, fea
 
 ---
 
-## 2. Completed Features (01–23)
+## 2. Completed Features (01–24)
 
 - **Feature 01**: Asset Browser
 - **Feature 02**: Market Snapshot
@@ -41,21 +41,23 @@ This document serves as the durable strategic memory for project sequencing, fea
 - **Feature 21**: Asset-Class Market & Historical Semantics (COMPLETE)
 - **Feature 22**: Deterministic Asset Analysis V2 (COMPLETE)
 - **Feature 23**: Multi-Asset News Foundation (COMPLETE)
+- **Feature 24**: Existing Feature Multi-Asset Integration (COMPLETE)
+  - **Feature 24A**: Backend / Canonical Capability Integration (Commit `e292f68`)
+  - **Feature 24B**: Frontend Capability-Aware Integration (Commit `2e2edde`)
 
 ---
 
-## 3. Current Next Feature: Feature 24
+## 3. Current Next Feature: Feature 25
 
-### Feature 24 — Existing Feature Multi-Asset Integration
+### Feature 25 — Portfolio Performance & Benchmarking
 - **Status**: NEXT IN SEQUENCE.
-- **Scope**: Adapt Dashboard, Watchlist, Portfolio Overview, Portfolio Composition, Asset Comparison, and Price Alerts to render and handle canonical multi-asset records and mixed portfolios cleanly without breaking single-asset assumptions.
+- **Scope**: Auditable capital-weighted returns (TWR/MWR), realized/unrealized P/L performance tracking, drawdowns, and benchmark comparison (VN-Index, S&P 500).
 
 ---
 
-## 4. Ordered Roadmap (Features 24–30)
+## 4. Ordered Roadmap (Features 25–30)
 
-- **Feature 24 — Existing Feature Multi-Asset Integration (NEXT)**: Adapt Dashboard, Watchlist, Portfolio, Composition, Comparison, and Alerts to support multi-asset rendering cleanly.
-- **Feature 25 — Portfolio Performance & Benchmarking**: Auditable capital-weighted returns (TWR/MWR), realized/unrealized P/L performance tracking, drawdowns, and benchmark comparison (VN-Index, S&P 500).
+- **Feature 25 — Portfolio Performance & Benchmarking (NEXT)**: Auditable capital-weighted returns (TWR/MWR), realized/unrealized P/L performance tracking, drawdowns, and benchmark comparison (VN-Index, S&P 500).
 - **Feature 26 — Risk & Exposure Analytics**: Multi-dimensional portfolio risk analysis (asset class, currency, sector, concentration risk, historical drawdown, volatility).
 - **Feature 27 — Market Regime Engine**: Deterministic macro and market regime indicators (interest rate environment, inflation trends, market breadth).
 - **Feature 28 — Opportunity Engine**: Evidence-driven screening and candidate ranking based on transparent quantitative rules and user profile fit.

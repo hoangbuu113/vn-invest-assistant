@@ -22,13 +22,13 @@ The following items are deferred for future phases and are strictly marked as **
 
 The following design decisions are unresolved and intentionally deferred. They must not be assumed or decided prematurely:
 
-- **Gold**:
-  - `UNKNOWN`: Exact instrument and price reference source (e.g., domestic SJC/PNJ physical gold in VND/lượng vs international spot XAU/USD).
+- **Multicurrency Transaction Accounting**:
+  - `UNKNOWN`: Database schema, acquisition-time FX storage, and realized/unrealized P/L calculation engine for non-VND asset trading.
+- **Multicurrency Cash**:
+  - `UNKNOWN`: Multi-currency cash account architecture and cash ledger conversion tracking.
+- **Foreign Exchange History**:
+  - `UNKNOWN`: USD/VND historical daily bar timezone alignment and provider selection for FX historical time series.
 - **Funds**:
-  - `UNKNOWN`: Specific handling differences between exchange-traded ETFs (continuous intraday pricing) vs open-ended mutual funds (periodic NAV pricing).
-- **Crypto**:
-  - `UNKNOWN`: Market data provider selection for crypto assets.
-  - `UNKNOWN`: Exact selection and maintenance methodology for the Top ~40 crypto assets.
-  - `UNKNOWN`: Inclusion vs exclusion rules for USD-pegged stablecoins (e.g., USDT, USDC).
-- **FX & Cross-Currency Valuation**:
-  - `UNKNOWN`: Primary FX rate provider and fallback mechanism for non-VND asset conversion.
+  - `UNKNOWN`: Open-ended mutual fund NAV strike mechanics, provider onboarding, and subscription/redemption flows (deferred beyond priority ETF foundation).
+- **Provider Redundancy**:
+  - `UNKNOWN`: Provider failover orchestration and multi-source redundancy policy.

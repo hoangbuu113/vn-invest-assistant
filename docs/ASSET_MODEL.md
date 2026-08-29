@@ -4,9 +4,9 @@ This document defines the canonical architectural and conceptual model for multi
 
 ---
 
-## 1. Current Implementation Status (Features 16–23)
+## 1. Current Implementation Status (Features 16–24)
 
-Features 16 through 23 establish the canonical schema, ledger authority, provider abstraction, FX valuation, full controlled multi-asset universe, normalized historical semantics, deterministic multi-asset analysis, and multi-source news foundation:
+Features 16 through 24 establish the canonical schema, ledger authority, provider abstraction, FX valuation, full controlled multi-asset universe, normalized historical semantics, deterministic multi-asset analysis, multi-source news foundation, and comprehensive frontend capability integration:
 
 - **Verified Production Universe (49 Canonical Assets)**:
   - **Vietnamese Equities & ETFs** (`VN_EXCHANGE`, `Asia/Ho_Chi_Minh`, `VND`, `share`):
@@ -16,8 +16,8 @@ Features 16 through 23 establish the canonical schema, ledger authority, provide
     - News: CafeF 4-feed official RSS integration
   - **Cryptocurrencies (40 Canonical Assets)** (`CONTINUOUS_24_7`, `UTC`, `USD`, `coin`):
     - `BTC` (`bitcoin`), `ETH` (`ethereum`), `SOL` (`solana`), `BNB` (`binancecoin`), `XRP` (`ripple`), `TRX` (`tron`), `HYPE` (`hyperliquid`), `ZEC` (`zcash`), `DOGE` (`dogecoin`), `RAIN` (`rain`), `XMR` (`monero`), `LINK` (`chainlink`), `WBT` (`whitebit`), `ADA` (`cardano`), `XLM` (`stellar`), `BCH` (`bitcoin-cash`), `GRAM` (`the-open-network`), `LTC` (`litecoin`), `HBAR` (`hedera-hashgraph`), `AVAX` (`avalanche-2`), `SHIB` (`shiba-inu`), `SUI` (`sui`), `UNI` (`uniswap`), `NEAR` (`near`), `TAO` (`bittensor`), `PUMP` (`pump-fun`), `AAVE` (`aave`), `ASTER` (`aster-2`), `WLFI` (`world-liberty-financial`), `ONDO` (`ondo-finance`), `ENA` (`ethena`), `MORPHO` (`morpho`), `PEPE` (`pepe`), `DOT` (`polkadot`), `WLD` (`worldcoin-wld`), `ETC` (`ethereum-classic`), `POL` (`polygon-ecosystem-token`), `LIT` (`lighter`), `ATOM` (`cosmos`), `JUP` (`jupiter-exchange-solana`)
-    - Provider mapping: `coingecko` $\rightarrow$ `<EXPLICIT_COINGECKO_ID>`
-    - History: Completed UTC daily close-only bars supported (`open`, `high`, `low`, `volume` are `null`)
+    - Canonical snapshot & history provider: `coingecko` $\rightarrow$ `<EXPLICIT_COINGECKO_ID>` (quoted in `USD`). Completed UTC daily close-only bars supported (`open`, `high`, `low`, `volume` are `null`).
+    - Realtime reference provider: `binance` public miniTicker WebSocket stream (~35/40 pairs, quoted in `USDT`, `referenceOnly = true`). Polled by Asset Detail frontend ~2s; strictly isolated from canonical portfolio/valuation/alerts/comparison paths. 5 assets without Binance pairs fall back to canonical CoinGecko USD snapshot.
     - News: CoinDesk official RSS integration with contextual ticker disambiguation
   - **Gold Spot** (`GLOBAL_24_5`, `UTC`, base: `XAU`, quote: `USD`, `oz`):
     - `XAU/USD` (provider: `alphavantage` $\rightarrow$ `XAU` via `GOLD_SILVER_SPOT`)
@@ -40,6 +40,7 @@ Features 16 through 23 establish the canonical schema, ledger authority, provide
   - Multi-asset calendar and historical bar engine (`server/src/history.js`) with calendar-window lookbacks (`1W`, `1M`, `3M`, `6M`, `1Y`) and current-day exclusivity.
   - Provider-neutral deterministic analysis V2 over completed canonical daily history, with universal completed-close metrics and capability-gated OHLC metrics.
   - Database trigger guard (`enforce_vnd_portfolio_transaction_asset`) strictly enforcing VND-only transaction accounting until multi-currency FX accounting is implemented.
+  - Centralized frontend native formatting (`client/src/utils/formatting.js`) and capability-aware UI integration across Dashboard, Watchlist, Portfolio, Composition, Comparison, Alerts, and Detail.
 
 - **Current Intentional Limitations**:
   - USD/VND historical bars remain unsupported due to unresolved daily timezone compatibility.
@@ -50,6 +51,7 @@ Features 16 through 23 establish the canonical schema, ledger authority, provide
   - The single VND cash ledger remains authoritative for all cash operations (no multi-currency cash balances).
   - Open-ended mutual funds (NAV scheduled) remain deferred.
   - No article database persistence (news is dynamically cached in memory with per-source TTLs).
+  - Binance realtime stream is reference-only for Asset Detail and does not feed canonical valuation, alerts, or historical series.
 
 ---
 
