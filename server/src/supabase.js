@@ -1152,3 +1152,82 @@ export async function evaluateAndPersistAlerts({ getMarketSnapshotFn = getMarket
     alerts: refreshedAlerts
   };
 }
+
+/**
+ * Fetches the cash ledger activation record for the singleton profile.
+ */
+export async function getCashActivation(client = supabase) {
+  const db = client || supabase;
+  if (!db) {
+    throw new Error('Supabase credentials are not configured. Please set SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY in server/.env');
+  }
+
+  const profile = await getInvestorProfile(db);
+  const { data, error } = await db
+    .from('cash_ledger_activation')
+    .select('profile_id, opening_balance_amount, activated_at')
+    .eq('profile_id', profile.id)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Database query error: ${error.message} (code: ${error.code || 'UNKNOWN'})`);
+  }
+
+  if (!data) return null;
+  return {
+    profileId: data.profile_id,
+    openingBalanceAmount: typeof data.opening_balance_amount === 'number'
+      ? data.opening_balance_amount
+      : Number(data.opening_balance_amount),
+    activatedAt: data.activated_at
+  };
+}
+
+/**
+ * Fetches all position opening baselines for the singleton profile.
+ */
+export async function getPositionOpeningBaselines(client = supabase) {
+  const db = client || supabase;
+  if (!db) {
+    throw new Error('Supabase credentials are not configured. Please set SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY in server/.env');
+  }
+
+  const profile = await getInvestorProfile(db);
+  const { data, error } = await db
+    .from('position_opening_baselines')
+    .select(`
+      id,
+      profile_id,
+      asset_id,
+      opening_quantity,
+      opening_average_cost,
+      accounting_cutoff_at,
+      provenance_type,
+      locked_at,
+      cancelled_at,
+      created_at,
+      updated_at,
+      assets (id, symbol, name, asset_type, exchange, quote_currency)
+    `)
+    .eq('profile_id', profile.id)
+    .order('created_at', { ascending: true });
+
+  if (error) {
+    throw new Error(`Database query error: ${error.message} (code: ${error.code || 'UNKNOWN'})`);
+  }
+
+  return (data || []).map((row) => ({
+    id: row.id,
+    profileId: row.profile_id,
+    assetId: row.asset_id,
+    openingQuantity: typeof row.opening_quantity === 'number' ? row.opening_quantity : Number(row.opening_quantity),
+    openingAverageCost: typeof row.opening_average_cost === 'number' ? row.opening_average_cost : Number(row.opening_average_cost),
+    accountingCutoffAt: row.accounting_cutoff_at,
+    provenanceType: row.provenance_type,
+    lockedAt: row.locked_at || null,
+    cancelledAt: row.cancelled_at || null,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    asset: row.assets || null
+  }));
+}

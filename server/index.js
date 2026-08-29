@@ -21,6 +21,7 @@ import { getMarketSnapshot, getMarketHistory, getMarketRealtime } from './src/ma
 import { getNewsFeed, getPersonalizedNewsFeed } from './src/news.js';
 import { getPortfolioOverview } from './src/portfolio.js';
 import { getPortfolioComposition } from './src/composition.js';
+import { getPortfolioPerformance } from './src/performance.js';
 import { getAssetAnalysis } from './src/analysis.js';
 import { getAssetComparison } from './src/comparison.js';
 import {
@@ -71,6 +72,7 @@ export function createApp(services = {}) {
     getPersonalizedNewsFeedFn = getPersonalizedNewsFeed,
     getPortfolioOverviewFn = getPortfolioOverview,
     getPortfolioCompositionFn = getPortfolioComposition,
+    getPortfolioPerformanceFn = getPortfolioPerformance,
     checkSupabaseConnectionFn = checkSupabaseConnection,
     getAssetAnalysisFn = getAssetAnalysis,
     getAssetComparisonFn = getAssetComparison,
@@ -713,6 +715,26 @@ export function createApp(services = {}) {
         message: 'Failed to generate portfolio composition',
         details: error.message
       });
+    }
+  });
+
+  // Portfolio performance endpoint (Feature 25B — VND portfolio TWR, MWR/XIRR, wealth index drawdown, accounting P/L)
+  app.get('/api/portfolio/performance', async (req, res) => {
+    const { range = '1M' } = req.query;
+    try {
+      const performance = await getPortfolioPerformanceFn({ range });
+      return res.json({
+        status: 'ok',
+        data: performance
+      });
+    } catch (error) {
+      const statusCode = error.status || 500;
+      const response = {
+        status: 'error',
+        message: error.message || 'Failed to generate portfolio performance'
+      };
+      if (error.code) response.code = error.code;
+      return res.status(statusCode).json(response);
     }
   });
 
