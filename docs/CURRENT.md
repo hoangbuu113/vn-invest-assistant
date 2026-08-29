@@ -1,31 +1,40 @@
 # Current Project Status
 
 ## LATEST VERIFIED CHECKPOINT
-- **Commit**: `cec1971`
+- **Commit**: `ef694d2`
 - **Branch**: `main`
-- **Feature 19 Commit**: `7a2129d`
-- **Feature 20A Commit**: `caf1414`
-- **Feature 20B Commit**: `cec1971`
+- **Feature 21 Implementation Commit**: `4a6b394`
+- **Asset Explorer UI Patch Commit**: `ef694d2`
 - **Automated Test Suite**:
-  - Latest Full Backend Regression: 265/265 PASS (at Feature 19 high-risk gate)
-  - Feature 20B Targeted Final Gate: 52/52 PASS + Live End-to-End Application & Remote Provider Verification
+  - Latest Full Backend Regression: 312/312 PASS (Features 01–21 complete test coverage)
 - **Client Build**: Production build clean
 - **Git Working Tree**: Clean
 - **GitHub Remote**: No origin configured / remote state not verified (local git authority)
 
 ## CURRENT PHASE
-MULTI-ASSET FOUNDATION & UNIVERSE
+MULTI-ASSET FOUNDATION, HISTORY & QUANTITATIVE ANALYSIS
 
 ## CURRENT NEXT PROJECT TASK
-Feature 21 — Asset-Class Market & Historical Semantics (class-specific calendar rules, trading session hours, 24/7 crypto candles, NAV strike points, and bar completion logic). See `docs/ROADMAP.md`.
+Feature 22 — Deterministic Asset Analysis V2 (generalized quantitative analysis across asset classes with shared, specialized, and explicitly unavailable metrics). See `docs/ROADMAP.md`.
 
 ---
 
 ## PRODUCTION & LIVE PROVIDER VERIFIED PATHS
-- **Yahoo Finance**: Vietnamese listed equities & exchange-traded ETFs (`VCB`, `FPT`, `HPG`, `VNM`, `E1VFVN30`, `FUEVFVND`, `FUESSVFL`)
-- **CoinGecko**: Cryptocurrency spot snapshots (40 canonical assets: `BTC`, `ETH`, `SOL`, `BNB`, `XRP`, `TRX`, `HYPE`, `ZEC`, `DOGE`, `RAIN`, `XMR`, `LINK`, `WBT`, `ADA`, `XLM`, `BCH`, `GRAM`, `LTC`, `HBAR`, `AVAX`, `SHIB`, `SUI`, `UNI`, `NEAR`, `TAO`, `PUMP`, `AAVE`, `ASTER`, `WLFI`, `ONDO`, `ENA`, `MORPHO`, `PEPE`, `DOT`, `WLD`, `ETC`, `POL`, `LIT`, `ATOM`, `JUP`) via explicit immutable coin IDs
-- **Alpha Vantage**: Gold Spot snapshot (`XAU/USD`) via `GOLD_SILVER_SPOT` with `symbol=XAU`
-- **Twelve Data**: Direct `USD -> VND` FX exchange rate resolution
+- **Yahoo Finance**: Vietnamese listed equities & exchange-traded ETFs (`VCB`, `FPT`, `HPG`, `VNM`, `E1VFVN30`, `FUEVFVND`, `FUESSVFL`). Completed daily OHLCV history with `Asia/Ho_Chi_Minh` timezone semantics.
+- **CoinGecko**: Cryptocurrency spot snapshots and completed daily close-only history (40 canonical assets: `BTC`, `ETH`, `SOL`, `BNB`, `XRP`, `TRX`, `HYPE`, `ZEC`, `DOGE`, `RAIN`, `XMR`, `LINK`, `WBT`, `ADA`, `XLM`, `BCH`, `GRAM`, `LTC`, `HBAR`, `AVAX`, `SHIB`, `SUI`, `UNI`, `NEAR`, `TAO`, `PUMP`, `AAVE`, `ASTER`, `WLFI`, `ONDO`, `ENA`, `MORPHO`, `PEPE`, `DOT`, `WLD`, `ETC`, `POL`, `LIT`, `ATOM`, `JUP`) via explicit immutable coin IDs. `UTC` daily calendar semantics; completed periods only; close-only (`open`, `high`, `low`, `volume` are `null`).
+- **Alpha Vantage**: Gold Spot snapshot and completed daily close-only history (`XAU/USD`) via `GOLD_SILVER_SPOT` with `symbol=XAU`. `UTC` daily calendar semantics; completed periods only; close-only.
+- **Twelve Data**: Direct `USD -> VND` FX exchange rate resolution. Current snapshot supported; history intentionally UNSUPPORTED because provider daily timezone boundary cannot currently be reconciled confidently with canonical asset timezone.
+
+## CURRENT PUBLIC HISTORY CAPABILITIES
+- **Supported Ranges**: `1W`, `1M`, `3M`, `6M`, `1Y`
+- **Range Semantics**: Canonical calendar lookback windows (`1W` = 7 days, `1M`/`3M`/`6M` = calendar months, `1Y` = calendar year) with upper bound strictly exclusive of the current uncompleted market date.
+- **Analysis Invariant**: Feature 07 deterministic analysis remains restricted to `VN_EXCHANGE` assets; multi-asset history does not automatically enable multi-asset analysis.
+
+## ASSET BROWSER UI STATE
+- Asset Browser is organized as a unified Asset Explorer grouped by asset class (`Cổ phiếu Việt Nam`, `ETF`, `Crypto`, `Vàng`, `Ngoại hối`).
+- Top filter bar with live dynamic counts (`Tất cả`, `Cổ phiếu`, `ETF`, `Crypto`, `Vàng`, `Ngoại hối`) and integrated search.
+- Compact Crypto preview (initial 8 items + expand/collapse CTA) in "Tất cả" view.
+- Responsive mobile card rows without horizontal table overflow while preserving 5-column table layout on desktop.
 
 ## FINANCIAL DEVELOPMENT BASELINE
 - Authoritative Holdings: 2 rows (`E1VFVN30`: 111,003 @ 35,000 VND; `FPT`: 12 @ 35,000 VND)
@@ -36,7 +45,7 @@ Feature 21 — Asset-Class Market & Historical Semantics (class-specific calenda
 
 ---
 
-## COMPLETED FEATURES SUMMARY (01–20)
+## COMPLETED FEATURES SUMMARY (01–21)
 
 - **Features 01–03**: Asset Browser (`/api/assets`), Market Snapshot (delayed Yahoo Finance `/api/market/:symbol`), News Feed (CafeF RSS `/api/news`).
 - **Feature 04**: Investor Profile (`GET`/`PUT /api/profile`), singleton enforcement, holdings management.
@@ -57,4 +66,8 @@ Feature 21 — Asset-Class Market & Historical Semantics (class-specific calenda
 - **Feature 19**: FX & Cross-Currency Valuation Foundation (VND universal reporting currency, decoupled native/reporting valuation, direct-to-VND conversion, partial valuation on missing FX, blocked non-VND transactions).
 - **Feature 20**: Real Multi-Asset Providers & Controlled Universe (COMPLETE):
   - **20A**: Real Multi-Asset Provider Onboarding (Twelve Data FX, CoinGecko BTC/ETH/SOL, Alpha Vantage Gold Spot, Yahoo VN ETFs; 12 canonical assets total).
-  - **20B**: Controlled Crypto Universe Expansion (Audited Top 100 Market Cap $\cap$ Top 100 24h Volume snapshot with deterministic exclusions; expanded to exactly 40 liquid canonical crypto assets with explicit CoinGecko provider mappings, fail-fast migration identity preflight assertions, and preserved financial baseline).
+  - **20B**: Controlled Crypto Universe Expansion (Audited Top 100 Market Cap $\cap$ Top 100 24h Volume snapshot with deterministic exclusions; 40 liquid canonical crypto assets with explicit CoinGecko provider mappings).
+- **Feature 21**: Asset-Class Market & Historical Semantics (COMPLETE):
+  - Normalized multi-asset historical bar engine with asset-class specific calendar policies (`VN_EXCHANGE`, `CONTINUOUS_24_7`, `GLOBAL_24_5`).
+  - Canonical calendar lookback windows (`1W`, `1M`, `3M`, `6M`, `1Y`) with current-date exclusivity.
+  - Truthful representation: Yahoo OHLCV for VN equities/ETFs, CoinGecko close-only for 40 cryptos, Alpha Vantage close-only for Gold Spot, explicit unsupported error for USD/VND history. Missing candle fields are preserved as `null`.

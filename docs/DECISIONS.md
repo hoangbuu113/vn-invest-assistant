@@ -133,6 +133,32 @@ The following architectural and product decisions are confirmed and authoritativ
     - Existing asset has incompatible semantics $\rightarrow$ FAIL LOUDLY.
     - Existing provider mapping has conflicting `provider_symbol` $\rightarrow$ FAIL LOUDLY.
     - `ON CONFLICT (symbol) DO UPDATE` is strictly prohibited for canonical assets to prevent silent identity corruption.
+- **Asset-Class Market & Historical Semantics (Feature 21)**:
+  - **Governing Authority**: Historical bar semantics and calendar boundaries are governed strictly by the canonical asset's `market_policy` and `market_timezone`, NOT by arbitrary third-party provider payload formatting.
+  - **Business-Period Identity**: Canonical daily bar `date` (`YYYY-MM-DD`) represents the completed business day/period identity in the asset's canonical timezone. Provider timestamp is provenance metadata, not universal date identity.
+  - **Completed Period Invariant**: Completed history strictly excludes the current, uncompleted canonical market date. An ongoing or incomplete market period is never silently synthesized or treated as completed.
+  - **Calendar Lookback Range Semantics**:
+    - `1W` = previous 7 calendar days before current canonical date.
+    - `1M` / `3M` / `6M` = 1, 3, 6 calendar months subtracted from current canonical date.
+    - `1Y` = 1 calendar year subtracted from current canonical date.
+    - Upper bound is strictly exclusive of the current market date (`< current_canonical_date`).
+    - Ranges represent calendar lookback windows, NOT fixed observation counts.
+  - **Market Policy Rules**:
+    - `VN_EXCHANGE`: Evaluated in canonical `Asia/Ho_Chi_Minh` timezone. Weekends and Vietnamese market holidays are non-trading days; provider gaps are preserved without synthetic candle fabrication.
+    - `CONTINUOUS_24_7`: Evaluated in canonical `UTC` timezone. All 7 calendar days are valid trading days. The current UTC day is excluded until the next UTC midnight strike.
+    - `GLOBAL_24_5`: Evaluated in asset's canonical timezone (`UTC` for Gold Spot). Weekends are excluded; exchange/trading holiday gaps are preserved.
+  - **Provider History Rules**:
+    - **Yahoo Finance**: Supplies truthful daily OHLCV bars for VN equities and ETFs.
+    - **CoinGecko**: Supplies truthful daily close-only history for 40 canonical cryptocurrencies. Missing OHLC and volume remain `null` and are never synthesized from close.
+    - **Alpha Vantage**: Supplies truthful daily close-only history for Gold Spot (`XAU/USD`). Missing OHLCV fields remain `null`.
+    - **Twelve Data**: `USD/VND` daily history remains intentionally unsupported (`UNSUPPORTED_MARKET_POLICY`) because provider daily timezone boundary cannot currently be reconciled confidently with canonical asset timezone.
+  - **Snapshot vs History Invariant**:
+    - Snapshot represents the current / delayed real-time market observation.
+    - History represents finalized, completed canonical business periods.
+    - Snapshot data must never fill or replace completed historical close bars.
+  - **Analysis Invariant**:
+    - Feature 07 deterministic analysis remains restricted to `VN_EXCHANGE` assets.
+    - Enabling multi-asset history does not automatically enable multi-asset quantitative analysis. Feature 22 owns multi-asset quantitative analysis generalization.
 - **Numerical Precision**: Intermediate financial calculations retain full floating-point/numeric precision without premature two-decimal rounding. Rounding is presentation-only.
 - **Data Labeling**: Market snapshots are clearly disclosed as delayed (~15 min for equities) with explicit timestamp provenance. Missing source timestamps remain `null`.
 

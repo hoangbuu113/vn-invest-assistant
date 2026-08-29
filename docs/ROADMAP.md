@@ -14,7 +14,7 @@ This document serves as the durable strategic memory for project sequencing, fea
 
 ---
 
-## 2. Completed Features (01–20)
+## 2. Completed Features (01–21)
 
 - **Feature 01**: Asset Browser
 - **Feature 02**: Market Snapshot
@@ -38,27 +38,26 @@ This document serves as the durable strategic memory for project sequencing, fea
 - **Feature 20**: Real Multi-Asset Providers & Controlled Universe (COMPLETE)
   - **Feature 20A**: Representative Real Multi-Asset Providers (COMPLETE)
   - **Feature 20B**: Controlled Crypto Universe Expansion (COMPLETE)
+- **Feature 21**: Asset-Class Market & Historical Semantics (COMPLETE)
 
 ---
 
-## 3. Current Next Feature: Feature 21
+## 3. Current Next Feature: Feature 22
 
-### Feature 21 — Asset-Class Market & History Semantics
+### Feature 22 — Deterministic Asset Analysis V2
 - **Status**: NEXT IN SEQUENCE.
 - **Core Invariant**:
-  $$\text{Asset Class Schedule} \longrightarrow \text{Session / 24/7 Calendar Rules} \longrightarrow \text{Normalized Historical Bars \& Daily Closes}$$
+  $$\text{Multi-Asset Historical Bars} \longrightarrow \text{Shared / Specialized Quantitative Metrics} \longrightarrow \text{Explicit Metric Availability Matrix}$$
 - **Key Objectives**:
-  - Implement class-specific calendar rules and trading session boundaries.
-  - Continuous 24/7 crypto candle aggregation and daily bar completion.
-  - Gold spot continuous trading calendar rules.
-  - Prevent non-VN assets from entering Vietnamese equity exchange completion normalization.
-  - Provide clean foundation for Feature 22 (Deterministic Asset Analysis V2).
+  - Generalize quantitative analysis across asset classes with shared, specialized, and explicitly unavailable metrics.
+  - Compute deterministic return, range position, drawdown, and volatility metrics consuming normalized Feature 21 daily bars.
+  - Preserve explicit unavailable markers for metrics that do not apply to non-equity asset classes (e.g. market capitalization, P/E, VN-Index relative strength).
+  - Prepare clean multi-asset quantitative inputs for downstream features (Asset Comparison, Opportunity Engine, AI Brief).
 
 ---
 
-## 4. Ordered Roadmap (Features 21–30)
+## 4. Ordered Roadmap (Features 22–30)
 
-- **Feature 21 — Asset-Class Market & History Semantics**: Implement class-specific calendar rules, trading session hours, 24/7 crypto candles, NAV strike points, and bar completion logic.
 - **Feature 22 — Deterministic Asset Analysis V2**: Generalize quantitative analysis across asset classes with shared, specialized, and explicitly unavailable metrics.
 - **Feature 23 — Multi-Asset News Foundation**: Unified normalized news model with multi-source ingestion (CafeF, global macro/FX, crypto feeds).
 - **Feature 24 — Existing Feature Multi-Asset Integration**: Adapt Dashboard, Watchlist, Portfolio, Composition, Comparison, Alerts, and Personalized News to support multi-asset rendering cleanly.
