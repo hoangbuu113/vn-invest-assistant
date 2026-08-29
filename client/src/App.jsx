@@ -26,6 +26,7 @@ import TransactionHistorySection from './components/TransactionHistorySection.js
 import CashMovementModal from './components/CashMovementModal.jsx';
 import CashManagementSection from './components/CashManagementSection.jsx';
 import OpeningPositionModal from './components/OpeningPositionModal.jsx';
+import { PortfolioPerformanceSection } from './components/PortfolioPerformanceSection.jsx';
 import {
   formatNativeAmount,
   formatMarketChange,
@@ -1824,6 +1825,11 @@ function App() {
                     <span><strong>Định giá một phần</strong> — một số tài sản chưa có dữ liệu giá thị trường từ sàn.</span>
                   </div>
                 </div>
+              )}
+
+              {/* Feature 25D: Portfolio performance and benchmark comparison */}
+              {!portfolioLoading && (
+                <PortfolioPerformanceSection />
               )}
 
               {/* Content when loaded */}
