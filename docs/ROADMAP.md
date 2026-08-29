@@ -14,7 +14,7 @@ This document serves as the durable strategic memory for project sequencing, fea
 
 ---
 
-## 2. Completed Features (01–21)
+## 2. Completed Features (01–22)
 
 - **Feature 01**: Asset Browser
 - **Feature 02**: Market Snapshot
@@ -39,27 +39,22 @@ This document serves as the durable strategic memory for project sequencing, fea
   - **Feature 20A**: Representative Real Multi-Asset Providers (COMPLETE)
   - **Feature 20B**: Controlled Crypto Universe Expansion (COMPLETE)
 - **Feature 21**: Asset-Class Market & Historical Semantics (COMPLETE)
+- **Feature 22**: Deterministic Asset Analysis V2 (COMPLETE)
 
 ---
 
-## 3. Current Next Feature: Feature 22
+## 3. Current Next Feature: Feature 23
 
-### Feature 22 — Deterministic Asset Analysis V2
+### Feature 23 — Multi-Asset News Foundation
 - **Status**: NEXT IN SEQUENCE.
-- **Core Invariant**:
-  $$\text{Multi-Asset Historical Bars} \longrightarrow \text{Shared / Specialized Quantitative Metrics} \longrightarrow \text{Explicit Metric Availability Matrix}$$
-- **Key Objectives**:
-  - Generalize quantitative analysis across asset classes with shared, specialized, and explicitly unavailable metrics.
-  - Compute deterministic return, range position, drawdown, and volatility metrics consuming normalized Feature 21 daily bars.
-  - Preserve explicit unavailable markers for metrics that do not apply to non-equity asset classes (e.g. market capitalization, P/E, VN-Index relative strength).
-  - Prepare clean multi-asset quantitative inputs for downstream features (Asset Comparison, Opportunity Engine, AI Brief).
+- **Scope**: Unified normalized news model with multi-source ingestion for Vietnamese markets, global macro/FX, and crypto.
 
 ---
 
 ## 4. Ordered Roadmap (Features 22–30)
 
 - **Feature 22 — Deterministic Asset Analysis V2**: Generalize quantitative analysis across asset classes with shared, specialized, and explicitly unavailable metrics.
-- **Feature 23 — Multi-Asset News Foundation**: Unified normalized news model with multi-source ingestion (CafeF, global macro/FX, crypto feeds).
+- **Feature 23 — Multi-Asset News Foundation (NEXT)**: Unified normalized news model with multi-source ingestion (CafeF, global macro/FX, crypto feeds).
 - **Feature 24 — Existing Feature Multi-Asset Integration**: Adapt Dashboard, Watchlist, Portfolio, Composition, Comparison, Alerts, and Personalized News to support multi-asset rendering cleanly.
 - **Feature 25 — Portfolio Performance & Benchmarking**: Auditable capital-weighted returns (TWR/MWR), realized/unrealized P/L performance tracking, drawdowns, and benchmark comparison (VN-Index, S&P 500).
 - **Feature 26 — Risk & Exposure Analytics**: Multi-dimensional portfolio risk analysis (asset class, currency, sector, concentration risk, historical drawdown, volatility).

@@ -157,8 +157,65 @@ The following architectural and product decisions are confirmed and authoritativ
     - History represents finalized, completed canonical business periods.
     - Snapshot data must never fill or replace completed historical close bars.
   - **Analysis Invariant**:
-    - Feature 07 deterministic analysis remains restricted to `VN_EXCHANGE` assets.
-    - Enabling multi-asset history does not automatically enable multi-asset quantitative analysis. Feature 22 owns multi-asset quantitative analysis generalization.
+    - Feature 21 owns completed canonical history and its capability metadata; metric eligibility is evaluated separately by Feature 22.
+    - Close-only history is truthful complete history when the canonical capability declares `ohlc=false` and `volume=false`.
+- **Deterministic Analysis V2 (Feature 22)**:
+  - **Provider-Neutral Analysis Boundary**:
+    - Analysis consumes canonical asset metadata, completed canonical daily history, and provider-neutral `historyCapabilities` (`close`, `ohlc`, `volume`).
+    - Analysis methodology must not branch on provider names. Provider provenance may remain response metadata only.
+  - **Methodology Version**:
+    - Feature 22 analysis responses use `methodologyVersion = "v2"`.
+  - **Analysis Price**:
+    - `analysisPrice` is the last completed canonical daily close.
+    - `analysisPriceDate` is the canonical date of that close.
+    - A snapshot may be newer, but snapshot values never enter analysis formulas.
+  - **Period Price Change**:
+    - `priceChangePct = ((periodEndPrice / periodStartPrice) - 1) * 100` using full-precision validated prices.
+    - Its business meaning is **"Biến động giá trong kỳ"**, not total return or investment return.
+    - It excludes dividends/distributions, fees, funding, staking yield, and separately modeled corporate actions.
+  - **Universal Completed-Close Metrics**:
+    - `highestCompletedClose` and `lowestCompletedClose` are derived only from completed canonical closes in the evaluated window.
+    - `completedCloseRangePositionPct = ((lastClose - minClose) / (maxClose - minClose)) * 100`.
+    - A flat completed-close range returns `null` with reason `FLAT_CLOSE_RANGE`.
+    - `distanceBelowHighestCompletedClosePct = ((maxClose - lastClose) / maxClose) * 100`; a legitimate zero remains numeric zero.
+  - **Positive Close Transitions**:
+    - `positiveCloseTransitionRatio` is positive completed close-to-close transitions divided by all valid close-to-close transitions.
+    - Flat transitions remain in the denominator.
+    - This is historical descriptive frequency, never a win rate, probability, or forecast.
+    - Legacy `positivePeriodRatio` retains its existing VN breadth methodology where required for compatibility and is not silently repurposed.
+  - **Daily Volatility**:
+    - Daily simple return is `r_t = (close_t / close_(t-1)) - 1`.
+    - `dailyVolatilityPct` is the sample standard deviation of daily simple returns multiplied by 100.
+    - The minimum is 3 completed closes / 2 returns.
+    - Volatility is not annualized; no universal 252-day, 365-day, or other cross-asset annualization constant is assumed.
+  - **Maximum Drawdown**:
+    - `runningMaxClose_t = max(close_0 ... close_t)`.
+    - `drawdown_t = (close_t / runningMaxClose_t) - 1`.
+    - `maxDrawdownPct` is the absolute magnitude of the minimum completed-close drawdown multiplied by 100.
+    - Flat or monotonically increasing completed history returns available numeric zero.
+    - This is historical completed-close drawdown, not future risk or expected loss.
+  - **OHLC Capability and Compatibility**:
+    - OHLC metrics are capability-dependent. Yahoo VN history currently declares `close=true`, `ohlc=true`, `volume=true`; CoinGecko crypto and Alpha Vantage Gold history declare `close=true`, `ohlc=false`, `volume=false`.
+    - Close-only history never fabricates OHLC.
+    - Legacy `periodHighPrice`, `periodLowPrice`, `rangePositionPct`, and `distanceBelowHighPct` retain their intraday OHLC meanings where preserved for compatibility and are never redefined as completed-close metrics.
+  - **Metric Status Contract**:
+    - Metric states are `available`, `unavailable`, `insufficient_data`, and `unsupported`.
+    - Current machine-readable reasons include `NO_HISTORY`, `INSUFFICIENT_BARS`, `UNSUPPORTED_HISTORY`, `METRIC_REQUIRES_OHLC`, `METRIC_REQUIRES_VOLUME`, `INCOMPLETE_OHLC`, `FLAT_CLOSE_RANGE`, and `INVALID_CLOSE_SERIES`.
+    - Unavailable values are never represented as numeric zero.
+  - **Completeness and Sufficiency**:
+    - Feature 22 uses Feature 21 canonical history completeness and does not apply legacy fixed VN session thresholds across asset classes.
+    - Metric sufficiency is separate from history completeness. Close-only capability does not imply incomplete history, and VN having fewer observations than crypto over the same calendar window is expected.
+  - **Analysis Ranges**:
+    - Supported ranges are `1W`, `1M`, `3M`, `6M`, and `1Y`.
+    - An explicit `range` evaluates that exact Feature 21 calendar window. An omitted range preserves five-period behavior.
+    - Lower boundaries are not shifted backward to manufacture observations.
+  - **Asset Support**:
+    - VN stocks and VN ETFs are supported.
+    - Crypto and Gold Spot are supported through universal completed-close metrics.
+    - USD/VND analysis remains unsupported until trustworthy completed historical capability exists.
+    - A known asset without historical capability returns HTTP 422 with `UNSUPPORTED_HISTORY`.
+  - **Interpretation Boundary**:
+    - Feature 22 is metrics only: no bullish/bearish label, positive/negative investment judgment, recommendation, opportunity score, risk score, confidence percentage, prediction, or forecast.
 - **Numerical Precision**: Intermediate financial calculations retain full floating-point/numeric precision without premature two-decimal rounding. Rounding is presentation-only.
 - **Data Labeling**: Market snapshots are clearly disclosed as delayed (~15 min for equities) with explicit timestamp provenance. Missing source timestamps remain `null`.
 

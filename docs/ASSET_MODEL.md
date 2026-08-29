@@ -4,9 +4,9 @@ This document defines the canonical architectural and conceptual model for multi
 
 ---
 
-## 1. Current Implementation Status (Features 16–21)
+## 1. Current Implementation Status (Features 16–22)
 
-Features 16 through 21 establish the canonical schema, ledger authority, provider abstraction, FX valuation, full controlled multi-asset universe, and normalized historical semantics:
+Features 16 through 22 establish the canonical schema, ledger authority, provider abstraction, FX valuation, full controlled multi-asset universe, normalized historical semantics, and deterministic multi-asset analysis:
 
 - **Verified Production Universe (49 Canonical Assets)**:
   - **Vietnamese Equities & ETFs** (`VN_EXCHANGE`, `Asia/Ho_Chi_Minh`, `VND`, `share`):
@@ -32,11 +32,13 @@ Features 16 through 21 establish the canonical schema, ledger authority, provide
     $$\text{Canonical Asset} \longrightarrow \text{Explicit Provider Mapping} \longrightarrow \text{Provider Adapter} \longrightarrow \text{Normalized Snapshot / History}$$
   - Universal reporting currency is strictly `VND`; native non-VND asset valuations are converted on demand via direct `quoteCurrency -> VND` FX rates.
   - Multi-asset calendar and historical bar engine (`server/src/history.js`) with calendar-window lookbacks (`1W`, `1M`, `3M`, `6M`, `1Y`) and current-day exclusivity.
+  - Provider-neutral deterministic analysis V2 over completed canonical daily history, with universal completed-close metrics and capability-gated OHLC metrics.
   - Database trigger guard (`enforce_vnd_portfolio_transaction_asset`) strictly enforcing VND-only transaction accounting until multi-currency FX accounting is implemented.
 
 - **Current Intentional Limitations**:
   - USD/VND historical bars remain unsupported due to unresolved daily timezone compatibility.
-  - Feature 07 quantitative analysis remains restricted to `VN_EXCHANGE` assets; multi-asset quantitative analysis generalization is deferred to Feature 22.
+  - USD/VND deterministic analysis remains unsupported until trustworthy completed historical capability exists.
+  - Crypto and Gold Spot history is close-only, so OHLC-dependent analysis metrics remain explicitly unavailable for those assets.
   - Non-VND cost basis and unrealized P/L remain unavailable until acquisition-time FX accounting exists.
   - Non-VND BUY/SELL transactions are strictly blocked at database trigger level.
   - The single VND cash ledger remains authoritative for all cash operations (no multi-currency cash balances).
@@ -176,11 +178,33 @@ The double-ledger architecture is the sole authoritative mechanism for portfolio
 
 ## 12. Quantitative Analysis Semantics
 
-- Analysis metrics must be mathematically valid for the underlying asset class.
-- Metrics may be:
-  1. **Cross-Asset Universal**: When mathematically sound across all asset classes (e.g. unadjusted percentage price change over completed lookback windows).
-  2. **Class-Specialized**: When tailored to specific asset mechanics (e.g. exchange trading session breadth vs 24/7 continuous volatility).
-  3. **Explicitly Unavailable**: When an equity-centric metric has no meaningful interpretation for an asset class (marked `unavailable`, never forced to 0).
+- **Provider-Neutral Capability Model**:
+  - Analysis consumes canonical asset metadata, completed canonical daily history, and `historyCapabilities`:
+    - `close`
+    - `ohlc`
+    - `volume`
+  - Provider names and payload formats do not select formulas. Provider provenance may remain metadata only.
+  - Capability availability and per-window metric availability are distinct: an asset may support a capability globally while a specific window still has insufficient or incomplete observations.
+- **Current Analysis Support Matrix**:
+  - **`VN_EXCHANGE` stock / ETF**:
+    - Completed-close metrics are supported.
+    - OHLC metrics are supported when canonical OHLC is complete for the evaluated window.
+    - Current Yahoo canonical history includes volume, but Feature 22 adds no volume-analysis methodology.
+  - **`CONTINUOUS_24_7` crypto**:
+    - Completed-close analysis is supported.
+    - OHLC analysis is unsupported with current close-only canonical history.
+    - Daily volatility is a non-annualized sample statistic despite continuous 24/7 trading.
+  - **`GLOBAL_24_5` Gold Spot (`XAU/USD`)**:
+    - Completed-close analysis is supported.
+    - OHLC analysis is unsupported with current close-only canonical history.
+  - **`GLOBAL_24_5` USD/VND**:
+    - Snapshot is supported.
+    - History and deterministic analysis are unsupported pending trustworthy completed historical capability.
+- **Metric Classes**:
+  1. **Cross-Asset Universal**: Mathematically sound completed-close metrics, including period price change, highest/lowest completed close, completed-close range position, distance below highest completed close, positive close transition ratio, non-annualized sample daily volatility, and maximum completed-close drawdown.
+  2. **Capability-Dependent**: Metrics requiring canonical OHLC are available only when `historyCapabilities.ohlc=true` and the evaluated window contains complete OHLC observations.
+  3. **Explicitly Unavailable or Unsupported**: Missing capability or history is expressed through machine-readable metric/analysis status, never forced to zero and never synthesized from close.
+- **Interpretation Boundary**: Analysis V2 is deterministic metrics only. It produces no recommendation, score, confidence percentage, prediction, or forecast.
 
 ---
 

@@ -1,12 +1,12 @@
 # Current Project Status
 
 ## LATEST VERIFIED CHECKPOINT
-- **Commit**: `ef694d2`
+- **Commit**: `61ca0b9`
 - **Branch**: `main`
-- **Feature 21 Implementation Commit**: `4a6b394`
+- **Feature 22 Implementation Commit**: `61ca0b9`
 - **Asset Explorer UI Patch Commit**: `ef694d2`
 - **Automated Test Suite**:
-  - Latest Full Backend Regression: 312/312 PASS (Features 01–21 complete test coverage)
+  - Latest Full Backend Regression: 345/345 PASS (Features 01–22 complete test coverage)
 - **Client Build**: Production build clean
 - **Git Working Tree**: Clean
 - **GitHub Remote**: No origin configured / remote state not verified (local git authority)
@@ -15,7 +15,7 @@
 MULTI-ASSET FOUNDATION, HISTORY & QUANTITATIVE ANALYSIS
 
 ## CURRENT NEXT PROJECT TASK
-Feature 22 — Deterministic Asset Analysis V2 (generalized quantitative analysis across asset classes with shared, specialized, and explicitly unavailable metrics). See `docs/ROADMAP.md`.
+Feature 23 — Multi-Asset News Foundation. See `docs/ROADMAP.md`.
 
 ---
 
@@ -28,7 +28,16 @@ Feature 22 — Deterministic Asset Analysis V2 (generalized quantitative analysi
 ## CURRENT PUBLIC HISTORY CAPABILITIES
 - **Supported Ranges**: `1W`, `1M`, `3M`, `6M`, `1Y`
 - **Range Semantics**: Canonical calendar lookback windows (`1W` = 7 days, `1M`/`3M`/`6M` = calendar months, `1Y` = calendar year) with upper bound strictly exclusive of the current uncompleted market date.
-- **Analysis Invariant**: Feature 07 deterministic analysis remains restricted to `VN_EXCHANGE` assets; multi-asset history does not automatically enable multi-asset analysis.
+- **Analysis Invariant**: Feature 22 consumes completed canonical history and provider-neutral history capabilities; assets without trustworthy completed history remain explicitly unsupported.
+
+## CURRENT FEATURE 22 ANALYSIS CAPABILITIES
+- **Methodology**: `methodologyVersion = "v2"`; deterministic, metrics-only, and provider-neutral.
+- **VN Stocks**: Supported with completed canonical daily history.
+- **VN ETFs**: Supported with completed canonical daily history.
+- **Crypto**: Supported with completed close-only canonical history.
+- **Gold Spot (`XAU/USD`)**: Supported with completed close-only canonical history.
+- **USD/VND FX**: Analysis unsupported because trustworthy completed historical series remains unavailable.
+- **Interpretation Boundary**: No recommendation, score, confidence percentage, prediction, or forecast.
 
 ## ASSET BROWSER UI STATE
 - Asset Browser is organized as a unified Asset Explorer grouped by asset class (`Cổ phiếu Việt Nam`, `ETF`, `Crypto`, `Vàng`, `Ngoại hối`).
@@ -45,7 +54,7 @@ Feature 22 — Deterministic Asset Analysis V2 (generalized quantitative analysi
 
 ---
 
-## COMPLETED FEATURES SUMMARY (01–21)
+## COMPLETED FEATURES SUMMARY (01–22)
 
 - **Features 01–03**: Asset Browser (`/api/assets`), Market Snapshot (delayed Yahoo Finance `/api/market/:symbol`), News Feed (CafeF RSS `/api/news`).
 - **Feature 04**: Investor Profile (`GET`/`PUT /api/profile`), singleton enforcement, holdings management.
@@ -71,3 +80,7 @@ Feature 22 — Deterministic Asset Analysis V2 (generalized quantitative analysi
   - Normalized multi-asset historical bar engine with asset-class specific calendar policies (`VN_EXCHANGE`, `CONTINUOUS_24_7`, `GLOBAL_24_5`).
   - Canonical calendar lookback windows (`1W`, `1M`, `3M`, `6M`, `1Y`) with current-date exclusivity.
   - Truthful representation: Yahoo OHLCV for VN equities/ETFs, CoinGecko close-only for 40 cryptos, Alpha Vantage close-only for Gold Spot, explicit unsupported error for USD/VND history. Missing candle fields are preserved as `null`.
+- **Feature 22**: Deterministic Analysis V2 (COMPLETE):
+  - Provider-neutral quantitative analysis over completed canonical daily history with `methodologyVersion = "v2"`.
+  - VN stocks and ETFs support completed-close and capability-dependent OHLC metrics; crypto and Gold Spot support universal completed-close metrics without fabricated OHLCV.
+  - USD/VND analysis remains explicitly unsupported until trustworthy completed historical capability exists.
