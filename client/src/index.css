@@ -2326,6 +2326,113 @@ body {
   background: #dbeafe;
 }
 
+/* Asset Browser Grouping & Filters */
+.asset-filter-pill:hover:not(.active) {
+  background-color: var(--color-slate-50) !important;
+  border-color: var(--color-slate-300) !important;
+  transform: translateY(-1px);
+}
+
+.asset-filter-pill.active {
+  box-shadow: 0 1px 3px rgba(37, 99, 235, 0.12);
+}
+
+.asset-symbol-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background-color: var(--color-brand-50);
+  color: var(--color-brand-700);
+  border: 1px solid var(--color-brand-200);
+  font-weight: 800;
+  font-size: 0.82rem;
+  line-height: 1.2;
+}
+
+.asset-desktop-table {
+  display: block;
+}
+
+.asset-mobile-list {
+  display: none;
+}
+
+@media (max-width: 640px) {
+  .asset-desktop-table {
+    display: none;
+  }
+
+  .asset-mobile-list {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .asset-mobile-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.85rem 1rem;
+    border-bottom: 1px solid var(--border-subtle);
+    cursor: pointer;
+    transition: background-color var(--transition-fast);
+  }
+
+  .asset-mobile-row:last-child {
+    border-bottom: none;
+  }
+
+  .asset-mobile-row:hover,
+  .asset-mobile-row:active {
+    background-color: rgba(239, 246, 255, 0.6);
+  }
+
+  .asset-mobile-main {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+
+  .asset-mobile-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+
+  .asset-mobile-name {
+    color: var(--color-slate-800);
+    font-weight: 600;
+    font-size: 0.88rem;
+    line-height: 1.3;
+    word-break: break-word;
+  }
+
+  .asset-mobile-meta {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.78rem;
+    color: var(--color-slate-500);
+  }
+
+  .asset-mobile-dot {
+    color: var(--color-slate-300);
+    font-weight: 700;
+  }
+
+  .asset-mobile-context {
+    color: var(--color-slate-600);
+    font-weight: 500;
+  }
+
+  .asset-mobile-action {
+    flex-shrink: 0;
+  }
+}
+
 /* Respect user's motion preference */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {

@@ -73,6 +73,8 @@ const ASSET_TYPE_LABELS = {
   etf: 'ETF',
   fund: 'Quỹ đầu tư',
   gold: 'Vàng',
+  crypto: 'Crypto',
+  fx: 'Ngoại hối',
   deposit: 'Tiền gửi',
   bank_deposit: 'Tiền gửi',
   bond: 'Trái phiếu'
@@ -82,6 +84,44 @@ function formatAssetType(assetType) {
   if (!assetType) return 'N/A';
   return ASSET_TYPE_LABELS[String(assetType).toLowerCase()] || assetType;
 }
+
+function formatMarketContext(asset) {
+  if (!asset) return '—';
+  const policy = asset.market_policy || asset.marketPolicy;
+  if (policy === 'VN_EXCHANGE') {
+    return asset.exchange || asset.market_code || asset.marketCode || 'HOSE';
+  }
+  if (policy === 'CONTINUOUS_24_7') {
+    return '24/7';
+  }
+  if (policy === 'GLOBAL_24_5') {
+    return '24/5';
+  }
+  if (policy === 'NAV_SCHEDULED') {
+    return 'NAV';
+  }
+  if (asset.exchange) {
+    return asset.exchange;
+  }
+  return '—';
+}
+
+const ASSET_CLASS_FILTERS = [
+  { id: 'all', label: 'Tất cả' },
+  { id: 'stock', label: 'Cổ phiếu' },
+  { id: 'etf', label: 'ETF' },
+  { id: 'crypto', label: 'Crypto' },
+  { id: 'gold', label: 'Vàng' },
+  { id: 'fx', label: 'Ngoại hối' }
+];
+
+const ASSET_SECTIONS = [
+  { type: 'stock', title: 'Cổ phiếu Việt Nam', icon: '🏛️' },
+  { type: 'etf', title: 'ETF', icon: '📦' },
+  { type: 'crypto', title: 'Crypto', icon: '💎' },
+  { type: 'gold', title: 'Vàng', icon: '🥇' },
+  { type: 'fx', title: 'Ngoại hối', icon: '💱' }
+];
 
 const NEWS_CATEGORY_LABELS = {
   macro: 'Vĩ mô',
@@ -217,6 +257,9 @@ function App() {
   const [assets, setAssets] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [assetTypeFilter, setAssetTypeFilter] = useState('all'); // 'all' | 'stock' | 'etf' | 'crypto' | 'gold' | 'fx'
+  const [assetSearchQuery, setAssetSearchQuery] = useState('');
+  const [cryptoExpanded, setCryptoExpanded] = useState(false);
 
   // Selected asset detail state
   const [selectedSymbol, setSelectedSymbol] = useState(null);
@@ -2782,7 +2825,7 @@ function App() {
                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '1rem', paddingTop: '0.85rem', borderTop: '1px solid var(--border-subtle)', fontSize: '0.88rem' }}>
                         <div><span style={{ color: 'var(--color-slate-500)' }}>Mã tài sản:</span> <strong style={{ color: 'var(--color-slate-900)' }}>{assetDetail.symbol}</strong></div>
                         <div><span style={{ color: 'var(--color-slate-500)' }}>Loại tài sản:</span> <strong style={{ color: 'var(--color-slate-900)' }}>{formatAssetType(assetDetail.asset_type)}</strong></div>
-                        <div><span style={{ color: 'var(--color-slate-500)' }}>Sàn niêm yết:</span> <strong style={{ color: 'var(--color-slate-900)' }}>{assetDetail.exchange || 'N/A'}</strong></div>
+                        <div><span style={{ color: 'var(--color-slate-500)' }}>Thị trường:</span> <strong style={{ color: 'var(--color-slate-900)' }}>{formatMarketContext(assetDetail)}</strong></div>
                         <div><span style={{ color: 'var(--color-slate-500)' }}>Mã định danh:</span> <span style={{ color: 'var(--color-slate-400)', fontSize: '0.78rem' }}>{assetDetail.id}</span></div>
                       </div>
                     </TiltCard>
@@ -3043,124 +3086,432 @@ function App() {
               ) : (
                 /* Asset List View */
                 <div>
-                  <motion.div variants={sectionItemVariants} className="section-header" style={{ alignItems: 'center' }}>
-                    <div>
-                      <h2 className="section-title">Danh sách tài sản</h2>
-                      <p className="section-subtitle">
-                        Danh sách tài sản đang theo dõi trong hệ thống ({assets.length} mã)
-                      </p>
-                    </div>
+                  {/* Dynamic counts and filtered collections */}
+                  {(() => {
+                    const assetCounts = { all: assets.length, stock: 0, etf: 0, crypto: 0, gold: 0, fx: 0 };
+                    for (const a of assets) {
+                      const t = String(a.asset_type || a.assetType || '').toLowerCase();
+                      if (assetCounts[t] !== undefined) {
+                        assetCounts[t]++;
+                      }
+                    }
 
-                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-                      {/* Feature 12: Price Alerts Entry */}
-                      <MagneticButton
-                        onClick={() => {
-                          setIsViewingAlerts(true);
-                        }}
-                        className="fintech-btn btn-secondary btn-sm"
-                        style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
-                      >
-                        <span>🔔</span>
-                        <span>Cảnh báo giá</span>
-                      </MagneticButton>
+                    const searchFilteredAssets = !assetSearchQuery.trim()
+                      ? assets
+                      : assets.filter((a) => {
+                          const q = assetSearchQuery.trim().toLowerCase();
+                          const sym = String(a.symbol || '').toLowerCase();
+                          const name = String(a.name || '').toLowerCase();
+                          return sym.includes(q) || name.includes(q);
+                        });
 
-                      {/* Feature 11: Secondary Action */}
-                      <MagneticButton
-                        onClick={() => {
-                          setComparePresetSymbols(['FPT', 'VCB']);
-                          setIsComparingAssets(true);
-                        }}
-                        className="fintech-btn btn-secondary btn-sm"
-                        style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
-                      >
-                        <span>⚖️</span>
-                        <span>So sánh tài sản</span>
-                      </MagneticButton>
-                    </div>
-                  </motion.div>
+                    const currentFilteredAssets = assetTypeFilter === 'all'
+                      ? searchFilteredAssets
+                      : searchFilteredAssets.filter(
+                          (a) => String(a.asset_type || a.assetType || '').toLowerCase() === assetTypeFilter
+                        );
 
-                  {loading && (
-                    <div className="state-box">
-                      <div className="state-icon spin-icon">⏳</div>
-                      <h3 className="state-title">Đang tải danh sách tài sản...</h3>
-                    </div>
-                  )}
-
-                  {error && (
-                    <div className="fintech-banner banner-error">
-                      <p style={{ margin: 0 }}><strong>Lỗi tải danh sách tài sản:</strong> {error}</p>
-                    </div>
-                  )}
-
-                  {!loading && !error && assets.length === 0 && (
-                    <div className="state-box">
-                      <div className="state-icon float-icon">📈</div>
-                      <h3 className="state-title">Không tìm thấy tài sản nào</h3>
-                      <p className="state-desc">Chưa có tài sản trong cơ sở dữ liệu.</p>
-                    </div>
-                  )}
-
-                  {!loading && !error && assets.length > 0 && (
-                    <motion.div variants={sectionItemVariants} className="fintech-card" style={{ overflow: 'hidden' }}>
-                      <div className="table-container">
-                        <table className="fintech-table">
-                          <thead>
-                            <tr>
-                              <th>Mã</th>
-                              <th>Tên tài sản</th>
-                              <th>Loại tài sản</th>
-                              <th>Sàn giao dịch</th>
-                              <th style={{ textAlign: 'right' }}>Thao tác</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {assets.map((asset) => (
-                              <tr
-                                key={asset.id || asset.symbol}
-                                className="row-interactive"
-                                onClick={() => handleSelectAsset(asset.symbol)}
-                              >
-                                <td style={{ fontWeight: 800, color: 'var(--color-slate-900)' }}>
-                                  <span style={{
-                                    padding: '2px 8px',
-                                    borderRadius: '4px',
-                                    backgroundColor: 'var(--color-brand-50)',
-                                    color: 'var(--color-brand-700)',
-                                    border: '1px solid var(--color-brand-200)',
-                                    fontWeight: 800
-                                  }}>
-                                    {asset.symbol}
-                                  </span>
-                                </td>
-                                <td style={{ color: 'var(--color-slate-800)', fontWeight: 600 }}>
-                                  {asset.name}
-                                </td>
-                                <td>
-                                  <span className="fintech-badge badge-neutral">
-                                    {formatAssetType(asset.asset_type)}
-                                  </span>
-                                </td>
-                                <td style={{ color: 'var(--color-slate-500)' }}>
-                                  {asset.exchange || 'N/A'}
-                                </td>
-                                <td style={{ textAlign: 'right' }}>
-                                  <MagneticButton
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      handleSelectAsset(asset.symbol);
-                                    }}
-                                    className="fintech-btn btn-secondary btn-sm"
-                                  >
-                                    Xem chi tiết ↗
-                                  </MagneticButton>
-                                </td>
+                    const renderAssetTable = (assetList) => (
+                      <>
+                        {/* Desktop View: Full 5-Column Table */}
+                        <div className="asset-desktop-table table-container">
+                          <table className="fintech-table">
+                            <thead>
+                              <tr>
+                                <th style={{ width: '120px' }}>Mã</th>
+                                <th>Tên tài sản</th>
+                                <th style={{ width: '130px' }}>Loại tài sản</th>
+                                <th style={{ width: '140px' }}>Thị trường</th>
+                                <th style={{ textAlign: 'right', width: '140px' }}>Thao tác</th>
                               </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </motion.div>
-                  )}
+                            </thead>
+                            <tbody>
+                              {assetList.map((asset) => (
+                                <tr
+                                  key={asset.id || asset.symbol}
+                                  className="row-interactive"
+                                  onClick={() => handleSelectAsset(asset.symbol)}
+                                >
+                                  <td style={{ fontWeight: 800, color: 'var(--color-slate-900)' }}>
+                                    <span className="asset-symbol-badge">
+                                      {asset.symbol}
+                                    </span>
+                                  </td>
+                                  <td style={{ color: 'var(--color-slate-800)', fontWeight: 600 }}>
+                                    {asset.name}
+                                  </td>
+                                  <td>
+                                    <span className="fintech-badge badge-neutral">
+                                      {formatAssetType(asset.asset_type || asset.assetType)}
+                                    </span>
+                                  </td>
+                                  <td style={{ color: 'var(--color-slate-600)', fontWeight: 500 }}>
+                                    {formatMarketContext(asset)}
+                                  </td>
+                                  <td style={{ textAlign: 'right' }}>
+                                    <MagneticButton
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleSelectAsset(asset.symbol);
+                                      }}
+                                      className="fintech-btn btn-secondary btn-sm"
+                                    >
+                                      Xem chi tiết ↗
+                                    </MagneticButton>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+
+                        {/* Mobile View: Compact Responsive Rows */}
+                        <div className="asset-mobile-list">
+                          {assetList.map((asset) => (
+                            <div
+                              key={asset.id || asset.symbol}
+                              className="asset-mobile-row"
+                              onClick={() => handleSelectAsset(asset.symbol)}
+                            >
+                              <div className="asset-mobile-main">
+                                <div className="asset-mobile-header">
+                                  <span className="asset-symbol-badge">{asset.symbol}</span>
+                                  <span className="asset-mobile-name">{asset.name}</span>
+                                </div>
+                                <div className="asset-mobile-meta">
+                                  <span className="fintech-badge badge-neutral" style={{ fontSize: '0.7rem', padding: '1px 6px' }}>
+                                    {formatAssetType(asset.asset_type || asset.assetType)}
+                                  </span>
+                                  <span className="asset-mobile-dot">·</span>
+                                  <span className="asset-mobile-context">{formatMarketContext(asset)}</span>
+                                </div>
+                              </div>
+                              <div className="asset-mobile-action">
+                                <MagneticButton
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleSelectAsset(asset.symbol);
+                                  }}
+                                  className="fintech-btn btn-secondary btn-sm"
+                                  style={{ fontSize: '0.78rem', padding: '0.35rem 0.65rem' }}
+                                >
+                                  Xem chi tiết ↗
+                                </MagneticButton>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </>
+                    );
+
+                    return (
+                      <>
+                        <motion.div variants={sectionItemVariants} className="section-header" style={{ alignItems: 'center', marginBottom: '1rem' }}>
+                          <div>
+                            <h2 className="section-title">Danh sách tài sản</h2>
+                            <p className="section-subtitle">
+                              {assetSearchQuery.trim() || assetTypeFilter !== 'all'
+                                ? `Hiển thị ${currentFilteredAssets.length} / ${assets.length} tài sản trong hệ thống`
+                                : `${assets.length} tài sản trong hệ thống`}
+                            </p>
+                          </div>
+
+                          <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                            {/* Feature 12: Price Alerts Entry */}
+                            <MagneticButton
+                              onClick={() => {
+                                setIsViewingAlerts(true);
+                              }}
+                              className="fintech-btn btn-secondary btn-sm"
+                              style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                            >
+                              <span>🔔</span>
+                              <span>Cảnh báo giá</span>
+                            </MagneticButton>
+
+                            {/* Feature 11: Secondary Action */}
+                            <MagneticButton
+                              onClick={() => {
+                                setComparePresetSymbols(['FPT', 'VCB']);
+                                setIsComparingAssets(true);
+                              }}
+                              className="fintech-btn btn-secondary btn-sm"
+                              style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                            >
+                              <span>⚖️</span>
+                              <span>So sánh tài sản</span>
+                            </MagneticButton>
+                          </div>
+                        </motion.div>
+
+                        {/* Top Filter & Search Bar */}
+                        {!loading && !error && assets.length > 0 && (
+                          <motion.div
+                            variants={sectionItemVariants}
+                            style={{
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                              flexWrap: 'wrap',
+                              gap: '0.75rem',
+                              marginBottom: '1.25rem',
+                              padding: '0.75rem 1rem',
+                              background: 'rgba(255, 255, 255, 0.85)',
+                              backdropFilter: 'blur(10px)',
+                              borderRadius: 'var(--radius-lg)',
+                              border: '1px solid var(--border-default)',
+                              boxShadow: 'var(--shadow-xs)'
+                            }}
+                          >
+                            {/* Filter Pills */}
+                            <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
+                              {ASSET_CLASS_FILTERS.map((f) => {
+                                const count = assetCounts[f.id] || 0;
+                                const isActive = assetTypeFilter === f.id;
+                                return (
+                                  <button
+                                    key={f.id}
+                                    type="button"
+                                    onClick={() => {
+                                      setAssetTypeFilter(f.id);
+                                      setCryptoExpanded(false);
+                                    }}
+                                    className={`asset-filter-pill ${isActive ? 'active' : ''}`}
+                                    style={{
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '6px',
+                                      padding: '0.35rem 0.75rem',
+                                      fontSize: '0.82rem',
+                                      fontWeight: isActive ? 700 : 600,
+                                      borderRadius: 'var(--radius-full)',
+                                      border: isActive ? '1.5px solid var(--color-brand-600)' : '1px solid var(--border-default)',
+                                      background: isActive ? 'var(--color-brand-50)' : '#ffffff',
+                                      color: isActive ? 'var(--color-brand-700)' : 'var(--color-slate-700)',
+                                      cursor: 'pointer',
+                                      transition: 'all 0.15s ease'
+                                    }}
+                                  >
+                                    <span>{f.label}</span>
+                                    <span
+                                      style={{
+                                        fontSize: '0.72rem',
+                                        fontWeight: 700,
+                                        padding: '1px 6px',
+                                        borderRadius: 'var(--radius-full)',
+                                        background: isActive ? 'var(--color-brand-200)' : 'var(--color-slate-100)',
+                                        color: isActive ? 'var(--color-brand-800)' : 'var(--color-slate-600)'
+                                      }}
+                                    >
+                                      {count}
+                                    </span>
+                                  </button>
+                                );
+                              })}
+                            </div>
+
+                            {/* Search Input */}
+                            <div style={{ position: 'relative', minWidth: '220px', maxWidth: '320px', flex: '1 1 auto' }}>
+                              <span
+                                style={{
+                                  position: 'absolute',
+                                  left: '10px',
+                                  top: '50%',
+                                  transform: 'translateY(-50%)',
+                                  fontSize: '0.85rem',
+                                  color: 'var(--color-slate-400)',
+                                  pointerEvents: 'none'
+                                }}
+                              >
+                                🔍
+                              </span>
+                              <input
+                                type="text"
+                                placeholder="Tìm mã hoặc tên tài sản..."
+                                value={assetSearchQuery}
+                                onChange={(e) => setAssetSearchQuery(e.target.value)}
+                                className="fintech-input"
+                                style={{
+                                  paddingLeft: '32px',
+                                  paddingRight: assetSearchQuery ? '30px' : '12px',
+                                  paddingTop: '0.4rem',
+                                  paddingBottom: '0.4rem',
+                                  fontSize: '0.85rem',
+                                  height: '36px'
+                                }}
+                              />
+                              {assetSearchQuery && (
+                                <button
+                                  type="button"
+                                  onClick={() => setAssetSearchQuery('')}
+                                  style={{
+                                    position: 'absolute',
+                                    right: '8px',
+                                    top: '50%',
+                                    transform: 'translateY(-50%)',
+                                    background: 'none',
+                                    border: 'none',
+                                    fontSize: '0.85rem',
+                                    color: 'var(--color-slate-400)',
+                                    cursor: 'pointer',
+                                    padding: '2px 4px',
+                                    lineHeight: 1
+                                  }}
+                                  title="Xóa tìm kiếm"
+                                >
+                                  ✕
+                                </button>
+                              )}
+                            </div>
+                          </motion.div>
+                        )}
+
+                        {loading && (
+                          <div className="state-box">
+                            <div className="state-icon spin-icon">⏳</div>
+                            <h3 className="state-title">Đang tải danh sách tài sản...</h3>
+                          </div>
+                        )}
+
+                        {error && (
+                          <div className="fintech-banner banner-error">
+                            <p style={{ margin: 0 }}><strong>Lỗi tải danh sách tài sản:</strong> {error}</p>
+                          </div>
+                        )}
+
+                        {!loading && !error && assets.length === 0 && (
+                          <div className="state-box">
+                            <div className="state-icon float-icon">📈</div>
+                            <h3 className="state-title">Không tìm thấy tài sản nào</h3>
+                            <p className="state-desc">Chưa có tài sản trong cơ sở dữ liệu.</p>
+                          </div>
+                        )}
+
+                        {/* Empty search/filter result */}
+                        {!loading && !error && assets.length > 0 && currentFilteredAssets.length === 0 && (
+                          <div className="state-box">
+                            <div className="state-icon float-icon">🔍</div>
+                            <h3 className="state-title">
+                              {assetSearchQuery.trim()
+                                ? `Không tìm thấy tài sản phù hợp với "${assetSearchQuery}"`
+                                : 'Không tìm thấy tài sản nào trong phân loại đã chọn'}
+                            </h3>
+                            <p className="state-desc">
+                              {assetSearchQuery.trim()
+                                ? 'Hãy thử tìm kiếm với mã hoặc tên tài sản khác.'
+                                : 'Chưa có tài sản nào thuộc danh mục này.'}
+                            </p>
+                            {(assetSearchQuery.trim() || assetTypeFilter !== 'all') && (
+                              <div style={{ marginTop: '1.25rem' }}>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setAssetSearchQuery('');
+                                    setAssetTypeFilter('all');
+                                  }}
+                                  className="fintech-btn btn-secondary btn-sm"
+                                >
+                                  Xóa bộ lọc
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* "Tất cả" View: Grouped by Section */}
+                        {!loading && !error && assetTypeFilter === 'all' && currentFilteredAssets.length > 0 && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+                            {ASSET_SECTIONS.map((section) => {
+                              const sectionAssets = searchFilteredAssets.filter(
+                                (a) => String(a.asset_type || a.assetType || '').toLowerCase() === section.type
+                              );
+                              if (sectionAssets.length === 0) return null;
+
+                              const isCrypto = section.type === 'crypto';
+                              const isCollapsible = isCrypto && sectionAssets.length > 8;
+                              const displayedAssets = isCollapsible && !cryptoExpanded
+                                ? sectionAssets.slice(0, 8)
+                                : sectionAssets;
+
+                              return (
+                                <motion.div
+                                  key={section.type}
+                                  variants={sectionItemVariants}
+                                  className="fintech-card"
+                                  style={{ overflow: 'hidden' }}
+                                >
+                                  {/* Section Subheader */}
+                                  <div
+                                    style={{
+                                      padding: '0.85rem 1.25rem',
+                                      display: 'flex',
+                                      justifyContent: 'space-between',
+                                      alignItems: 'center',
+                                      background: 'rgba(248, 250, 252, 0.75)',
+                                      borderBottom: '1px solid var(--border-subtle)'
+                                    }}
+                                  >
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem' }}>
+                                      <span style={{ fontSize: '1.1rem' }}>{section.icon}</span>
+                                      <h3 style={{ margin: 0, fontSize: '0.98rem', fontWeight: 800, color: 'var(--color-slate-900)' }}>
+                                        {section.title}
+                                      </h3>
+                                      <span
+                                        style={{
+                                          fontSize: '0.72rem',
+                                          fontWeight: 700,
+                                          padding: '2px 7px',
+                                          borderRadius: 'var(--radius-full)',
+                                          backgroundColor: 'var(--color-brand-100)',
+                                          color: 'var(--color-brand-800)',
+                                          border: '1px solid var(--color-brand-200)'
+                                        }}
+                                      >
+                                        {sectionAssets.length}
+                                      </span>
+                                    </div>
+                                  </div>
+
+                                  {/* Table */}
+                                  {renderAssetTable(displayedAssets)}
+
+                                  {/* Bottom Expand/Collapse Control for Crypto */}
+                                  {isCollapsible && (
+                                    <div
+                                      style={{
+                                        padding: '0.65rem',
+                                        textAlign: 'center',
+                                        background: 'linear-gradient(180deg, rgba(255, 255, 255, 0.4) 0%, rgba(248, 250, 252, 0.9) 100%)',
+                                        borderTop: '1px solid var(--border-subtle)'
+                                      }}
+                                    >
+                                      <button
+                                        type="button"
+                                        onClick={() => setCryptoExpanded(!cryptoExpanded)}
+                                        className="fintech-btn btn-secondary btn-sm"
+                                        style={{ fontSize: '0.8rem' }}
+                                      >
+                                        {cryptoExpanded
+                                          ? 'Thu gọn ▴'
+                                          : `Xem tất cả ${sectionAssets.length} Crypto (${sectionAssets.length - displayedAssets.length} mã khác) ▾`}
+                                      </button>
+                                    </div>
+                                  )}
+                                </motion.div>
+                              );
+                            })}
+                          </div>
+                        )}
+
+                        {/* Dedicated Single-Type View */}
+                        {!loading && !error && assetTypeFilter !== 'all' && currentFilteredAssets.length > 0 && (
+                          <motion.div variants={sectionItemVariants} className="fintech-card" style={{ overflow: 'hidden' }}>
+                            {renderAssetTable(currentFilteredAssets)}
+                          </motion.div>
+                        )}
+                      </>
+                    );
+                  })()}
                 </div>
               )}
             </motion.section>
