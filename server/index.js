@@ -22,6 +22,7 @@ import { getNewsFeed, getPersonalizedNewsFeed } from './src/news.js';
 import { getPortfolioOverview } from './src/portfolio.js';
 import { getPortfolioComposition } from './src/composition.js';
 import { getPortfolioPerformance } from './src/performance.js';
+import { getPortfolioBenchmark } from './src/benchmarks.js';
 import { getAssetAnalysis } from './src/analysis.js';
 import { getAssetComparison } from './src/comparison.js';
 import {
@@ -73,6 +74,7 @@ export function createApp(services = {}) {
     getPortfolioOverviewFn = getPortfolioOverview,
     getPortfolioCompositionFn = getPortfolioComposition,
     getPortfolioPerformanceFn = getPortfolioPerformance,
+    getPortfolioBenchmarkFn = getPortfolioBenchmark,
     checkSupabaseConnectionFn = checkSupabaseConnection,
     getAssetAnalysisFn = getAssetAnalysis,
     getAssetComparisonFn = getAssetComparison,
@@ -732,6 +734,30 @@ export function createApp(services = {}) {
       const response = {
         status: 'error',
         message: error.message || 'Failed to generate portfolio performance'
+      };
+      if (error.code) response.code = error.code;
+      return res.status(statusCode).json(response);
+    }
+  });
+
+  // Portfolio benchmark comparison endpoint (Feature 25C — VN-Index primary / S&P 500 reference-only)
+  app.get('/api/portfolio/performance/benchmark', async (req, res) => {
+    const { range = '1M', benchmark } = req.query;
+    try {
+      const result = await getPortfolioBenchmarkFn({
+        benchmarkId: benchmark,
+        range,
+        getPortfolioPerformanceFn
+      });
+      return res.json({
+        status: 'ok',
+        data: result
+      });
+    } catch (error) {
+      const statusCode = error.status || 500;
+      const response = {
+        status: 'error',
+        message: error.message || 'Failed to generate benchmark comparison'
       };
       if (error.code) response.code = error.code;
       return res.status(statusCode).json(response);
