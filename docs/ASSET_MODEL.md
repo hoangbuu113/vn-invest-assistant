@@ -4,25 +4,29 @@ This document defines the canonical architectural and conceptual model for multi
 
 ---
 
-## 1. Current Implementation Status (Features 16–22)
+## 1. Current Implementation Status (Features 16–23)
 
-Features 16 through 22 establish the canonical schema, ledger authority, provider abstraction, FX valuation, full controlled multi-asset universe, normalized historical semantics, and deterministic multi-asset analysis:
+Features 16 through 23 establish the canonical schema, ledger authority, provider abstraction, FX valuation, full controlled multi-asset universe, normalized historical semantics, deterministic multi-asset analysis, and multi-source news foundation:
 
 - **Verified Production Universe (49 Canonical Assets)**:
   - **Vietnamese Equities & ETFs** (`VN_EXCHANGE`, `Asia/Ho_Chi_Minh`, `VND`, `share`):
     - `VCB`, `FPT`, `HPG`, `VNM`, `E1VFVN30`, `FUEVFVND`, `FUESSVFL`
     - Provider mapping: `yahoo` $\rightarrow$ `<SYMBOL>.VN`
     - History: Completed daily OHLCV bars supported
+    - News: CafeF 4-feed official RSS integration
   - **Cryptocurrencies (40 Canonical Assets)** (`CONTINUOUS_24_7`, `UTC`, `USD`, `coin`):
     - `BTC` (`bitcoin`), `ETH` (`ethereum`), `SOL` (`solana`), `BNB` (`binancecoin`), `XRP` (`ripple`), `TRX` (`tron`), `HYPE` (`hyperliquid`), `ZEC` (`zcash`), `DOGE` (`dogecoin`), `RAIN` (`rain`), `XMR` (`monero`), `LINK` (`chainlink`), `WBT` (`whitebit`), `ADA` (`cardano`), `XLM` (`stellar`), `BCH` (`bitcoin-cash`), `GRAM` (`the-open-network`), `LTC` (`litecoin`), `HBAR` (`hedera-hashgraph`), `AVAX` (`avalanche-2`), `SHIB` (`shiba-inu`), `SUI` (`sui`), `UNI` (`uniswap`), `NEAR` (`near`), `TAO` (`bittensor`), `PUMP` (`pump-fun`), `AAVE` (`aave`), `ASTER` (`aster-2`), `WLFI` (`world-liberty-financial`), `ONDO` (`ondo-finance`), `ENA` (`ethena`), `MORPHO` (`morpho`), `PEPE` (`pepe`), `DOT` (`polkadot`), `WLD` (`worldcoin-wld`), `ETC` (`ethereum-classic`), `POL` (`polygon-ecosystem-token`), `LIT` (`lighter`), `ATOM` (`cosmos`), `JUP` (`jupiter-exchange-solana`)
     - Provider mapping: `coingecko` $\rightarrow$ `<EXPLICIT_COINGECKO_ID>`
     - History: Completed UTC daily close-only bars supported (`open`, `high`, `low`, `volume` are `null`)
+    - News: CoinDesk official RSS integration with contextual ticker disambiguation
   - **Gold Spot** (`GLOBAL_24_5`, `UTC`, base: `XAU`, quote: `USD`, `oz`):
     - `XAU/USD` (provider: `alphavantage` $\rightarrow$ `XAU` via `GOLD_SILVER_SPOT`)
     - History: Completed daily close-only bars supported
+    - News: Alpha Vantage commodities/macro context with verified Gold alias matching (`XAU`, `vàng`, `gold bullion`, etc.)
   - **Foreign Exchange Context** (`GLOBAL_24_5`, `Asia/Ho_Chi_Minh`, base: `USD`, quote: `VND`, unit: `null`):
     - `USD/VND` (provider: `twelvedata` $\rightarrow$ `USD/VND`)
     - Snapshot: Live exchange rate supported; History: Intentionally unsupported pending verified timezone reconciliation
+    - News: Alpha Vantage forex/macro context with explicit exchange-rate/pair disambiguation (lone `USD` never matches)
 
 - **Implemented Multi-Asset Capabilities**:
   - Authoritative internal asset identity via UUID (`public.assets.id`).
@@ -30,6 +34,8 @@ Features 16 through 22 establish the canonical schema, ledger authority, provide
   - Dedicated opening-position baseline authority (`public.position_opening_baselines`) with locked correction upon subsequent ledger activity.
   - Multi-provider market adapter architecture (`server/src/providers/`):
     $$\text{Canonical Asset} \longrightarrow \text{Explicit Provider Mapping} \longrightarrow \text{Provider Adapter} \longrightarrow \text{Normalized Snapshot / History}$$
+  - Multi-source news architecture (`server/src/news/`):
+    $$\text{Source Adapter} \longrightarrow \text{Sanitization} \longrightarrow \text{Deduplication} \longrightarrow \text{Relevance Engine} \longrightarrow \text{Canonical News Feed}$$
   - Universal reporting currency is strictly `VND`; native non-VND asset valuations are converted on demand via direct `quoteCurrency -> VND` FX rates.
   - Multi-asset calendar and historical bar engine (`server/src/history.js`) with calendar-window lookbacks (`1W`, `1M`, `3M`, `6M`, `1Y`) and current-day exclusivity.
   - Provider-neutral deterministic analysis V2 over completed canonical daily history, with universal completed-close metrics and capability-gated OHLC metrics.
@@ -43,6 +49,7 @@ Features 16 through 22 establish the canonical schema, ledger authority, provide
   - Non-VND BUY/SELL transactions are strictly blocked at database trigger level.
   - The single VND cash ledger remains authoritative for all cash operations (no multi-currency cash balances).
   - Open-ended mutual funds (NAV scheduled) remain deferred.
+  - No article database persistence (news is dynamically cached in memory with per-source TTLs).
 
 ---
 
@@ -158,7 +165,7 @@ The double-ledger architecture is the sole authoritative mechanism for portfolio
 
 ## 10. Provider Abstraction
 
-- Feature components (Dashboard, Portfolio, Analysis, Alerts, Watchlist) request data through normalized service contracts (`getMarketSnapshot(asset)`, `getHistoricalBars(asset, range)`).
+- Feature components (Dashboard, Portfolio, Analysis, Alerts, Watchlist, News) request data through normalized service contracts (`getMarketSnapshot(asset)`, `getHistoricalBars(asset, range)`, `getNewsFeed()`).
 - Specific provider adapters (`server/src/providers/`):
   - **Yahoo Finance**: Vietnamese listed equities & ETFs.
   - **CoinGecko**: 40 canonical cryptocurrencies.
@@ -168,11 +175,22 @@ The double-ledger architecture is the sole authoritative mechanism for portfolio
 
 ---
 
-## 11. News Semantics
+## 11. News & Relevance Semantics (Feature 23)
 
-- News feed contracts share a unified normalized schema (`id`, `title`, `summary`, `url`, `publishedAt`, `category`, `matchedAssets`).
-- Different source families and category classifications are utilized for different asset markets (e.g. CafeF for Vietnamese corporate/macro news; future specialized feeds for global FX or crypto).
-- Asset matching utilizes unicode token-boundary matching against trusted canonical asset metadata.
+- **Canonical Identity Authority**:
+  - The canonical asset UUID (`assetId`) is the sole authoritative identity linking news articles to assets in `relatedAssets`.
+  - Matching utilizes canonical symbols, full names, verified aliases, and contextual disambiguation, but the resulting relationship references the asset UUID.
+- **Current Asset-Class News Sources**:
+  - **Vietnamese Equities & ETFs**: CafeF official 4-feed RSS.
+  - **Crypto**: CoinDesk official public RSS.
+  - **Gold Spot (`XAU/USD`)**: Alpha Vantage commodities/macro context.
+  - **USD/VND Foreign Exchange**: Alpha Vantage forex/macro context.
+  - **Global Macro / Economy**: Alpha Vantage economy_macro topics and CafeF macro feeds.
+- **Relevance Rules & Non-Inference**:
+  - Articles from a given source family do **not** automatically relate to all assets in that class. Every asset relationship requires explicit textual evidence (`SYMBOL_EXACT`, `NAME_EXACT`, `VERIFIED_ALIAS`).
+  - General macroeconomic or industry articles without individual asset mentions remain valid in the public feed with `relatedAssets = []`.
+- **Application-Level Aliases**:
+  - No database alias table was introduced; verified aliases (e.g. Gold spot `XAU`, `vàng`, `vàng miếng`, `vàng sjc`) and ambiguous ticker protection rules (e.g. `USD/VND`, `RAIN`, `SOL`) reside in version-controlled application logic.
 
 ---
 

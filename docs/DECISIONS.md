@@ -160,71 +160,114 @@ The following architectural and product decisions are confirmed and authoritativ
     - Feature 21 owns completed canonical history and its capability metadata; metric eligibility is evaluated separately by Feature 22.
     - Close-only history is truthful complete history when the canonical capability declares `ohlc=false` and `volume=false`.
 - **Deterministic Analysis V2 (Feature 22)**:
-  - **Provider-Neutral Analysis Boundary**:
-    - Analysis consumes canonical asset metadata, completed canonical daily history, and provider-neutral `historyCapabilities` (`close`, `ohlc`, `volume`).
-    - Analysis methodology must not branch on provider names. Provider provenance may remain response metadata only.
-  - **Methodology Version**:
-    - Feature 22 analysis responses use `methodologyVersion = "v2"`.
-  - **Analysis Price**:
-    - `analysisPrice` is the last completed canonical daily close.
-    - `analysisPriceDate` is the canonical date of that close.
-    - A snapshot may be newer, but snapshot values never enter analysis formulas.
-  - **Period Price Change**:
-    - `priceChangePct = ((periodEndPrice / periodStartPrice) - 1) * 100` using full-precision validated prices.
-    - Its business meaning is **"Biến động giá trong kỳ"**, not total return or investment return.
-    - It excludes dividends/distributions, fees, funding, staking yield, and separately modeled corporate actions.
-  - **Universal Completed-Close Metrics**:
-    - `highestCompletedClose` and `lowestCompletedClose` are derived only from completed canonical closes in the evaluated window.
-    - `completedCloseRangePositionPct = ((lastClose - minClose) / (maxClose - minClose)) * 100`.
-    - A flat completed-close range returns `null` with reason `FLAT_CLOSE_RANGE`.
-    - `distanceBelowHighestCompletedClosePct = ((maxClose - lastClose) / maxClose) * 100`; a legitimate zero remains numeric zero.
-  - **Positive Close Transitions**:
-    - `positiveCloseTransitionRatio` is positive completed close-to-close transitions divided by all valid close-to-close transitions.
-    - Flat transitions remain in the denominator.
-    - This is historical descriptive frequency, never a win rate, probability, or forecast.
-    - Legacy `positivePeriodRatio` retains its existing VN breadth methodology where required for compatibility and is not silently repurposed.
-  - **Daily Volatility**:
-    - Daily simple return is `r_t = (close_t / close_(t-1)) - 1`.
-    - `dailyVolatilityPct` is the sample standard deviation of daily simple returns multiplied by 100.
-    - The minimum is 3 completed closes / 2 returns.
-    - Volatility is not annualized; no universal 252-day, 365-day, or other cross-asset annualization constant is assumed.
-  - **Maximum Drawdown**:
-    - `runningMaxClose_t = max(close_0 ... close_t)`.
-    - `drawdown_t = (close_t / runningMaxClose_t) - 1`.
-    - `maxDrawdownPct` is the absolute magnitude of the minimum completed-close drawdown multiplied by 100.
-    - Flat or monotonically increasing completed history returns available numeric zero.
-    - This is historical completed-close drawdown, not future risk or expected loss.
-  - **OHLC Capability and Compatibility**:
-    - OHLC metrics are capability-dependent. Yahoo VN history currently declares `close=true`, `ohlc=true`, `volume=true`; CoinGecko crypto and Alpha Vantage Gold history declare `close=true`, `ohlc=false`, `volume=false`.
-    - Close-only history never fabricates OHLC.
-    - Legacy `periodHighPrice`, `periodLowPrice`, `rangePositionPct`, and `distanceBelowHighPct` retain their intraday OHLC meanings where preserved for compatibility and are never redefined as completed-close metrics.
-  - **Metric Status Contract**:
-    - Metric states are `available`, `unavailable`, `insufficient_data`, and `unsupported`.
-    - Current machine-readable reasons include `NO_HISTORY`, `INSUFFICIENT_BARS`, `UNSUPPORTED_HISTORY`, `METRIC_REQUIRES_OHLC`, `METRIC_REQUIRES_VOLUME`, `INCOMPLETE_OHLC`, `FLAT_CLOSE_RANGE`, and `INVALID_CLOSE_SERIES`.
-    - Unavailable values are never represented as numeric zero.
-  - **Completeness and Sufficiency**:
-    - Feature 22 uses Feature 21 canonical history completeness and does not apply legacy fixed VN session thresholds across asset classes.
-    - Metric sufficiency is separate from history completeness. Close-only capability does not imply incomplete history, and VN having fewer observations than crypto over the same calendar window is expected.
-  - **Analysis Ranges**:
-    - Supported ranges are `1W`, `1M`, `3M`, `6M`, and `1Y`.
-    - An explicit `range` evaluates that exact Feature 21 calendar window. An omitted range preserves five-period behavior.
-    - Lower boundaries are not shifted backward to manufacture observations.
-  - **Asset Support**:
-    - VN stocks and VN ETFs are supported.
-    - Crypto and Gold Spot are supported through universal completed-close metrics.
-    - USD/VND analysis remains unsupported until trustworthy completed historical capability exists.
-    - A known asset without historical capability returns HTTP 422 with `UNSUPPORTED_HISTORY`.
-  - **Interpretation Boundary**:
-    - Feature 22 is metrics only: no bullish/bearish label, positive/negative investment judgment, recommendation, opportunity score, risk score, confidence percentage, prediction, or forecast.
+  - **Provider-Neutral Analysis Boundary**: Analysis consumes canonical asset metadata, completed canonical daily history, and provider-neutral `historyCapabilities` (`close`, `ohlc`, `volume`). Analysis methodology must not branch on provider names.
+  - **Methodology Version**: Analysis responses use `methodologyVersion = "v2"`.
+  - **Analysis Price**: `analysisPrice` is the last completed canonical daily close; snapshot values never enter analysis formulas.
+  - **Period Price Change**: `priceChangePct = ((periodEndPrice / periodStartPrice) - 1) * 100` ("Biến động giá trong kỳ").
+  - **Universal Completed-Close Metrics**: `highestCompletedClose`, `lowestCompletedClose`, `completedCloseRangePositionPct`, `distanceBelowHighestCompletedClosePct`, `positiveCloseTransitionRatio`, non-annualized `dailyVolatilityPct`, and completed-close `maxDrawdownPct`.
+  - **OHLC Capability and Compatibility**: OHLC metrics are capability-dependent. Close-only history never fabricates OHLC; missing capability returns explicit machine-readable status (`METRIC_REQUIRES_OHLC`, `UNSUPPORTED_HISTORY`).
+  - **Completeness and Sufficiency**: Feature 22 uses Feature 21 canonical history completeness and does not apply legacy fixed VN session thresholds across asset classes.
+  - **Analysis Ranges**: Supported ranges are `1W`, `1M`, `3M`, `6M`, and `1Y`.
+  - **Asset Support**: VN stocks and VN ETFs supported. Crypto and Gold Spot supported with universal completed-close metrics. USD/VND analysis remains unsupported until trustworthy completed historical capability exists.
+  - **Interpretation Boundary**: Feature 22 is metrics only: no bullish/bearish label, positive/negative investment judgment, recommendation, opportunity score, risk score, confidence percentage, prediction, or forecast.
 - **Numerical Precision**: Intermediate financial calculations retain full floating-point/numeric precision without premature two-decimal rounding. Rounding is presentation-only.
 - **Data Labeling**: Market snapshots are clearly disclosed as delayed (~15 min for equities) with explicit timestamp provenance. Missing source timestamps remain `null`.
 
 ---
 
-## 6. Cross-Feature Relationships
+## 6. Multi-Asset News Foundation (Feature 23)
+
+### A. News Architecture Pipeline
+$$\text{Source Adapter} \longrightarrow \text{Canonical Validation / Sanitization} \longrightarrow \text{Cross-Source Aggregation} \longrightarrow \text{Deterministic Dedupe} \longrightarrow \text{Deterministic Relevance Engine} \longrightarrow \text{Public / Personalized Endpoints}$$
+- Source-specific raw parsing and response structures remain isolated inside their respective adapters (`server/src/news/adapters/`).
+- Generic aggregation, deduplication, relevance, and presentation layers must not depend on raw provider formats.
+
+### B. Current Source Set
+- **CafeF**: Vietnamese market, enterprise, macroeconomic, and international context via 4 official RSS feeds (`thi-truong-chung-khoan`, `doanh-nghiep`, `vi-mo-dau-tu`, `tai-chinh-quoc-te`).
+- **CoinDesk**: Global cryptocurrency market context via official public RSS (`https://www.coindesk.com/arc/outboundfeeds/rss/`).
+- **Alpha Vantage NEWS_SENTIMENT**: Global gold spot, foreign exchange, and macroeconomic context via single broad topic query (`economy_macro,commodities,forex`).
+- **FXStreet**: Intentionally NOT used in Feature 23 because unauthenticated public access was verified unreliable.
+
+### C. Alpha Vantage Content & Sentiment Boundary
+- Feature 23 may consume article metadata (title, short provider excerpt, publisher/source name, URL, publication timestamp, deterministic topic/ticker context).
+- Feature 23 **MUST discard** all upstream sentiment scores, sentiment labels, relevance scores, and confidence-like judgments.
+- Third-party sentiment or relevance scores must never be converted or presented as project sentiment or relevance scores.
+
+### D. Canonical News Identity & Relationship Authority
+- `assetId` (canonical asset UUID) is the sole authority for asset relationships in `relatedAssets`.
+- Symbol and name metadata are matching and presentation metadata only.
+- One article may relate to multiple canonical assets, but it is emitted as a single deduplicated article with multiple items in `relatedAssets`.
+
+### E. Deterministic Relevance Matching
+- Allowed deterministic match reasons: `SYMBOL_EXACT`, `NAME_EXACT`, `VERIFIED_ALIAS`.
+- Source category alone cannot create an asset relationship.
+- Conservative false negatives are strictly preferred over false positives.
+- Ambiguous ticker symbols require deterministic contextual disambiguation:
+  - `USD/VND`: Requires explicit pair or central exchange-rate terms; lone `USD` never matches.
+  - `RAIN`: Requires explicit token phrases (`Rain coin`, `Rain token`, `Rain crypto`); the English word "rain" never matches.
+  - Short crypto tickers (`SOL`, `ADA`, `DOT`, `ATOM`, `UNI`, etc.): Require crypto context (CoinDesk source or crypto keywords); otherwise full asset name is required.
+  - Gold Spot (`XAU/USD`): Matches verified aliases (`XAU`, `vàng`, `vàng miếng`, `vàng sjc`, `vàng nhẫn`, `gold bullion`, `gold spot`).
+- General macroeconomic and industry articles without specific asset relationships remain valid with `relatedAssets = []`.
+
+### F. Personalized News
+- User asset universe is the union of holdings canonical UUIDs and watchlist canonical UUIDs ($\text{Holdings UUIDs} \cup \text{Watchlist UUIDs}$).
+- An article is included in personalized news if its `relatedAssets` intersects the user's asset UUID set.
+- Personalized news is derived from the unified news feed; no source-specific matching logic is introduced.
+- One article appears once in personalized news even if it matches multiple assets owned or watchlisted by the user.
+- General unlinked articles (`relatedAssets = []`) are excluded from personalized news.
+
+### G. Content, Excerpts & Copyright Integrity
+- Feature 23 retains only headline, short source-provided excerpt, source attribution, publication timestamp, outbound URL, and deterministic metadata.
+- Never scrape full article pages, store full article bodies, or reproduce full article text.
+
+### H. URL & Content Security
+- Outbound URLs must use valid `http` or `https` schemes.
+- Unsafe schemes (`javascript:`, `data:`, `file:`, `ftp:`) and credential-bearing URLs (`user:pass@`) are strictly rejected.
+- Known tracking parameters (`utm_*`, `fbclid`, `gclid`, etc.) are stripped while semantic query parameters are preserved and sorted deterministically.
+- Source HTML markup is cleaned and entity-decoded into plain text. Raw provider XML/HTML is never emitted to clients.
+
+### I. Timestamp Semantics
+- `publishedAt` must originate from upstream source metadata and carry explicit or verifiable timezone semantics.
+- All valid timestamps are normalized to ISO-8601 UTC.
+- Missing, invalid, date-only without time, or timezone-ambiguous timestamps are strictly rejected.
+- Server current time is never substituted as publication timestamp.
+
+### J. Deduplication Hierarchy
+1. Exact normalized canonical URL.
+2. Source-scoped article / GUID identity.
+3. Conservative fallback: `sourceId` + exact normalized title + exact publication timestamp.
+- No fuzzy-title AI deduplication.
+
+### K. Failure & Partial Degradation Semantics
+- Individual source failures must not fail the entire news feed.
+- If at least one source responds successfully: Return HTTP 200 with `partial: true` metadata.
+- If all live fetches fail but valid stale cache exists: Return HTTP 200 with stale source status and `partial: true`.
+- If all sources fail and no usable cache exists: Return HTTP 503 `NEWS_SOURCES_UNAVAILABLE`.
+- Successful empty source returns valid empty status (`empty`), not error.
+- Filtering by a valid canonical `assetId` with zero matching news returns HTTP 200 with `data: []`.
+- Filtering by an unknown or nonexistent `assetId` returns HTTP 404 `ASSET_NOT_FOUND`.
+
+### L. Caching & Request Coalescing
+- In-memory cache TTLs:
+  - CafeF: 5-minute fresh TTL, 30-minute stale-if-error fallback.
+  - CoinDesk: 5-minute fresh TTL, 30-minute stale-if-error fallback.
+  - Alpha Vantage News: 4-hour fresh TTL, 24-hour stale-if-error fallback.
+- Successful empty results are cached to prevent hammering empty endpoints.
+- Concurrent in-flight requests for the same source are coalesced into a single Promise.
+- *Account Quota Clarification*: Feature 23 limits normal `NEWS_SENTIMENT` refresh frequency per process. Alpha Vantage quota is shared across other project features (e.g. Gold spot snapshot and history); Feature 23 does not guarantee whole-account daily quota limits.
+
+### M. Language Policy
+- Original source language is preserved without automated translation (CafeF: Vietnamese `vi`, CoinDesk & Alpha Vantage: English `en`).
+
+### N. Non-Financial & Non-Judgment Boundary
+- Feature 23 does NOT provide sentiment scores, bullish/bearish indicators, impact scores, confidence percentages, investment recommendations, opportunity scores, or market predictions.
+
+---
+
+## 7. Cross-Feature Relationships
 - **Portfolio Overview (Feature 05)**: Combines holdings + cash overview + market data on demand.
 - **Portfolio Composition (Feature 10)**: Derives allocations and concentration metrics purely from Feature 05 portfolio valuation.
 - **Asset Comparison (Feature 11)**: Consumes canonical Feature 07 analysis and historical price metrics across 2–4 selected assets without client-side formula recalculation.
 - **Price Alerts (Feature 12)**: One-shot persistent alert lifecycle (`active` -> `triggered`) evaluated deterministically against canonical market snapshots.
-- **Personalized Relevant News (Feature 13)**: Dynamic token matching against current holdings and watchlist assets; acts as a filtered view of the canonical news feed without a separate ingestion pipeline.
-- **Personal Investment Dashboard (Feature 09)**: High-level overview coordinating summary metrics, watchlist movers, and latest news. Expansion is frozen until multi-asset foundation contracts are established.
+- **Personalized Relevant News (Features 13 & 23)**: Deterministic UUID matching against current holdings and watchlist assets; acts as a filtered view of the canonical multi-asset news feed.
+- **Personal Investment Dashboard (Feature 09)**: High-level overview coordinating summary metrics, watchlist movers, and multi-source market news preview.

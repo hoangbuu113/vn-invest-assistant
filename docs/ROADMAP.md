@@ -14,7 +14,7 @@ This document serves as the durable strategic memory for project sequencing, fea
 
 ---
 
-## 2. Completed Features (01–22)
+## 2. Completed Features (01–23)
 
 - **Feature 01**: Asset Browser
 - **Feature 02**: Market Snapshot
@@ -40,22 +40,21 @@ This document serves as the durable strategic memory for project sequencing, fea
   - **Feature 20B**: Controlled Crypto Universe Expansion (COMPLETE)
 - **Feature 21**: Asset-Class Market & Historical Semantics (COMPLETE)
 - **Feature 22**: Deterministic Asset Analysis V2 (COMPLETE)
+- **Feature 23**: Multi-Asset News Foundation (COMPLETE)
 
 ---
 
-## 3. Current Next Feature: Feature 23
+## 3. Current Next Feature: Feature 24
 
-### Feature 23 — Multi-Asset News Foundation
+### Feature 24 — Existing Feature Multi-Asset Integration
 - **Status**: NEXT IN SEQUENCE.
-- **Scope**: Unified normalized news model with multi-source ingestion for Vietnamese markets, global macro/FX, and crypto.
+- **Scope**: Adapt Dashboard, Watchlist, Portfolio Overview, Portfolio Composition, Asset Comparison, and Price Alerts to render and handle canonical multi-asset records and mixed portfolios cleanly without breaking single-asset assumptions.
 
 ---
 
-## 4. Ordered Roadmap (Features 22–30)
+## 4. Ordered Roadmap (Features 24–30)
 
-- **Feature 22 — Deterministic Asset Analysis V2**: Generalize quantitative analysis across asset classes with shared, specialized, and explicitly unavailable metrics.
-- **Feature 23 — Multi-Asset News Foundation (NEXT)**: Unified normalized news model with multi-source ingestion (CafeF, global macro/FX, crypto feeds).
-- **Feature 24 — Existing Feature Multi-Asset Integration**: Adapt Dashboard, Watchlist, Portfolio, Composition, Comparison, Alerts, and Personalized News to support multi-asset rendering cleanly.
+- **Feature 24 — Existing Feature Multi-Asset Integration (NEXT)**: Adapt Dashboard, Watchlist, Portfolio, Composition, Comparison, and Alerts to support multi-asset rendering cleanly.
 - **Feature 25 — Portfolio Performance & Benchmarking**: Auditable capital-weighted returns (TWR/MWR), realized/unrealized P/L performance tracking, drawdowns, and benchmark comparison (VN-Index, S&P 500).
 - **Feature 26 — Risk & Exposure Analytics**: Multi-dimensional portfolio risk analysis (asset class, currency, sector, concentration risk, historical drawdown, volatility).
 - **Feature 27 — Market Regime Engine**: Deterministic macro and market regime indicators (interest rate environment, inflation trends, market breadth).
@@ -73,7 +72,7 @@ Verification must match the risk level of the change to avoid wasteful token exp
 - **LOW RISK** (Isolated frontend polish, UI copy, local styling, presentation-only components):
   - *Verification*: Targeted UI checks, client build (`npm run build`), manual visual check.
   - *Rule*: Do NOT automatically run full backend regression suites or spawn Codex reviewer agents.
-- **MEDIUM RISK** (API/state integration, component data plumbing, non-financial provider adapters):
+- **MEDIUM RISK** (API/state integration, component data plumbing, non-financial provider adapters, news parsing/caching):
   - *Verification*: Affected route/unit tests, integration check, client build, and git diff check.
   - *Rule*: Broader regression is run only if cross-module dependencies are touched.
 - **HIGH RISK** (Financial accounting, PostgreSQL migrations, ledger mutations, access controls, FX math, core quantitative formulas):
