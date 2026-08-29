@@ -1,4 +1,5 @@
-import { getAnalysisHistory, getMarketSnapshot } from './market.js';
+import { getMarketHistory, getMarketSnapshot } from './market.js';
+import { getHistoryRangeStart, PUBLIC_HISTORY_RANGES } from './history.js';
 
 export const PERIOD_THRESHOLDS = {
   '1W': 3,
@@ -338,7 +339,7 @@ export function analyzeAssetHistory(rawBars, options = {}) {
         : null,
       priceAsOf: options.snapshot.priceAsOf || null,
       freshness: options.snapshot.freshness || 'delayed',
-      priceSource: options.snapshot.priceSource || 'yahoo_delayed_snapshot'
+      priceSource: options.snapshot.priceSource || null
     };
   }
 
@@ -375,43 +376,462 @@ export function analyzeAssetHistory(rawBars, options = {}) {
   };
 }
 
+export const ANALYSIS_METHODOLOGY_VERSION = 'v2';
+
+const DATE_KEY_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+function createAnalysisError(message, code, status) {
+  const error = new Error(message);
+  error.code = code;
+  error.status = status;
+  return error;
+}
+
+function metricStatus(status, reason = null) {
+  return { status, reason };
+}
+
+function isValidCanonicalDate(dateKey) {
+  if (typeof dateKey !== 'string') return false;
+  const match = DATE_KEY_PATTERN.exec(dateKey);
+  if (!match) return false;
+  const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+  return date.toISOString().slice(0, 10) === dateKey;
+}
+
+function optionalPositiveNumber(value) {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null;
+}
+
+function optionalVolume(value) {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+function normalizeSnapshotContext(snapshot) {
+  if (!snapshot || typeof snapshot !== 'object') return null;
+  return {
+    price: optionalPositiveNumber(snapshot.price),
+    priceAsOf: typeof snapshot.priceAsOf === 'string' && snapshot.priceAsOf ? snapshot.priceAsOf : null,
+    freshness: typeof snapshot.freshness === 'string' && snapshot.freshness ? snapshot.freshness : null,
+    priceSource: typeof snapshot.priceSource === 'string' && snapshot.priceSource ? snapshot.priceSource : null
+  };
+}
+
+function validateHistoryCapabilities(historyCapabilities) {
+  if (
+    !historyCapabilities ||
+    typeof historyCapabilities.close !== 'boolean' ||
+    typeof historyCapabilities.ohlc !== 'boolean' ||
+    typeof historyCapabilities.volume !== 'boolean'
+  ) {
+    throw createAnalysisError(
+      'Canonical history capability metadata is required for analysis',
+      'INVALID_HISTORY_CAPABILITIES',
+      500
+    );
+  }
+  if (!historyCapabilities.close) {
+    throw createAnalysisError(
+      'Completed close history is unsupported for this asset',
+      'UNSUPPORTED_HISTORY',
+      422
+    );
+  }
+  return {
+    close: true,
+    ohlc: historyCapabilities.ohlc,
+    volume: historyCapabilities.volume
+  };
+}
+
+function validateCanonicalHistoryMetadata(historyResult) {
+  const metadata = {
+    symbol: typeof historyResult.symbol === 'string' ? historyResult.symbol.trim().toUpperCase() : '',
+    assetType: typeof historyResult.assetType === 'string' ? historyResult.assetType.trim() : '',
+    marketPolicy: typeof historyResult.marketPolicy === 'string' ? historyResult.marketPolicy.trim() : '',
+    marketTimezone: typeof historyResult.marketTimezone === 'string' ? historyResult.marketTimezone.trim() : '',
+    quoteCurrency: typeof historyResult.quoteCurrency === 'string' ? historyResult.quoteCurrency.trim() : ''
+  };
+  if (Object.values(metadata).some((value) => !value)) {
+    throw createAnalysisError(
+      'Canonical asset metadata is required for analysis',
+      'INVALID_HISTORY_METADATA',
+      500
+    );
+  }
+  if (!['complete', 'partial'].includes(historyResult.dataCompleteness)) {
+    throw createAnalysisError(
+      'Canonical history completeness metadata is required for analysis',
+      'INVALID_HISTORY_METADATA',
+      500
+    );
+  }
+  return metadata;
+}
+
+function normalizeCanonicalBars(rawBars, symbol) {
+  if (!Array.isArray(rawBars) || rawBars.length === 0) {
+    throw createAnalysisError(`No historical data available for '${symbol}'`, 'NO_HISTORY', 404);
+  }
+
+  const bars = [];
+  let rejectedBarCount = 0;
+  for (const bar of rawBars) {
+    const timestampMs = Date.parse(bar?.timestamp);
+    if (
+      !bar ||
+      bar.isComplete !== true ||
+      !isValidCanonicalDate(bar.date) ||
+      !Number.isFinite(timestampMs) ||
+      optionalPositiveNumber(bar.close) === null
+    ) {
+      rejectedBarCount++;
+      continue;
+    }
+    bars.push({
+      timestamp: new Date(timestampMs).toISOString(),
+      date: bar.date,
+      open: optionalPositiveNumber(bar.open),
+      high: optionalPositiveNumber(bar.high),
+      low: optionalPositiveNumber(bar.low),
+      close: bar.close,
+      volume: optionalVolume(bar.volume),
+      isComplete: true
+    });
+  }
+
+  if (bars.length === 0) {
+    throw createAnalysisError(
+      `No valid completed close series found for '${symbol}'`,
+      'INVALID_CLOSE_SERIES',
+      422
+    );
+  }
+
+  bars.sort((left, right) => left.date.localeCompare(right.date) || left.timestamp.localeCompare(right.timestamp));
+  return { bars, rejectedBarCount };
+}
+
+function computeSampleDailyVolatilityPct(closes) {
+  const changes = [];
+  for (let index = 1; index < closes.length; index++) {
+    changes.push((closes[index] / closes[index - 1]) - 1);
+  }
+  const mean = changes.reduce((sum, value) => sum + value, 0) / changes.length;
+  const squaredDeviations = changes.reduce((sum, value) => sum + ((value - mean) ** 2), 0);
+  return Math.sqrt(squaredDeviations / (changes.length - 1)) * 100;
+}
+
+function computeMaxDrawdownPct(closes) {
+  let runningMax = closes[0];
+  let minimumDrawdown = 0;
+  for (const close of closes) {
+    runningMax = Math.max(runningMax, close);
+    minimumDrawdown = Math.min(minimumDrawdown, (close / runningMax) - 1);
+  }
+  return Math.abs(minimumDrawdown) * 100;
+}
+
+function createPeriodAnalysis(periodBars, historyCapabilities) {
+  const usableCompletedBarCount = periodBars.length;
+  const firstBar = periodBars[0] || null;
+  const lastBar = periodBars.at(-1) || null;
+  const closes = periodBars.map((bar) => bar.close);
+  const hasMovementData = usableCompletedBarCount >= 2;
+  const insufficient = metricStatus('insufficient_data', 'INSUFFICIENT_BARS');
+  const available = () => metricStatus('available');
+  const metricStatusMap = {};
+
+  const periodStartPrice = firstBar?.close ?? null;
+  const periodEndPrice = lastBar?.close ?? null;
+  metricStatusMap.periodStartPrice = firstBar ? available() : metricStatus('unavailable', 'NO_HISTORY');
+  metricStatusMap.periodEndPrice = lastBar ? available() : metricStatus('unavailable', 'NO_HISTORY');
+
+  const absoluteChange = hasMovementData ? periodEndPrice - periodStartPrice : null;
+  const priceChangePct = hasMovementData ? ((periodEndPrice / periodStartPrice) - 1) * 100 : null;
+  metricStatusMap.absoluteChange = hasMovementData ? available() : insufficient;
+  metricStatusMap.priceChangePct = hasMovementData ? available() : insufficient;
+
+  const highestCompletedClose = firstBar ? Math.max(...closes) : null;
+  const lowestCompletedClose = firstBar ? Math.min(...closes) : null;
+  metricStatusMap.highestCompletedClose = firstBar ? available() : metricStatus('unavailable', 'NO_HISTORY');
+  metricStatusMap.lowestCompletedClose = firstBar ? available() : metricStatus('unavailable', 'NO_HISTORY');
+
+  let completedCloseRangePositionPct = null;
+  if (!hasMovementData) {
+    metricStatusMap.completedCloseRangePositionPct = insufficient;
+  } else if (highestCompletedClose === lowestCompletedClose) {
+    metricStatusMap.completedCloseRangePositionPct = metricStatus('unavailable', 'FLAT_CLOSE_RANGE');
+  } else {
+    completedCloseRangePositionPct =
+      ((periodEndPrice - lowestCompletedClose) / (highestCompletedClose - lowestCompletedClose)) * 100;
+    metricStatusMap.completedCloseRangePositionPct = available();
+  }
+
+  const distanceBelowHighestCompletedClosePct = hasMovementData
+    ? ((highestCompletedClose - periodEndPrice) / highestCompletedClose) * 100
+    : null;
+  metricStatusMap.distanceBelowHighestCompletedClosePct = hasMovementData ? available() : insufficient;
+
+  let positiveCloseTransitionRatio = null;
+  if (hasMovementData) {
+    let positiveTransitionCount = 0;
+    for (let index = 1; index < closes.length; index++) {
+      if (closes[index] > closes[index - 1]) positiveTransitionCount++;
+    }
+    positiveCloseTransitionRatio = positiveTransitionCount / (closes.length - 1);
+  }
+  metricStatusMap.positiveCloseTransitionRatio = hasMovementData ? available() : insufficient;
+
+  const dailyVolatilityPct = usableCompletedBarCount >= 3
+    ? computeSampleDailyVolatilityPct(closes)
+    : null;
+  metricStatusMap.dailyVolatilityPct = usableCompletedBarCount >= 3 ? available() : insufficient;
+
+  const maxDrawdownPct = hasMovementData ? computeMaxDrawdownPct(closes) : null;
+  metricStatusMap.maxDrawdownPct = hasMovementData ? available() : insufficient;
+
+  let intradayHighPrice = null;
+  let intradayLowPrice = null;
+  let intradayRangePositionPct = null;
+  let distanceBelowIntradayHighPct = null;
+
+  if (!historyCapabilities.ohlc) {
+    const unsupportedOhlc = metricStatus('unsupported', 'METRIC_REQUIRES_OHLC');
+    metricStatusMap.intradayHighPrice = unsupportedOhlc;
+    metricStatusMap.intradayLowPrice = unsupportedOhlc;
+    metricStatusMap.intradayRangePositionPct = unsupportedOhlc;
+    metricStatusMap.distanceBelowIntradayHighPct = unsupportedOhlc;
+  } else {
+    const completeHighs = periodBars.every((bar) => bar.high !== null);
+    const completeLows = periodBars.every((bar) => bar.low !== null);
+    const incompleteOhlc = metricStatus('unavailable', 'INCOMPLETE_OHLC');
+
+    if (completeHighs && firstBar) {
+      intradayHighPrice = Math.max(...periodBars.map((bar) => bar.high));
+      metricStatusMap.intradayHighPrice = available();
+    } else {
+      metricStatusMap.intradayHighPrice = incompleteOhlc;
+    }
+
+    if (completeLows && firstBar) {
+      intradayLowPrice = Math.min(...periodBars.map((bar) => bar.low));
+      metricStatusMap.intradayLowPrice = available();
+    } else {
+      metricStatusMap.intradayLowPrice = incompleteOhlc;
+    }
+
+    if (intradayHighPrice === null || intradayLowPrice === null) {
+      metricStatusMap.intradayRangePositionPct = incompleteOhlc;
+    } else if (intradayHighPrice === intradayLowPrice) {
+      metricStatusMap.intradayRangePositionPct = metricStatus('unavailable', 'FLAT_CLOSE_RANGE');
+    } else if (periodEndPrice < intradayLowPrice || periodEndPrice > intradayHighPrice) {
+      metricStatusMap.intradayRangePositionPct = metricStatus('unavailable', 'INVALID_CLOSE_SERIES');
+    } else {
+      intradayRangePositionPct =
+        ((periodEndPrice - intradayLowPrice) / (intradayHighPrice - intradayLowPrice)) * 100;
+      metricStatusMap.intradayRangePositionPct = available();
+    }
+
+    if (intradayHighPrice === null) {
+      metricStatusMap.distanceBelowIntradayHighPct = incompleteOhlc;
+    } else if (periodEndPrice > intradayHighPrice) {
+      metricStatusMap.distanceBelowIntradayHighPct = metricStatus('unavailable', 'INVALID_CLOSE_SERIES');
+    } else {
+      distanceBelowIntradayHighPct = ((intradayHighPrice - periodEndPrice) / intradayHighPrice) * 100;
+      metricStatusMap.distanceBelowIntradayHighPct = available();
+    }
+  }
+
+  return {
+    status: hasMovementData ? 'available' : 'insufficient_data',
+    observedStartAt: firstBar?.timestamp ?? null,
+    observedEndAt: lastBar?.timestamp ?? null,
+    observedStartDate: firstBar?.date ?? null,
+    observedEndDate: lastBar?.date ?? null,
+    usableCompletedBarCount,
+    validSessionCount: usableCompletedBarCount,
+    periodStartPrice,
+    periodEndPrice,
+    absoluteChange,
+    priceChangePct,
+    highestCompletedClose,
+    lowestCompletedClose,
+    completedCloseRangePositionPct,
+    distanceBelowHighestCompletedClosePct,
+    positiveCloseTransitionRatio,
+    dailyVolatilityPct,
+    maxDrawdownPct,
+    intradayHighPrice,
+    intradayLowPrice,
+    intradayRangePositionPct,
+    distanceBelowIntradayHighPct,
+    periodHighPrice: intradayHighPrice,
+    periodLowPrice: intradayLowPrice,
+    rangePositionPct: intradayRangePositionPct,
+    distanceBelowHighPct: distanceBelowIntradayHighPct,
+    metricStatus: metricStatusMap
+  };
+}
+
 /**
- * Integration function to fetch Yahoo historical daily bars (2Y superset) and produce deterministic asset analysis.
- * Obtains concrete system time once at integration boundary if not injected.
- * @param {string} rawSymbol - Asset symbol (e.g. 'FPT')
- * @param {Object} [options] - Injected services/context for testing
+ * Pure V2 analysis of provider-neutral canonical completed daily history.
+ */
+export function analyzeCanonicalHistory(historyResult, options = {}) {
+  if (!historyResult || typeof historyResult !== 'object') {
+    throw createAnalysisError('Canonical history is required for analysis', 'NO_HISTORY', 404);
+  }
+
+  const metadata = validateCanonicalHistoryMetadata(historyResult);
+  const symbol = metadata.symbol;
+  const historyCapabilities = validateHistoryCapabilities(historyResult.historyCapabilities);
+  const { bars, rejectedBarCount } = normalizeCanonicalBars(historyResult.bars, symbol);
+  const lastBar = bars.at(-1);
+  const requestedRange = options.requestedRange ?? null;
+  if (requestedRange !== null && !PUBLIC_HISTORY_RANGES.includes(requestedRange)) {
+    throw createAnalysisError(`Invalid analysis range '${requestedRange}'`, 'INVALID_HISTORY_RANGE', 400);
+  }
+  const periodKeys = requestedRange ? [requestedRange] : ANALYSIS_PERIODS;
+  const periods = {};
+
+  for (const periodKey of periodKeys) {
+    const periodBars = requestedRange
+      ? bars
+      : bars.filter((bar) => bar.date >= getHistoryRangeStart(lastBar.date, periodKey));
+    periods[periodKey] = createPeriodAnalysis(periodBars, historyCapabilities);
+  }
+
+  let positivePeriodCount = 0;
+  let negativePeriodCount = 0;
+  let zeroChangePeriodCount = 0;
+  const legacyBreadthSupported = metadata.marketPolicy === 'VN_EXCHANGE';
+  if (legacyBreadthSupported) {
+    for (const [periodKey, period] of Object.entries(periods)) {
+      if (
+        period.metricStatus.priceChangePct.status !== 'available' ||
+        period.usableCompletedBarCount < PERIOD_THRESHOLDS[periodKey]
+      ) {
+        continue;
+      }
+      if (period.priceChangePct > 0) positivePeriodCount++;
+      else if (period.priceChangePct < 0) negativePeriodCount++;
+      else zeroChangePeriodCount++;
+    }
+  }
+  const validPeriodCount = positivePeriodCount + negativePeriodCount + zeroChangePeriodCount;
+  const positivePeriodRatio = validPeriodCount >= 3 ? positivePeriodCount / validPeriodCount : null;
+
+  const canonicalHistoryCompleteness = historyResult.dataCompleteness === 'partial' || rejectedBarCount > 0
+    ? 'partial'
+    : 'complete';
+  const availableRanges = periodKeys.filter((periodKey) => periods[periodKey].usableCompletedBarCount > 0);
+  const unavailableRanges = periodKeys.filter((periodKey) => periods[periodKey].usableCompletedBarCount === 0);
+  const warnings = Array.isArray(historyResult.warnings) ? [...historyResult.warnings] : [];
+  if (rejectedBarCount > 0) {
+    warnings.push({
+      code: 'INVALID_CLOSE_SERIES',
+      message: `${rejectedBarCount} non-canonical historical bar(s) were excluded from analysis.`
+    });
+  }
+
+  const analysisPriceSource = 'last_completed_daily_close';
+  return {
+    symbol,
+    assetType: metadata.assetType,
+    marketPolicy: metadata.marketPolicy,
+    marketTimezone: metadata.marketTimezone,
+    quoteCurrency: metadata.quoteCurrency,
+    requestedRange,
+    analysisPrice: lastBar.close,
+    analysisPriceDate: lastBar.date,
+    analysisAsOf: lastBar.timestamp,
+    analysisPriceSource,
+    dataAsOf: historyResult.dataAsOf ?? lastBar.date,
+    freshness: historyResult.freshness ?? null,
+    historyCapabilities,
+    methodologyVersion: ANALYSIS_METHODOLOGY_VERSION,
+    snapshot: normalizeSnapshotContext(options.snapshot),
+    periods,
+    crossPeriod: {
+      positivePeriodRatio,
+      positivePeriodCount,
+      negativePeriodCount,
+      zeroChangePeriodCount,
+      validPeriodCount
+    },
+    dataCompleteness: {
+      availabilityLevel: canonicalHistoryCompleteness,
+      canonicalHistoryCompleteness,
+      requestedRange,
+      usableCompletedBarCount: bars.length,
+      observedStartDate: bars[0].date,
+      observedEndDate: lastBar.date,
+      dataAsOf: historyResult.dataAsOf ?? lastBar.date,
+      availableRanges,
+      unavailableRanges,
+      periodCompletenessRatio: null,
+      warnings
+    },
+    methodology: {
+      methodologyVersion: ANALYSIS_METHODOLOGY_VERSION,
+      analysisPriceSource,
+      priceChangeMetric: 'unadjusted_completed_close_price_change',
+      priceChangeUnit: 'percent',
+      completedCloseRangeUnit: 'percent',
+      positiveCloseTransitionRatioUnit: 'ratio',
+      dailyVolatilityMetric: 'sample_stddev_daily_close_changes',
+      dailyVolatilityAnnualized: false,
+      maxDrawdownMetric: 'completed_close_running_peak',
+      dividendsIncluded: false,
+      distributionsIncluded: false,
+      feesIncluded: false,
+      fundingIncluded: false,
+      stakingYieldIncluded: false,
+      corporateActionsModeled: false,
+      legacyFields: {
+        positivePeriodRatio: 'deprecated_cross_period_positive_breadth',
+        periodHighPrice: 'intradayHighPrice',
+        periodLowPrice: 'intradayLowPrice',
+        rangePositionPct: 'intradayRangePositionPct',
+        distanceBelowHighPct: 'distanceBelowIntradayHighPct',
+        validSessionCount: 'usableCompletedBarCount'
+      }
+    }
+  };
+}
+
+/**
+ * Fetches one canonical Feature 21 history window and produces V2 analysis.
  */
 export async function getAssetAnalysis(rawSymbol, options = {}) {
   if (!rawSymbol || typeof rawSymbol !== 'string') {
-    const err = new Error('Invalid symbol parameter');
-    err.status = 400;
-    throw err;
+    throw createAnalysisError('Invalid symbol parameter', 'INVALID_SYMBOL', 400);
   }
 
   const symbol = rawSymbol.trim().toUpperCase();
+  const requestedRange = options.range === undefined || options.range === null || options.range === ''
+    ? null
+    : String(options.range).trim().toUpperCase();
+  if (requestedRange !== null && !PUBLIC_HISTORY_RANGES.includes(requestedRange)) {
+    throw createAnalysisError(
+      `Invalid range '${options.range}'. Supported ranges: 1W, 1M, 3M, 6M, 1Y`,
+      'INVALID_HISTORY_RANGE',
+      400
+    );
+  }
 
-  const getAnalysisHistoryFn = options.getAnalysisHistoryFn || options.getMarketHistoryFn || getAnalysisHistory;
-  const getMarketSnapshotFn = options.getMarketSnapshotFn || getMarketSnapshot;
+  const historyRange = requestedRange || '1Y';
+  const historyFn = options.getMarketHistoryFn || options.getAnalysisHistoryFn || getMarketHistory;
+  const snapshotFn = options.getMarketSnapshotFn || getMarketSnapshot;
+  const now = options.now === undefined ? new Date() : options.now;
+  const historyResult = await historyFn(symbol, historyRange, { now });
 
-  // 1. Fetch 2Y daily history superset from dedicated Feature 07 analysis history provider
-  const historyResult = await getAnalysisHistoryFn(symbol);
-
-  // 2. Fetch market snapshot context (optional, provider failures do not invalidate historical analysis)
   let snapshot = null;
   try {
-    snapshot = await getMarketSnapshotFn(symbol);
-  } catch (_snapErr) {
+    snapshot = await snapshotFn(symbol);
+  } catch (_snapshotError) {
     snapshot = null;
   }
 
-  // 3. Obtain current time ONCE at integration boundary
-  const now = options.now instanceof Date && Number.isFinite(options.now.getTime()) ? options.now : new Date();
-
-  // 4. Run pure deterministic quantitative analysis
-  return analyzeAssetHistory(historyResult.bars, {
-    symbol,
-    snapshot,
-    now,
-    warnings: historyResult.warnings
-  });
+  return analyzeCanonicalHistory(historyResult, { requestedRange, snapshot });
 }

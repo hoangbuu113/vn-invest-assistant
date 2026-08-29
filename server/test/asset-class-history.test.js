@@ -89,6 +89,7 @@ describe('Feature 21 — Asset-Class Market & Historical Semantics', () => {
     assert.equal(yahoo.bars[1].volume, 12345.6789);
     assert.equal(yahoo.metrics.percentageChange, ((130.987654 / 123.456789) - 1) * 100);
     assert.equal(yahoo.dataCompleteness, 'complete');
+    assert.deepEqual(yahoo.historyCapabilities, { close: true, ohlc: true, volume: true });
 
     const closeOnly = normalizeDailyHistory({
       asset: BTC_ASSET,
@@ -104,6 +105,7 @@ describe('Feature 21 — Asset-Class Market & Historical Semantics', () => {
 
     assert.equal(closeOnly.bars[0].open, null);
     assert.equal(closeOnly.bars[0].high, null);
+    assert.deepEqual(closeOnly.historyCapabilities, { close: true, ohlc: false, volume: false });
     assert.equal(closeOnly.bars[0].low, null);
     assert.equal(closeOnly.bars[0].volume, null);
     assert.equal(closeOnly.metrics.periodHigh, null);
@@ -360,6 +362,7 @@ describe('Feature 21 — Asset-Class Market & Historical Semantics', () => {
     assert.equal(result.provider, 'coingecko');
     assert.equal(result.marketPolicy, 'CONTINUOUS_24_7');
     assert.equal(result.quoteCurrency, 'USD');
+    assert.deepEqual(result.historyCapabilities, { close: true, ohlc: false, volume: false });
   });
 
   test('W–AA. Alpha Vantage maps date-only Gold Spot history to completed UTC close-only bars', async () => {
@@ -396,6 +399,7 @@ describe('Feature 21 — Asset-Class Market & Historical Semantics', () => {
     assert.deepEqual(result.bars.map((bar) => bar.date), ['2026-08-24', '2026-08-28']);
     assert.equal(result.bars[0].timestamp, '2026-08-24T00:00:00.000Z');
     assert.ok(result.bars.every((bar) => bar.open === null && bar.high === null && bar.low === null && bar.volume === null));
+    assert.deepEqual(result.historyCapabilities, { close: true, ohlc: false, volume: false });
     assert.ok(result.warnings.some((warning) => warning.code === 'DERIVED_PERIOD_TIMESTAMP'));
     assert.ok(result.warnings.some((warning) => warning.code === 'NON_TRADING_DATE_EXCLUDED'));
   });

@@ -17,7 +17,7 @@ import {
   reactivateAlert,
   evaluateAndPersistAlerts
 } from './src/supabase.js';
-import { getMarketSnapshot, getMarketHistory, getAnalysisHistory } from './src/market.js';
+import { getMarketSnapshot, getMarketHistory } from './src/market.js';
 import { getNewsFeed, getPersonalizedNewsFeed } from './src/news.js';
 import { getPortfolioOverview } from './src/portfolio.js';
 import { getPortfolioComposition } from './src/composition.js';
@@ -70,7 +70,6 @@ export function createApp(services = {}) {
     getPortfolioOverviewFn = getPortfolioOverview,
     getPortfolioCompositionFn = getPortfolioComposition,
     checkSupabaseConnectionFn = checkSupabaseConnection,
-    getAnalysisHistoryFn = getAnalysisHistory,
     getAssetAnalysisFn = getAssetAnalysis,
     getWatchlistFn = getWatchlist,
     addToWatchlistFn = addToWatchlist,
@@ -681,8 +680,9 @@ export function createApp(services = {}) {
     const { symbol } = req.params;
     try {
       const analysis = await getAssetAnalysisFn(symbol, {
-        getAnalysisHistoryFn,
-        getMarketSnapshotFn
+        getMarketHistoryFn,
+        getMarketSnapshotFn,
+        range: req.query.range
       });
       return res.json({
         status: 'ok',
@@ -694,6 +694,7 @@ export function createApp(services = {}) {
         status: 'error',
         message: error.message || 'Failed to generate asset analysis'
       };
+      if (error.code) response.code = error.code;
       if (error.warnings && Array.isArray(error.warnings) && error.warnings.length > 0) {
         response.warnings = error.warnings;
       }

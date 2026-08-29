@@ -213,7 +213,12 @@ export async function getHistory(asset, mapping, options = {}) {
       range,
       records,
       now,
-      freshness: 'delayed'
+      freshness: 'delayed',
+      historyCapabilities: {
+        close: true,
+        ohlc: false,
+        volume: false
+      }
     });
   } catch (err) {
     if (err.status) throw err;

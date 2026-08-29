@@ -240,6 +240,7 @@ export function normalizeDailyHistory({
   records,
   now,
   freshness = 'delayed',
+  historyCapabilities,
   applyRangeFilter = true,
   excludeIncomplete = true,
   initialWarnings = []
@@ -253,6 +254,19 @@ export function normalizeDailyHistory({
 
   const { marketPolicy, marketTimezone } = assertPolicyContract(asset);
   const symbol = asset.symbol;
+  const normalizedCapabilities = {
+    close: true,
+    ohlc: typeof historyCapabilities?.ohlc === 'boolean'
+      ? historyCapabilities.ohlc
+      : records.some((record) =>
+          normalizedPositiveNumber(record?.open) !== null ||
+          normalizedPositiveNumber(record?.high) !== null ||
+          normalizedPositiveNumber(record?.low) !== null
+        ),
+    volume: typeof historyCapabilities?.volume === 'boolean'
+      ? historyCapabilities.volume
+      : records.some((record) => normalizedVolume(record?.volume) !== null)
+  };
   const today = getCanonicalDate(now, marketTimezone);
   const startDate = applyRangeFilter ? getHistoryRangeStart(today, range) : null;
   const warnings = Array.isArray(initialWarnings) ? [...initialWarnings] : [];
@@ -400,6 +414,7 @@ export function normalizeDailyHistory({
 
   const payload = {
     symbol,
+    assetType: asset.assetType ?? asset.asset_type ?? null,
     range,
     interval: '1d',
     freshness,
@@ -407,6 +422,7 @@ export function normalizeDailyHistory({
     marketPolicy,
     marketTimezone,
     quoteCurrency: asset.quoteCurrency ?? asset.quote_currency ?? null,
+    historyCapabilities: normalizedCapabilities,
     updatedAt: bars.at(-1).timestamp,
     dataAsOf: bars.at(-1).date,
     dataCompleteness: hasIntegrityLoss ? 'partial' : 'complete',

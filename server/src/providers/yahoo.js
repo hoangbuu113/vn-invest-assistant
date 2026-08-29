@@ -174,6 +174,11 @@ export function normalizeHistoricalData(result, symbol, range, options = {}) {
     records,
     now: options.now || new Date(),
     freshness: 'delayed',
+    historyCapabilities: {
+      close: true,
+      ohlc: true,
+      volume: true
+    },
     applyRangeFilter: options.applyRangeFilter === true,
     excludeIncomplete: options.excludeIncomplete !== false
   });

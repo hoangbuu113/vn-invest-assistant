@@ -52,6 +52,30 @@ function createBars({
   return bars;
 }
 
+function createCanonicalHistoryFixture(symbol, bars, overrides = {}) {
+  const canonicalBars = bars.map((bar) => ({
+    ...bar,
+    date: bar.date || bar.timestamp.slice(0, 10),
+    isComplete: true
+  }));
+  return {
+    symbol,
+    assetType: symbol === 'E1VFVN30' ? 'etf' : 'stock',
+    marketPolicy: 'VN_EXCHANGE',
+    marketTimezone: 'Asia/Ho_Chi_Minh',
+    quoteCurrency: 'VND',
+    range: '1Y',
+    interval: '1d',
+    freshness: 'delayed',
+    historyCapabilities: { close: true, ohlc: true, volume: true },
+    updatedAt: canonicalBars.at(-1)?.timestamp ?? null,
+    dataAsOf: canonicalBars.at(-1)?.date ?? null,
+    dataCompleteness: 'complete',
+    bars: canonicalBars,
+    ...overrides
+  };
+}
+
 const DETERMINISTIC_NOW = new Date('2026-08-28T07:00:00.000Z'); // Vietnam date: 2026-08-28
 
 async function resolveYahooVietnamFixture(symbol) {
@@ -656,11 +680,7 @@ describe('Feature 07 — Deterministic Asset Analysis Engine (Core + API + Tests
 
     test('37b. Integration snapshot provider exception/failure -> snapshot becomes null and analysis succeeds', async () => {
       const mockBars = createBars({ endDate: '2026-08-27', count: 200 });
-      const mockGetAnalysisHistory = async (symbol) => ({
-        symbol,
-        range: '1Y',
-        bars: mockBars
-      });
+      const mockGetAnalysisHistory = async (symbol) => createCanonicalHistoryFixture(symbol, mockBars);
       const mockFailingSnapshot = async () => {
         const err = new Error('Yahoo Finance quote endpoint 502 Bad Gateway');
         err.status = 502;
@@ -683,11 +703,7 @@ describe('Feature 07 — Deterministic Asset Analysis Engine (Core + API + Tests
 
     test('37c. Snapshot failure baseline comparison: calculations are identical whether snapshot succeeds or throws', async () => {
       const mockBars = createBars({ endDate: '2026-08-27', count: 200 });
-      const mockGetAnalysisHistory = async (symbol) => ({
-        symbol,
-        range: '1Y',
-        bars: mockBars
-      });
+      const mockGetAnalysisHistory = async (symbol) => createCanonicalHistoryFixture(symbol, mockBars);
 
       const mockSuccessfulSnapshot = async () => ({
         price: 75000,
@@ -866,15 +882,11 @@ describe('Feature 07 — Deterministic Asset Analysis Engine (Core + API + Tests
         priceSource: 'yahoo_delayed_snapshot'
       };
 
-      const mockGetAnalysisHistory = async (symbol) => ({
-        symbol,
-        range: '1Y',
-        bars: mockBars
-      });
+      const mockGetAnalysisHistory = async (symbol) => createCanonicalHistoryFixture(symbol, mockBars);
       const mockGetMarketSnapshot = async () => mockSnapshot;
 
       const app = createApp({
-        getAnalysisHistoryFn: mockGetAnalysisHistory,
+        getMarketHistoryFn: mockGetAnalysisHistory,
         getMarketSnapshotFn: mockGetMarketSnapshot
       });
 
@@ -904,7 +916,7 @@ describe('Feature 07 — Deterministic Asset Analysis Engine (Core + API + Tests
       };
 
       const app = createApp({
-        getAnalysisHistoryFn: mockGetAnalysisHistory
+        getMarketHistoryFn: mockGetAnalysisHistory
       });
 
       const server = app.listen(0);
@@ -970,32 +982,20 @@ describe('Feature 07 — Deterministic Asset Analysis Engine (Core + API + Tests
       assert.equal(result.symbol, 'FPT');
     });
 
-    test('46. Production route wiring regression: GET /api/analysis/:symbol does not call Feature 06 public getMarketHistory range validator', async () => {
-      // Create app with default services (real getAnalysisHistory and real getMarketHistory)
-      // Public getMarketHistory only accepts 1W/1M/3M/6M/1Y and throws on '2Y'.
-      // If the analysis route accidentally called getMarketHistory(symbol, '2Y'), it would throw a 400 error.
+    test('46. Production route wiring uses the public canonical 1Y history contract', async () => {
       const mockBars = createBars({ endDate: '2026-08-27', count: 200 });
 
-      // Injected analysis history provider
-      const mockAnalysisHistory = async (symbol) => ({
-        symbol,
-        range: '1Y',
-        bars: mockBars
-      });
-
-      // Strict public history provider that throws if range is '2Y'
       const strictPublicHistory = async (symbol, range = '1M') => {
         if (!['1W', '1M', '3M', '6M', '1Y'].includes(range)) {
           const err = new Error(`Invalid range '${range}'. Supported ranges: 1W, 1M, 3M, 6M, 1Y`);
           err.status = 400;
           throw err;
         }
-        return { symbol, range, bars: mockBars.slice(0, 10) };
+        return createCanonicalHistoryFixture(symbol, mockBars, { range });
       };
 
       const app = createApp({
         getMarketHistoryFn: strictPublicHistory,
-        getAnalysisHistoryFn: mockAnalysisHistory,
         getMarketSnapshotFn: async () => null
       });
 
@@ -1003,7 +1003,6 @@ describe('Feature 07 — Deterministic Asset Analysis Engine (Core + API + Tests
       const port = server.address().port;
 
       try {
-        // Analysis route MUST succeed (uses getAnalysisHistory, does NOT call public getMarketHistory with 2Y)
         const resAnalysis = await fetch(`http://127.0.0.1:${port}/api/analysis/FPT`);
         assert.equal(resAnalysis.status, 200);
         const analysisBody = await resAnalysis.json();
@@ -1083,10 +1082,11 @@ describe('Feature 07 — Deterministic Asset Analysis Engine (Core + API + Tests
       };
 
       let normalizedHistory = null;
-      const productionAnalysisHistory = async (symbol) => {
+      const productionAnalysisHistory = async (symbol, _range, historyOptions = {}) => {
         normalizedHistory = await getAnalysisHistory(symbol, {
           fetchFn: fakeFetch,
-          resolveProviderMappingFn: resolveYahooVietnamFixture
+          resolveProviderMappingFn: resolveYahooVietnamFixture,
+          now: historyOptions.now
         });
         return normalizedHistory;
       };
