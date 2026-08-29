@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { TiltCard } from './MotionHelpers.jsx';
+import { formatNativeAmount } from '../utils/formatting.js';
 
 export default function AlertCenterSection({
   onSelectAsset,
@@ -133,7 +134,7 @@ export default function AlertCenterSection({
             </h1>
           </div>
           <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.85rem', color: 'var(--color-slate-500)' }}>
-            Theo dõi ngưỡng giá mục tiêu dựa trên dữ liệu giá có độ trễ (~15 phút).
+            Theo dõi ngưỡng giá mục tiêu dựa trên dữ liệu giá thị trường.
           </p>
         </div>
 
@@ -165,7 +166,7 @@ export default function AlertCenterSection({
         </div>
       </div>
 
-      {/* Honest V1 Limitation & Delay Banner */}
+      {/* Honest V1 Limitation Banner */}
       <div
         style={{
           padding: '0.75rem 1rem',
@@ -182,7 +183,7 @@ export default function AlertCenterSection({
       >
         <span style={{ fontSize: '1rem', lineHeight: 1 }}>ⓘ</span>
         <div>
-          Cảnh báo chỉ kích hoạt một lần và được kiểm tra khi bạn làm mới dữ liệu trong ứng dụng. Dữ liệu giá có độ trễ khoảng 15 phút. Phiên bản hiện tại chưa gửi thông báo nền.
+          Cảnh báo chỉ kích hoạt một lần và được kiểm tra khi bạn làm mới dữ liệu trong ứng dụng. Phiên bản hiện tại chưa gửi thông báo nền.
         </div>
       </div>
 
@@ -448,7 +449,7 @@ export default function AlertCenterSection({
                     >
                       <span>{alert.direction === 'above' ? '▲ Giá đạt hoặc vượt' : '▼ Giá giảm xuống hoặc thấp hơn'}</span>
                       <span style={{ color: 'var(--color-slate-900)' }}>
-                        {alert.target_price?.toLocaleString('vi-VN')} ₫
+                        {formatNativeAmount(alert.target_price, alert.asset?.quote_currency || alert.asset?.quoteCurrency || 'VND')}
                       </span>
                     </div>
 
@@ -466,7 +467,7 @@ export default function AlertCenterSection({
                     >
                       <span>{isTriggered ? 'Giá khi kích hoạt:' : 'Giá khi kiểm tra:'}</span>
                       <strong style={{ color: hasEvaluatedPrice ? 'var(--color-slate-800)' : 'var(--color-slate-400)' }}>
-                        {hasEvaluatedPrice ? `${alert.last_evaluated_price.toLocaleString('vi-VN')} ₫` : 'Chưa có dữ liệu giá'}
+                        {hasEvaluatedPrice ? formatNativeAmount(alert.last_evaluated_price, alert.asset?.quote_currency || alert.asset?.quoteCurrency || 'VND') : 'Chưa có dữ liệu giá'}
                       </strong>
                     </div>
                   </div>

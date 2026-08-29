@@ -1,4 +1,5 @@
 import React, { useState, useRef, useId } from 'react';
+import { formatNativeAmount } from '../utils/formatting.js';
 
 /**
  * Format date for X axis and tooltips in Vietnamese
@@ -24,14 +25,6 @@ function formatDateLabel(isoString, isFull = false) {
   }
 }
 
-/**
- * Formats currency in VND
- */
-function formatVND(value) {
-  if (value === null || value === undefined || isNaN(value)) return 'N/A';
-  return `${Number(value).toLocaleString('vi-VN')} ₫`;
-}
-
 export function PriceHistoryChart({
   bars = [],
   percentageChange = null,
@@ -52,7 +45,7 @@ export function PriceHistoryChart({
   if (bars.length < 2) {
     return (
       <div className="chart-empty-state">
-        <span>Chưa đủ phiên giao dịch để vẽ biểu đồ xu hướng (cần tối thiểu 2 phiên)</span>
+        <span>Chưa đủ dữ liệu để vẽ biểu đồ xu hướng (cần tối thiểu 2 mốc dữ liệu)</span>
       </div>
     );
   }
@@ -156,21 +149,21 @@ export function PriceHistoryChart({
           <div className="active-readout-inner">
             <span className="readout-date">📅 {formatDateLabel(activeBar.timestamp, true)}</span>
             <span className="readout-close">
-              Đóng cửa: <strong>{formatVND(activeBar.close)}</strong>
+              Đóng cửa: <strong>{formatNativeAmount(activeBar.close, currency)}</strong>
             </span>
             {activeBar.open && (
-              <span className="readout-sub">Mở: {formatVND(activeBar.open)}</span>
+              <span className="readout-sub">Mở: {formatNativeAmount(activeBar.open, currency)}</span>
             )}
             {activeBar.high && (
-              <span className="readout-sub">Cao: {formatVND(activeBar.high)}</span>
+              <span className="readout-sub">Cao: {formatNativeAmount(activeBar.high, currency)}</span>
             )}
             {activeBar.low && (
-              <span className="readout-sub">Thấp: {formatVND(activeBar.low)}</span>
+              <span className="readout-sub">Thấp: {formatNativeAmount(activeBar.low, currency)}</span>
             )}
           </div>
         ) : (
           <div className="active-readout-hint">
-            <span>Di chuột hoặc chạm vào biểu đồ để xem chi tiết từng phiên</span>
+            <span>Di chuột hoặc chạm vào biểu đồ để xem chi tiết từng mốc dữ liệu</span>
           </div>
         )}
       </div>
@@ -221,7 +214,7 @@ export function PriceHistoryChart({
                 fontWeight="500"
                 fontFamily="var(--font-mono, monospace)"
               >
-                {grid.price.toLocaleString('vi-VN')}
+                {formatNativeAmount(grid.price, currency, { showCurrency: false })}
               </text>
             </g>
           ))}

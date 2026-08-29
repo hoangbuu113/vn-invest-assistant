@@ -54,7 +54,7 @@ export function MarketTicker() {
         {/* Ticker Lead Tag */}
         <div className="ticker-label-badge">
           <span className="ticker-live-dot" />
-          <span>MARKET PULSE</span>
+          <span>THỊ TRƯỜNG VN</span>
           <span className="ticker-delay-tag">Trễ ~15p</span>
         </div>
 

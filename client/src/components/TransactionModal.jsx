@@ -109,10 +109,12 @@ export default function TransactionModal({
     return heldSymbolMap.get(selectedSymbol.toUpperCase()) || null;
   }, [selectedSymbol, heldSymbolMap]);
 
-  // Filtered asset list
+  // Filtered asset list (VND-denominated assets only)
   const filteredAssets = useMemo(() => {
     const query = assetSearchQuery.trim().toLowerCase();
-    let list = Array.isArray(assets) ? [...assets] : [];
+    let list = Array.isArray(assets)
+      ? assets.filter((a) => (a.quote_currency || a.quoteCurrency || 'VND').toUpperCase() === 'VND')
+      : [];
 
     // If SELL mode, prioritize held assets
     if (transactionType === 'SELL') {
@@ -137,6 +139,10 @@ export default function TransactionModal({
     if (!selectedSymbol) return null;
     return (assets || []).find((a) => a.symbol.toUpperCase() === selectedSymbol.toUpperCase()) || null;
   }, [selectedSymbol, assets]);
+
+  const isVndSelectedAsset = selectedAssetObject
+    ? (selectedAssetObject.quote_currency || selectedAssetObject.quoteCurrency || 'VND').toUpperCase() === 'VND'
+    : true;
 
   if (!isOpen) return null;
 
@@ -351,6 +357,22 @@ export default function TransactionModal({
         {/* Scrollable Form Body */}
         <div style={{ overflowY: 'auto', padding: '1.25rem 1.5rem', flex: 1 }}>
           <form onSubmit={handleSubmit} id="transaction-entry-form">
+            {/* Currency Support Notice */}
+            <div
+              style={{
+                fontSize: '0.78rem',
+                color: 'var(--color-slate-600)',
+                backgroundColor: 'var(--color-slate-50, #f8fafc)',
+                padding: '0.65rem 0.85rem',
+                borderRadius: '8px',
+                border: '1px solid var(--color-slate-200, #e2e8f0)',
+                marginBottom: '1.25rem',
+                lineHeight: 1.45
+              }}
+            >
+              📌 <strong>Lưu ý:</strong> Hiện chỉ hỗ trợ ghi nhận giao dịch mua/bán cho tài sản định giá bằng <strong>VND</strong>.
+            </div>
+
             {/* Transaction Type Segmented Toggle */}
             <div style={{ marginBottom: '1.25rem' }}>
               <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 700, color: 'var(--color-slate-700)', marginBottom: '0.4rem' }}>
@@ -638,6 +660,22 @@ export default function TransactionModal({
                   ) : null}
                 </div>
               )}
+
+              {!isVndSelectedAsset && (
+                <div
+                  style={{
+                    padding: '0.65rem 0.85rem',
+                    backgroundColor: 'rgba(245, 158, 11, 0.08)',
+                    borderRadius: '8px',
+                    border: '1px solid rgba(251, 191, 36, 0.6)',
+                    fontSize: '0.82rem',
+                    color: 'var(--color-amber-800, #92400e)',
+                    marginTop: '0.5rem'
+                  }}
+                >
+                  ⚠️ Hiện chỉ hỗ trợ ghi nhận giao dịch cho tài sản định giá bằng VND.
+                </div>
+              )}
             </div>
 
             {/* Inputs Grid: Quantity & Price */}
@@ -822,7 +860,7 @@ export default function TransactionModal({
           <button
             type="submit"
             form="transaction-entry-form"
-            disabled={loading}
+            disabled={loading || !isVndSelectedAsset}
             className="fintech-btn btn-primary btn-sm"
             style={{
               padding: '0.6rem 1.25rem',

@@ -39,27 +39,38 @@ export async function getSnapshot(asset, mapping, options = {}) {
     clearTimeout(timeout);
 
     if (!response.ok) {
+      const isRateLimit = response.status === 429;
       const err = new Error(
         response.status === 404
           ? `Market data for '${symbol}' not found on Alpha Vantage`
-          : `Alpha Vantage returned status ${response.status}`
+          : isRateLimit
+            ? 'Nhà cung cấp dữ liệu đang tạm thời giới hạn yêu cầu. Vui lòng thử lại sau.'
+            : 'Không thể kết nối nhà cung cấp dữ liệu'
       );
-      err.status = response.status === 404 ? 404 : 502;
+      err.status = response.status === 404 ? 404 : isRateLimit ? 503 : 502;
+      err.code = response.status === 404 ? 'MARKET_DATA_NOT_FOUND' : isRateLimit ? 'PROVIDER_RATE_LIMITED' : 'PROVIDER_ERROR';
       throw err;
     }
 
     const data = await response.json();
 
     if (data?.['Error Message']) {
-      const err = new Error(data['Error Message']);
+      const err = new Error(`Market data for '${symbol}' not found on Alpha Vantage`);
       err.status = 404;
+      err.code = 'MARKET_DATA_NOT_FOUND';
       throw err;
     }
 
     if (data?.['Note'] || data?.['Information']) {
       const message = data['Note'] || data['Information'];
-      const err = new Error(`Alpha Vantage notice: ${message}`);
+      const isRateLimit = typeof message === 'string' && /rate|frequency|limit|thank you/i.test(message);
+      const err = new Error(
+        isRateLimit
+          ? 'Nhà cung cấp dữ liệu đang tạm thời giới hạn yêu cầu. Vui lòng thử lại sau.'
+          : 'Không thể kết nối nhà cung cấp dữ liệu'
+      );
       err.status = 502;
+      err.code = isRateLimit ? 'PROVIDER_RATE_LIMITED' : 'PROVIDER_ERROR';
       throw err;
     }
 
@@ -161,31 +172,36 @@ export async function getHistory(asset, mapping, options = {}) {
     });
 
     if (!response.ok) {
+      const isRateLimit = response.status === 429;
       const err = new Error(
         response.status === 404
           ? `Historical Gold Spot data for '${symbol}' not found on Alpha Vantage`
-          : response.status === 429
-            ? 'Alpha Vantage history rate limit exceeded'
-            : `Alpha Vantage returned status ${response.status}`
+          : isRateLimit
+            ? 'Nhà cung cấp dữ liệu đang tạm thời giới hạn yêu cầu. Vui lòng thử lại sau.'
+            : 'Không thể kết nối nhà cung cấp dữ liệu'
       );
-      err.status = response.status === 404 ? 404 : response.status === 429 ? 503 : 502;
-      err.code = response.status === 404 ? 'HISTORY_NOT_FOUND' : response.status === 429 ? 'PROVIDER_RATE_LIMIT' : 'PROVIDER_ERROR';
+      err.status = response.status === 404 ? 404 : isRateLimit ? 503 : 502;
+      err.code = response.status === 404 ? 'HISTORY_NOT_FOUND' : isRateLimit ? 'PROVIDER_RATE_LIMITED' : 'PROVIDER_ERROR';
       throw err;
     }
 
     const data = await response.json();
     if (data?.['Error Message']) {
-      const err = new Error(data['Error Message']);
+      const err = new Error(`Historical Gold Spot data for '${symbol}' not found on Alpha Vantage`);
       err.status = 404;
       err.code = 'HISTORY_NOT_FOUND';
       throw err;
     }
     if (data?.Note || data?.Information) {
       const message = data.Note || data.Information;
-      const isRateLimit = /rate|frequency|limit/i.test(message);
-      const err = new Error(`Alpha Vantage notice: ${message}`);
+      const isRateLimit = typeof message === 'string' && /rate|frequency|limit|thank you/i.test(message);
+      const err = new Error(
+        isRateLimit
+          ? 'Nhà cung cấp dữ liệu đang tạm thời giới hạn yêu cầu. Vui lòng thử lại sau.'
+          : 'Không thể kết nối nhà cung cấp dữ liệu'
+      );
       err.status = isRateLimit ? 503 : 502;
-      err.code = isRateLimit ? 'PROVIDER_RATE_LIMIT' : 'PROVIDER_ERROR';
+      err.code = isRateLimit ? 'PROVIDER_RATE_LIMITED' : 'PROVIDER_ERROR';
       throw err;
     }
     if (!Array.isArray(data?.data)) {

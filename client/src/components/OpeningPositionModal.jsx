@@ -111,13 +111,16 @@ export default function OpeningPositionModal({
 
   if (!isOpen) return null;
 
-  // Filter available assets (excluding already held assets in CREATE mode)
+  // Filter available assets (excluding already held assets in CREATE mode, and restricted to VND assets)
   const availableAssets = (assets || []).filter((a) => {
+    const isVnd = (a.quote_currency || a.quoteCurrency || 'VND').toUpperCase() === 'VND';
+    if (!isVnd) return false;
     if (mode !== 'CREATE') return true;
     return !(holdings || []).some((h) => h.asset_id === a.id);
   });
 
   const selectedAsset = (assets || []).find((a) => a.id === assetId) || targetHolding?.asset || null;
+  const isVndAsset = selectedAsset ? (selectedAsset.quote_currency || selectedAsset.quoteCurrency || 'VND').toUpperCase() === 'VND' : true;
 
   const handleSubmit = async (e) => {
     if (e) e.preventDefault();
@@ -333,7 +336,7 @@ export default function OpeningPositionModal({
                 <>
                   <div>📌 <strong>Thông tin này dùng để ghi nhận tài sản bạn đã sở hữu trước khi theo dõi bằng ứng dụng.</strong></div>
                   <div style={{ marginTop: '4px', color: 'var(--color-slate-500)' }}>
-                    Thao tác này tạo vị thế khởi điểm trong danh mục, <strong>không tạo giao dịch mua</strong> và <strong>không làm thay đổi số tiền mặt hiện tại</strong>.
+                    Thao tác này tạo vị thế khởi điểm trong danh mục, <strong>không tạo giao dịch mua</strong> và <strong>không làm thay đổi số tiền mặt hiện tại</strong>. Hiện chỉ hỗ trợ ghi nhận vị thế ban đầu cho tài sản định giá bằng VND.
                   </div>
                 </>
               )}
@@ -354,6 +357,12 @@ export default function OpeningPositionModal({
                 </>
               )}
             </div>
+
+            {!isVndAsset && (
+              <div className="fintech-banner banner-warning" style={{ marginBottom: '1.25rem' }}>
+                <span>Hiện chỉ hỗ trợ ghi nhận vị thế ban đầu cho tài sản định giá bằng VND.</span>
+              </div>
+            )}
 
             {/* Error banner */}
             {error && (

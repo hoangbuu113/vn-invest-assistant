@@ -26,6 +26,15 @@ import TransactionHistorySection from './components/TransactionHistorySection.js
 import CashMovementModal from './components/CashMovementModal.jsx';
 import CashManagementSection from './components/CashManagementSection.jsx';
 import OpeningPositionModal from './components/OpeningPositionModal.jsx';
+import {
+  formatNativeAmount,
+  formatMarketChange,
+  formatVNDReporting,
+  formatPercentVN,
+  formatAssetType,
+  formatMarketContext,
+  getMarketDisplayDecimals
+} from './utils/formatting.js';
 
 const CATEGORY_STYLES = {
   market: { label: 'Thị trường', bg: '#eff6ff', color: '#1d4ed8', border: '#bfdbfe', accent: '#2563eb' },
@@ -71,61 +80,6 @@ function formatPublishedTime(isoString) {
   } catch {
     return isoString;
   }
-}
-
-function getMarketDisplayDecimals(value, currency) {
-  if (currency !== 'USD' || typeof value !== 'number' || !Number.isFinite(value)) return 0;
-  const absoluteValue = Math.abs(value);
-  if (absoluteValue < 1) return 6;
-  if (absoluteValue < 100) return 4;
-  if (absoluteValue < 1000) return 2;
-  return 0;
-}
-
-function formatMarketChange(value, currency) {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return '—';
-  const decimals = currency === 'USD'
-    ? (Math.abs(value) < 1 ? 6 : 2)
-    : 2;
-  return value.toLocaleString('vi-VN', { maximumFractionDigits: decimals });
-}
-
-const ASSET_TYPE_LABELS = {
-  stock: 'Cổ phiếu',
-  etf: 'ETF',
-  fund: 'Quỹ đầu tư',
-  gold: 'Vàng',
-  crypto: 'Crypto',
-  fx: 'Ngoại hối',
-  deposit: 'Tiền gửi',
-  bank_deposit: 'Tiền gửi',
-  bond: 'Trái phiếu'
-};
-
-function formatAssetType(assetType) {
-  if (!assetType) return 'N/A';
-  return ASSET_TYPE_LABELS[String(assetType).toLowerCase()] || assetType;
-}
-
-function formatMarketContext(asset) {
-  if (!asset) return '—';
-  const policy = asset.market_policy || asset.marketPolicy;
-  if (policy === 'VN_EXCHANGE') {
-    return asset.exchange || asset.market_code || asset.marketCode || 'HOSE';
-  }
-  if (policy === 'CONTINUOUS_24_7') {
-    return '24/7';
-  }
-  if (policy === 'GLOBAL_24_5') {
-    return '24/5';
-  }
-  if (policy === 'NAV_SCHEDULED') {
-    return 'NAV';
-  }
-  if (asset.exchange) {
-    return asset.exchange;
-  }
-  return '—';
 }
 
 const ASSET_CLASS_FILTERS = [
@@ -200,7 +154,8 @@ function computeWatchlistMovers(watchlistItems, marketDataMap = {}) {
         price,
         change,
         changePercent,
-        currency: mkt.currency || 'VND',
+        currency: item.asset?.quote_currency || item.asset?.quoteCurrency || mkt.currency || 'VND',
+        changeBasis: mkt.changeBasis || (item.asset?.market_policy === 'CONTINUOUS_24_7' ? 'ROLLING_24H' : 'PREVIOUS_SESSION_CLOSE'),
         updatedAt: mkt.updatedAt || null
       });
     }
@@ -1111,6 +1066,18 @@ function App() {
   // Fetch historical market data (Feature 06)
   const fetchHistoryData = useCallback((symbol, range = '1M') => {
     if (!symbol) return;
+    if (symbol === 'USD/VND') {
+      setHistoryLoading(false);
+      setHistoryError(null);
+      setHistoryData({
+        unsupported: true,
+        symbol: 'USD/VND',
+        quoteCurrency: 'VND',
+        message: 'Lịch sử giá hiện chưa được hỗ trợ cho USD/VND.'
+      });
+      return;
+    }
+
     setHistoryLoading(true);
     setHistoryError(null);
     setHistoryData(null); // Prevent stale range data from showing while loading
@@ -1147,6 +1114,18 @@ function App() {
   // Fetch deterministic asset analysis (Feature 07)
   const fetchAnalysisData = useCallback((symbol, isInitial = false) => {
     if (!symbol) return;
+    if (symbol === 'USD/VND') {
+      setAnalysisLoading(false);
+      setAnalysisError(null);
+      setAnalysisData({
+        unsupported: true,
+        symbol: 'USD/VND',
+        quoteCurrency: 'VND',
+        message: 'Phân tích lịch sử hiện chưa được hỗ trợ cho USD/VND.'
+      });
+      return;
+    }
+
     if (isInitial) {
       setAnalysisLoading(true);
       setAnalysisData(null);
@@ -1503,7 +1482,7 @@ function App() {
                         </span>
                       )}
                     </div>
-                    <span style={{ fontSize: '0.75rem', color: 'var(--color-slate-400)' }}>Độ trễ ~15p</span>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--color-slate-400)' }}>Dữ liệu thị trường</span>
                   </div>
 
                   {/* Section 5: Watchlist Movers Highlights */}
@@ -1521,7 +1500,7 @@ function App() {
                           >
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                               <span style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--color-gain-700)' }}>
-                                ▲ Tăng mạnh nhất
+                                ▲ Tăng mạnh nhất {movers.topGainer.changeBasis === 'ROLLING_24H' ? '(24h)' : '(phiên)'}
                               </span>
                               <span style={{ fontWeight: 800, color: 'var(--color-gain-800)', fontSize: '0.82rem' }}>
                                 +{Number(movers.topGainer.changePercent).toFixed(2)}%
@@ -1532,7 +1511,7 @@ function App() {
                                 {movers.topGainer.symbol}
                               </strong>
                               <span style={{ fontSize: '0.8rem', color: 'var(--color-slate-600)' }}>
-                                {movers.topGainer.price.toLocaleString('vi-VN')} ₫
+                                {formatNativeAmount(movers.topGainer.price, movers.topGainer.currency)}
                               </span>
                             </div>
                           </div>
@@ -1546,7 +1525,7 @@ function App() {
                           >
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                               <span style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--color-loss-700)' }}>
-                                ▼ Giảm mạnh nhất
+                                ▼ Giảm mạnh nhất {movers.topDecliner.changeBasis === 'ROLLING_24H' ? '(24h)' : '(phiên)'}
                               </span>
                               <span style={{ fontWeight: 800, color: 'var(--color-loss-800)', fontSize: '0.82rem' }}>
                                 {Number(movers.topDecliner.changePercent).toFixed(2)}%
@@ -1557,7 +1536,7 @@ function App() {
                                 {movers.topDecliner.symbol}
                               </strong>
                               <span style={{ fontSize: '0.8rem', color: 'var(--color-slate-600)' }}>
-                                {movers.topDecliner.price.toLocaleString('vi-VN')} ₫
+                                {formatNativeAmount(movers.topDecliner.price, movers.topDecliner.currency)}
                               </span>
                             </div>
                           </div>
@@ -1637,7 +1616,7 @@ function App() {
 
                               <div style={{ textAlign: 'right' }}>
                                 <div style={{ fontWeight: 700, color: 'var(--color-slate-900)', fontSize: '0.9rem' }}>
-                                  {hasPrice ? `${mkt.price.toLocaleString('vi-VN')} ₫` : 'Chưa có giá'}
+                                  {hasPrice ? formatNativeAmount(mkt.price, asset.quote_currency || asset.quoteCurrency || mkt.currency || 'VND') : 'Chưa có giá'}
                                 </div>
                                 <div style={{ marginTop: '2px' }}>
                                   {hasPrice && mkt.changePercent !== null && mkt.changePercent !== undefined ? (
@@ -1777,7 +1756,7 @@ function App() {
                         Theo dõi giá trị tài sản, lãi/lỗ và cơ cấu danh mục đầu tư
                       </span>
                       <span className="fintech-badge badge-neutral" style={{ animation: 'pulseGlow 3s ease-in-out infinite' }}>
-                        Dữ liệu thị trường có độ trễ (~15p)
+                        Dữ liệu theo thời điểm cập nhật của nhà cung cấp
                       </span>
                     </div>
 
@@ -2025,8 +2004,10 @@ function App() {
                           <tbody>
                             {portfolioOverview.holdings.map((h) => {
                               const isPriced = h.pricingStatus === 'available' && h.latestPrice !== null;
-                              const isProfit = isPriced && h.unrealizedPnL > 0;
-                              const isLoss = isPriced && h.unrealizedPnL < 0;
+                              const isPnlSupported = h.pnlStatus === 'available' && h.unrealizedPnL !== null;
+                              const isProfit = isPnlSupported && h.unrealizedPnL > 0;
+                              const isLoss = isPnlSupported && h.unrealizedPnL < 0;
+                              const holdingCurrency = h.asset?.quote_currency || h.asset?.quoteCurrency || h.currency || 'VND';
 
                               const holdingMeta = holdings.find((item) => item.asset_id === h.assetId || item.id === h.id);
                               const isEditable = holdingMeta?.opening_correction_allowed === true;
@@ -2073,14 +2054,16 @@ function App() {
 
                                   {/* 3. Average Cost */}
                                   <td style={{ textAlign: 'right', color: 'var(--color-slate-700)' }}>
-                                    {h.averageCost.toLocaleString('vi-VN')} ₫
+                                    {h.averageCost !== null && h.averageCost !== undefined
+                                      ? formatNativeAmount(h.averageCost, holdingCurrency)
+                                      : '—'}
                                   </td>
 
                                   {/* 4. Latest Price */}
                                   <td style={{ textAlign: 'right' }}>
                                     {isPriced ? (
                                       <span style={{ fontWeight: 700, color: 'var(--color-slate-900)' }}>
-                                        {h.latestPrice.toLocaleString('vi-VN')} ₫
+                                        {formatNativeAmount(h.latestPrice, holdingCurrency)}
                                       </span>
                                     ) : (
                                       <span style={{ fontSize: '0.78rem', color: 'var(--color-slate-400)', fontStyle: 'italic' }}>
@@ -2089,11 +2072,11 @@ function App() {
                                     )}
                                   </td>
 
-                                  {/* 5. Market Value */}
+                                  {/* 5. Market Value (Reporting VND) */}
                                   <td style={{ textAlign: 'right' }}>
                                     {isPriced && h.marketValue !== null ? (
                                       <span style={{ fontWeight: 800, color: 'var(--color-slate-900)' }}>
-                                        {h.marketValue.toLocaleString('vi-VN')} ₫
+                                        {formatVNDReporting(h.marketValue)}
                                       </span>
                                     ) : (
                                       <span style={{ fontSize: '0.78rem', color: 'var(--color-slate-400)', fontStyle: 'italic' }}>
@@ -2104,22 +2087,24 @@ function App() {
 
                                   {/* 6. Unrealized PnL & % */}
                                   <td style={{ textAlign: 'right' }}>
-                                    {isPriced && h.unrealizedPnL !== null ? (
+                                    {isPnlSupported ? (
                                       <div>
                                         <div style={{
                                           fontWeight: 800,
                                           color: isProfit ? 'var(--color-gain-600)' : isLoss ? 'var(--color-loss-600)' : 'var(--color-slate-900)'
                                         }}>
-                                          {isProfit ? '+' : ''}{h.unrealizedPnL.toLocaleString('vi-VN')} ₫
+                                          {isProfit ? '+' : ''}{formatVNDReporting(h.unrealizedPnL)}
                                         </div>
                                         <div style={{ marginTop: '2px' }}>
                                           <span className={`fintech-badge ${isProfit ? 'badge-gain' : isLoss ? 'badge-loss' : 'badge-neutral'}`}>
-                                            {h.unrealizedPnLPercent !== null && h.unrealizedPnLPercent !== undefined
-                                              ? `${h.unrealizedPnLPercent > 0 ? '+' : ''}${Number(h.unrealizedPnLPercent).toFixed(2)}%`
-                                              : '—'}
+                                            {formatPercentVN(h.unrealizedPnLPercent)}
                                           </span>
                                         </div>
                                       </div>
+                                    ) : h.pnlStatus === 'unavailable' ? (
+                                      <span className="fintech-badge badge-neutral" style={{ fontSize: '0.72rem' }} title="Chưa hỗ trợ tính P&L cho tài sản phi VND">
+                                        Chưa khả dụng
+                                      </span>
                                     ) : (
                                       <span style={{ fontSize: '0.78rem', color: 'var(--color-slate-400)', fontStyle: 'italic' }}>
                                         Chưa có dữ liệu
@@ -2192,7 +2177,7 @@ function App() {
                       Các tài sản bạn quan tâm theo dõi nhanh
                     </span>
                     <span className="fintech-badge badge-neutral">
-                      Dữ liệu thị trường có độ trễ (~15p)
+                      Dữ liệu theo thời điểm cập nhật của nhà cung cấp
                     </span>
                   </div>
                 </div>
@@ -2282,7 +2267,7 @@ function App() {
                         <tr>
                           <th>Mã & Tài sản</th>
                           <th>Loại tài sản</th>
-                          <th>Sàn giao dịch</th>
+                          <th>Thị trường</th>
                           <th style={{ textAlign: 'right' }}>Giá gần nhất</th>
                           <th style={{ textAlign: 'right' }}>Biến động</th>
                           <th style={{ textAlign: 'right' }}>Cập nhật</th>
@@ -2328,16 +2313,16 @@ function App() {
                                 </span>
                               </td>
 
-                              {/* 3. Exchange */}
+                              {/* 3. Exchange / Market Context */}
                               <td style={{ color: 'var(--color-slate-500)' }}>
-                                {asset.exchange || 'N/A'}
+                                {formatMarketContext(asset)}
                               </td>
 
                               {/* 4. Latest Market Price (Failure-isolated) */}
                               <td style={{ textAlign: 'right' }}>
                                 {hasPrice ? (
                                   <span style={{ fontWeight: 800, color: 'var(--color-slate-900)', fontSize: '0.95rem' }}>
-                                    {mkt.price.toLocaleString('vi-VN')} {mkt.currency ? `${mkt.currency}` : '₫'}
+                                    {formatNativeAmount(mkt.price, asset.quote_currency || asset.quoteCurrency || mkt.currency || 'VND')}
                                   </span>
                                 ) : (
                                   <span style={{ fontSize: '0.8rem', color: 'var(--color-slate-400)', fontStyle: 'italic' }}>
@@ -2350,7 +2335,7 @@ function App() {
                               <td style={{ textAlign: 'right' }}>
                                 {hasPrice && mkt.change !== null && mkt.change !== undefined ? (
                                   <span className={`fintech-badge ${isGain ? 'badge-gain' : isLoss ? 'badge-loss' : 'badge-neutral'}`}>
-                                    {isGain ? '+' : ''}{Number(mkt.change).toLocaleString('vi-VN', { maximumFractionDigits: 2 })}
+                                    {formatMarketChange(mkt.change, asset.quote_currency || asset.quoteCurrency || mkt.currency || 'VND')}
                                     {mkt.changePercent !== null && mkt.changePercent !== undefined
                                       ? ` (${mkt.changePercent > 0 ? '+' : ''}${Number(mkt.changePercent).toFixed(2)}%)`
                                       : ''}
@@ -2375,7 +2360,8 @@ function App() {
                                         symbol: sym,
                                         name: asset.name || sym,
                                         exchange: asset.exchange,
-                                        asset_type: asset.asset_type
+                                        asset_type: asset.asset_type,
+                                        quote_currency: asset.quote_currency || asset.quoteCurrency || 'VND'
                                       });
                                       setIsAlertModalOpen(true);
                                     }}
@@ -2953,7 +2939,9 @@ function App() {
                             <span style={{ fontSize: '0.78rem', color: 'var(--color-slate-400)' }}>
                               {isRealtime
                                 ? `Binance realtime (USDT) · ${realtimeData.freshness === 'live' ? 'Trực tiếp' : 'Gần đây'}`
-                                : 'Dữ liệu thị trường có độ trễ (~15 phút)'}
+                                : assetDetail?.market_policy === 'VN_EXCHANGE'
+                                  ? 'Dữ liệu thị trường có độ trễ (~15 phút)'
+                                  : 'Dữ liệu theo thời điểm cập nhật của nhà cung cấp'}
                             </span>
                           </div>
                           <MagneticButton
@@ -3003,11 +2991,7 @@ function App() {
                             <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.85rem', marginBottom: '1.25rem', flexWrap: 'wrap' }}>
                               <span style={{ fontSize: '2.15rem', fontWeight: 800, color: 'var(--color-slate-900)', letterSpacing: '-0.02em' }}>
                                 {displayData.price !== null ? (
-                                  <CountUp
-                                    value={displayData.price}
-                                    decimals={getMarketDisplayDecimals(displayData.price, displayData.currency)}
-                                    suffix={displayData.currency ? ` ${displayData.currency}` : ''}
-                                  />
+                                  formatNativeAmount(displayData.price, displayData.currency)
                                 ) : 'N/A'}
                               </span>
 
@@ -3027,14 +3011,14 @@ function App() {
                               <div className="metric-card" style={{ padding: '0.95rem 1rem', '--card-accent': '#64748b' }}>
                                 <div className="metric-label">Cao nhất trong ngày</div>
                                 <div className="metric-value" style={{ fontSize: '1.15rem' }}>
-                                  {displayData.dayHigh !== null ? `${displayData.dayHigh.toLocaleString('vi-VN')}${displayData.currency ? ` ${displayData.currency}` : ''}` : 'N/A'}
+                                  {displayData.dayHigh !== null ? formatNativeAmount(displayData.dayHigh, displayData.currency) : 'N/A'}
                                 </div>
                               </div>
 
                               <div className="metric-card" style={{ padding: '0.95rem 1rem', '--card-accent': '#64748b' }}>
                                 <div className="metric-label">Thấp nhất trong ngày</div>
                                 <div className="metric-value" style={{ fontSize: '1.15rem' }}>
-                                  {displayData.dayLow !== null ? `${displayData.dayLow.toLocaleString('vi-VN')}${displayData.currency ? ` ${displayData.currency}` : ''}` : 'N/A'}
+                                  {displayData.dayLow !== null ? formatNativeAmount(displayData.dayLow, displayData.currency) : 'N/A'}
                                 </div>
                               </div>
 
@@ -3066,159 +3050,186 @@ function App() {
 
 
                   {/* Historical Price & Trend Card (Feature 06) */}
-                  <TiltCard className="fintech-card" style={{ padding: '1.5rem', marginTop: '1.25rem' }}>
-                    {/* Header: Title, delayed badge, and range selector */}
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.75rem' }}>
-                      <div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <h3 style={{ margin: 0, fontSize: '1.1rem', color: 'var(--color-slate-900)', fontWeight: 800 }}>Lịch sử giá</h3>
-                          <span className="fintech-badge badge-neutral" style={{ fontSize: '0.75rem' }}>
-                            Dữ liệu thị trường có độ trễ
-                          </span>
+                  {selectedSymbol === 'USD/VND' || historyData?.unsupported ? (
+                    <TiltCard className="fintech-card" style={{ padding: '1.5rem', marginTop: '1.25rem' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '0.75rem' }}>
+                        <h3 style={{ margin: 0, fontSize: '1.1rem', color: 'var(--color-slate-900)', fontWeight: 800 }}>Lịch sử giá</h3>
+                        <span className="fintech-badge badge-neutral" style={{ fontSize: '0.75rem' }}>Không hỗ trợ</span>
+                      </div>
+                      <div style={{ padding: '1rem', backgroundColor: 'var(--color-slate-50, #f8fafc)', borderRadius: '10px', border: '1px solid var(--color-slate-200, #e2e8f0)', fontSize: '0.85rem', color: 'var(--color-slate-600)' }}>
+                        Lịch sử giá hiện chưa được hỗ trợ cho USD/VND.
+                      </div>
+                    </TiltCard>
+                  ) : (
+                    <TiltCard className="fintech-card" style={{ padding: '1.5rem', marginTop: '1.25rem' }}>
+                      {/* Header: Title, delayed badge, and range selector */}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.75rem' }}>
+                        <div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <h3 style={{ margin: 0, fontSize: '1.1rem', color: 'var(--color-slate-900)', fontWeight: 800 }}>Lịch sử giá</h3>
+                            <span className="fintech-badge badge-neutral" style={{ fontSize: '0.75rem' }}>
+                              Dữ liệu lịch sử đã hoàn tất
+                            </span>
+                          </div>
+                          {historyData && historyData.updatedAt && (
+                            <span style={{ fontSize: '0.78rem', color: 'var(--color-slate-400)', display: 'block', marginTop: '2px' }}>
+                              Cập nhật lúc: {formatPublishedTime(historyData.updatedAt)}
+                            </span>
+                          )}
                         </div>
-                        {historyData && historyData.updatedAt && (
-                          <span style={{ fontSize: '0.78rem', color: 'var(--color-slate-400)', display: 'block', marginTop: '2px' }}>
-                            Cập nhật lúc: {formatPublishedTime(historyData.updatedAt)}
-                          </span>
-                        )}
-                      </div>
 
-                      {/* Range Selector: 1T | 1Th | 3Th | 6Th | 1N */}
-                      <div className="range-selector-group">
-                        {HISTORY_RANGES.map((r) => (
-                          <button
-                            key={r.id}
-                            type="button"
-                            className={`range-selector-btn ${historyRange === r.id ? 'active' : ''}`}
-                            onClick={() => handleRangeChange(r.id)}
-                            disabled={historyLoading}
-                          >
-                            {r.label}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Loading State */}
-                    {historyLoading && (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', padding: '1rem 0' }}>
-                        <div className="skeleton-shimmer" style={{ width: '100%', height: '220px', borderRadius: 'var(--radius-md)' }} />
-                        <div className="metrics-grid" style={{ marginBottom: 0 }}>
-                          {[1, 2, 3, 4, 5, 6].map((n) => (
-                            <div key={n} className="skeleton-shimmer" style={{ height: '65px' }} />
+                        {/* Range Selector: 1T | 1Th | 3Th | 6Th | 1N */}
+                        <div className="range-selector-group">
+                          {HISTORY_RANGES.map((r) => (
+                            <button
+                              key={r.id}
+                              type="button"
+                              className={`range-selector-btn ${historyRange === r.id ? 'active' : ''}`}
+                              onClick={() => handleRangeChange(r.id)}
+                              disabled={historyLoading}
+                            >
+                              {r.label}
+                            </button>
                           ))}
                         </div>
                       </div>
-                    )}
 
-                    {/* Error State */}
-                    {historyError && !historyLoading && (
-                      <div className="fintech-banner banner-warning" style={{ margin: '0.5rem 0' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', flexWrap: 'wrap', gap: '0.5rem' }}>
-                          <span>Không thể tải dữ liệu lịch sử giá ({historyError}).</span>
-                          <MagneticButton
-                            onClick={() => fetchHistoryData(selectedSymbol, historyRange)}
-                            className="fintech-btn btn-secondary btn-sm"
-                          >
-                            Thử lại
-                          </MagneticButton>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Content when loaded */}
-                    {historyData && !historyLoading && (
-                      <div>
-                        {/* Summary Metrics Grid */}
-                        <div className="metrics-grid" style={{ marginBottom: '1.25rem' }}>
-                          {/* 1. Giá đầu kỳ */}
-                          <div className="metric-card" style={{ padding: '0.85rem 1rem', '--card-accent': '#64748b' }}>
-                            <div className="metric-label">Giá đầu kỳ</div>
-                            <div className="metric-value" style={{ fontSize: '1.1rem' }}>
-                              {historyData.metrics?.periodStartPrice !== null && historyData.metrics?.periodStartPrice !== undefined
-                                ? `${historyData.metrics.periodStartPrice.toLocaleString('vi-VN')} ₫`
-                                : 'N/A'}
-                            </div>
-                          </div>
-
-                          {/* 2. Giá gần nhất */}
-                          <div className="metric-card" style={{ padding: '0.85rem 1rem', '--card-accent': '#3b82f6' }}>
-                            <div className="metric-label">Giá gần nhất</div>
-                            <div className="metric-value" style={{ fontSize: '1.1rem' }}>
-                              {historyData.metrics?.latestPrice !== null && historyData.metrics?.latestPrice !== undefined
-                                ? `${historyData.metrics.latestPrice.toLocaleString('vi-VN')} ₫`
-                                : 'N/A'}
-                            </div>
-                          </div>
-
-                          {/* 3. Thay đổi tuyệt đối */}
-                          <div
-                            className={`metric-card ${
-                              (historyData.metrics?.absoluteChange || 0) > 0
-                                ? 'metric-card-gain'
-                                : (historyData.metrics?.absoluteChange || 0) < 0
-                                ? 'metric-card-loss'
-                                : ''
-                            }`}
-                            style={{ padding: '0.85rem 1rem', '--card-accent': (historyData.metrics?.absoluteChange || 0) >= 0 ? '#10b981' : '#ef4444' }}
-                          >
-                            <div className="metric-label">Thay đổi</div>
-                            <div className="metric-value" style={{ fontSize: '1.1rem' }}>
-                              {historyData.metrics?.absoluteChange !== null && historyData.metrics?.absoluteChange !== undefined
-                                ? `${historyData.metrics.absoluteChange > 0 ? '+' : ''}${Number(historyData.metrics.absoluteChange).toLocaleString('vi-VN', { maximumFractionDigits: 2 })} ₫`
-                                : 'N/A'}
-                            </div>
-                          </div>
-
-                          {/* 4. % Thay đổi */}
-                          <div
-                            className={`metric-card ${
-                              (historyData.metrics?.percentageChange || 0) > 0
-                                ? 'metric-card-gain'
-                                : (historyData.metrics?.percentageChange || 0) < 0
-                                ? 'metric-card-loss'
-                                : ''
-                            }`}
-                            style={{ padding: '0.85rem 1rem', '--card-accent': (historyData.metrics?.percentageChange || 0) >= 0 ? '#10b981' : '#ef4444' }}
-                          >
-                            <div className="metric-label">% Thay đổi</div>
-                            <div className="metric-value" style={{ fontSize: '1.1rem' }}>
-                              {historyData.metrics?.percentageChange !== null && historyData.metrics?.percentageChange !== undefined
-                                ? `${historyData.metrics.percentageChange > 0 ? '+' : ''}${Number(historyData.metrics.percentageChange).toFixed(2)}%`
-                                : 'N/A'}
-                            </div>
-                          </div>
-
-                          {/* 5. Cao nhất kỳ */}
-                          <div className="metric-card" style={{ padding: '0.85rem 1rem', '--card-accent': '#10b981' }}>
-                            <div className="metric-label">Cao nhất</div>
-                            <div className="metric-value" style={{ fontSize: '1.1rem' }}>
-                              {historyData.metrics?.periodHigh !== null && historyData.metrics?.periodHigh !== undefined
-                                ? `${Number(historyData.metrics.periodHigh).toLocaleString('vi-VN')} ₫`
-                                : 'N/A'}
-                            </div>
-                          </div>
-
-                          {/* 6. Thấp nhất kỳ */}
-                          <div className="metric-card" style={{ padding: '0.85rem 1rem', '--card-accent': '#ef4444' }}>
-                            <div className="metric-label">Thấp nhất</div>
-                            <div className="metric-value" style={{ fontSize: '1.1rem' }}>
-                              {historyData.metrics?.periodLow !== null && historyData.metrics?.periodLow !== undefined
-                                ? `${Number(historyData.metrics.periodLow).toLocaleString('vi-VN')} ₫`
-                                : 'N/A'}
-                            </div>
+                      {/* Loading State */}
+                      {historyLoading && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', padding: '1rem 0' }}>
+                          <div className="skeleton-shimmer" style={{ width: '100%', height: '220px', borderRadius: 'var(--radius-md)' }} />
+                          <div className="metrics-grid" style={{ marginBottom: 0 }}>
+                            {[1, 2, 3, 4, 5, 6].map((n) => (
+                              <div key={n} className="skeleton-shimmer" style={{ height: '65px' }} />
+                            ))}
                           </div>
                         </div>
+                      )}
 
-                        {/* Visual Trend Chart */}
-                        <PriceHistoryChart
-                          bars={historyData.bars || []}
-                          percentageChange={historyData.metrics?.percentageChange}
-                          currency="VND"
-                        />
-                      </div>
-                    )}
-                  </TiltCard>
+                      {/* Error State */}
+                      {historyError && !historyLoading && (
+                        <div className="fintech-banner banner-warning" style={{ margin: '0.5rem 0' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', flexWrap: 'wrap', gap: '0.5rem' }}>
+                            <span>Không thể tải dữ liệu lịch sử giá ({historyError}).</span>
+                            <MagneticButton
+                              onClick={() => fetchHistoryData(selectedSymbol, historyRange)}
+                              className="fintech-btn btn-secondary btn-sm"
+                            >
+                              Thử lại
+                            </MagneticButton>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Content when loaded */}
+                      {historyData && !historyLoading && (() => {
+                        const historyCurrency = historyData.quoteCurrency || historyData.currency || assetDetail?.quote_currency || 'VND';
+                        const isCloseOnly = historyData.historyCapabilities?.ohlc === false || assetDetail?.market_policy === 'CONTINUOUS_24_7' || assetDetail?.market_policy === 'GLOBAL_24_5';
+                        let effHigh = isCloseOnly ? (historyData.metrics?.highestCompletedClose ?? historyData.metrics?.periodHigh) : historyData.metrics?.periodHigh;
+                        let effLow = isCloseOnly ? (historyData.metrics?.lowestCompletedClose ?? historyData.metrics?.periodLow) : historyData.metrics?.periodLow;
+
+                        if ((effHigh === null || effHigh === undefined) && Array.isArray(historyData.bars) && historyData.bars.length > 0) {
+                          const validCloses = historyData.bars.map((b) => b.close).filter((c) => typeof c === 'number' && Number.isFinite(c));
+                          if (validCloses.length > 0) {
+                            effHigh = Math.max(...validCloses);
+                            effLow = Math.min(...validCloses);
+                          }
+                        }
+
+                        return (
+                          <div>
+                            {/* Summary Metrics Grid */}
+                            <div className="metrics-grid" style={{ marginBottom: '1.25rem' }}>
+                              {/* 1. Giá đầu kỳ */}
+                              <div className="metric-card" style={{ padding: '0.85rem 1rem', '--card-accent': '#64748b' }}>
+                                <div className="metric-label">Giá đầu kỳ</div>
+                                <div className="metric-value" style={{ fontSize: '1.1rem' }}>
+                                  {historyData.metrics?.periodStartPrice !== null && historyData.metrics?.periodStartPrice !== undefined
+                                    ? formatNativeAmount(historyData.metrics.periodStartPrice, historyCurrency)
+                                    : 'N/A'}
+                                </div>
+                              </div>
+
+                              {/* 2. Giá gần nhất */}
+                              <div className="metric-card" style={{ padding: '0.85rem 1rem', '--card-accent': '#3b82f6' }}>
+                                <div className="metric-label">Giá gần nhất</div>
+                                <div className="metric-value" style={{ fontSize: '1.1rem' }}>
+                                  {historyData.metrics?.latestPrice !== null && historyData.metrics?.latestPrice !== undefined
+                                    ? formatNativeAmount(historyData.metrics.latestPrice, historyCurrency)
+                                    : 'N/A'}
+                                </div>
+                              </div>
+
+                              {/* 3. Thay đổi tuyệt đối */}
+                              <div
+                                className={`metric-card ${
+                                  (historyData.metrics?.absoluteChange || 0) > 0
+                                    ? 'metric-card-gain'
+                                    : (historyData.metrics?.absoluteChange || 0) < 0
+                                    ? 'metric-card-loss'
+                                    : ''
+                                }`}
+                                style={{ padding: '0.85rem 1rem', '--card-accent': (historyData.metrics?.absoluteChange || 0) >= 0 ? '#10b981' : '#ef4444' }}
+                              >
+                                <div className="metric-label">Thay đổi</div>
+                                <div className="metric-value" style={{ fontSize: '1.1rem' }}>
+                                  {historyData.metrics?.absoluteChange !== null && historyData.metrics?.absoluteChange !== undefined
+                                    ? formatMarketChange(historyData.metrics.absoluteChange, historyCurrency)
+                                    : 'N/A'}
+                                </div>
+                              </div>
+
+                              {/* 4. % Thay đổi */}
+                              <div
+                                className={`metric-card ${
+                                  (historyData.metrics?.percentageChange || 0) > 0
+                                    ? 'metric-card-gain'
+                                    : (historyData.metrics?.percentageChange || 0) < 0
+                                    ? 'metric-card-loss'
+                                    : ''
+                                }`}
+                                style={{ padding: '0.85rem 1rem', '--card-accent': (historyData.metrics?.percentageChange || 0) >= 0 ? '#10b981' : '#ef4444' }}
+                              >
+                                <div className="metric-label">% Thay đổi</div>
+                                <div className="metric-value" style={{ fontSize: '1.1rem' }}>
+                                  {historyData.metrics?.percentageChange !== null && historyData.metrics?.percentageChange !== undefined
+                                    ? formatPercentVN(historyData.metrics.percentageChange)
+                                    : 'N/A'}
+                                </div>
+                              </div>
+
+                              {/* 5. Cao nhất kỳ */}
+                              <div className="metric-card" style={{ padding: '0.85rem 1rem', '--card-accent': '#10b981' }}>
+                                <div className="metric-label">{isCloseOnly ? 'Đóng cửa cao nhất' : 'Cao nhất'}</div>
+                                <div className="metric-value" style={{ fontSize: '1.1rem' }}>
+                                  {effHigh !== null && effHigh !== undefined
+                                    ? formatNativeAmount(effHigh, historyCurrency)
+                                    : 'N/A'}
+                                </div>
+                              </div>
+
+                              {/* 6. Thấp nhất kỳ */}
+                              <div className="metric-card" style={{ padding: '0.85rem 1rem', '--card-accent': '#ef4444' }}>
+                                <div className="metric-label">{isCloseOnly ? 'Đóng cửa thấp nhất' : 'Thấp nhất'}</div>
+                                <div className="metric-value" style={{ fontSize: '1.1rem' }}>
+                                  {effLow !== null && effLow !== undefined
+                                    ? formatNativeAmount(effLow, historyCurrency)
+                                    : 'N/A'}
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Visual Trend Chart */}
+                            <PriceHistoryChart
+                              bars={historyData.bars || []}
+                              percentageChange={historyData.metrics?.percentageChange}
+                              currency={historyCurrency}
+                            />
+                          </div>
+                        );
+                      })()}
+                    </TiltCard>
+                  )}
 
                   {/* Deterministic Asset Analysis (Feature 07) */}
                   <AssetAnalysisSection

@@ -1,6 +1,11 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { TiltCard, MagneticButton, CountUp } from './MotionHelpers.jsx';
+import {
+  formatNativeAmount,
+  formatMarketChange,
+  formatPercentVN
+} from '../utils/formatting.js';
 
 const PERIODS_CONFIG = [
   { key: '1W', label: '1T', name: '1 tuần' },
@@ -10,26 +15,14 @@ const PERIODS_CONFIG = [
   { key: '1Y', label: '1N', name: '1 năm' }
 ];
 
-const AVAILABILITY_LABELS = {
-  complete: { text: 'Dữ liệu đầy đủ', badgeClass: 'badge-gain' },
-  partial: { text: 'Dữ liệu một phần', badgeClass: 'badge-warn' },
-  limited: { text: 'Dữ liệu còn hạn chế', badgeClass: 'badge-warn' },
-  unavailable: { text: 'Chưa đủ dữ liệu', badgeClass: 'badge-neutral' }
-};
-
 const UNAVAILABLE_REASON_LABELS = {
-  insufficient_sessions: 'Chưa đủ số phiên giao dịch theo tiêu chuẩn giai đoạn',
+  insufficient_sessions: 'Chưa đủ số mốc dữ liệu theo tiêu chuẩn giai đoạn',
   missing_high: 'Thiếu dữ liệu giá cao nhất trong giai đoạn',
   missing_low: 'Thiếu dữ liệu giá thấp nhất trong giai đoạn',
   flat_range: 'Vùng giá chưa xác định được (giá cao nhất bằng giá thấp nhất)',
   analysis_price_outside_range: 'Dữ liệu vùng giá chưa nhất quán với giá phân tích',
   invalid_start_price: 'Giá đầu kỳ không hợp lệ'
 };
-
-function formatVND(value) {
-  if (value === null || value === undefined || isNaN(value)) return 'N/A';
-  return `${Number(value).toLocaleString('vi-VN')} ₫`;
-}
 
 function formatDate(isoString, includeTime = false) {
   if (!isoString) return 'N/A';
@@ -55,15 +48,6 @@ function formatDate(isoString, includeTime = false) {
   }
 }
 
-function formatPercentVN(val, showSign = true) {
-  if (val === null || val === undefined || isNaN(val)) return '—';
-  const num = Number(val);
-  const formatted = Math.abs(num).toFixed(2).replace('.', ',');
-  if (num > 0) return showSign ? `+${formatted}%` : `${formatted}%`;
-  if (num < 0) return `-${formatted}%`;
-  return `0,00%`;
-}
-
 export function AssetAnalysisSection({
   data,
   loading = false,
@@ -73,6 +57,34 @@ export function AssetAnalysisSection({
 }) {
   const [selectedPeriod, setSelectedPeriod] = useState('1M');
   const [showMethodology, setShowMethodology] = useState(false);
+
+  // Explicit unsupported state (e.g. USD/VND FX)
+  if (symbol === 'USD/VND' || data?.unsupported) {
+    return (
+      <TiltCard className="fintech-card" style={{ padding: '1.5rem', marginTop: '1.25rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '0.75rem' }}>
+          <h3 style={{ margin: 0, fontSize: '1.1rem', color: 'var(--color-slate-900)', fontWeight: 800 }}>
+            Phân tích tài sản
+          </h3>
+          <span className="fintech-badge badge-neutral" style={{ fontSize: '0.75rem' }}>
+            Không hỗ trợ
+          </span>
+        </div>
+        <div
+          style={{
+            padding: '1rem',
+            backgroundColor: 'var(--color-slate-50, #f8fafc)',
+            borderRadius: '10px',
+            border: '1px solid var(--color-slate-200, #e2e8f0)',
+            fontSize: '0.85rem',
+            color: 'var(--color-slate-600)'
+          }}
+        >
+          Phân tích lịch sử hiện chưa được hỗ trợ cho USD/VND.
+        </div>
+      </TiltCard>
+    );
+  }
 
   // Loading skeleton state
   if (loading) {
@@ -111,7 +123,7 @@ export function AssetAnalysisSection({
               Dựa trên biến động giá lịch sử đã hoàn tất.
             </span>
           </div>
-          <span className="fintech-badge badge-neutral">Dữ liệu thị trường có độ trễ</span>
+          <span className="fintech-badge badge-neutral">Dựa trên dữ liệu đã hoàn tất</span>
         </div>
 
         <div className="fintech-banner banner-warning" style={{ margin: '0.5rem 0' }}>
@@ -133,16 +145,17 @@ export function AssetAnalysisSection({
     return null;
   }
 
+  const quoteCurrency = data.quoteCurrency || data.currency || 'VND';
+  const isCloseOnly = data.capabilities?.ohlc === false || data.marketPolicy === 'CONTINUOUS_24_7' || data.marketPolicy === 'GLOBAL_24_5';
+
   const {
     analysisPrice,
     analysisAsOf,
     periods = {},
-    crossPeriod = {},
     dataCompleteness = {},
     methodology = {}
   } = data;
 
-  const availabilityInfo = AVAILABILITY_LABELS[dataCompleteness.availabilityLevel] || AVAILABILITY_LABELS.unavailable;
   const availableRangesCount = Array.isArray(dataCompleteness.availableRanges) ? dataCompleteness.availableRanges.length : 0;
 
   const activePeriodConfig = PERIODS_CONFIG.find((p) => p.key === selectedPeriod) || PERIODS_CONFIG[1];
@@ -152,10 +165,27 @@ export function AssetAnalysisSection({
   const isPositiveChange = typeof activePeriodData.priceChangePct === 'number' && activePeriodData.priceChangePct > 0;
   const isNegativeChange = typeof activePeriodData.priceChangePct === 'number' && activePeriodData.priceChangePct < 0;
 
-  // Clamped dot position for range visual
-  const rangePosition = typeof activePeriodData.rangePositionPct === 'number' && Number.isFinite(activePeriodData.rangePositionPct)
-    ? Math.min(100, Math.max(0, activePeriodData.rangePositionPct))
+  // Clamped dot position for range visual (prefer V2 completedCloseRangePositionPct if close-only)
+  const rawRangePct = isCloseOnly
+    ? (activePeriodData.completedCloseRangePositionPct ?? activePeriodData.rangePositionPct)
+    : (activePeriodData.rangePositionPct ?? activePeriodData.completedCloseRangePositionPct);
+
+  const rangePosition = typeof rawRangePct === 'number' && Number.isFinite(rawRangePct)
+    ? Math.min(100, Math.max(0, rawRangePct))
     : null;
+
+  // Determine low/high price for current period
+  const effectiveLowPrice = isCloseOnly
+    ? (activePeriodData.lowestCompletedClose ?? activePeriodData.periodLowPrice)
+    : (activePeriodData.periodLowPrice ?? activePeriodData.lowestCompletedClose);
+
+  const effectiveHighPrice = isCloseOnly
+    ? (activePeriodData.highestCompletedClose ?? activePeriodData.periodHighPrice)
+    : (activePeriodData.periodHighPrice ?? activePeriodData.highestCompletedClose);
+
+  const effectiveDistanceBelowHigh = isCloseOnly
+    ? (activePeriodData.distanceBelowHighestCompletedClosePct ?? activePeriodData.distanceBelowHighPct)
+    : (activePeriodData.distanceBelowHighPct ?? activePeriodData.distanceBelowHighestCompletedClosePct);
 
   return (
     <TiltCard className="fintech-card" style={{ padding: '1.5rem', marginTop: '1.25rem' }}>
@@ -166,12 +196,17 @@ export function AssetAnalysisSection({
             <h3 style={{ margin: 0, fontSize: '1.15rem', color: 'var(--color-slate-900)', fontWeight: 800 }}>
               Phân tích tài sản
             </h3>
-            <span className={`fintech-badge ${availabilityInfo.badgeClass}`} style={{ fontSize: '0.75rem' }}>
-              {availabilityInfo.text} ({availableRangesCount}/5)
+            <span className={`fintech-badge ${availableRangesCount === 5 ? 'badge-gain' : 'badge-neutral'}`} style={{ fontSize: '0.75rem' }}>
+              {availableRangesCount}/5 kỳ có dữ liệu
             </span>
             <span className="fintech-badge badge-neutral" style={{ fontSize: '0.75rem' }}>
-              Dữ liệu thị trường có độ trễ
+              Dựa trên dữ liệu đã hoàn tất
             </span>
+            {isCloseOnly && (
+              <span className="fintech-badge badge-neutral" style={{ fontSize: '0.75rem' }}>
+                Một số chỉ số nội ngày không áp dụng
+              </span>
+            )}
           </div>
           <p style={{ margin: '4px 0 0 0', fontSize: '0.82rem', color: 'var(--color-slate-500)' }}>
             Dựa trên biến động giá lịch sử đã hoàn tất.
@@ -195,12 +230,12 @@ export function AssetAnalysisSection({
         <div className="metric-card" style={{ padding: '0.9rem 1rem', '--card-accent': '#2563eb' }}>
           <div className="metric-label">Giá dùng để phân tích</div>
           <div className="metric-value" style={{ fontSize: '1.2rem', color: 'var(--color-slate-900)' }}>
-            {analysisPrice !== null && analysisPrice !== undefined ? (
-              <CountUp value={analysisPrice} suffix=" ₫" />
-            ) : 'N/A'}
+            {analysisPrice !== null && analysisPrice !== undefined
+              ? formatNativeAmount(analysisPrice, quoteCurrency)
+              : 'N/A'}
           </div>
           <div style={{ fontSize: '0.74rem', color: 'var(--color-slate-500)', marginTop: '3px' }}>
-            Giá đóng cửa của phiên hoàn tất gần nhất
+            {isCloseOnly ? 'Giá đóng cửa của ngày hoàn tất gần nhất' : 'Giá đóng cửa của phiên hoàn tất gần nhất'}
           </div>
         </div>
 
@@ -211,7 +246,7 @@ export function AssetAnalysisSection({
             {analysisAsOf ? formatDate(analysisAsOf) : 'N/A'}
           </div>
           <div style={{ fontSize: '0.74rem', color: 'var(--color-slate-500)', marginTop: '3px' }}>
-            Phiên đóng cửa gần nhất được ghi nhận
+            Mốc đóng cửa gần nhất được ghi nhận
           </div>
         </div>
 
@@ -219,43 +254,14 @@ export function AssetAnalysisSection({
         <div className="metric-card" style={{ padding: '0.9rem 1rem', '--card-accent': availableRangesCount === 5 ? '#10b981' : '#f59e0b' }}>
           <div className="metric-label">Độ bao phủ dữ liệu</div>
           <div className="metric-value" style={{ fontSize: '1.1rem', color: 'var(--color-slate-800)' }}>
-            {availableRangesCount}/5 giai đoạn
+            {availableRangesCount}/5 kỳ có dữ liệu
           </div>
           <div style={{ fontSize: '0.74rem', color: 'var(--color-slate-500)', marginTop: '3px' }}>
-            {availableRangesCount === 5 ? '5/5 giai đoạn có đủ dữ liệu' : `${availableRangesCount} trên 5 giai đoạn có đủ dữ liệu`}
+            {availableRangesCount === 5
+              ? (isCloseOnly ? '5/5 kỳ có dữ liệu mốc đóng cửa' : '5/5 kỳ có đủ dữ liệu phiên')
+              : `${availableRangesCount} trên 5 kỳ có dữ liệu`}
           </div>
         </div>
-      </div>
-
-      {/* 3. Cross-Period Breadth Indicator */}
-      <div className="analysis-breadth-box" style={{ marginBottom: '1.25rem' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem' }}>
-            <span style={{ fontSize: '0.88rem', fontWeight: 700, color: 'var(--color-slate-800)' }}>
-              Giai đoạn tăng giá:
-            </span>
-            <strong style={{ fontSize: '1.05rem', color: 'var(--color-brand-700)', fontWeight: 800 }}>
-              {crossPeriod.positivePeriodCount !== undefined ? `${crossPeriod.positivePeriodCount} / ${crossPeriod.validPeriodCount ?? 5}` : '—'}
-            </strong>
-          </div>
-          <span style={{ fontSize: '0.8rem', color: 'var(--color-slate-600)' }}>
-            {crossPeriod.positivePeriodRatio !== null && crossPeriod.positivePeriodRatio !== undefined
-              ? `${crossPeriod.positivePeriodCount} trong ${crossPeriod.validPeriodCount} giai đoạn có biến động giá dương (${(crossPeriod.positivePeriodRatio * 100).toFixed(0)}%)`
-              : 'Chưa đủ dữ liệu giai đoạn để thống kê độ rộng'}
-          </span>
-        </div>
-
-        {/* Compact Breadth Progress Bar */}
-        {crossPeriod.validPeriodCount > 0 && (
-          <div className="breadth-mini-bar" style={{ marginTop: '0.65rem' }}>
-            <div
-              className="breadth-mini-fill"
-              style={{
-                width: `${(crossPeriod.positivePeriodRatio || 0) * 100}%`
-              }}
-            />
-          </div>
-        )}
       </div>
 
       {/* 4. Five-Period Interactive Switcher & Active Period Details */}
@@ -322,7 +328,7 @@ export function AssetAnalysisSection({
                   </h4>
                   <span style={{ fontSize: '0.78rem', color: 'var(--color-slate-500)' }}>
                     {isPeriodAvailable
-                      ? `${activePeriodData.validSessionCount || 0} phiên giao dịch hoàn tất (${formatDate(activePeriodData.observedStartAt)} → ${formatDate(activePeriodData.observedEndAt)})`
+                      ? `${activePeriodData.validSessionCount || 0} ${isCloseOnly ? 'ngày' : 'phiên'} dữ liệu hoàn tất (${formatDate(activePeriodData.observedStartAt)} → ${formatDate(activePeriodData.observedEndAt)})`
                       : 'Chưa đủ dữ liệu phân tích'}
                   </span>
                 </div>
@@ -336,7 +342,7 @@ export function AssetAnalysisSection({
             {isPeriodAvailable ? (
               <div>
                 {/* Metrics Grid for this Period */}
-                <div className="metrics-grid" style={{ marginBottom: '1.25rem', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))' }}>
+                <div className="metrics-grid" style={{ marginBottom: '1.25rem', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))' }}>
                   {/* Biến động giá */}
                   <div
                     className={`metric-card ${
@@ -359,20 +365,22 @@ export function AssetAnalysisSection({
                     </div>
                     <div style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--color-slate-600)', marginTop: '2px' }}>
                       {typeof activePeriodData.absoluteChange === 'number'
-                        ? `${activePeriodData.absoluteChange > 0 ? '+' : ''}${activePeriodData.absoluteChange.toLocaleString('vi-VN')} ₫`
+                        ? formatMarketChange(activePeriodData.absoluteChange, quoteCurrency)
                         : '—'}
                     </div>
                   </div>
 
                   {/* Khoảng giá (Low -> High) */}
                   <div className="metric-card" style={{ padding: '0.95rem 1rem', '--card-accent': '#6366f1' }}>
-                    <div className="metric-label">Khoảng giá trong kỳ</div>
-                    <div className="metric-value" style={{ fontSize: '1.05rem', color: 'var(--color-slate-900)' }}>
-                      {formatVND(activePeriodData.periodLowPrice)} &rarr; {formatVND(activePeriodData.periodHighPrice)}
+                    <div className="metric-label">{isCloseOnly ? 'Khoảng giá đóng cửa' : 'Khoảng giá trong kỳ'}</div>
+                    <div className="metric-value" style={{ fontSize: '0.95rem', color: 'var(--color-slate-900)' }}>
+                      {effectiveLowPrice !== null && effectiveHighPrice !== null ? (
+                        <span>{formatNativeAmount(effectiveLowPrice, quoteCurrency)} &rarr; {formatNativeAmount(effectiveHighPrice, quoteCurrency)}</span>
+                      ) : '—'}
                     </div>
                     <div style={{ fontSize: '0.75rem', color: 'var(--color-slate-500)', marginTop: '2px' }}>
-                      Biên độ: {typeof activePeriodData.periodHighPrice === 'number' && typeof activePeriodData.periodLowPrice === 'number'
-                        ? `${(activePeriodData.periodHighPrice - activePeriodData.periodLowPrice).toLocaleString('vi-VN')} ₫`
+                      Biên độ: {typeof effectiveHighPrice === 'number' && typeof effectiveLowPrice === 'number'
+                        ? formatMarketChange(effectiveHighPrice - effectiveLowPrice, quoteCurrency, { showCurrency: true })
                         : '—'}
                     </div>
                   </div>
@@ -382,34 +390,73 @@ export function AssetAnalysisSection({
                     className="metric-card"
                     style={{
                       padding: '0.95rem 1rem',
-                      '--card-accent': activePeriodData.distanceBelowHighPct === 0 ? '#10b981' : '#f59e0b'
+                      '--card-accent': effectiveDistanceBelowHigh === 0 ? '#10b981' : '#f59e0b'
                     }}
                   >
                     <div className="metric-label">Cách đỉnh giai đoạn</div>
                     <div className="metric-value" style={{ fontSize: '1.05rem', color: 'var(--color-slate-800)' }}>
-                      {activePeriodData.distanceBelowHighPct === 0 ? (
+                      {effectiveDistanceBelowHigh === 0 ? (
                         <span style={{ color: 'var(--color-gain-600)', fontWeight: 700 }}>
                           Đang ở đỉnh kỳ ✨
                         </span>
-                      ) : typeof activePeriodData.distanceBelowHighPct === 'number' ? (
-                        <span>Thấp hơn đỉnh {activePeriodData.distanceBelowHighPct.toFixed(2).replace('.', ',')}%</span>
+                      ) : typeof effectiveDistanceBelowHigh === 'number' ? (
+                        <span>Thấp hơn đỉnh {effectiveDistanceBelowHigh.toFixed(2).replace('.', ',')}%</span>
                       ) : '—'}
                     </div>
                     <div style={{ fontSize: '0.75rem', color: 'var(--color-slate-500)', marginTop: '2px' }}>
-                      {activePeriodData.distanceBelowHighPct === 0
+                      {effectiveDistanceBelowHigh === 0
                         ? 'Giá phân tích trùng với mức cao nhất trong kỳ'
-                        : `Đỉnh cao nhất: ${formatVND(activePeriodData.periodHighPrice)}`}
+                        : `Đỉnh: ${formatNativeAmount(effectiveHighPrice, quoteCurrency)}`}
                     </div>
                   </div>
 
-                  {/* Số phiên giao dịch */}
+                  {/* Tỷ lệ mốc đóng cửa tăng */}
+                  {typeof activePeriodData.positiveCloseTransitionRatio === 'number' && (
+                    <div className="metric-card" style={{ padding: '0.95rem 1rem', '--card-accent': '#0284c7' }}>
+                      <div className="metric-label">Tỷ lệ mốc đóng cửa tăng</div>
+                      <div className="metric-value" style={{ fontSize: '1.15rem', color: 'var(--color-slate-900)' }}>
+                        {(activePeriodData.positiveCloseTransitionRatio * 100).toFixed(1).replace('.', ',')}%
+                      </div>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--color-slate-500)', marginTop: '2px' }}>
+                        Tỷ lệ các mốc có giá đóng cửa tăng so với mốc trước
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Biến động ngày (Volatility) */}
+                  {typeof activePeriodData.dailyVolatilityPct === 'number' && (
+                    <div className="metric-card" style={{ padding: '0.95rem 1rem', '--card-accent': '#8b5cf6' }}>
+                      <div className="metric-label">Biến động ngày</div>
+                      <div className="metric-value" style={{ fontSize: '1.15rem', color: 'var(--color-slate-900)' }}>
+                        {activePeriodData.dailyVolatilityPct.toFixed(2).replace('.', ',')}%
+                      </div>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--color-slate-500)', marginTop: '2px' }}>
+                        Độ lệch chuẩn log-return ngày
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Sụt giảm tối đa theo giá đóng cửa (Max Drawdown) */}
+                  {typeof activePeriodData.maxDrawdownPct === 'number' && (
+                    <div className="metric-card" style={{ padding: '0.95rem 1rem', '--card-accent': '#f43f5e' }}>
+                      <div className="metric-label">Sụt giảm tối đa (đóng cửa)</div>
+                      <div className="metric-value" style={{ fontSize: '1.15rem', color: 'var(--color-loss-600)' }}>
+                        {activePeriodData.maxDrawdownPct > 0 ? '-' : ''}{activePeriodData.maxDrawdownPct.toFixed(2).replace('.', ',')}%
+                      </div>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--color-slate-500)', marginTop: '2px' }}>
+                        Mức giảm lớn nhất từ đỉnh đến đáy đóng cửa
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Số mốc dữ liệu & Giá đầu kỳ */}
                   <div className="metric-card" style={{ padding: '0.95rem 1rem', '--card-accent': '#3b82f6' }}>
-                    <div className="metric-label">Số phiên dữ liệu</div>
+                    <div className="metric-label">Số {isCloseOnly ? 'ngày' : 'phiên'} dữ liệu</div>
                     <div className="metric-value" style={{ fontSize: '1.15rem', color: 'var(--color-slate-900)' }}>
-                      {activePeriodData.validSessionCount} phiên
+                      {activePeriodData.validSessionCount} {isCloseOnly ? 'ngày' : 'phiên'}
                     </div>
                     <div style={{ fontSize: '0.75rem', color: 'var(--color-slate-500)', marginTop: '2px' }}>
-                      Giá đầu kỳ: {formatVND(activePeriodData.periodStartPrice)}
+                      Giá đầu kỳ: {formatNativeAmount(activePeriodData.periodStartPrice, quoteCurrency)}
                     </div>
                   </div>
                 </div>
@@ -446,7 +493,7 @@ export function AssetAnalysisSection({
                         >
                           <div className="range-dot-core" />
                           <div className="range-dot-badge">
-                            {formatVND(analysisPrice)}
+                            {formatNativeAmount(analysisPrice, quoteCurrency)}
                           </div>
                         </motion.div>
                       )}
@@ -454,12 +501,12 @@ export function AssetAnalysisSection({
 
                     <div className="range-track-labels">
                       <div className="range-label-left">
-                        <span className="label-title">Thấp nhất</span>
-                        <span className="label-price">{formatVND(activePeriodData.periodLowPrice)}</span>
+                        <span className="label-title">{isCloseOnly ? 'Đóng cửa thấp nhất' : 'Thấp nhất'}</span>
+                        <span className="label-price">{formatNativeAmount(effectiveLowPrice, quoteCurrency)}</span>
                       </div>
                       <div className="range-label-right">
-                        <span className="label-title">Cao nhất</span>
-                        <span className="label-price">{formatVND(activePeriodData.periodHighPrice)}</span>
+                        <span className="label-title">{isCloseOnly ? 'Đóng cửa cao nhất' : 'Cao nhất'}</span>
+                        <span className="label-price">{formatNativeAmount(effectiveHighPrice, quoteCurrency)}</span>
                       </div>
                     </div>
                   </div>
@@ -473,7 +520,7 @@ export function AssetAnalysisSection({
                   Chưa đủ dữ liệu cho giai đoạn {activePeriodConfig.name}
                 </h5>
                 <p style={{ margin: '0 0 0.85rem 0', fontSize: '0.82rem', color: 'var(--color-slate-500)' }}>
-                  Giai đoạn này không có đủ số phiên hợp lệ hoặc dữ liệu thị trường chưa đủ điều kiện tính toán.
+                  Giai đoạn này không có đủ số mốc dữ liệu hợp lệ hoặc dữ liệu thị trường chưa đủ điều kiện tính toán.
                 </p>
                 {Array.isArray(activePeriodData.unavailableReasons) && activePeriodData.unavailableReasons.length > 0 && (
                   <div className="unavailable-reasons-list">
@@ -501,10 +548,10 @@ export function AssetAnalysisSection({
               <tr>
                 <th>Giai đoạn</th>
                 <th>Biến động giá</th>
-                <th>Khoảng giá (Thấp - Cao)</th>
+                <th>Khoảng giá</th>
                 <th>Vị trí vùng giá</th>
                 <th>Cách đỉnh</th>
-                <th>Số phiên</th>
+                <th>Số {isCloseOnly ? 'ngày' : 'phiên'}</th>
               </tr>
             </thead>
             <tbody>
@@ -512,6 +559,22 @@ export function AssetAnalysisSection({
                 const pData = periods[p.key];
                 const isAvail = pData && pData.status === 'available';
                 const isSelected = selectedPeriod === p.key;
+
+                const pLow = isCloseOnly
+                  ? (pData?.lowestCompletedClose ?? pData?.periodLowPrice)
+                  : (pData?.periodLowPrice ?? pData?.lowestCompletedClose);
+
+                const pHigh = isCloseOnly
+                  ? (pData?.highestCompletedClose ?? pData?.periodHighPrice)
+                  : (pData?.periodHighPrice ?? pData?.highestCompletedClose);
+
+                const pDist = isCloseOnly
+                  ? (pData?.distanceBelowHighestCompletedClosePct ?? pData?.distanceBelowHighPct)
+                  : (pData?.distanceBelowHighPct ?? pData?.distanceBelowHighestCompletedClosePct);
+
+                const pRange = isCloseOnly
+                  ? (pData?.completedCloseRangePositionPct ?? pData?.rangePositionPct)
+                  : (pData?.rangePositionPct ?? pData?.completedCloseRangePositionPct);
 
                 return (
                   <tr
@@ -544,33 +607,33 @@ export function AssetAnalysisSection({
                       )}
                     </td>
                     <td>
-                      {isAvail && pData.periodLowPrice !== null && pData.periodHighPrice !== null ? (
+                      {isAvail && pLow !== null && pHigh !== null ? (
                         <span style={{ fontSize: '0.84rem' }}>
-                          {Number(pData.periodLowPrice).toLocaleString('vi-VN')} – {Number(pData.periodHighPrice).toLocaleString('vi-VN')} ₫
+                          {formatNativeAmount(pLow, quoteCurrency)} – {formatNativeAmount(pHigh, quoteCurrency)}
                         </span>
                       ) : (
                         <span style={{ color: 'var(--color-slate-400)' }}>—</span>
                       )}
                     </td>
                     <td>
-                      {isAvail && typeof pData.rangePositionPct === 'number' ? (
+                      {isAvail && typeof pRange === 'number' ? (
                         <span style={{ fontWeight: 600, color: 'var(--color-slate-800)', fontSize: '0.84rem' }}>
-                          {pData.rangePositionPct.toFixed(1).replace('.', ',')}%
+                          {pRange.toFixed(1).replace('.', ',')}%
                         </span>
                       ) : (
                         <span style={{ color: 'var(--color-slate-400)' }}>—</span>
                       )}
                     </td>
                     <td>
-                      {isAvail && typeof pData.distanceBelowHighPct === 'number' ? (
+                      {isAvail && typeof pDist === 'number' ? (
                         <span
                           style={{
                             fontSize: '0.84rem',
-                            color: pData.distanceBelowHighPct === 0 ? 'var(--color-gain-600)' : 'var(--color-slate-700)',
-                            fontWeight: pData.distanceBelowHighPct === 0 ? 600 : 400
+                            color: pDist === 0 ? 'var(--color-gain-600)' : 'var(--color-slate-700)',
+                            fontWeight: pDist === 0 ? 600 : 400
                           }}
                         >
-                          {pData.distanceBelowHighPct.toFixed(2).replace('.', ',')}%
+                          {pDist.toFixed(2).replace('.', ',')}%
                         </span>
                       ) : (
                         <span style={{ color: 'var(--color-slate-400)' }}>—</span>
@@ -578,7 +641,7 @@ export function AssetAnalysisSection({
                     </td>
                     <td>
                       <span style={{ fontSize: '0.82rem', color: 'var(--color-slate-600)' }}>
-                        {isAvail ? `${pData.validSessionCount} phiên` : `${pData?.validSessionCount || 0} phiên`}
+                        {isAvail ? `${pData.validSessionCount} ${isCloseOnly ? 'ngày' : 'phiên'}` : `${pData?.validSessionCount || 0} ${isCloseOnly ? 'ngày' : 'phiên'}`}
                       </span>
                     </td>
                   </tr>
@@ -618,19 +681,19 @@ export function AssetAnalysisSection({
             >
               <ul className="methodology-list">
                 <li>
-                  <strong>Nguồn giá phân tích:</strong> Sử dụng giá đóng cửa của phiên giao dịch lịch sử đã hoàn tất gần nhất ({methodology.analysisPriceSource || 'last_completed_daily_close'}). Không tính phiên trong ngày đang diễn ra.
+                  <strong>Nguồn giá phân tích:</strong> Sử dụng giá đóng cửa của mốc dữ liệu lịch sử đã hoàn tất gần nhất ({methodology.analysisPriceSource || 'last_completed_daily_close'}). Không tính dữ liệu phiên/ngày đang diễn ra.
                 </li>
                 <li>
-                  <strong>Độ trễ dữ liệu:</strong> Dữ liệu thị trường có độ trễ (~15 phút) từ nguồn tham chiếu.
+                  <strong>Đơn vị tiền tệ:</strong> Định giá theo đồng tiền niêm yết gốc ({quoteCurrency}).
                 </li>
                 <li>
                   <strong>Cổ tức:</strong> Phép tính biến động giá thuần ({methodology.priceChangeMetric || 'unadjusted_close_change'}), không điều chỉnh dòng tiền cổ tức bằng tiền.
                 </li>
                 <li>
-                  <strong>Sự kiện doanh nghiệp:</strong> Chưa điều chỉnh đầy đủ cho toàn bộ các sự kiện doanh nghiệp phát sinh trong quá khứ.
+                  <strong>Sự kiện tài sản:</strong> Chưa điều chỉnh đầy đủ cho toàn bộ các sự kiện tài sản phát sinh trong quá khứ.
                 </li>
                 <li>
-                  <strong>Bản chất phân tích:</strong> Phân tích mô tả định lượng dựa trên các phiên giao dịch lịch sử đã ghi nhận; không cấu thành dự đoán xu hướng tương lai hay phân tích cơ bản doanh nghiệp.
+                  <strong>Bản chất phân tích:</strong> Phân tích mô tả định lượng dựa trên các mốc dữ liệu lịch sử đã ghi nhận; không cấu thành dự đoán xu hướng tương lai hay khuyến nghị đầu tư.
                 </li>
               </ul>
             </motion.div>
@@ -648,4 +711,3 @@ export function AssetAnalysisSection({
     </TiltCard>
   );
 }
-

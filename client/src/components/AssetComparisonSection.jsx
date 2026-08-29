@@ -1,6 +1,12 @@
-import React, { useState, useEffect, useCallback, useRef, useId } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { TiltCard, MagneticButton, CountUp } from './MotionHelpers.jsx';
+import {
+  formatNativeAmount,
+  formatMarketChange,
+  formatPercentVN,
+  formatAssetType
+} from '../utils/formatting.js';
 
 const PERIODS = [
   { id: '1W', label: '1T', name: '1 tuần' },
@@ -17,52 +23,6 @@ const ASSET_COLORS = [
   { stroke: '#d97706', bg: '#fffbeb', border: '#fde68a', text: '#b45309', dot: '#f59e0b', label: 'Tài sản 4' }
 ];
 
-const ASSET_TYPE_LABELS = {
-  stock: 'Cổ phiếu',
-  etf: 'ETF',
-  fund: 'Quỹ đầu tư',
-  gold: 'Vàng',
-  deposit: 'Tiền gửi',
-  bank_deposit: 'Tiền gửi',
-  bond: 'Trái phiếu'
-};
-
-function formatAssetType(type) {
-  if (!type) return 'N/A';
-  return ASSET_TYPE_LABELS[String(type).toLowerCase()] || type;
-}
-
-function formatVND(value) {
-  if (value === null || value === undefined || isNaN(value)) return '—';
-  return `${Number(value).toLocaleString('vi-VN')} ₫`;
-}
-
-function formatPublishedTime(isoString) {
-  if (!isoString) return '—';
-  try {
-    const date = new Date(isoString);
-    if (isNaN(date.getTime())) return isoString;
-    return date.toLocaleString('vi-VN', {
-      hour: '2-digit',
-      minute: '2-digit',
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric'
-    });
-  } catch {
-    return isoString;
-  }
-}
-
-function formatPercentVN(val, showSign = true) {
-  if (val === null || val === undefined || isNaN(val)) return '—';
-  const num = Number(val);
-  const formatted = Math.abs(num).toFixed(2).replace('.', ',');
-  if (num > 0) return showSign ? `+${formatted}%` : `${formatted}%`;
-  if (num < 0) return `-${formatted}%`;
-  return `0,00%`;
-}
-
 function translateAvailability(level) {
   switch (level) {
     case 'complete':
@@ -78,63 +38,47 @@ function translateAvailability(level) {
 }
 
 /**
- * Normalized Multi-Asset Price Chart (Base = 100)
+ * Normalized Multi-Asset Price Chart (Base = 100 on Common Dates)
  */
 function NormalizedComparisonChart({
-  seriesData = [],
+  base100Data = null,
+  assets = [],
   periodLabel = '1 tháng'
 }) {
   const [hoverIndex, setHoverIndex] = useState(null);
   const svgRef = useRef(null);
 
-  // Filter series that have valid bars
-  const validSeries = seriesData.filter((s) => s.bars && s.bars.length >= 2);
+  const series = base100Data?.series || [];
+  const validSeries = series.filter((s) => s.points && s.points.length >= 2);
 
-  if (validSeries.length === 0) {
+  if (!base100Data || base100Data.status === 'unavailable' || validSeries.length === 0) {
     return (
-      <div className="chart-empty-state" style={{ minHeight: '180px' }}>
-        <span>Chưa đủ dữ liệu lịch sử giá để vẽ biểu đồ tương đối</span>
+      <div className="chart-empty-state" style={{ minHeight: '180px', padding: '2rem 1rem', textAlign: 'center' }}>
+        <span>
+          {base100Data?.reason === 'HISTORY_UNAVAILABLE_FOR_SELECTED_ASSET'
+            ? 'So sánh lịch sử giá không khả dụng do danh sách chứa tài sản chưa hỗ trợ lịch sử giá.'
+            : 'Chưa đủ dữ liệu lịch sử giá đồng nhất để vẽ biểu đồ tương đối (Base 100).'}
+        </span>
       </div>
     );
   }
 
-  // Find standard timestamps length
-  const maxBarLength = Math.max(...validSeries.map((s) => s.bars.length));
-  const referenceSeries = validSeries.reduce((prev, curr) =>
-    curr.bars.length > prev.bars.length ? curr : prev
-  , validSeries[0]);
+  // Reference series for date mapping
+  const referenceSeries = validSeries[0];
+  const totalPoints = referenceSeries.points.length;
 
-  // Compute all normalized points
-  const normalizedSeries = validSeries.map((s, sIdx) => {
-    const validBars = s.bars.filter((b) => b && typeof b.close === 'number' && b.close > 0 && b.timestamp);
-    if (validBars.length < 2) return { ...s, points: [] };
-    const baseClose = validBars[0].close;
-
-    const points = validBars.map((b, bIdx) => ({
-      timestamp: b.timestamp,
-      close: b.close,
-      normalizedValue: (b.close / baseClose) * 100,
-      index: bIdx
-    }));
-
-    return {
-      symbol: s.symbol,
-      color: s.color || ASSET_COLORS[sIdx % ASSET_COLORS.length],
-      points
-    };
-  });
-
-  // Calculate global min and max normalized values
+  // Global min and max base100 values
   let minNorm = 100;
   let maxNorm = 100;
-  normalizedSeries.forEach((s) => {
+  validSeries.forEach((s) => {
     s.points.forEach((p) => {
-      if (p.normalizedValue < minNorm) minNorm = p.normalizedValue;
-      if (p.normalizedValue > maxNorm) maxNorm = p.normalizedValue;
+      if (typeof p.base100 === 'number' && Number.isFinite(p.base100)) {
+        if (p.base100 < minNorm) minNorm = p.base100;
+        if (p.base100 > maxNorm) maxNorm = p.base100;
+      }
     });
   });
 
-  // Dimensions
   const width = 680;
   const height = 260;
   const paddingLeft = 55;
@@ -153,10 +97,8 @@ function NormalizedComparisonChart({
   const getX = (i, total) => paddingLeft + (i / Math.max(1, total - 1)) * chartWidth;
   const getY = (val) => height - paddingBottom - ((val - yMin) / ySpan) * chartHeight;
 
-  // Base 100 line coordinate
   const y100 = getY(100);
 
-  // Y-axis gridlines
   const ySteps = 4;
   const gridLines = Array.from({ length: ySteps + 1 }, (_, index) => {
     const val = yMin + (index / ySteps) * ySpan;
@@ -166,9 +108,8 @@ function NormalizedComparisonChart({
     };
   });
 
-  // Handle pointer move
   const handlePointerMove = (e) => {
-    if (!svgRef.current || !referenceSeries.bars.length) return;
+    if (!svgRef.current || !totalPoints) return;
     const rect = svgRef.current.getBoundingClientRect();
     const clientX = e.clientX ?? (e.touches && e.touches[0]?.clientX);
     if (clientX === undefined) return;
@@ -176,8 +117,8 @@ function NormalizedComparisonChart({
     const relativeX = ((clientX - rect.left) / rect.width) * width;
     const boundedX = Math.max(paddingLeft, Math.min(width - paddingRight, relativeX));
     const ratio = (boundedX - paddingLeft) / chartWidth;
-    const nearestIndex = Math.round(ratio * (referenceSeries.bars.length - 1));
-    const clampedIndex = Math.max(0, Math.min(referenceSeries.bars.length - 1, nearestIndex));
+    const nearestIndex = Math.round(ratio * (totalPoints - 1));
+    const clampedIndex = Math.max(0, Math.min(totalPoints - 1, nearestIndex));
     setHoverIndex(clampedIndex);
   };
 
@@ -193,12 +134,15 @@ function NormalizedComparisonChart({
           <span style={{ width: '14px', height: '2px', backgroundColor: 'var(--color-slate-400)', borderStyle: 'dashed' }} />
           <span>Mốc cơ sở (100)</span>
         </div>
-        {normalizedSeries.map((s) => (
-          <div key={s.symbol} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.82rem', fontWeight: 700, color: 'var(--color-slate-700)' }}>
-            <span style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: s.color.stroke }} />
-            <span>{s.symbol}</span>
-          </div>
-        ))}
+        {validSeries.map((s, sIdx) => {
+          const color = ASSET_COLORS[sIdx % ASSET_COLORS.length];
+          return (
+            <div key={s.symbol} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.82rem', fontWeight: 700, color: 'var(--color-slate-700)' }}>
+              <span style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: color.stroke }} />
+              <span>{s.symbol} ({s.quoteCurrency || 'VND'})</span>
+            </div>
+          );
+        })}
       </div>
 
       <svg
@@ -218,7 +162,7 @@ function NormalizedComparisonChart({
               y1={line.y}
               x2={width - paddingRight}
               y2={line.y}
-              stroke="var(--border-subtle)"
+              stroke="var(--border-subtle, #e2e8f0)"
               strokeDasharray="2 2"
               strokeWidth="1"
             />
@@ -260,9 +204,9 @@ function NormalizedComparisonChart({
         )}
 
         {/* Render Each Asset's Normalized Curve */}
-        {normalizedSeries.map((s) => {
-          if (s.points.length < 2) return null;
-          const coords = s.points.map((p, i) => `${getX(i, s.points.length)},${getY(p.normalizedValue)}`);
+        {validSeries.map((s, sIdx) => {
+          const color = ASSET_COLORS[sIdx % ASSET_COLORS.length];
+          const coords = s.points.map((p, i) => `${getX(i, totalPoints)},${getY(p.base100)}`);
           const linePath = `M ${coords.join(' L ')}`;
 
           return (
@@ -270,42 +214,42 @@ function NormalizedComparisonChart({
               <path
                 d={linePath}
                 fill="none"
-                stroke={s.color.stroke}
+                stroke={color.stroke}
                 strokeWidth="2.2"
                 strokeLinecap="round"
                 strokeLinejoin="round"
               />
-              {/* Endpoint marker */}
               {s.points.length > 0 && (
                 <circle
-                  cx={getX(s.points.length - 1, s.points.length)}
-                  cy={getY(s.points[s.points.length - 1].normalizedValue)}
+                  cx={getX(s.points.length - 1, totalPoints)}
+                  cy={getY(s.points[s.points.length - 1].base100)}
                   r="3.5"
-                  fill={s.color.stroke}
+                  fill={color.stroke}
                 />
               )}
             </g>
           );
         })}
 
-        {/* Interactive Hover Vertical Guide and Dots */}
-        {hoverIndex !== null && referenceSeries.bars[hoverIndex] && (
+        {/* Interactive Hover Guide */}
+        {hoverIndex !== null && referenceSeries.points[hoverIndex] && (
           <g>
             <line
-              x1={getX(hoverIndex, referenceSeries.bars.length)}
+              x1={getX(hoverIndex, totalPoints)}
               y1={paddingTop}
-              x2={getX(hoverIndex, referenceSeries.bars.length)}
+              x2={getX(hoverIndex, totalPoints)}
               y2={height - paddingBottom}
               stroke="var(--color-slate-400)"
               strokeDasharray="3 3"
               strokeWidth="1"
             />
 
-            {normalizedSeries.map((s) => {
-              const p = s.points[Math.min(hoverIndex, s.points.length - 1)];
+            {validSeries.map((s, sIdx) => {
+              const color = ASSET_COLORS[sIdx % ASSET_COLORS.length];
+              const p = s.points[hoverIndex];
               if (!p) return null;
-              const cx = getX(hoverIndex, referenceSeries.bars.length);
-              const cy = getY(p.normalizedValue);
+              const cx = getX(hoverIndex, totalPoints);
+              const cy = getY(p.base100);
 
               return (
                 <circle
@@ -313,7 +257,7 @@ function NormalizedComparisonChart({
                   cx={cx}
                   cy={cy}
                   r="4.5"
-                  fill={s.color.stroke}
+                  fill={color.stroke}
                   stroke="#ffffff"
                   strokeWidth="2"
                 />
@@ -324,7 +268,7 @@ function NormalizedComparisonChart({
       </svg>
 
       {/* Floating Hover Tooltip */}
-      {hoverIndex !== null && referenceSeries.bars[hoverIndex] && (
+      {hoverIndex !== null && referenceSeries.points[hoverIndex] && (
         <div
           style={{
             position: 'absolute',
@@ -342,19 +286,20 @@ function NormalizedComparisonChart({
           }}
         >
           <div style={{ fontWeight: 700, color: 'var(--color-slate-500)', marginBottom: '4px' }}>
-            {new Date(referenceSeries.bars[hoverIndex].timestamp).toLocaleDateString('vi-VN')}
+            📅 {referenceSeries.points[hoverIndex].date || new Date(referenceSeries.points[hoverIndex].timestamp).toLocaleDateString('vi-VN')}
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
-            {normalizedSeries.map((s) => {
-              const p = s.points[Math.min(hoverIndex, s.points.length - 1)];
+            {validSeries.map((s, sIdx) => {
+              const color = ASSET_COLORS[sIdx % ASSET_COLORS.length];
+              const p = s.points[hoverIndex];
               if (!p) return null;
               return (
                 <div key={s.symbol} style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'center' }}>
-                  <span style={{ fontWeight: 800, color: s.color.text }}>{s.symbol}:</span>
+                  <span style={{ fontWeight: 800, color: color.text }}>{s.symbol}:</span>
                   <span style={{ fontWeight: 700, color: 'var(--color-slate-900)' }}>
-                    {p.normalizedValue.toFixed(2).replace('.', ',')}
+                    {p.base100.toFixed(2).replace('.', ',')}
                     <span style={{ fontSize: '0.72rem', color: 'var(--color-slate-500)', marginLeft: '4px' }}>
-                      ({p.close.toLocaleString('vi-VN')} ₫)
+                      ({formatNativeAmount(p.close, s.quoteCurrency || 'VND')})
                     </span>
                   </span>
                 </div>
@@ -377,23 +322,17 @@ export function AssetComparisonSection({
   onSelectAsset
 }) {
   const [selectedSymbols, setSelectedSymbols] = useState(initialSymbols);
-  const [selectedPeriod, setSelectedPeriod] = useState('1M'); // '1W' | '1M' | '3M' | '6M' | '1Y'
+  const [selectedPeriod, setSelectedPeriod] = useState('1M');
 
-  // Per-asset asynchronous data state
-  const [marketDataMap, setMarketDataMap] = useState({});
-  const [analysisDataMap, setAnalysisDataMap] = useState({});
-  const [historyDataMap, setHistoryDataMap] = useState({});
-  const [loadingMap, setLoadingMap] = useState({});
-  const [errorMap, setErrorMap] = useState({});
+  const [comparisonData, setComparisonData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
 
-  // Search/add dropdown state
   const [searchQuery, setSearchQuery] = useState('');
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
 
-  // Active abort controllers per symbol
-  const abortControllersRef = useRef({});
+  const abortControllerRef = useRef(null);
 
-  // Add symbol to selection
   const handleAddSymbol = (sym) => {
     if (!sym) return;
     const cleanSym = sym.trim().toUpperCase();
@@ -405,249 +344,194 @@ export function AssetComparisonSection({
     setIsDropdownOpen(false);
   };
 
-  // Remove symbol from selection
   const handleRemoveSymbol = (sym) => {
-    if (abortControllersRef.current[sym]) {
-      abortControllersRef.current[sym].abort();
-      delete abortControllersRef.current[sym];
-    }
+    if (selectedSymbols.length <= 2) return;
     setSelectedSymbols((prev) => prev.filter((s) => s !== sym));
-    setMarketDataMap((prev) => {
-      const copy = { ...prev };
-      delete copy[sym];
-      return copy;
-    });
-    setAnalysisDataMap((prev) => {
-      const copy = { ...prev };
-      delete copy[sym];
-      return copy;
-    });
-    setHistoryDataMap((prev) => {
-      const copy = { ...prev };
-      delete copy[sym];
-      return copy;
-    });
-    setErrorMap((prev) => {
-      const copy = { ...prev };
-      delete copy[sym];
-      return copy;
-    });
   };
 
-  // Fetch all endpoints for one symbol with failure isolation
-  const fetchAssetComparisonData = useCallback((sym, period) => {
-    if (!sym) return;
+  const fetchComparison = useCallback((symbols, range) => {
+    if (!symbols || symbols.length < 2) return;
 
-    if (abortControllersRef.current[sym]) {
-      abortControllersRef.current[sym].abort();
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
     }
     const controller = new AbortController();
-    abortControllersRef.current[sym] = controller;
+    abortControllerRef.current = controller;
 
-    setLoadingMap((prev) => ({ ...prev, [sym]: true }));
-    setErrorMap((prev) => ({ ...prev, [sym]: null }));
+    setLoading(true);
+    setError(null);
 
-    const mktPromise = fetch(`/api/market/${encodeURIComponent(sym)}`, { signal: controller.signal })
-      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`Market ${res.status}`))))
-      .then((json) => (json.status === 'ok' ? json.data : null))
-      .catch((err) => {
-        if (err.name === 'AbortError') throw err;
-        return null;
-      });
+    const queryParams = new URLSearchParams({
+      symbols: symbols.join(','),
+      range
+    });
 
-    const analysisPromise = fetch(`/api/analysis/${encodeURIComponent(sym)}`, { signal: controller.signal })
-      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`Analysis ${res.status}`))))
-      .then((json) => (json.status === 'ok' ? json.data : null))
-      .catch((err) => {
-        if (err.name === 'AbortError') throw err;
-        return null;
-      });
-
-    const historyPromise = fetch(`/api/market/${encodeURIComponent(sym)}/history?range=${encodeURIComponent(period)}`, { signal: controller.signal })
-      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`History ${res.status}`))))
-      .then((json) => (json.status === 'ok' ? json.data : null))
-      .catch((err) => {
-        if (err.name === 'AbortError') throw err;
-        return null;
-      });
-
-    Promise.allSettled([mktPromise, analysisPromise, historyPromise])
-      .then(([mktRes, anaRes, histRes]) => {
+    fetch(`/api/comparison?${queryParams.toString()}`, { signal: controller.signal })
+      .then((res) => {
+        if (!res.ok) {
+          return res.json().catch(() => ({})).then((json) => {
+            throw new Error(json.message || `HTTP ${res.status}`);
+          });
+        }
+        return res.json();
+      })
+      .then((json) => {
         if (controller.signal.aborted) return;
-
-        const mktData = mktRes.status === 'fulfilled' ? mktRes.value : null;
-        const anaData = anaRes.status === 'fulfilled' ? anaRes.value : null;
-        const histData = histRes.status === 'fulfilled' ? histRes.value : null;
-
-        if (!mktData && !anaData && !histData) {
-          setErrorMap((prev) => ({ ...prev, [sym]: 'Không thể tải dữ liệu cho tài sản này' }));
+        if (json.status === 'ok' && json.data) {
+          setComparisonData(json.data);
+        } else {
+          throw new Error(json.message || 'Không thể tải dữ liệu so sánh');
         }
-
-        if (mktData) setMarketDataMap((prev) => ({ ...prev, [sym]: mktData }));
-        if (anaData) setAnalysisDataMap((prev) => ({ ...prev, [sym]: anaData }));
-        if (histData) setHistoryDataMap((prev) => ({ ...prev, [sym]: histData }));
+        setLoading(false);
       })
       .catch((err) => {
-        if (err.name === 'AbortError') return;
-        setErrorMap((prev) => ({ ...prev, [sym]: err.message || 'Lỗi kết nối' }));
-      })
-      .finally(() => {
-        if (abortControllersRef.current[sym] === controller) {
-          setLoadingMap((prev) => ({ ...prev, [sym]: false }));
-        }
+        if (controller.signal.aborted || err.name === 'AbortError') return;
+        setError(err.message || 'Lỗi kết nối khi tải dữ liệu so sánh');
+        setLoading(false);
       });
   }, []);
 
-  // Fetch / refresh data when selected symbols or period changes
   useEffect(() => {
-    selectedSymbols.forEach((sym) => {
-      fetchAssetComparisonData(sym, selectedPeriod);
-    });
-
+    fetchComparison(selectedSymbols, selectedPeriod);
     return () => {
-      Object.values(abortControllersRef.current).forEach((ctrl) => ctrl && ctrl.abort());
+      if (abortControllerRef.current) abortControllerRef.current.abort();
     };
-  }, [selectedSymbols, selectedPeriod, fetchAssetComparisonData]);
-
-  // Filter available assets for search dropdown
-  const filteredAssets = availableAssets.filter((a) => {
-    if (selectedSymbols.includes(a.symbol)) return false;
-    if (!searchQuery) return true;
-    const q = searchQuery.toLowerCase();
-    return (
-      (a.symbol && a.symbol.toLowerCase().includes(q)) ||
-      (a.name && a.name.toLowerCase().includes(q))
-    );
-  });
+  }, [selectedSymbols, selectedPeriod, fetchComparison]);
 
   const activePeriodConfig = PERIODS.find((p) => p.id === selectedPeriod) || PERIODS[1];
 
-  // Prepare normalized chart data
-  const normalizedSeriesData = selectedSymbols.map((sym, idx) => {
-    const hist = historyDataMap[sym];
-    return {
-      symbol: sym,
-      color: ASSET_COLORS[idx % ASSET_COLORS.length],
-      bars: hist && Array.isArray(hist.bars) ? hist.bars : []
-    };
+  const availableDropdownAssets = availableAssets.filter((a) => {
+    const sym = a.symbol?.toUpperCase();
+    if (selectedSymbols.includes(sym)) return false;
+    if (!searchQuery.trim()) return true;
+    const q = searchQuery.trim().toLowerCase();
+    return sym?.toLowerCase().includes(q) || a.name?.toLowerCase().includes(q);
   });
 
+  const comparedAssets = comparisonData?.assets || [];
+
   return (
-    <div>
-      {/* Top Action Bar */}
-      <motion.div
-        initial={{ opacity: 0, y: -8 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="section-header"
-        style={{ alignItems: 'center', marginBottom: '1.25rem' }}
+    <div style={{ animation: 'fadeIn 0.25s ease-out' }}>
+      {/* Top Header Navigation */}
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: '1rem',
+          marginBottom: '1.25rem'
+        }}
       >
         <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-            <h2 className="section-title">So sánh tài sản</h2>
-            <span className="fintech-badge badge-neutral">Dữ liệu có độ trễ ~15p</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+            <span style={{ fontSize: '1.4rem' }}>⚖️</span>
+            <h1
+              style={{
+                fontSize: '1.5rem',
+                fontWeight: 900,
+                color: 'var(--color-slate-900)',
+                margin: 0,
+                letterSpacing: '-0.02em'
+              }}
+            >
+              So sánh tài sản
+            </h1>
           </div>
-          <p className="section-subtitle">
-            So sánh trực quan từ 2 đến 4 tài sản song song dựa trên dữ liệu thị trường và phân tích định lượng.
+          <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.85rem', color: 'var(--color-slate-500)' }}>
+            Đối chiếu biến động giá tương đối (Base 100) và các chỉ số định lượng theo cùng mốc thời gian.
           </p>
         </div>
 
-        <MagneticButton onClick={onBack} className="fintech-btn btn-secondary btn-sm">
-          &larr; Quay lại danh sách
-        </MagneticButton>
-      </motion.div>
+        {onBack && (
+          <MagneticButton
+            onClick={onBack}
+            className="fintech-btn btn-secondary btn-sm"
+          >
+            ← Quay lại danh sách
+          </MagneticButton>
+        )}
+      </div>
 
-      {/* Asset Selection Controls & Shared Period Bar */}
-      <TiltCard className="fintech-card" style={{ padding: '1.25rem', marginBottom: '1.5rem' }} tiltMax={1}>
+      {/* Asset Selector & Controls Bar */}
+      <TiltCard className="fintech-card" style={{ padding: '1.25rem', marginBottom: '1.25rem' }} tiltMax={1}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
-
-          {/* Left: Selected Badges + Add Dropdown */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', flex: 1 }}>
-            <span style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--color-slate-700)' }}>
-              Tài sản ({selectedSymbols.length}/4):
+          {/* Selected Asset Chips */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--color-slate-600)' }}>
+              Đang so sánh ({selectedSymbols.length}/4):
             </span>
 
-            {/* Selected asset chips */}
             {selectedSymbols.map((sym, idx) => {
               const color = ASSET_COLORS[idx % ASSET_COLORS.length];
               const assetInfo = availableAssets.find((a) => a.symbol === sym);
 
               return (
-                <motion.div
+                <div
                   key={sym}
-                  initial={{ scale: 0.9, opacity: 0 }}
-                  animate={{ scale: 1, opacity: 1 }}
-                  exit={{ scale: 0.9, opacity: 0 }}
                   style={{
-                    display: 'inline-flex',
+                    display: 'flex',
                     alignItems: 'center',
                     gap: '6px',
-                    padding: '3px 10px',
-                    borderRadius: 'var(--radius-full)',
+                    padding: '4px 10px',
+                    borderRadius: 'var(--radius-full, 9999px)',
                     backgroundColor: color.bg,
                     border: `1px solid ${color.border}`,
                     color: color.text,
-                    fontWeight: 800,
-                    fontSize: '0.85rem'
+                    fontSize: '0.85rem',
+                    fontWeight: 800
                   }}
                 >
                   <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: color.dot }} />
                   <span>{sym}</span>
-                  {assetInfo && (
-                    <span style={{ fontWeight: 500, fontSize: '0.75rem', opacity: 0.8 }}>
-                      ({formatAssetType(assetInfo.asset_type)})
-                    </span>
+                  {selectedSymbols.length > 2 && (
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveSymbol(sym)}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        color: color.text,
+                        cursor: 'pointer',
+                        padding: '0 2px',
+                        fontSize: '0.9rem',
+                        lineHeight: 1
+                      }}
+                      title="Bỏ tài sản này"
+                    >
+                      ×
+                    </button>
                   )}
-                  <button
-                    type="button"
-                    onClick={() => handleRemoveSymbol(sym)}
-                    title={`Bỏ ${sym}`}
-                    style={{
-                      background: 'none',
-                      border: 'none',
-                      color: color.text,
-                      cursor: 'pointer',
-                      fontSize: '1rem',
-                      fontWeight: 'bold',
-                      lineHeight: 1,
-                      padding: '0 2px',
-                      opacity: 0.7
-                    }}
-                  >
-                    ×
-                  </button>
-                </motion.div>
+                </div>
               );
             })}
 
-            {/* Add Asset Selector / Dropdown (Capped at 4) */}
+            {/* Add Asset Dropdown */}
             {selectedSymbols.length < 4 && (
               <div style={{ position: 'relative' }}>
                 <button
                   type="button"
-                  onClick={() => setIsDropdownOpen((prev) => !prev)}
+                  onClick={() => setIsDropdownOpen(!isDropdownOpen)}
                   className="fintech-btn btn-secondary btn-sm"
-                  style={{ borderRadius: 'var(--radius-full)', padding: '4px 10px', fontSize: '0.8rem' }}
+                  style={{ padding: '4px 10px', fontSize: '0.82rem' }}
                 >
-                  + Thêm tài sản
+                  ＋ Thêm tài sản
                 </button>
 
                 {isDropdownOpen && (
                   <div
                     style={{
                       position: 'absolute',
-                      top: '110%',
+                      top: '100%',
                       left: 0,
-                      zIndex: 30,
+                      marginTop: '6px',
                       width: '260px',
-                      maxHeight: '280px',
-                      backgroundColor: 'var(--color-bg-surface, #ffffff)',
-                      border: '1px solid var(--border-subtle)',
+                      backgroundColor: 'var(--color-surface, #ffffff)',
                       borderRadius: 'var(--radius-md)',
-                      boxShadow: '0 8px 24px rgba(0,0,0,0.15)',
-                      padding: '8px',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: '6px'
+                      border: '1px solid var(--border-default)',
+                      boxShadow: '0 10px 25px rgba(0,0,0,0.12)',
+                      zIndex: 50,
+                      padding: '8px'
                     }}
                   >
                     <input
@@ -656,20 +540,26 @@ export function AssetComparisonSection({
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
                       autoFocus
-                      className="fintech-input"
-                      style={{ padding: '6px 8px', fontSize: '0.82rem' }}
+                      style={{
+                        width: '100%',
+                        padding: '6px 10px',
+                        borderRadius: '6px',
+                        border: '1px solid var(--border-subtle)',
+                        fontSize: '0.82rem',
+                        marginBottom: '6px',
+                        boxSizing: 'border-box'
+                      }}
                     />
-
-                    <div style={{ overflowY: 'auto', maxHeight: '200px', display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                      {filteredAssets.length === 0 ? (
+                    <div style={{ maxHeight: '180px', overflowY: 'auto' }}>
+                      {availableDropdownAssets.length === 0 ? (
                         <div style={{ padding: '8px', fontSize: '0.78rem', color: 'var(--color-slate-400)', textAlign: 'center' }}>
                           Không tìm thấy tài sản phù hợp
                         </div>
                       ) : (
-                        filteredAssets.map((asset) => (
+                        availableDropdownAssets.map((a) => (
                           <div
-                            key={asset.symbol}
-                            onClick={() => handleAddSymbol(asset.symbol)}
+                            key={a.id || a.symbol}
+                            onClick={() => handleAddSymbol(a.symbol)}
                             style={{
                               padding: '6px 8px',
                               borderRadius: '4px',
@@ -680,14 +570,11 @@ export function AssetComparisonSection({
                               fontSize: '0.82rem',
                               transition: 'background-color 0.15s ease'
                             }}
-                            className="row-interactive"
+                            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'var(--color-slate-100)'}
+                            onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
                           >
-                            <span style={{ fontWeight: 800, color: 'var(--color-slate-900)' }}>
-                              {asset.symbol}
-                            </span>
-                            <span style={{ fontSize: '0.75rem', color: 'var(--color-slate-500)' }}>
-                              {formatAssetType(asset.asset_type)}
-                            </span>
+                            <span style={{ fontWeight: 800, color: 'var(--color-slate-900)' }}>{a.symbol}</span>
+                            <span style={{ fontSize: '0.75rem', color: 'var(--color-slate-500)' }}>{formatAssetType(a.asset_type)}</span>
                           </div>
                         ))
                       )}
@@ -698,178 +585,139 @@ export function AssetComparisonSection({
             )}
           </div>
 
-          {/* Right: Shared Period Selector */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span style={{ fontSize: '0.82rem', color: 'var(--color-slate-500)', fontWeight: 600 }}>
-              Giai đoạn:
-            </span>
-            <div className="range-selector-group">
-              {PERIODS.map((p) => (
-                <button
-                  key={p.id}
-                  type="button"
-                  className={`range-selector-btn ${selectedPeriod === p.id ? 'active' : ''}`}
-                  onClick={() => setSelectedPeriod(p.id)}
-                >
-                  {p.label}
-                </button>
-              ))}
-            </div>
+          {/* Period Selector Tabs */}
+          <div className="range-selector-group">
+            {PERIODS.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                className={`range-selector-btn ${selectedPeriod === p.id ? 'active' : ''}`}
+                onClick={() => setSelectedPeriod(p.id)}
+                disabled={loading}
+              >
+                {p.label}
+              </button>
+            ))}
           </div>
-
         </div>
       </TiltCard>
 
-      {/* Initial state if fewer than 2 assets */}
-      {selectedSymbols.length < 2 && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          className="state-box"
-          style={{ padding: '3rem 1.5rem', marginBottom: '2rem' }}
-        >
-          <div className="state-icon float-icon" style={{ fontSize: '2.5rem' }}>⚖️</div>
-          <h3 className="state-title" style={{ fontSize: '1.25rem', marginTop: '0.5rem' }}>
-            Chọn từ 2 đến 4 tài sản để so sánh.
-          </h3>
-          <p className="state-desc" style={{ maxWidth: '480px', margin: '0.5rem auto 1.25rem auto' }}>
-            Thêm ít nhất 2 tài sản bằng nút "+ Thêm tài sản" phía trên để bắt đầu phân tích so sánh các chỉ số song song.
-          </p>
-          <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', flexWrap: 'wrap' }}>
-            {['FPT', 'VCB', 'E1VFVN30', 'MWG'].map((presetSym) => (
-              <MagneticButton
-                key={presetSym}
-                onClick={() => handleAddSymbol(presetSym)}
-                disabled={selectedSymbols.includes(presetSym)}
-                className="fintech-btn btn-secondary btn-sm"
-              >
-                + {presetSym}
-              </MagneticButton>
-            ))}
-          </div>
-        </motion.div>
+      {/* Error state */}
+      {error && (
+        <div className="fintech-banner banner-warning" style={{ marginBottom: '1.25rem' }}>
+          <span>{error}</span>
+          <MagneticButton onClick={() => fetchComparison(selectedSymbols, selectedPeriod)} className="fintech-btn btn-secondary btn-sm" style={{ marginTop: '0.5rem' }}>
+            Thử lại
+          </MagneticButton>
+        </div>
       )}
 
-      {/* Comparison Matrix & Charts when >= 2 assets */}
-      {selectedSymbols.length >= 2 && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+      {/* Main Comparison Cards */}
+      {loading && !comparisonData && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          <div className="skeleton-shimmer" style={{ width: '100%', height: '280px', borderRadius: 'var(--radius-md)' }} />
+          <div className="skeleton-shimmer" style={{ width: '100%', height: '320px', borderRadius: 'var(--radius-md)' }} />
+        </div>
+      )}
 
-          {/* Normalized Relative Price Chart (Base = 100) */}
-          <TiltCard className="fintech-card" style={{ padding: '1.5rem' }} tiltMax={1}>
+      {comparisonData && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+          {/* 1. Base-100 Relative Chart Card */}
+          <TiltCard className="fintech-card" style={{ padding: '1.5rem' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem' }}>
               <div>
-                <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 800, color: 'var(--color-slate-900)' }}>
-                  Diễn biến giá tương đối — mốc đầu kỳ = 100
+                <h3 style={{ margin: 0, fontSize: '1.1rem', color: 'var(--color-slate-900)', fontWeight: 800 }}>
+                  Biểu đồ tăng trưởng tương đối (Base 100)
                 </h3>
-                <span style={{ fontSize: '0.78rem', color: 'var(--color-slate-400)' }}>
-                  Chuẩn hóa biến động giá trong giai đoạn {activePeriodConfig.name} để dễ so sánh trực quan.
+                <span style={{ fontSize: '0.78rem', color: 'var(--color-slate-500)' }}>
+                  Chuẩn hóa mốc đầu kỳ về 100 trên các mốc ngày dữ liệu chung ({activePeriodConfig.name}).
                 </span>
               </div>
-              <span className="fintech-badge badge-neutral">Mốc 100 đầu kỳ</span>
+              <span className="fintech-badge badge-neutral" style={{ fontSize: '0.75rem' }}>
+                {comparisonData.base100?.commonObservationCount || 0} mốc chung
+              </span>
             </div>
 
             <NormalizedComparisonChart
-              seriesData={normalizedSeriesData}
+              base100Data={comparisonData.base100}
+              assets={comparedAssets}
               periodLabel={activePeriodConfig.name}
             />
           </TiltCard>
 
-          {/* Side-by-Side Comparison Matrix Table / Cards */}
-          <TiltCard className="fintech-card" style={{ padding: '1.5rem', overflow: 'hidden' }} tiltMax={0.5}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.5rem' }}>
-              <div>
-                <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 800, color: 'var(--color-slate-900)' }}>
-                  Bảng đối chiếu chỉ số định lượng ({activePeriodConfig.name})
-                </h3>
-                <span style={{ fontSize: '0.78rem', color: 'var(--color-slate-400)' }}>
-                  Dữ liệu trích xuất trực tiếp từ engine định lượng, không xếp hạng hay gợi ý giao dịch.
-                </span>
-              </div>
+          {/* 2. Side-by-Side Metric Comparison Matrix */}
+          <TiltCard className="fintech-card" style={{ padding: '1.5rem' }}>
+            <div style={{ marginBottom: '1rem' }}>
+              <h3 style={{ margin: 0, fontSize: '1.1rem', color: 'var(--color-slate-900)', fontWeight: 800 }}>
+                Bảng đối chiếu định lượng ({activePeriodConfig.name})
+              </h3>
+              <span style={{ fontSize: '0.78rem', color: 'var(--color-slate-500)' }}>
+                So sánh các chỉ số V2 theo đơn vị tiền tệ niêm yết gốc của từng tài sản.
+              </span>
             </div>
 
-            {/* Responsive Scrollable Container */}
-            <div className="table-container" style={{ margin: '0 -1.5rem', padding: '0 1.5rem' }}>
-              <div
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: `200px repeat(${selectedSymbols.length}, minmax(220px, 1fr))`,
-                  gap: '12px',
-                  minWidth: `${200 + selectedSymbols.length * 220}px`
-                }}
-              >
-                {/* COLUMN 0: METRIC LABELS HEADER */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', justifyContent: 'space-between' }}>
-                  {/* Header spacer */}
-                  <div style={{ height: '140px', display: 'flex', alignItems: 'flex-end', paddingBottom: '8px' }}>
-                    <span style={{ fontSize: '0.82rem', fontWeight: 800, color: 'var(--color-slate-400)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                      Chỉ số đối chiếu
+            <div style={{ overflowX: 'auto' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: `180px repeat(${comparedAssets.length}, minmax(180px, 1fr))`, gap: '12px', minWidth: '600px' }}>
+                {/* Column 0: Metric Headers */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  <div style={{ height: '70px', display: 'flex', alignItems: 'flex-end', paddingBottom: '8px' }}>
+                    <span style={{ fontSize: '0.82rem', fontWeight: 800, color: 'var(--color-slate-400)', textTransform: 'uppercase' }}>
+                      Chỉ số
                     </span>
                   </div>
-
-                  {/* Row 1: Giá gần nhất */}
                   <div className="comparison-metric-row-label">
-                    <span className="metric-label-title">Giá gần nhất</span>
-                    <span className="metric-label-sub">Độ trễ ~15 phút</span>
+                    <span className="metric-label-title">Giá thị trường</span>
+                    <span className="metric-label-sub">Đồng tiền niêm yết</span>
                   </div>
-
-                  {/* Row 2: Biến động giá */}
                   <div className="comparison-metric-row-label">
                     <span className="metric-label-title">Biến động giá</span>
-                    <span className="metric-label-sub">Trong {activePeriodConfig.name}</span>
+                    <span className="metric-label-sub">Giai đoạn {activePeriodConfig.label}</span>
                   </div>
-
-                  {/* Row 3: Khoảng giá */}
                   <div className="comparison-metric-row-label">
                     <span className="metric-label-title">Khoảng giá</span>
-                    <span className="metric-label-sub">Thấp nhất — Cao nhất</span>
+                    <span className="metric-label-sub">Thấp → Cao</span>
                   </div>
-
-                  {/* Row 4: Vị trí vùng giá */}
                   <div className="comparison-metric-row-label">
-                    <span className="metric-label-title">Vị trí trong vùng giá</span>
+                    <span className="metric-label-title">Vị trí vùng giá</span>
                     <span className="metric-label-sub">Tương quan đỉnh - đáy</span>
                   </div>
-
-                  {/* Row 5: Cách đỉnh */}
                   <div className="comparison-metric-row-label">
-                    <span className="metric-label-title">Cách đỉnh giai đoạn</span>
-                    <span className="metric-label-sub">So với giá cao nhất</span>
+                    <span className="metric-label-title">Tỷ lệ mốc đóng cửa tăng</span>
+                    <span className="metric-label-sub">Mốc tăng/tổng mốc</span>
                   </div>
-
-                  {/* Row 6: Số phiên */}
                   <div className="comparison-metric-row-label">
-                    <span className="metric-label-title">Số phiên dữ liệu</span>
-                    <span className="metric-label-sub">Phiên giao dịch hợp lệ</span>
+                    <span className="metric-label-title">Biến động ngày</span>
+                    <span className="metric-label-sub">Độ lệch chuẩn log-return</span>
                   </div>
-
-                  {/* Row 7: Giai đoạn tăng giá */}
                   <div className="comparison-metric-row-label">
-                    <span className="metric-label-title">Giai đoạn tăng giá</span>
-                    <span className="metric-label-sub">Tỷ lệ kỳ tăng (5 kỳ)</span>
+                    <span className="metric-label-title">Sụt giảm tối đa</span>
+                    <span className="metric-label-sub">Max Drawdown (đóng cửa)</span>
                   </div>
-
-                  {/* Row 8: Mức độ đầy đủ dữ liệu */}
                   <div className="comparison-metric-row-label">
-                    <span className="metric-label-title">Độ đầy đủ dữ liệu</span>
-                    <span className="metric-label-sub">Độ bao phủ các mốc</span>
+                    <span className="metric-label-title">Số mốc dữ liệu</span>
+                    <span className="metric-label-sub">Số ngày/phiên</span>
                   </div>
                 </div>
 
-                {/* ASSET COLUMNS */}
-                {selectedSymbols.map((sym, idx) => {
+                {/* Columns 1..N: Asset Cards */}
+                {comparedAssets.map((item, idx) => {
                   const color = ASSET_COLORS[idx % ASSET_COLORS.length];
-                  const assetInfo = availableAssets.find((a) => a.symbol === sym);
-                  const mkt = marketDataMap[sym];
-                  const ana = analysisDataMap[sym];
-                  const loading = loadingMap[sym];
-                  const err = errorMap[sym];
+                  const qCur = item.quoteCurrency || 'VND';
+                  const ana = item.analysis;
+                  const metrics = ana?.metrics || {};
+                  const isAvail = ana?.status === 'available' && typeof metrics.priceChangePct === 'number';
 
-                  const periodAna = ana?.periods?.[selectedPeriod];
-                  const isPeriodAvail = periodAna && periodAna.status === 'available';
+                  const seriesObj = comparisonData.base100?.series?.find((s) => s.symbol === item.symbol);
+                  const points = seriesObj?.points || [];
+                  const closes = points.map((p) => p.close).filter((c) => typeof c === 'number' && Number.isFinite(c));
+                  const lowPrice = closes.length > 0 ? Math.min(...closes) : null;
+                  const highPrice = closes.length > 0 ? Math.max(...closes) : null;
+                  const rangePct = typeof metrics.completedCloseRangePositionPct === 'number' ? metrics.completedCloseRangePositionPct : null;
+                  const barCount = ana?.usableCompletedBarCount || points.length;
 
                   return (
                     <div
-                      key={sym}
+                      key={item.symbol}
                       style={{
                         display: 'flex',
                         flexDirection: 'column',
@@ -880,258 +728,128 @@ export function AssetComparisonSection({
                         border: `1px solid ${color.border}`
                       }}
                     >
-                      {/* Asset Header Card */}
-                      <div
-                        style={{
-                          height: '140px',
-                          display: 'flex',
-                          flexDirection: 'column',
-                          justifyContent: 'space-between',
-                          paddingBottom: '8px',
-                          borderBottom: '1px solid var(--border-subtle)'
-                        }}
-                      >
-                        <div>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                            <span
-                              style={{
-                                padding: '2px 8px',
-                                borderRadius: '4px',
-                                backgroundColor: color.bg,
-                                color: color.text,
-                                border: `1px solid ${color.border}`,
-                                fontWeight: 900,
-                                fontSize: '0.95rem'
-                              }}
-                            >
-                              {sym}
-                            </span>
-                            <span className="fintech-badge badge-neutral" style={{ fontSize: '0.72rem' }}>
-                              {assetInfo ? formatAssetType(assetInfo.asset_type) : 'Tài sản'}
-                            </span>
-                          </div>
-
-                          <div
+                      {/* Header Card */}
+                      <div style={{ height: '70px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', borderBottom: '1px solid var(--border-subtle)', paddingBottom: '6px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span
                             style={{
-                              fontSize: '0.82rem',
-                              fontWeight: 700,
-                              color: 'var(--color-slate-800)',
-                              whiteSpace: 'nowrap',
-                              overflow: 'hidden',
-                              textOverflow: 'ellipsis'
+                              padding: '2px 8px',
+                              borderRadius: '4px',
+                              backgroundColor: color.bg,
+                              color: color.text,
+                              border: `1px solid ${color.border}`,
+                              fontWeight: 900,
+                              fontSize: '0.92rem'
                             }}
-                            title={assetInfo?.name || sym}
                           >
-                            {assetInfo?.name || sym}
-                          </div>
+                            {item.symbol}
+                          </span>
+                          <span className="fintech-badge badge-neutral" style={{ fontSize: '0.7rem' }}>
+                            {formatAssetType(item.assetType)}
+                          </span>
                         </div>
-
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '6px' }}>
-                          <MagneticButton
-                            onClick={() => onSelectAsset(sym)}
-                            className="fintech-btn btn-secondary btn-sm"
-                            style={{ width: '100%', justifyContent: 'center', fontSize: '0.78rem', padding: '4px 8px' }}
-                          >
-                            Xem chi tiết ↗
-                          </MagneticButton>
+                        <div style={{ fontSize: '0.78rem', color: 'var(--color-slate-600)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {item.name}
                         </div>
                       </div>
 
-                      {/* Loading or Isolated Error Fallback */}
-                      {loading && (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', padding: '20px 0' }}>
-                          {[1, 2, 3, 4, 5, 6, 7, 8].map((n) => (
-                            <div key={n} className="skeleton-shimmer" style={{ height: '36px', borderRadius: '4px' }} />
-                          ))}
+                      {/* Row 1: Giá thị trường */}
+                      <div className="comparison-metric-cell">
+                        <div style={{ fontSize: '1rem', fontWeight: 800, color: 'var(--color-slate-900)' }}>
+                          {item.snapshot?.price !== null && item.snapshot?.price !== undefined
+                            ? formatNativeAmount(item.snapshot.price, qCur)
+                            : '—'}
                         </div>
-                      )}
+                      </div>
 
-                      {err && !loading && (
-                        <div className="fintech-banner banner-warning" style={{ margin: '12px 0', fontSize: '0.78rem' }}>
-                          <span>{err}</span>
-                          <button
-                            type="button"
-                            onClick={() => fetchAssetComparisonData(sym, selectedPeriod)}
-                            className="fintech-btn btn-secondary btn-sm"
-                            style={{ marginTop: '6px', fontSize: '0.72rem' }}
+                      {/* Row 2: Biến động giá */}
+                      <div className="comparison-metric-cell">
+                        {isAvail ? (
+                          <span
+                            style={{
+                              fontSize: '0.95rem',
+                              fontWeight: 800,
+                              color: metrics.priceChangePct > 0 ? 'var(--color-gain-700)' : metrics.priceChangePct < 0 ? 'var(--color-loss-700)' : 'var(--color-slate-700)'
+                            }}
                           >
-                            Thử lại
-                          </button>
-                        </div>
-                      )}
+                            {formatPercentVN(metrics.priceChangePct)}
+                          </span>
+                        ) : (
+                          <span style={{ color: 'var(--color-slate-400)', fontSize: '0.82rem' }}>
+                            {item.historyStatus?.status === 'unsupported' ? 'Không hỗ trợ' : 'Chưa đủ dữ liệu'}
+                          </span>
+                        )}
+                      </div>
 
-                      {!loading && !err && (
-                        <>
-                          {/* Row 1: Giá gần nhất */}
-                          <div className="comparison-metric-cell">
-                            <div style={{ fontSize: '1.05rem', fontWeight: 800, color: 'var(--color-slate-900)' }}>
-                              {mkt && typeof mkt.price === 'number' ? formatVND(mkt.price) : '—'}
-                            </div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '2px' }}>
-                              {mkt && typeof mkt.changePercent === 'number' ? (
-                                <span
-                                  className={`fintech-badge ${mkt.changePercent > 0 ? 'badge-gain' : mkt.changePercent < 0 ? 'badge-loss' : 'badge-neutral'}`}
-                                  style={{ fontSize: '0.72rem', padding: '1px 6px' }}
-                                >
-                                  {mkt.changePercent > 0 ? '+' : ''}{Number(mkt.changePercent).toFixed(2)}%
-                                </span>
-                              ) : (
-                                <span style={{ fontSize: '0.75rem', color: 'var(--color-slate-400)' }}>—</span>
-                              )}
-                              {mkt?.updatedAt && (
-                                <span style={{ fontSize: '0.7rem', color: 'var(--color-slate-400)' }}>
-                                  {new Date(mkt.updatedAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}
-                                </span>
-                              )}
-                            </div>
+                      {/* Row 3: Khoảng giá */}
+                      <div className="comparison-metric-cell">
+                        {isAvail && lowPrice !== null && highPrice !== null ? (
+                          <div style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--color-slate-800)' }}>
+                            {formatNativeAmount(lowPrice, qCur)} → {formatNativeAmount(highPrice, qCur)}
                           </div>
+                        ) : (
+                          <span style={{ color: 'var(--color-slate-400)', fontSize: '0.82rem' }}>—</span>
+                        )}
+                      </div>
 
-                          {/* Row 2: Biến động giá */}
-                          <div className="comparison-metric-cell">
-                            {isPeriodAvail && typeof periodAna.priceChangePct === 'number' ? (
-                              <div>
-                                <span
-                                  style={{
-                                    fontSize: '1rem',
-                                    fontWeight: 800,
-                                    color: periodAna.priceChangePct > 0 ? 'var(--color-gain-700)' : periodAna.priceChangePct < 0 ? 'var(--color-loss-700)' : 'var(--color-slate-700)'
-                                  }}
-                                >
-                                  {formatPercentVN(periodAna.priceChangePct)}
-                                </span>
-                                {typeof periodAna.absoluteChange === 'number' && (
-                                  <div style={{ fontSize: '0.75rem', color: 'var(--color-slate-500)', marginTop: '2px' }}>
-                                    {periodAna.absoluteChange > 0 ? '+' : ''}{Number(periodAna.absoluteChange).toLocaleString('vi-VN')} ₫
-                                  </div>
-                                )}
-                              </div>
-                            ) : (
-                              <span style={{ color: 'var(--color-slate-400)', fontSize: '0.85rem' }}>Chưa đủ dữ liệu</span>
-                            )}
-                          </div>
+                      {/* Row 4: Vị trí trong vùng giá */}
+                      <div className="comparison-metric-cell">
+                        {isAvail && typeof rangePct === 'number' ? (
+                          <span style={{ fontSize: '0.88rem', fontWeight: 700, color: 'var(--color-slate-800)' }}>
+                            {rangePct.toFixed(1).replace('.', ',')}%
+                          </span>
+                        ) : (
+                          <span style={{ color: 'var(--color-slate-400)', fontSize: '0.82rem' }}>—</span>
+                        )}
+                      </div>
 
-                          {/* Row 3: Khoảng giá */}
-                          <div className="comparison-metric-cell">
-                            {isPeriodAvail && periodAna.periodLowPrice !== null && periodAna.periodHighPrice !== null ? (
-                              <div style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--color-slate-900)' }}>
-                                {Number(periodAna.periodLowPrice).toLocaleString('vi-VN')} — {Number(periodAna.periodHighPrice).toLocaleString('vi-VN')} ₫
-                              </div>
-                            ) : (
-                              <span style={{ color: 'var(--color-slate-400)', fontSize: '0.85rem' }}>Chưa đủ dữ liệu</span>
-                            )}
-                          </div>
+                      {/* Row 5: Tỷ lệ mốc đóng cửa tăng */}
+                      <div className="comparison-metric-cell">
+                        {isAvail && typeof metrics.positiveCloseTransitionRatio === 'number' ? (
+                          <span style={{ fontSize: '0.88rem', fontWeight: 700, color: color.text }}>
+                            {(metrics.positiveCloseTransitionRatio * 100).toFixed(1).replace('.', ',')}%
+                          </span>
+                        ) : (
+                          <span style={{ color: 'var(--color-slate-400)', fontSize: '0.82rem' }}>—</span>
+                        )}
+                      </div>
 
-                          {/* Row 4: Vị trí trong vùng giá (Visual slider track) */}
-                          <div className="comparison-metric-cell">
-                            {isPeriodAvail && typeof periodAna.rangePositionPct === 'number' ? (
-                              <div style={{ width: '100%', padding: '4px 0' }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.7rem', color: 'var(--color-slate-400)', marginBottom: '4px' }}>
-                                  <span>Thấp</span>
-                                  <span style={{ fontWeight: 800, color: 'var(--color-slate-800)' }}>
-                                    {Math.round(periodAna.rangePositionPct)}%
-                                  </span>
-                                  <span>Cao</span>
-                                </div>
-                                <div
-                                  style={{
-                                    height: '6px',
-                                    backgroundColor: 'var(--color-slate-200)',
-                                    borderRadius: '3px',
-                                    position: 'relative'
-                                  }}
-                                >
-                                  <div
-                                    style={{
-                                      position: 'absolute',
-                                      left: `${Math.max(0, Math.min(100, periodAna.rangePositionPct))}%`,
-                                      top: '50%',
-                                      transform: 'translate(-50%, -50%)',
-                                      width: '12px',
-                                      height: '12px',
-                                      borderRadius: '50%',
-                                      backgroundColor: color.dot,
-                                      border: '2px solid #ffffff',
-                                      boxShadow: '0 1px 3px rgba(0,0,0,0.2)'
-                                    }}
-                                  />
-                                </div>
-                              </div>
-                            ) : (
-                              <span style={{ color: 'var(--color-slate-400)', fontSize: '0.85rem' }}>Chưa đủ dữ liệu</span>
-                            )}
-                          </div>
+                      {/* Row 6: Biến động ngày */}
+                      <div className="comparison-metric-cell">
+                        {isAvail && typeof metrics.dailyVolatilityPct === 'number' ? (
+                          <span style={{ fontSize: '0.88rem', fontWeight: 700, color: 'var(--color-slate-800)' }}>
+                            {metrics.dailyVolatilityPct.toFixed(2).replace('.', ',')}%
+                          </span>
+                        ) : (
+                          <span style={{ color: 'var(--color-slate-400)', fontSize: '0.82rem' }}>—</span>
+                        )}
+                      </div>
 
-                          {/* Row 5: Cách đỉnh */}
-                          <div className="comparison-metric-cell">
-                            {isPeriodAvail && typeof periodAna.distanceBelowHighPct === 'number' ? (
-                              <span
-                                style={{
-                                  fontSize: '0.92rem',
-                                  fontWeight: 800,
-                                  color: 'var(--color-slate-800)'
-                                }}
-                              >
-                                {periodAna.distanceBelowHighPct.toFixed(2).replace('.', ',')}%
-                              </span>
-                            ) : (
-                              <span style={{ color: 'var(--color-slate-400)', fontSize: '0.85rem' }}>Chưa đủ dữ liệu</span>
-                            )}
-                          </div>
+                      {/* Row 7: Sụt giảm tối đa */}
+                      <div className="comparison-metric-cell">
+                        {isAvail && typeof metrics.maxDrawdownPct === 'number' ? (
+                          <span style={{ fontSize: '0.88rem', fontWeight: 700, color: 'var(--color-loss-600)' }}>
+                            −{Math.abs(metrics.maxDrawdownPct).toFixed(2).replace('.', ',')}%
+                          </span>
+                        ) : (
+                          <span style={{ color: 'var(--color-slate-400)', fontSize: '0.82rem' }}>—</span>
+                        )}
+                      </div>
 
-                          {/* Row 6: Số phiên */}
-                          <div className="comparison-metric-cell">
-                            {isPeriodAvail && typeof periodAna.validSessionCount === 'number' ? (
-                              <span style={{ fontSize: '0.9rem', fontWeight: 700, color: 'var(--color-slate-800)' }}>
-                                {periodAna.validSessionCount} phiên
-                              </span>
-                            ) : (
-                              <span style={{ color: 'var(--color-slate-400)', fontSize: '0.85rem' }}>—</span>
-                            )}
-                          </div>
-
-                          {/* Row 7: Giai đoạn tăng giá (Cross-period breadth) */}
-                          <div className="comparison-metric-cell">
-                            {ana?.crossPeriod && typeof ana.crossPeriod.positivePeriodCount === 'number' && typeof ana.crossPeriod.validPeriodCount === 'number' ? (
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                <span style={{ fontSize: '0.95rem', fontWeight: 900, color: color.text }}>
-                                  {ana.crossPeriod.positivePeriodCount}/{ana.crossPeriod.validPeriodCount}
-                                </span>
-                                <span style={{ fontSize: '0.75rem', color: 'var(--color-slate-500)' }}>kỳ tăng</span>
-                              </div>
-                            ) : (
-                              <span style={{ color: 'var(--color-slate-400)', fontSize: '0.85rem' }}>Chưa đủ dữ liệu</span>
-                            )}
-                          </div>
-
-                          {/* Row 8: Mức độ đầy đủ dữ liệu */}
-                          <div className="comparison-metric-cell">
-                            {ana?.dataCompleteness?.availabilityLevel ? (
-                              (() => {
-                                const avail = translateAvailability(ana.dataCompleteness.availabilityLevel);
-                                return (
-                                  <span className={`fintech-badge ${avail.badgeClass}`} style={{ fontSize: '0.75rem' }}>
-                                    {avail.text}
-                                  </span>
-                                );
-                              })()
-                            ) : (
-                              <span className="fintech-badge badge-neutral" style={{ fontSize: '0.75rem' }}>
-                                Chưa đủ dữ liệu
-                              </span>
-                            )}
-                          </div>
-                        </>
-                      )}
+                      {/* Row 8: Số mốc dữ liệu */}
+                      <div className="comparison-metric-cell">
+                        <span style={{ fontSize: '0.85rem', color: 'var(--color-slate-700)' }}>
+                          {barCount > 0 ? `${barCount} mốc` : '—'}
+                        </span>
+                      </div>
                     </div>
                   );
                 })}
               </div>
             </div>
           </TiltCard>
-
         </div>
       )}
     </div>
   );
 }
-

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { formatNativeAmount } from '../utils/formatting.js';
 
 export default function PriceAlertModal({
   isOpen,
@@ -24,6 +25,7 @@ export default function PriceAlertModal({
 
   if (!isOpen || !asset) return null;
 
+  const quoteCurrency = asset.quote_currency || asset.quoteCurrency || 'VND';
   const numericTargetPrice = parseFloat(targetPriceInput.replace(/[^0-9.]/g, ''));
   const isValidPrice = Number.isFinite(numericTargetPrice) && numericTargetPrice > 0;
 
@@ -156,7 +158,7 @@ export default function PriceAlertModal({
 
         {/* Content Body */}
         <form onSubmit={handleSubmit} style={{ padding: '1.5rem' }}>
-          {/* Current delayed price context */}
+          {/* Current market price context */}
           {typeof currentPrice === 'number' && currentPrice > 0 && (
             <div
               style={{
@@ -171,10 +173,10 @@ export default function PriceAlertModal({
               }}
             >
               <span style={{ fontSize: '0.85rem', color: 'var(--color-slate-600)' }}>
-                Giá hiện tại (độ trễ ~15p):
+                Giá hiện tại tham chiếu:
               </span>
               <span style={{ fontSize: '0.95rem', fontWeight: 800, color: 'var(--color-slate-900)' }}>
-                {currentPrice.toLocaleString('vi-VN')} ₫
+                {formatNativeAmount(currentPrice, quoteCurrency)}
               </span>
             </div>
           )}
@@ -248,14 +250,14 @@ export default function PriceAlertModal({
                 marginBottom: '0.5rem'
               }}
             >
-              Mức giá mục tiêu (₫)
+              Mức giá mục tiêu ({quoteCurrency})
             </label>
             <div style={{ position: 'relative' }}>
               <input
                 type="number"
                 step="any"
-                min="1"
-                placeholder="VD: 80000"
+                min="0.00000001"
+                placeholder={`VD: ${quoteCurrency === 'VND' ? '80000' : '80.5'}`}
                 value={targetPriceInput}
                 onChange={(e) => setTargetPriceInput(e.target.value)}
                 disabled={loading}
@@ -274,7 +276,7 @@ export default function PriceAlertModal({
             </div>
             {isValidPrice && (
               <div style={{ marginTop: '0.4rem', fontSize: '0.8rem', color: 'var(--color-slate-500)' }}>
-                ≈ {numericTargetPrice.toLocaleString('vi-VN')} ₫
+                ≈ {formatNativeAmount(numericTargetPrice, quoteCurrency)}
               </div>
             )}
           </div>
@@ -292,7 +294,7 @@ export default function PriceAlertModal({
               lineHeight: 1.45
             }}
           >
-            ⓘ <strong>Lưu ý:</strong> Cảnh báo chỉ kích hoạt một lần và được kiểm tra khi bạn làm mới dữ liệu trong ứng dụng. Dữ liệu giá có độ trễ khoảng 15 phút.
+            ⓘ <strong>Lưu ý:</strong> Cảnh báo chỉ kích hoạt một lần và được kiểm tra khi bạn làm mới dữ liệu trong ứng dụng. Thời điểm giá phụ thuộc nguồn dữ liệu của tài sản.
           </div>
 
           {/* Messages */}
