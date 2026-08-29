@@ -105,7 +105,9 @@ export function normalizeMarketSnapshot(meta, symbol) {
     updatedAt: priceAsOf,
     priceAsOf: priceAsOf,
     priceSource: 'yahoo_delayed_snapshot',
-    freshness: 'delayed'
+    freshness: 'delayed',
+    changeBasis: 'PREVIOUS_SESSION_CLOSE',
+    volumeSemantics: 'SESSION_BASE_UNITS'
   };
 }
 
@@ -331,6 +333,13 @@ export async function getHistory(asset, mapping, options = {}) {
 
 export const yahooProvider = Object.freeze({
   name: 'yahoo',
+  capabilities: Object.freeze({
+    snapshot: true,
+    history: true,
+    analysis: true,
+    ohlcHistory: true,
+    snapshotChangeBasis: 'PREVIOUS_SESSION_CLOSE'
+  }),
   getSnapshot,
   getHistory,
   normalizeMarketSnapshot,

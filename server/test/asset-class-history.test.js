@@ -416,7 +416,7 @@ describe('Feature 21 — Asset-Class Market & Historical Semantics', () => {
           fetchFn: async () => ({ ok: false, status: 429, json: async () => ({}) })
         }
       ),
-      (error) => error.status === 503 && error.code === 'PROVIDER_RATE_LIMIT'
+      (error) => error.status === 503 && error.code === 'PROVIDER_RATE_LIMITED'
     );
 
     await assert.rejects(

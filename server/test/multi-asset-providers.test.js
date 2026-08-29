@@ -1,13 +1,16 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { getTwelveDataFxRate } from '../src/providers/twelvedata.js';
+import http from 'node:http';
+import { getTwelveDataFxRate, twelvedataProvider } from '../src/providers/twelvedata.js';
 import { coingeckoProvider } from '../src/providers/coingecko.js';
 import { alphavantageProvider } from '../src/providers/alphavantage.js';
+import { yahooProvider } from '../src/providers/yahoo.js';
 import { getProviderAdapter, MARKET_PROVIDERS } from '../src/providers/index.js';
-import { getMarketSnapshot, getMarketHistory } from '../src/market.js';
+import { getAssetMarketCapabilities, getMarketSnapshot, getMarketHistory } from '../src/market.js';
 import { getFxRate, normalizeFxRate, createUnavailableFxRate } from '../src/fx.js';
 import { calculatePortfolioValuation } from '../src/portfolio.js';
 import { resolveProviderMapping } from '../src/assets.js';
+import { createApp } from '../index.js';
 
 describe('Feature 20A — Real Multi-Asset Providers & Representative Assets', () => {
   // A. Twelve Data USD->VND normalization
@@ -155,7 +158,9 @@ describe('Feature 20A — Real Multi-Asset Providers & Representative Assets', (
     assert.equal(snapshot.price, 64250.5);
     assert.equal(snapshot.volume, 28500000000);
     assert.equal(snapshot.changePercent, 3.25);
-    assert.ok(snapshot.previousClose > 0);
+    assert.equal(snapshot.previousClose, null);
+    assert.equal(snapshot.changeBasis, 'ROLLING_24H');
+    assert.equal(snapshot.volumeSemantics, 'ROLLING_24H_QUOTE_CURRENCY');
     assert.equal(snapshot.priceSource, 'coingecko_market_snapshot');
     assert.equal(snapshot.priceAsOf, new Date(1724835600 * 1000).toISOString());
   });
@@ -453,5 +458,165 @@ describe('Feature 20A — Real Multi-Asset Providers & Representative Assets', (
     assert.equal(getProviderAdapter('alphavantage')?.name, 'alphavantage');
     assert.equal(getProviderAdapter('twelvedata')?.name, 'twelvedata');
     assert.equal(getProviderAdapter('unknown'), null);
+  });
+
+  it('O. GET /api/market/USD%2FVND succeeds through canonical routing with truthful Twelve Data fields', async () => {
+    let requestedUrl = null;
+    const asset = {
+      id: 'asset-usd-vnd',
+      symbol: 'USD/VND',
+      name: 'US Dollar / Vietnamese Dong',
+      assetType: 'fx',
+      baseCurrency: 'USD',
+      quoteCurrency: 'VND',
+      marketPolicy: 'GLOBAL_24_5',
+      marketTimezone: 'Asia/Ho_Chi_Minh'
+    };
+    const mapping = {
+      provider: 'twelvedata',
+      providerSymbol: 'USD/VND'
+    };
+    const fetchFn = async (url) => {
+      requestedUrl = url;
+      return {
+        ok: true,
+        json: async () => ({
+          symbol: 'USD/VND',
+          rate: '25450.75',
+          timestamp: 1724835600
+        })
+      };
+    };
+
+    const app = createApp({
+      getMarketSnapshotFn: (symbol) => getMarketSnapshot(symbol, {
+        resolveProviderMappingFn: async () => ({ asset, mapping }),
+        providerAdapter: twelvedataProvider,
+        apiKey: 'test-key',
+        fetchFn
+      })
+    });
+    const server = http.createServer(app);
+    await new Promise((resolve) => server.listen(0, resolve));
+
+    try {
+      const response = await fetch(`http://127.0.0.1:${server.address().port}/api/market/USD%2FVND`);
+      const body = await response.json();
+
+      assert.equal(response.status, 200);
+      assert.equal(body.data.price, 25450.75);
+      assert.equal(body.data.currency, 'VND');
+      assert.equal(body.data.previousClose, null);
+      assert.equal(body.data.change, null);
+      assert.equal(body.data.changePercent, null);
+      assert.equal(body.data.volume, null);
+      assert.equal(body.data.changeBasis, 'UNAVAILABLE');
+      assert.equal(body.data.volumeSemantics, 'UNAVAILABLE');
+      assert.equal(body.data.priceAsOf, new Date(1724835600 * 1000).toISOString());
+      assert.equal(body.data.capabilities.snapshot, true);
+      assert.equal(body.data.capabilities.history, false);
+      assert.equal(body.data.capabilities.analysis, false);
+      assert.match(requestedUrl, /exchange_rate\?symbol=USD%2FVND/);
+      assert.equal('delayMinutes' in body.data, false);
+      assert.equal('latencyMinutes' in body.data, false);
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+
+  it('P. snapshot semantics distinguish Yahoo prior-session fields from CoinGecko rolling-24h fields', async () => {
+    const yahooSnapshot = await getMarketSnapshot('FPT', {
+      resolveProviderMappingFn: async () => ({
+        asset: {
+          id: 'asset-fpt',
+          symbol: 'FPT',
+          assetType: 'stock',
+          quoteCurrency: 'VND',
+          marketPolicy: 'VN_EXCHANGE',
+          marketTimezone: 'Asia/Ho_Chi_Minh'
+        },
+        mapping: { provider: 'yahoo', providerSymbol: 'FPT.VN' }
+      }),
+      providerAdapter: yahooProvider,
+      fetchFn: async () => ({
+        ok: true,
+        json: async () => ({
+          chart: {
+            result: [{
+              meta: {
+                regularMarketPrice: 101.25,
+                previousClose: 100.5,
+                regularMarketVolume: 1234.5,
+                regularMarketTime: 1724835600,
+                currency: 'VND',
+                exchangeName: 'HOSE'
+              }
+            }]
+          }
+        })
+      })
+    });
+
+    const cryptoSnapshot = await getMarketSnapshot('BTC', {
+      resolveProviderMappingFn: async () => ({
+        asset: {
+          id: 'asset-btc',
+          symbol: 'BTC',
+          assetType: 'crypto',
+          quoteCurrency: 'USD',
+          marketPolicy: 'CONTINUOUS_24_7',
+          marketTimezone: 'UTC'
+        },
+        mapping: { provider: 'coingecko', providerSymbol: 'bitcoin' }
+      }),
+      providerAdapter: coingeckoProvider,
+      fetchFn: async () => ({
+        ok: true,
+        json: async () => ({
+          bitcoin: {
+            usd: 64250.5,
+            usd_24h_vol: 28500000000,
+            usd_24h_change: 3.25,
+            last_updated_at: 1724835600
+          }
+        })
+      })
+    });
+
+    assert.equal(yahooSnapshot.changeBasis, 'PREVIOUS_SESSION_CLOSE');
+    assert.equal(yahooSnapshot.previousClose, 100.5);
+    assert.equal(yahooSnapshot.volumeSemantics, 'SESSION_BASE_UNITS');
+    assert.equal(cryptoSnapshot.changeBasis, 'ROLLING_24H');
+    assert.equal(cryptoSnapshot.previousClose, null);
+    assert.equal(cryptoSnapshot.volumeSemantics, 'ROLLING_24H_QUOTE_CURRENCY');
+    for (const snapshot of [yahooSnapshot, cryptoSnapshot]) {
+      assert.equal(typeof snapshot.priceAsOf, 'string');
+      assert.equal(snapshot.freshness, 'delayed');
+      assert.equal('delayMinutes' in snapshot, false);
+      assert.equal('latencyMinutes' in snapshot, false);
+    }
+  });
+
+  it('Q. canonical capability matrix is provider-derived for all five supported asset classes', () => {
+    const cases = [
+      [yahooProvider, { snapshot: true, history: true, analysis: true, ohlcHistory: true }],
+      [yahooProvider, { snapshot: true, history: true, analysis: true, ohlcHistory: true }],
+      [coingeckoProvider, { snapshot: true, history: true, analysis: true, ohlcHistory: false }],
+      [alphavantageProvider, { snapshot: true, history: true, analysis: true, ohlcHistory: false }],
+      [twelvedataProvider, { snapshot: true, history: false, analysis: false, ohlcHistory: false }]
+    ];
+
+    for (const [adapter, expected] of cases) {
+      const capabilities = getAssetMarketCapabilities({}, adapter);
+      assert.deepEqual(
+        {
+          snapshot: capabilities.snapshot,
+          history: capabilities.history,
+          analysis: capabilities.analysis,
+          ohlcHistory: capabilities.ohlcHistory
+        },
+        expected
+      );
+    }
   });
 });

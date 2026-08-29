@@ -343,7 +343,10 @@ describe('Feature 13 — Personalized Relevant News / Tin của tôi', () => {
           source: 'CafeF',
           category: 'company',
           publishedAt: '2026-08-28T12:00:00Z',
-          url: 'https://cafef.vn/fpt-global.chn'
+          url: 'https://cafef.vn/fpt-global.chn',
+          relatedAssets: [
+            { assetId: 'a-1', symbol: 'FPT', name: 'FPT Corporation', matchReasons: ['SYMBOL_EXACT'] }
+          ]
         },
         {
           id: 'n-2',
@@ -352,7 +355,8 @@ describe('Feature 13 — Personalized Relevant News / Tin của tôi', () => {
           source: 'CafeF',
           category: 'market',
           publishedAt: '2026-08-28T11:00:00Z',
-          url: 'https://cafef.vn/gold-today.chn'
+          url: 'https://cafef.vn/gold-today.chn',
+          relatedAssets: []
         }
       ];
 
@@ -367,6 +371,71 @@ describe('Feature 13 — Personalized Relevant News / Tin của tôi', () => {
       assert.equal(body.data[0].id, 'n-1');
       assert.equal(body.data[0].matchedAssets[0].symbol, 'FPT');
       assert.equal(body.data[0].source, 'CafeF');
+    });
+
+    test('J1. production route rejects ordinary-word RAIN false positives when canonical relationships are empty', async () => {
+      simulateDbError = false;
+      mockHoldings = [
+        {
+          id: 'h-rain',
+          asset_id: 'asset-rain',
+          asset: { id: 'asset-rain', symbol: 'RAIN', name: 'Rain' }
+        }
+      ];
+      mockWatchlist = [];
+      mockNews = [
+        {
+          id: 'weather-news',
+          title: 'Heavy rain expected across the region tomorrow',
+          summary: 'Weather conditions may affect travel.',
+          relatedAssets: []
+        }
+      ];
+
+      const res = await fetch(`${baseUrl}/api/news/personalized`);
+      const body = await res.json();
+
+      assert.equal(res.status, 200);
+      assert.equal(body.userAssetCount, 1);
+      assert.equal(body.count, 0);
+      assert.deepEqual(body.data, []);
+    });
+
+    test('J1b. one canonical article related to multiple user UUIDs appears once and preserves all relationships', async () => {
+      simulateDbError = false;
+      mockHoldings = [
+        {
+          id: 'h-fpt',
+          asset_id: 'asset-fpt',
+          asset: { id: 'asset-fpt', symbol: 'FPT', name: 'FPT Corporation' }
+        }
+      ];
+      mockWatchlist = [
+        {
+          id: 'w-vcb',
+          asset_id: 'asset-vcb',
+          asset: { id: 'asset-vcb', symbol: 'VCB', name: 'Vietcombank' }
+        }
+      ];
+      mockNews = [
+        {
+          id: 'fpt-vcb-partnership',
+          title: 'Canonical multi-asset article',
+          relatedAssets: [
+            { assetId: 'asset-fpt', symbol: 'FPT', name: 'FPT Corporation', matchReasons: ['SYMBOL_EXACT'] },
+            { assetId: 'asset-vcb', symbol: 'VCB', name: 'Vietcombank', matchReasons: ['SYMBOL_EXACT'] }
+          ]
+        }
+      ];
+
+      const res = await fetch(`${baseUrl}/api/news/personalized`);
+      const body = await res.json();
+
+      assert.equal(res.status, 200);
+      assert.equal(body.count, 1);
+      assert.equal(body.data.length, 1);
+      assert.equal(body.data[0].relatedAssets.length, 2);
+      assert.deepEqual(body.data[0].matchedAssets.map((asset) => asset.symbol), ['FPT', 'VCB']);
     });
 
     test('J2. route returns 200 with empty data when user has 0 assets', async () => {
@@ -398,4 +467,3 @@ describe('Feature 13 — Personalized Relevant News / Tin của tôi', () => {
     });
   });
 });
-

@@ -13,7 +13,6 @@ import { deduplicateArticles } from './news/dedupe.js';
 import { matchArticleAssets, attachRelatedAssets } from './news/relevance.js';
 import { NewsCache, globalNewsCache } from './news/cache.js';
 import { NewsService, globalNewsService } from './news/service.js';
-import { getAssets } from './supabase.js';
 
 export {
   CAFEF_FEEDS,
@@ -182,12 +181,40 @@ export async function getPersonalizedNewsFeed({
     throw new Error('getHoldingsFn and getWatchlistFn are required to generate personalized news feed');
   }
 
+  // The production path delegates to Feature 23's canonical aggregation and
+  // UUID-authoritative personalization service. The injected feed path below
+  // exists only for deterministic route tests and applies the same UUID rule.
+  if (getNewsFeedFn === getNewsFeed) {
+    return globalNewsService.getPersonalizedNewsFeed({ getHoldingsFn, getWatchlistFn });
+  }
+
   const [holdings, watchlist] = await Promise.all([
     getHoldingsFn(),
     getWatchlistFn()
   ]);
 
-  const userAssets = getUserAssetUniverse(holdings, watchlist);
+  const userAssetMap = new Map();
+  const addCanonicalAsset = (item) => {
+    if (!item || typeof item !== 'object') return;
+    const asset = item.asset && typeof item.asset === 'object' ? item.asset : item;
+    const assetId = asset.id ?? item.asset_id ?? item.assetId;
+    if (typeof assetId !== 'string' || !assetId.trim()) return;
+
+    const id = assetId.trim();
+    if (!userAssetMap.has(id)) {
+      const symbol = typeof asset.symbol === 'string' ? asset.symbol.trim().toUpperCase() : null;
+      const name = typeof asset.name === 'string' && asset.name.trim()
+        ? asset.name.trim()
+        : symbol;
+      userAssetMap.set(id, { id, symbol, name });
+    }
+  };
+
+  for (const holding of Array.isArray(holdings) ? holdings : []) addCanonicalAsset(holding);
+  for (const item of Array.isArray(watchlist) ? watchlist : []) addCanonicalAsset(item);
+
+  const userAssets = Array.from(userAssetMap.values())
+    .sort((left, right) => String(left.symbol || '').localeCompare(String(right.symbol || '')));
 
   if (userAssets.length === 0) {
     return {
@@ -219,8 +246,24 @@ export async function getPersonalizedNewsFeed({
     sources = feedResult.sources || [];
   }
 
-  // Filter personalized news matching user assets
-  const personalizedArticles = filterPersonalizedNews(rawArticles, userAssets);
+  const userAssetIds = new Set(userAssets.map((asset) => asset.id));
+  const personalizedArticles = [];
+  for (const article of rawArticles) {
+    const relatedAssets = Array.isArray(article?.relatedAssets) ? article.relatedAssets : [];
+    const matchingRelationships = relatedAssets.filter((relationship) =>
+      typeof relationship?.assetId === 'string' && userAssetIds.has(relationship.assetId)
+    );
+    if (matchingRelationships.length === 0) continue;
+
+    personalizedArticles.push({
+      ...article,
+      relatedAssets,
+      matchedAssets: matchingRelationships.map((relationship) => ({
+        symbol: relationship.symbol ?? null,
+        name: relationship.name ?? relationship.symbol ?? null
+      }))
+    });
+  }
 
   return {
     status: 'ok',

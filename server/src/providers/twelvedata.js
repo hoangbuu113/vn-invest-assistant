@@ -110,6 +110,57 @@ export async function getTwelveDataFxRate(baseCurrency, quoteCurrency = REPORTIN
   }
 }
 
+/**
+ * Fetches the canonical USD/VND market-context snapshot through the explicit
+ * Twelve Data provider mapping. The exchange-rate endpoint establishes only a
+ * current observed rate and timestamp; session change, OHLC, and volume remain
+ * unavailable rather than inferred.
+ */
+export async function getSnapshot(asset, mapping, options = {}) {
+  const symbol = asset?.symbol || 'USD/VND';
+  const providerSymbol = mapping?.providerSymbol ?? mapping?.provider_symbol;
+  const baseCurrency = asset?.baseCurrency ?? asset?.base_currency;
+  const quoteCurrency = asset?.quoteCurrency ?? asset?.quote_currency;
+
+  if (
+    providerSymbol !== 'USD/VND' ||
+    baseCurrency !== 'USD' ||
+    quoteCurrency !== 'VND'
+  ) {
+    const err = new Error(`Twelve Data snapshot requires explicit USD/VND mapping for '${symbol}'`);
+    err.status = 422;
+    err.code = 'UNSUPPORTED_PROVIDER';
+    throw err;
+  }
+
+  const rate = await getTwelveDataFxRate(baseCurrency, quoteCurrency, options);
+  if (rate.availability !== 'available') {
+    const err = new Error(rate.reason || `Market data for '${symbol}' is unavailable`);
+    err.status = rate.reason === 'FX_PROVIDER_UNCONFIGURED' ? 422 : 502;
+    err.code = rate.reason || 'PROVIDER_ERROR';
+    throw err;
+  }
+
+  return {
+    symbol,
+    currency: quoteCurrency,
+    exchange: null,
+    price: rate.rate,
+    previousClose: null,
+    change: null,
+    changePercent: null,
+    dayHigh: null,
+    dayLow: null,
+    volume: null,
+    updatedAt: rate.sourceTimestamp,
+    priceAsOf: rate.sourceTimestamp,
+    priceSource: 'twelvedata_exchange_rate',
+    freshness: rate.freshness,
+    changeBasis: 'UNAVAILABLE',
+    volumeSemantics: 'UNAVAILABLE'
+  };
+}
+
 export async function getHistory(asset) {
   const error = new Error(
     `Historical market data for '${asset?.symbol || 'USD/VND'}' is unsupported because Twelve Data daily timezone semantics are not compatible with the canonical market timezone`
@@ -121,5 +172,13 @@ export async function getHistory(asset) {
 
 export const twelvedataProvider = Object.freeze({
   name: 'twelvedata',
+  capabilities: Object.freeze({
+    snapshot: true,
+    history: false,
+    analysis: false,
+    ohlcHistory: false,
+    snapshotChangeBasis: 'UNAVAILABLE'
+  }),
+  getSnapshot,
   getHistory
 });

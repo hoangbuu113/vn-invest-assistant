@@ -96,7 +96,9 @@ export async function getSnapshot(asset, mapping, options = {}) {
       updatedAt: priceAsOf,
       priceAsOf,
       priceSource: 'alphavantage_gold_spot',
-      freshness: 'delayed'
+      freshness: 'delayed',
+      changeBasis: 'UNAVAILABLE',
+      volumeSemantics: 'UNAVAILABLE'
     };
   } catch (err) {
     if (err.status) {
@@ -241,6 +243,13 @@ export async function getHistory(asset, mapping, options = {}) {
 
 export const alphavantageProvider = Object.freeze({
   name: 'alphavantage',
+  capabilities: Object.freeze({
+    snapshot: true,
+    history: true,
+    analysis: true,
+    ohlcHistory: false,
+    snapshotChangeBasis: 'UNAVAILABLE'
+  }),
   getSnapshot,
   getHistory
 });

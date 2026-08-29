@@ -73,6 +73,23 @@ function formatPublishedTime(isoString) {
   }
 }
 
+function getMarketDisplayDecimals(value, currency) {
+  if (currency !== 'USD' || typeof value !== 'number' || !Number.isFinite(value)) return 0;
+  const absoluteValue = Math.abs(value);
+  if (absoluteValue < 1) return 6;
+  if (absoluteValue < 100) return 4;
+  if (absoluteValue < 1000) return 2;
+  return 0;
+}
+
+function formatMarketChange(value, currency) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return '—';
+  const decimals = currency === 'USD'
+    ? (Math.abs(value) < 1 ? 6 : 2)
+    : 2;
+  return value.toLocaleString('vi-VN', { maximumFractionDigits: decimals });
+}
+
 const ASSET_TYPE_LABELS = {
   stock: 'Cổ phiếu',
   etf: 'ETF',
@@ -279,6 +296,7 @@ function App() {
 
   // Market snapshot state
   const [marketData, setMarketData] = useState(null);
+  const [realtimeData, setRealtimeData] = useState(null);
   const [marketLoading, setMarketLoading] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [marketError, setMarketError] = useState(null);
@@ -326,6 +344,7 @@ function App() {
 
   // Request controller refs for stale response protection
   const activeMarketReqRef = useRef(null);
+  const activeRealtimeReqRef = useRef(null);
   const activeHistoryReqRef = useRef(null);
   const activeAssetDetailReqRef = useRef(null);
   const activeAnalysisReqRef = useRef(null);
@@ -984,9 +1003,14 @@ function App() {
     activeMarketReqRef.current = controller;
 
     fetch(`/api/market/${encodeURIComponent(symbol)}`, { signal: controller.signal })
-      .then((res) => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return res.json();
+      .then(async (res) => {
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          const error = new Error(json.message || `HTTP ${res.status}`);
+          error.code = json.code || null;
+          throw error;
+        }
+        return json;
       })
       .then((json) => {
         if (controller.signal.aborted) return;
@@ -1002,13 +1026,49 @@ function App() {
       })
       .catch((err) => {
         if (controller.signal.aborted || err.name === 'AbortError') return;
+        if (!isInitial) {
+          setMarketData((current) => current && current.symbol === symbol
+            ? {
+                ...current,
+                freshness: 'stale',
+                staleReason: err.code || 'REFRESH_FAILED'
+              }
+            : current);
+        }
         setMarketError(err.message || 'Dữ liệu giá thị trường không khả dụng');
         setMarketLoading(false);
         setIsRefreshing(false);
       });
   }, []);
 
-  // Automatic 5-minute refresh timer for market snapshot
+  const fetchRealtimeData = useCallback((symbol) => {
+    if (!symbol) return;
+    if (activeRealtimeReqRef.current) {
+      activeRealtimeReqRef.current.abort();
+    }
+    const controller = new AbortController();
+    activeRealtimeReqRef.current = controller;
+
+    fetch(`/api/market/${encodeURIComponent(symbol)}/realtime`, { signal: controller.signal })
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
+      .then((json) => {
+        if (controller.signal.aborted) return;
+        if (json.status === 'ok' && json.data) {
+          if (json.data.symbol === symbol) {
+            setRealtimeData(json.data);
+          }
+        }
+      })
+      .catch((err) => {
+        if (controller.signal.aborted || err.name === 'AbortError') return;
+        setRealtimeData(null);
+      });
+  }, []);
+
+  // Automatic 5-minute refresh timer for canonical market snapshot (all assets)
   useEffect(() => {
     if (!selectedSymbol) return;
 
@@ -1018,6 +1078,35 @@ function App() {
 
     return () => clearInterval(intervalId);
   }, [selectedSymbol, fetchMarketData]);
+
+  // Feature 24A: Dedicated ~2-second polling for Binance realtime crypto market reference (Asset Detail view only)
+  useEffect(() => {
+    if (!selectedSymbol) {
+      setRealtimeData(null);
+      return;
+    }
+
+    const isCrypto = assetDetail?.market_policy === 'CONTINUOUS_24_7';
+    if (!isCrypto) {
+      setRealtimeData(null);
+      return;
+    }
+
+    // Initial immediate fetch
+    fetchRealtimeData(selectedSymbol);
+
+    const intervalId = setInterval(() => {
+      fetchRealtimeData(selectedSymbol);
+    }, 2000);
+
+    return () => {
+      clearInterval(intervalId);
+      if (activeRealtimeReqRef.current) {
+        activeRealtimeReqRef.current.abort();
+      }
+      setRealtimeData(null);
+    };
+  }, [selectedSymbol, assetDetail?.market_policy, fetchRealtimeData]);
 
   // Fetch historical market data (Feature 06)
   const fetchHistoryData = useCallback((symbol, range = '1M') => {
@@ -1110,6 +1199,7 @@ function App() {
     setIsComparingAssets(false);
     if (activeAssetDetailReqRef.current) activeAssetDetailReqRef.current.abort();
     if (activeMarketReqRef.current) activeMarketReqRef.current.abort();
+    if (activeRealtimeReqRef.current) activeRealtimeReqRef.current.abort();
     if (activeHistoryReqRef.current) activeHistoryReqRef.current.abort();
     if (activeAnalysisReqRef.current) activeAnalysisReqRef.current.abort();
 
@@ -1120,6 +1210,7 @@ function App() {
     setDetailLoading(true);
     setDetailError(null);
     setAssetDetail(null);
+    setRealtimeData(null);
     setHistoryRange('1M');
     setAnalysisData(null);
     setAnalysisError(null);
@@ -1155,6 +1246,7 @@ function App() {
     setIsComparingAssets(false);
     if (activeAssetDetailReqRef.current) activeAssetDetailReqRef.current.abort();
     if (activeMarketReqRef.current) activeMarketReqRef.current.abort();
+    if (activeRealtimeReqRef.current) activeRealtimeReqRef.current.abort();
     if (activeHistoryReqRef.current) activeHistoryReqRef.current.abort();
     if (activeAnalysisReqRef.current) activeAnalysisReqRef.current.abort();
 
@@ -1162,6 +1254,7 @@ function App() {
     setAssetDetail(null);
     setDetailError(null);
     setMarketData(null);
+    setRealtimeData(null);
     setMarketError(null);
     setIsRefreshing(false);
     setHistoryData(null);
@@ -1178,6 +1271,7 @@ function App() {
     return () => {
       if (activeAssetDetailReqRef.current) activeAssetDetailReqRef.current.abort();
       if (activeMarketReqRef.current) activeMarketReqRef.current.abort();
+      if (activeRealtimeReqRef.current) activeRealtimeReqRef.current.abort();
       if (activeHistoryReqRef.current) activeHistoryReqRef.current.abort();
       if (activeAnalysisReqRef.current) activeAnalysisReqRef.current.abort();
     };
@@ -2840,92 +2934,136 @@ function App() {
                   )}
 
                   {/* Market Snapshot Card with 3D Tilt */}
-                  <TiltCard className="fintech-card" style={{ padding: '1.5rem' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.75rem' }}>
-                      <div>
-                        <h3 style={{ margin: 0, fontSize: '1.1rem', color: 'var(--color-slate-900)', fontWeight: 800 }}>Giá thị trường</h3>
-                        <span style={{ fontSize: '0.78rem', color: 'var(--color-slate-400)' }}>Dữ liệu thị trường có độ trễ (~15 phút)</span>
-                      </div>
-                      <MagneticButton
-                        onClick={() => fetchMarketData(selectedSymbol, false)}
-                        disabled={isRefreshing || marketLoading}
-                        className="fintech-btn btn-secondary btn-sm"
-                      >
-                        <span className={isRefreshing ? 'spin-icon' : ''}>{isRefreshing ? '⟳' : '↻'}</span>
-                        <span>{isRefreshing ? 'Đang làm mới...' : 'Làm mới'}</span>
-                      </MagneticButton>
-                    </div>
+                  {(() => {
+                    const isRealtime = !!realtimeData && realtimeData.price !== null;
+                    const displayData = isRealtime ? realtimeData : marketData;
 
-                    {marketLoading && (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', padding: '1rem 0' }}>
-                        <div className="skeleton-shimmer" style={{ width: '220px', height: '36px' }} />
-                        <div className="metrics-grid" style={{ marginBottom: 0 }}>
-                          {[1, 2, 3, 4].map((n) => (
-                            <div key={n} className="skeleton-shimmer" style={{ height: '70px' }} />
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {marketError && (
-                      <div className="fintech-banner banner-warning">
-                        <span>Thông báo: Không thể tải dữ liệu giá thị trường ({marketError}).</span>
-                      </div>
-                    )}
-
-                    {marketData && !marketLoading && (
-                      <div>
-                        <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.85rem', marginBottom: '1.25rem', flexWrap: 'wrap' }}>
-                          <span style={{ fontSize: '2.15rem', fontWeight: 800, color: 'var(--color-slate-900)', letterSpacing: '-0.02em' }}>
-                            {marketData.price !== null ? (
-                              <CountUp value={marketData.price} suffix={marketData.currency ? ` ${marketData.currency}` : ''} />
-                            ) : 'N/A'}
-                          </span>
-
-                          {marketData.change !== null && marketData.change !== undefined ? (
-                            <span className={`fintech-badge ${(marketData.change || 0) >= 0 ? 'badge-gain' : 'badge-loss'}`} style={{ fontSize: '0.88rem', padding: '4px 12px' }}>
-                              {marketData.change > 0 ? '+' : ''}
-                              {Number(marketData.change).toLocaleString('vi-VN', { maximumFractionDigits: 2 })} ({marketData.changePercent > 0 ? '+' : ''}{marketData.changePercent !== null && marketData.changePercent !== undefined ? `${Number(marketData.changePercent).toFixed(2)}%` : '—'})
+                    return (
+                      <TiltCard className="fintech-card" style={{ padding: '1.5rem' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.75rem' }}>
+                          <div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <h3 style={{ margin: 0, fontSize: '1.1rem', color: 'var(--color-slate-900)', fontWeight: 800 }}>Giá thị trường</h3>
+                              {isRealtime && (
+                                <span className="fintech-badge badge-gain" style={{ fontSize: '0.72rem', padding: '2px 8px' }}>
+                                  Realtime
+                                </span>
+                              )}
+                            </div>
+                            <span style={{ fontSize: '0.78rem', color: 'var(--color-slate-400)' }}>
+                              {isRealtime
+                                ? `Binance realtime (USDT) · ${realtimeData.freshness === 'live' ? 'Trực tiếp' : 'Gần đây'}`
+                                : 'Dữ liệu thị trường có độ trễ (~15 phút)'}
                             </span>
-                          ) : (
-                            <span className="fintech-badge badge-neutral" style={{ fontSize: '0.88rem', padding: '4px 12px' }}>
-                              —
+                          </div>
+                          <MagneticButton
+                            onClick={() => {
+                              fetchMarketData(selectedSymbol, false);
+                              if (assetDetail?.market_policy === 'CONTINUOUS_24_7') {
+                                fetchRealtimeData(selectedSymbol);
+                              }
+                            }}
+                            disabled={isRefreshing || marketLoading}
+                            className="fintech-btn btn-secondary btn-sm"
+                          >
+                            <span className={isRefreshing ? 'spin-icon' : ''}>{isRefreshing ? '⟳' : '↻'}</span>
+                            <span>{isRefreshing ? 'Đang làm mới...' : 'Làm mới'}</span>
+                          </MagneticButton>
+                        </div>
+
+                        {marketLoading && !displayData && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', padding: '1rem 0' }}>
+                            <div className="skeleton-shimmer" style={{ width: '220px', height: '36px' }} />
+                            <div className="metrics-grid" style={{ marginBottom: 0 }}>
+                              {[1, 2, 3, 4].map((n) => (
+                                <div key={n} className="skeleton-shimmer" style={{ height: '70px' }} />
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {!isRealtime && marketData?.freshness === 'stale' && (
+                          <div className="fintech-banner banner-warning">
+                            <span>
+                              {marketError
+                                ? `Không thể làm mới giá (${marketError}). Đang hiển thị bản ghi hợp lệ cuối cùng từ ${formatPublishedTime(marketData.priceAsOf || marketData.updatedAt)}, không phải giá mới.`
+                                : `Dữ liệu giá đang cũ do nhà cung cấp tạm thời giới hạn yêu cầu. Thời điểm ghi nhận: ${formatPublishedTime(marketData.priceAsOf || marketData.updatedAt)}.`}
                             </span>
-                          )}
-                        </div>
-
-                        <div className="metrics-grid" style={{ marginBottom: 0 }}>
-                          <div className="metric-card" style={{ padding: '0.95rem 1rem', '--card-accent': '#64748b' }}>
-                            <div className="metric-label">Cao nhất trong ngày</div>
-                            <div className="metric-value" style={{ fontSize: '1.15rem' }}>
-                              {marketData.dayHigh !== null ? `${marketData.dayHigh.toLocaleString('vi-VN')}${marketData.currency ? ` ${marketData.currency}` : ''}` : 'N/A'}
-                            </div>
                           </div>
+                        )}
 
-                          <div className="metric-card" style={{ padding: '0.95rem 1rem', '--card-accent': '#64748b' }}>
-                            <div className="metric-label">Thấp nhất trong ngày</div>
-                            <div className="metric-value" style={{ fontSize: '1.15rem' }}>
-                              {marketData.dayLow !== null ? `${marketData.dayLow.toLocaleString('vi-VN')}${marketData.currency ? ` ${marketData.currency}` : ''}` : 'N/A'}
-                            </div>
+                        {!isRealtime && marketError && marketData?.freshness !== 'stale' && (
+                          <div className="fintech-banner banner-warning">
+                            <span>Thông báo: Không thể tải dữ liệu giá thị trường ({marketError}).</span>
                           </div>
+                        )}
 
-                          <div className="metric-card" style={{ padding: '0.95rem 1rem', '--card-accent': '#3b82f6' }}>
-                            <div className="metric-label">Khối lượng giao dịch</div>
-                            <div className="metric-value" style={{ fontSize: '1.15rem' }}>
-                              {marketData.volume !== null ? marketData.volume.toLocaleString('vi-VN') : 'N/A'}
-                            </div>
-                          </div>
+                        {displayData && (
+                          <div>
+                            <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.85rem', marginBottom: '1.25rem', flexWrap: 'wrap' }}>
+                              <span style={{ fontSize: '2.15rem', fontWeight: 800, color: 'var(--color-slate-900)', letterSpacing: '-0.02em' }}>
+                                {displayData.price !== null ? (
+                                  <CountUp
+                                    value={displayData.price}
+                                    decimals={getMarketDisplayDecimals(displayData.price, displayData.currency)}
+                                    suffix={displayData.currency ? ` ${displayData.currency}` : ''}
+                                  />
+                                ) : 'N/A'}
+                              </span>
 
-                          <div className="metric-card" style={{ padding: '0.95rem 1rem', '--card-accent': '#10b981' }}>
-                            <div className="metric-label">Cập nhật lúc</div>
-                            <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--color-slate-600)' }}>
-                              {formatPublishedTime(marketData.updatedAt)}
+                              {displayData.change !== null && displayData.change !== undefined ? (
+                                <span className={`fintech-badge ${(displayData.change || 0) >= 0 ? 'badge-gain' : 'badge-loss'}`} style={{ fontSize: '0.88rem', padding: '4px 12px' }}>
+                                  {displayData.change > 0 ? '+' : ''}
+                                  {formatMarketChange(displayData.change, displayData.currency)} ({displayData.changePercent > 0 ? '+' : ''}{displayData.changePercent !== null && displayData.changePercent !== undefined ? `${Number(displayData.changePercent).toFixed(2)}%` : '—'})
+                                </span>
+                              ) : (
+                                <span className="fintech-badge badge-neutral" style={{ fontSize: '0.88rem', padding: '4px 12px' }}>
+                                  —
+                                </span>
+                              )}
                             </div>
+
+                            <div className="metrics-grid" style={{ marginBottom: 0 }}>
+                              <div className="metric-card" style={{ padding: '0.95rem 1rem', '--card-accent': '#64748b' }}>
+                                <div className="metric-label">Cao nhất trong ngày</div>
+                                <div className="metric-value" style={{ fontSize: '1.15rem' }}>
+                                  {displayData.dayHigh !== null ? `${displayData.dayHigh.toLocaleString('vi-VN')}${displayData.currency ? ` ${displayData.currency}` : ''}` : 'N/A'}
+                                </div>
+                              </div>
+
+                              <div className="metric-card" style={{ padding: '0.95rem 1rem', '--card-accent': '#64748b' }}>
+                                <div className="metric-label">Thấp nhất trong ngày</div>
+                                <div className="metric-value" style={{ fontSize: '1.15rem' }}>
+                                  {displayData.dayLow !== null ? `${displayData.dayLow.toLocaleString('vi-VN')}${displayData.currency ? ` ${displayData.currency}` : ''}` : 'N/A'}
+                                </div>
+                              </div>
+
+                              <div className="metric-card" style={{ padding: '0.95rem 1rem', '--card-accent': '#3b82f6' }}>
+                                <div className="metric-label">Khối lượng giao dịch</div>
+                                <div className="metric-value" style={{ fontSize: '1.15rem' }}>
+                                  {displayData.volume !== null ? displayData.volume.toLocaleString('vi-VN') : 'N/A'}
+                                </div>
+                              </div>
+
+                              <div className="metric-card" style={{ padding: '0.95rem 1rem', '--card-accent': '#10b981' }}>
+                                <div className="metric-label">Cập nhật lúc</div>
+                                <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--color-slate-600)' }}>
+                                  {formatPublishedTime(displayData.observedAt || displayData.updatedAt)}
+                                </div>
+                              </div>
+                            </div>
+
+                            {isRealtime && (
+                              <div style={{ fontSize: '0.75rem', color: 'var(--color-slate-400)', marginTop: '0.75rem', textAlign: 'right' }}>
+                                * Giá tham chiếu USDT theo thời gian thực từ Binance Spot (không dùng cho định giá danh mục VND).
+                              </div>
+                            )}
                           </div>
-                        </div>
-                      </div>
-                    )}
-                  </TiltCard>
+                        )}
+                      </TiltCard>
+                    );
+                  })()}
+
 
                   {/* Historical Price & Trend Card (Feature 06) */}
                   <TiltCard className="fintech-card" style={{ padding: '1.5rem', marginTop: '1.25rem' }}>

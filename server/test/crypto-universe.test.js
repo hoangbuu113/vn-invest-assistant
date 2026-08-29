@@ -15,9 +15,9 @@ const migrationSql = fs.readFileSync(migrationPath, 'utf8');
 const seedSql = fs.readFileSync(seedPath, 'utf8');
 
 const EXISTING_CRYPTO = [
-  { symbol: 'BTC', providerSymbol: 'bitcoin' },
-  { symbol: 'ETH', providerSymbol: 'ethereum' },
-  { symbol: 'SOL', providerSymbol: 'solana' }
+  { symbol: 'BTC', name: 'Bitcoin', providerSymbol: 'bitcoin', id: '1aca9503-acf1-4450-9b75-4f8935324398' },
+  { symbol: 'ETH', name: 'Ethereum', providerSymbol: 'ethereum', id: '66f2e0e6-e375-4693-8f9d-ea423f47e751' },
+  { symbol: 'SOL', name: 'Solana', providerSymbol: 'solana', id: '8ea1c52b-a999-4d1e-8b02-f8e7e8042118' }
 ];
 
 const NEW_CRYPTO = [
@@ -60,13 +60,24 @@ const NEW_CRYPTO = [
   { symbol: 'JUP', name: 'Jupiter', providerSymbol: 'jupiter-exchange-solana', id: '871267a7-954b-4d39-8299-3c0299fe8be8' }
 ];
 
+const ALL_CRYPTO = [...EXISTING_CRYPTO, ...NEW_CRYPTO];
+
+const seedCoinGeckoMappings = new Map(
+  [...seedSql.matchAll(/SELECT assets\.id, 'coingecko', '([^']+)' FROM public\.assets WHERE symbol = '([^']+)'/g)]
+    .map((match) => [match[2], match[1]])
+);
+
+const feature20bCandidatesMatch = migrationSql.match(/candidates CONSTANT jsonb := '(\[[\s\S]*?\])'::jsonb;/);
+const feature20bCandidates = feature20bCandidatesMatch
+  ? JSON.parse(feature20bCandidatesMatch[1])
+  : [];
+
 const EXISTING_NON_CRYPTO = ['VCB', 'FPT', 'HPG', 'VNM', 'E1VFVN30', 'FUEVFVND', 'FUESSVFL', 'XAU/USD', 'USD/VND'];
 
 describe('Feature 20B — Controlled Crypto Universe Expansion', () => {
   // A. exactly 40 canonical crypto identities (3 existing + 37 new)
   it('A. expected crypto universe contains exactly 40 canonical crypto identities', () => {
-    const totalCrypto = [...EXISTING_CRYPTO, ...NEW_CRYPTO];
-    assert.equal(totalCrypto.length, 40);
+    assert.equal(ALL_CRYPTO.length, 40);
   });
 
   // B. exact 37 new symbols are unique
@@ -77,12 +88,13 @@ describe('Feature 20B — Controlled Crypto Universe Expansion', () => {
     assert.equal(symbols.length, 37);
   });
 
-  // C. exact 37 CoinGecko IDs are unique
-  it('C. exact 37 CoinGecko provider symbols are unique', () => {
-    const ids = NEW_CRYPTO.map(a => a.providerSymbol);
+  // C. all 40 canonical CoinGecko IDs are non-empty and normalized-unique
+  it('C. all 40 canonical CoinGecko provider IDs are non-empty and normalized-unique', () => {
+    const ids = ALL_CRYPTO.map((asset) => asset.providerSymbol.trim().toLowerCase());
     const uniqueIds = new Set(ids);
-    assert.equal(uniqueIds.size, 37);
-    assert.equal(ids.length, 37);
+    assert.ok(ALL_CRYPTO.every((asset) => asset.providerSymbol.trim() !== ''));
+    assert.equal(uniqueIds.size, 40);
+    assert.equal(ids.length, 40);
   });
 
   // D. no symbol collision with existing non-crypto canonical assets
@@ -124,6 +136,34 @@ describe('Feature 20B — Controlled Crypto Universe Expansion', () => {
         seedSql.includes(`'${asset.providerSymbol}'`),
         `Seed missing provider mapping for ${asset.providerSymbol}`
       );
+    }
+  });
+
+  it('F2. all 40 exact symbol-to-provider associations match seed and Feature 20B tuples', () => {
+    assert.equal(seedCoinGeckoMappings.size, 40);
+    assert.equal(feature20bCandidates.length, 37);
+
+    const feature20bBySymbol = new Map(feature20bCandidates.map((asset) => [asset.symbol, asset]));
+    for (const asset of ALL_CRYPTO) {
+      assert.equal(
+        seedCoinGeckoMappings.get(asset.symbol),
+        asset.providerSymbol,
+        `Seed mapping mismatch for ${asset.symbol}`
+      );
+      assert.ok(
+        seedSql.includes(`('${asset.id}', '${asset.symbol}', '${asset.name}'`),
+        `Seed identity mismatch for ${asset.symbol}`
+      );
+
+      if (feature20bBySymbol.has(asset.symbol)) {
+        const candidate = feature20bBySymbol.get(asset.symbol);
+        assert.deepEqual(candidate, {
+          id: asset.id,
+          symbol: asset.symbol,
+          name: asset.name,
+          provider_symbol: asset.providerSymbol
+        });
+      }
     }
   });
 
@@ -268,6 +308,78 @@ describe('Feature 20B — Controlled Crypto Universe Expansion', () => {
       assert.equal(snapshot.currency, 'USD');
       assert.equal(snapshot.price, 123.45);
       assert.equal(snapshot.priceSource, 'coingecko_market_snapshot');
+    }
+  });
+
+  it('Q. all 40 exact mappings route through snapshot and completed-daily history without live calls', async () => {
+    const now = new Date('2026-08-29T12:00:00.000Z');
+    const completedPrices = [
+      [Date.parse('2026-08-22T00:00:00.000Z'), 100.123456],
+      [Date.parse('2026-08-28T00:00:00.000Z'), 101.654321],
+      [Date.parse('2026-08-29T00:00:00.000Z'), 999]
+    ];
+
+    for (const asset of ALL_CRYPTO) {
+      let snapshotUrl;
+      const snapshot = await coingeckoProvider.getSnapshot(
+        {
+          id: asset.id,
+          symbol: asset.symbol,
+          quoteCurrency: 'USD'
+        },
+        { provider: 'coingecko', providerSymbol: asset.providerSymbol },
+        {
+          apiKey: 'test-key',
+          fetchFn: async (url) => {
+            snapshotUrl = new URL(url);
+            return {
+              ok: true,
+              status: 200,
+              json: async () => ({
+                [asset.providerSymbol]: {
+                  usd: 1.23456789,
+                  usd_24h_vol: 5000000,
+                  usd_24h_change: 0.32,
+                  last_updated_at: 1788000000
+                }
+              })
+            };
+          }
+        }
+      );
+
+      let historyUrl;
+      const history = await coingeckoProvider.getHistory(
+        {
+          id: asset.id,
+          symbol: asset.symbol,
+          assetType: 'crypto',
+          quoteCurrency: 'USD',
+          marketPolicy: 'CONTINUOUS_24_7',
+          marketTimezone: 'UTC'
+        },
+        { provider: 'coingecko', providerSymbol: asset.providerSymbol },
+        {
+          apiKey: 'test-key',
+          now,
+          range: '1W',
+          fetchFn: async (url) => {
+            historyUrl = new URL(url);
+            return {
+              ok: true,
+              status: 200,
+              json: async () => ({ prices: completedPrices, market_caps: [], total_volumes: [] })
+            };
+          }
+        }
+      );
+
+      assert.equal(snapshotUrl.searchParams.get('ids'), asset.providerSymbol);
+      assert.equal(snapshot.symbol, asset.symbol);
+      assert.equal(snapshot.price, 1.23456789);
+      assert.ok(historyUrl.pathname.endsWith(`/coins/${asset.providerSymbol}/market_chart/range`));
+      assert.deepEqual(history.bars.map((bar) => bar.date), ['2026-08-22', '2026-08-28']);
+      assert.equal(history.dataAsOf, '2026-08-28');
     }
   });
 });

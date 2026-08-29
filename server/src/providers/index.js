@@ -2,6 +2,7 @@ import { yahooProvider } from './yahoo.js';
 import { coingeckoProvider } from './coingecko.js';
 import { alphavantageProvider } from './alphavantage.js';
 import { twelvedataProvider } from './twelvedata.js';
+export { isBinanceSupported, getBinanceService } from './binance.js';
 
 export const MARKET_PROVIDERS = Object.freeze({
   yahoo: yahooProvider,

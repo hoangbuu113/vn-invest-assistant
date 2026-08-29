@@ -564,17 +564,56 @@ export async function deleteHolding(id, client = supabase) {
   return { id, deleted: true };
 }
 
+const CANONICAL_ASSET_PROJECTION = 'id, symbol, name, asset_type, exchange, market_code, quote_currency, base_currency, market_policy, market_timezone, quantity_unit';
+const WATCHLIST_SELECT = `id, profile_id, asset_id, created_at, assets (${CANONICAL_ASSET_PROJECTION})`;
+const ALERT_SELECT = `id, profile_id, asset_id, direction, target_price, status, last_evaluated_price, last_evaluated_at, triggered_at, created_at, assets (${CANONICAL_ASSET_PROJECTION})`;
+
+function normalizeCanonicalAssetProjection(asset) {
+  if (!asset || typeof asset !== 'object') return null;
+  const assetId = asset.id ?? null;
+  const assetType = asset.assetType ?? asset.asset_type ?? null;
+  const marketCode = asset.marketCode ?? asset.market_code ?? null;
+  const quoteCurrency = asset.quoteCurrency ?? asset.quote_currency ?? null;
+  const baseCurrency = asset.baseCurrency ?? asset.base_currency ?? null;
+  const marketPolicy = asset.marketPolicy ?? asset.market_policy ?? null;
+  const marketTimezone = asset.marketTimezone ?? asset.market_timezone ?? null;
+  const quantityUnit = asset.quantityUnit ?? asset.quantity_unit ?? null;
+
+  return {
+    ...asset,
+    id: assetId,
+    assetId,
+    assetType,
+    marketCode,
+    quoteCurrency,
+    baseCurrency,
+    marketPolicy,
+    marketTimezone,
+    quantityUnit
+  };
+}
+
 /**
  * Normalizes a watchlist_item row from Supabase.
  */
 function normalizeWatchlistItem(row) {
   if (!row) return null;
+  const asset = normalizeCanonicalAssetProjection(row.assets || row.asset);
   return {
     id: row.id,
     profile_id: row.profile_id,
     asset_id: row.asset_id,
     created_at: row.created_at,
-    asset: row.assets || null
+    assetId: row.asset_id,
+    symbol: asset?.symbol ?? null,
+    name: asset?.name ?? null,
+    assetType: asset?.assetType ?? null,
+    quoteCurrency: asset?.quoteCurrency ?? null,
+    marketPolicy: asset?.marketPolicy ?? null,
+    marketTimezone: asset?.marketTimezone ?? null,
+    exchange: asset?.exchange ?? null,
+    marketCode: asset?.marketCode ?? null,
+    asset
   };
 }
 
@@ -591,7 +630,7 @@ export async function getWatchlist(client = supabase) {
 
   const { data, error } = await db
     .from('watchlist_items')
-    .select('id, profile_id, asset_id, created_at, assets (id, symbol, name, asset_type, exchange)')
+    .select(WATCHLIST_SELECT)
     .eq('profile_id', profile.id)
     .order('created_at', { ascending: true });
 
@@ -621,7 +660,7 @@ export async function addToWatchlist({ asset_id, symbol }, client = supabase) {
   const profile = await getInvestorProfile(db);
 
   // Look up asset by asset_id or symbol
-  let assetQuery = db.from('assets').select('id, symbol, name, asset_type, exchange');
+  let assetQuery = db.from('assets').select(CANONICAL_ASSET_PROJECTION);
   if (asset_id && typeof asset_id === 'string' && asset_id.trim()) {
     assetQuery = assetQuery.eq('id', asset_id.trim());
   } else if (symbol && typeof symbol === 'string' && symbol.trim()) {
@@ -643,7 +682,7 @@ export async function addToWatchlist({ asset_id, symbol }, client = supabase) {
   // Check if already in watchlist (idempotent)
   const { data: existing, error: existingErr } = await db
     .from('watchlist_items')
-    .select('id, profile_id, asset_id, created_at, assets (id, symbol, name, asset_type, exchange)')
+    .select(WATCHLIST_SELECT)
     .eq('profile_id', profile.id)
     .eq('asset_id', asset.id)
     .maybeSingle();
@@ -665,7 +704,7 @@ export async function addToWatchlist({ asset_id, symbol }, client = supabase) {
         asset_id: asset.id
       }
     ])
-    .select('id, profile_id, asset_id, created_at, assets (id, symbol, name, asset_type, exchange)')
+    .select(WATCHLIST_SELECT)
     .single();
 
   if (error) {
@@ -673,7 +712,7 @@ export async function addToWatchlist({ asset_id, symbol }, client = supabase) {
     if (error.code === '23505') {
       const { data: refetched, error: refetchErr } = await db
         .from('watchlist_items')
-        .select('id, profile_id, asset_id, created_at, assets (id, symbol, name, asset_type, exchange)')
+        .select(WATCHLIST_SELECT)
         .eq('profile_id', profile.id)
         .eq('asset_id', asset.id)
         .maybeSingle();
@@ -773,7 +812,7 @@ export async function removeFromWatchlist(assetIdentifier, client = supabase) {
  */
 export function normalizeAlert(row) {
   if (!row) return null;
-  const asset = row.assets || row.asset || {};
+  const asset = normalizeCanonicalAssetProjection(row.assets || row.asset);
   return {
     id: row.id,
     profile_id: row.profile_id,
@@ -787,13 +826,15 @@ export function normalizeAlert(row) {
     last_evaluated_at: row.last_evaluated_at || null,
     triggered_at: row.triggered_at || null,
     created_at: row.created_at,
-    asset: asset.id ? {
-      id: asset.id,
-      symbol: asset.symbol,
-      name: asset.name,
-      asset_type: asset.asset_type,
-      exchange: asset.exchange
-    } : undefined
+    assetId: row.asset_id,
+    symbol: asset?.symbol ?? null,
+    assetType: asset?.assetType ?? null,
+    quoteCurrency: asset?.quoteCurrency ?? null,
+    marketPolicy: asset?.marketPolicy ?? null,
+    marketTimezone: asset?.marketTimezone ?? null,
+    exchange: asset?.exchange ?? null,
+    marketCode: asset?.marketCode ?? null,
+    asset: asset || undefined
   };
 }
 
@@ -810,7 +851,7 @@ export async function getAlerts(client = supabase) {
 
   const { data, error } = await db
     .from('price_alerts')
-    .select('id, profile_id, asset_id, direction, target_price, status, last_evaluated_price, last_evaluated_at, triggered_at, created_at, assets (id, symbol, name, asset_type, exchange)')
+    .select(ALERT_SELECT)
     .eq('profile_id', profile.id)
     .order('created_at', { ascending: false });
 
@@ -853,7 +894,7 @@ export async function createAlert({ symbol, asset_id, direction, target_price },
   const profile = await getInvestorProfile(db);
 
   // Look up asset
-  let assetQuery = db.from('assets').select('id, symbol, name, asset_type, exchange');
+  let assetQuery = db.from('assets').select(CANONICAL_ASSET_PROJECTION);
   if (asset_id && typeof asset_id === 'string' && asset_id.trim()) {
     assetQuery = assetQuery.eq('id', asset_id.trim());
   } else if (symbol && typeof symbol === 'string' && symbol.trim()) {
@@ -875,7 +916,7 @@ export async function createAlert({ symbol, asset_id, direction, target_price },
   // Check for exact duplicate alert: (profile_id, asset_id, direction, target_price)
   const { data: existing, error: existingErr } = await db
     .from('price_alerts')
-    .select('id, profile_id, asset_id, direction, target_price, status, last_evaluated_price, last_evaluated_at, triggered_at, created_at, assets (id, symbol, name, asset_type, exchange)')
+    .select(ALERT_SELECT)
     .eq('profile_id', profile.id)
     .eq('asset_id', asset.id)
     .eq('direction', cleanDir)
@@ -902,14 +943,14 @@ export async function createAlert({ symbol, asset_id, direction, target_price },
         status: 'active'
       }
     ])
-    .select('id, profile_id, asset_id, direction, target_price, status, last_evaluated_price, last_evaluated_at, triggered_at, created_at, assets (id, symbol, name, asset_type, exchange)')
+    .select(ALERT_SELECT)
     .single();
 
   if (error) {
     if (error.code === '23505') {
       const { data: refetched } = await db
         .from('price_alerts')
-        .select('id, profile_id, asset_id, direction, target_price, status, last_evaluated_price, last_evaluated_at, triggered_at, created_at, assets (id, symbol, name, asset_type, exchange)')
+        .select(ALERT_SELECT)
         .eq('profile_id', profile.id)
         .eq('asset_id', asset.id)
         .eq('direction', cleanDir)
@@ -1002,7 +1043,7 @@ export async function reactivateAlert(alertId, client = supabase) {
     })
     .eq('id', alertId.trim())
     .eq('profile_id', profile.id)
-    .select('id, profile_id, asset_id, direction, target_price, status, last_evaluated_price, last_evaluated_at, triggered_at, created_at, assets (id, symbol, name, asset_type, exchange)')
+    .select(ALERT_SELECT)
     .maybeSingle();
 
   if (error) {
@@ -1032,7 +1073,7 @@ export async function evaluateAndPersistAlerts({ getMarketSnapshotFn = getMarket
   // 1. Fetch all alerts for singleton profile
   const { data: alertsData, error: alertsErr } = await db
     .from('price_alerts')
-    .select('id, profile_id, asset_id, direction, target_price, status, last_evaluated_price, last_evaluated_at, triggered_at, created_at, assets (id, symbol, name, asset_type, exchange)')
+    .select(ALERT_SELECT)
     .eq('profile_id', profile.id)
     .order('created_at', { ascending: false });
 

@@ -8,6 +8,9 @@ import {
   formatAlertCondition
 } from '../src/alerts.js';
 import { createApp, isValidFinancialNumber } from '../index.js';
+import { getMarketSnapshot } from '../src/market.js';
+import { normalizeAlert } from '../src/supabase.js';
+import { twelvedataProvider } from '../src/providers/twelvedata.js';
 
 describe('Feature 12 — Price Alerts V1 / Cảnh báo giá (Isolated Automated Tests)', () => {
   const SINGLETON_PROFILE_ID = 'singleton-profile-uuid-12345';
@@ -260,6 +263,83 @@ describe('Feature 12 — Price Alerts V1 / Cảnh báo giá (Isolated Automated 
 
       // Verify MWG remained triggered
       assert.equal(summary.updatedAlerts[3].status, 'triggered');
+    });
+
+    test('H2. alert projection preserves native quote currency and canonical market metadata', () => {
+      const normalized = normalizeAlert({
+        id: 'alert-btc',
+        profile_id: SINGLETON_PROFILE_ID,
+        asset_id: 'asset-btc',
+        direction: 'above',
+        target_price: 70000,
+        status: 'active',
+        last_evaluated_price: null,
+        last_evaluated_at: null,
+        triggered_at: null,
+        created_at: FIXED_NOW.toISOString(),
+        assets: {
+          id: 'asset-btc',
+          symbol: 'BTC',
+          name: 'Bitcoin',
+          asset_type: 'crypto',
+          exchange: null,
+          market_code: null,
+          quote_currency: 'USD',
+          market_policy: 'CONTINUOUS_24_7',
+          market_timezone: 'UTC',
+          quantity_unit: 'coin'
+        }
+      });
+
+      assert.equal(normalized.assetId, 'asset-btc');
+      assert.equal(normalized.assetType, 'crypto');
+      assert.equal(normalized.quoteCurrency, 'USD');
+      assert.equal(normalized.marketPolicy, 'CONTINUOUS_24_7');
+      assert.equal(normalized.marketTimezone, 'UTC');
+      assert.equal(normalized.exchange, null);
+      assert.equal(normalized.asset.quoteCurrency, 'USD');
+    });
+
+    test('H3. USD/VND native-price alert evaluates through repaired generic market snapshot path', async () => {
+      const snapshot = await getMarketSnapshot('USD/VND', {
+        resolveProviderMappingFn: async () => ({
+          asset: {
+            id: 'asset-usd-vnd',
+            symbol: 'USD/VND',
+            assetType: 'fx',
+            baseCurrency: 'USD',
+            quoteCurrency: 'VND',
+            marketPolicy: 'GLOBAL_24_5',
+            marketTimezone: 'Asia/Ho_Chi_Minh'
+          },
+          mapping: { provider: 'twelvedata', providerSymbol: 'USD/VND' }
+        }),
+        providerAdapter: twelvedataProvider,
+        apiKey: 'test-key',
+        fetchFn: async () => ({
+          ok: true,
+          json: async () => ({
+            symbol: 'USD/VND',
+            rate: '25450.5',
+            timestamp: 1724835600
+          })
+        })
+      });
+
+      const outcome = evaluateSingleAlert({
+        id: 'alert-usd-vnd',
+        asset_id: 'asset-usd-vnd',
+        symbol: 'USD/VND',
+        direction: 'above',
+        target_price: 25400,
+        status: 'active'
+      }, snapshot, { now: FIXED_NOW });
+
+      assert.equal(snapshot.currency, 'VND');
+      assert.equal(snapshot.changeBasis, 'UNAVAILABLE');
+      assert.equal(outcome.evaluated, true);
+      assert.equal(outcome.triggered, true);
+      assert.equal(outcome.evaluatedPrice, 25450.5);
     });
   });
 
@@ -557,4 +637,3 @@ describe('Feature 12 — Price Alerts V1 / Cảnh báo giá (Isolated Automated 
     });
   });
 });
-

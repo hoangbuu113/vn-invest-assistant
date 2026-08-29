@@ -157,6 +157,63 @@ describe('Feature 08 — Watchlist / Danh sách theo dõi (Isolated Automated Te
       assert.equal(profileFilter.value, SINGLETON_PROFILE_ID, 'Must filter strictly by singleton profile ID');
     });
 
+    test('1b. getWatchlist() exposes canonical market metadata without VND or HOSE fallbacks', async () => {
+      const { client } = createSpySupabaseClient({
+        watchlistData: [
+          {
+            id: 'wl-btc',
+            profile_id: SINGLETON_PROFILE_ID,
+            asset_id: 'asset-btc',
+            created_at: '2026-08-28T00:00:00.000Z',
+            assets: {
+              id: 'asset-btc',
+              symbol: 'BTC',
+              name: 'Bitcoin',
+              asset_type: 'crypto',
+              exchange: null,
+              market_code: null,
+              quote_currency: 'USD',
+              base_currency: null,
+              market_policy: 'CONTINUOUS_24_7',
+              market_timezone: 'UTC',
+              quantity_unit: 'coin'
+            }
+          },
+          {
+            id: 'wl-missing-meta',
+            profile_id: SINGLETON_PROFILE_ID,
+            asset_id: 'asset-missing-meta',
+            created_at: '2026-08-28T00:00:01.000Z',
+            assets: {
+              id: 'asset-missing-meta',
+              symbol: 'TEST',
+              name: 'Metadata Test',
+              asset_type: 'fund',
+              exchange: null,
+              market_code: null,
+              quote_currency: null,
+              market_policy: null,
+              market_timezone: null,
+              quantity_unit: null
+            }
+          }
+        ]
+      });
+
+      const result = await getWatchlist(client);
+
+      assert.equal(result[0].assetId, 'asset-btc');
+      assert.equal(result[0].assetType, 'crypto');
+      assert.equal(result[0].quoteCurrency, 'USD');
+      assert.equal(result[0].marketPolicy, 'CONTINUOUS_24_7');
+      assert.equal(result[0].marketTimezone, 'UTC');
+      assert.equal(result[0].exchange, null);
+      assert.equal(result[1].quoteCurrency, null);
+      assert.equal(result[1].exchange, null);
+      assert.notEqual(result[1].quoteCurrency, 'VND');
+      assert.notEqual(result[1].exchange, 'HOSE');
+    });
+
     test('2. addToWatchlist() forces singleton profile_id and discards foreign profile_id in payload', async () => {
       const { client, queryLog } = createSpySupabaseClient({
         asset: { id: 'asset-vcb-uuid', symbol: 'VCB', name: 'Vietcombank', asset_type: 'stock', exchange: 'HOSE' }
@@ -456,4 +513,3 @@ describe('Feature 08 — Watchlist / Danh sách theo dõi (Isolated Automated Te
     });
   });
 });
-

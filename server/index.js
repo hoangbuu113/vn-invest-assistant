@@ -17,11 +17,12 @@ import {
   reactivateAlert,
   evaluateAndPersistAlerts
 } from './src/supabase.js';
-import { getMarketSnapshot, getMarketHistory } from './src/market.js';
+import { getMarketSnapshot, getMarketHistory, getMarketRealtime } from './src/market.js';
 import { getNewsFeed, getPersonalizedNewsFeed } from './src/news.js';
 import { getPortfolioOverview } from './src/portfolio.js';
 import { getPortfolioComposition } from './src/composition.js';
 import { getAssetAnalysis } from './src/analysis.js';
+import { getAssetComparison } from './src/comparison.js';
 import {
   createPortfolioTransaction,
   getPortfolioTransactions,
@@ -65,12 +66,14 @@ export function createApp(services = {}) {
     getAssetBySymbolFn = getAssetBySymbol,
     getMarketSnapshotFn = getMarketSnapshot,
     getMarketHistoryFn = getMarketHistory,
+    getMarketRealtimeFn = getMarketRealtime,
     getNewsFeedFn = getNewsFeed,
     getPersonalizedNewsFeedFn = getPersonalizedNewsFeed,
     getPortfolioOverviewFn = getPortfolioOverview,
     getPortfolioCompositionFn = getPortfolioComposition,
     checkSupabaseConnectionFn = checkSupabaseConnection,
     getAssetAnalysisFn = getAssetAnalysis,
+    getAssetComparisonFn = getAssetComparison,
     getWatchlistFn = getWatchlist,
     addToWatchlistFn = addToWatchlist,
     removeFromWatchlistFn = removeFromWatchlist,
@@ -555,7 +558,7 @@ export function createApp(services = {}) {
     }
   });
 
-  // Market snapshot endpoint (delayed data from Yahoo Finance)
+  // Market snapshot endpoint (delayed data from canonical provider)
   app.get('/api/market/:symbol', async (req, res) => {
     const { symbol } = req.params;
     try {
@@ -566,10 +569,32 @@ export function createApp(services = {}) {
       });
     } catch (error) {
       const statusCode = error.status || 500;
-      return res.status(statusCode).json({
+      const response = {
         status: 'error',
         message: error.message || 'Failed to fetch market snapshot'
+      };
+      if (error.code) response.code = error.code;
+      return res.status(statusCode).json(response);
+    }
+  });
+
+  // Dedicated realtime market reference endpoint (Feature 24A — Binance WebSocket USDT for Crypto Asset Detail only)
+  app.get('/api/market/:symbol/realtime', async (req, res) => {
+    const { symbol } = req.params;
+    try {
+      const realtime = await getMarketRealtimeFn(symbol);
+      return res.json({
+        status: 'ok',
+        data: realtime
       });
+    } catch (error) {
+      const statusCode = error.status || 404;
+      const response = {
+        status: 'error',
+        message: error.message || 'Realtime market data unavailable'
+      };
+      if (error.code) response.code = error.code;
+      return res.status(statusCode).json(response);
     }
   });
 
@@ -714,6 +739,34 @@ export function createApp(services = {}) {
       if (error.warnings && Array.isArray(error.warnings) && error.warnings.length > 0) {
         response.warnings = error.warnings;
       }
+      return res.status(statusCode).json(response);
+    }
+  });
+
+  // Provider-neutral cross-asset comparison endpoint (Feature 24A)
+  app.get('/api/comparison', async (req, res) => {
+    const rawSymbols = Array.isArray(req.query.symbols)
+      ? req.query.symbols
+      : [req.query.symbols];
+    const symbols = rawSymbols
+      .flatMap((value) => typeof value === 'string' ? value.split(',') : [])
+      .map((symbol) => symbol.trim())
+      .filter(Boolean);
+    const range = typeof req.query.range === 'string' ? req.query.range : '1M';
+
+    try {
+      const comparison = await getAssetComparisonFn(symbols, range);
+      return res.json({
+        status: 'ok',
+        data: comparison
+      });
+    } catch (error) {
+      const statusCode = error.status || 500;
+      const response = {
+        status: 'error',
+        message: error.message || 'Failed to compare assets'
+      };
+      if (error.code) response.code = error.code;
       return res.status(statusCode).json(response);
     }
   });

@@ -1,5 +1,5 @@
 import { resolveProviderMapping } from './assets.js';
-import { getProviderAdapter, MARKET_PROVIDERS } from './providers/index.js';
+import { getProviderAdapter, MARKET_PROVIDERS, isBinanceSupported, getBinanceService } from './providers/index.js';
 import {
   getCanonicalDate,
   getHistoryRangeStart,
@@ -26,6 +26,87 @@ export {
 };
 
 const PUBLIC_RANGES = PUBLIC_HISTORY_RANGES;
+
+export const SNAPSHOT_CHANGE_BASES = Object.freeze({
+  PREVIOUS_SESSION_CLOSE: 'PREVIOUS_SESSION_CLOSE',
+  ROLLING_24H: 'ROLLING_24H',
+  UNAVAILABLE: 'UNAVAILABLE'
+});
+
+export const SNAPSHOT_VOLUME_SEMANTICS = Object.freeze({
+  SESSION_BASE_UNITS: 'SESSION_BASE_UNITS',
+  ROLLING_24H_QUOTE_CURRENCY: 'ROLLING_24H_QUOTE_CURRENCY',
+  UNAVAILABLE: 'UNAVAILABLE'
+});
+
+const VALID_CHANGE_BASES = new Set(Object.values(SNAPSHOT_CHANGE_BASES));
+const VALID_VOLUME_SEMANTICS = new Set(Object.values(SNAPSHOT_VOLUME_SEMANTICS));
+
+export function getAssetMarketCapabilities(asset, adapter) {
+  const declared = adapter?.capabilities && typeof adapter.capabilities === 'object'
+    ? adapter.capabilities
+    : {};
+  const snapshot = declared.snapshot === true ||
+    (declared.snapshot !== false && typeof adapter?.getSnapshot === 'function');
+  const history = declared.history === true ||
+    (declared.history !== false && typeof adapter?.getHistory === 'function');
+  const analysis = declared.analysis === true ||
+    (declared.analysis !== false && history);
+
+  return {
+    snapshot,
+    history,
+    analysis,
+    ohlcHistory: history && declared.ohlcHistory === true,
+    snapshotChangeBasis: VALID_CHANGE_BASES.has(declared.snapshotChangeBasis)
+      ? declared.snapshotChangeBasis
+      : SNAPSHOT_CHANGE_BASES.UNAVAILABLE
+  };
+}
+
+function normalizeSnapshotContract(snapshot, asset, mapping, adapter) {
+  if (!snapshot || typeof snapshot !== 'object') {
+    const err = new Error(`No market quote available for '${asset.symbol}'`);
+    err.status = 404;
+    throw err;
+  }
+
+  const capabilities = getAssetMarketCapabilities(asset, adapter);
+  const changeBasis = VALID_CHANGE_BASES.has(snapshot.changeBasis)
+    ? snapshot.changeBasis
+    : capabilities.snapshotChangeBasis;
+  const volumeSemantics = VALID_VOLUME_SEMANTICS.has(snapshot.volumeSemantics)
+    ? snapshot.volumeSemantics
+    : SNAPSHOT_VOLUME_SEMANTICS.UNAVAILABLE;
+  const changeUnavailable = changeBasis === SNAPSHOT_CHANGE_BASES.UNAVAILABLE;
+  const rollingChange = changeBasis === SNAPSHOT_CHANGE_BASES.ROLLING_24H;
+
+  return {
+    ...snapshot,
+    assetId: asset.id ?? null,
+    assetType: asset.assetType ?? asset.asset_type ?? null,
+    quoteCurrency: asset.quoteCurrency ?? asset.quote_currency ?? null,
+    marketPolicy: asset.marketPolicy ?? asset.market_policy ?? null,
+    marketTimezone: asset.marketTimezone ?? asset.market_timezone ?? null,
+    provider: mapping.provider,
+    currency: typeof snapshot.currency === 'string' && snapshot.currency.trim()
+      ? snapshot.currency.trim()
+      : null,
+    exchange: typeof snapshot.exchange === 'string' && snapshot.exchange.trim()
+      ? snapshot.exchange.trim()
+      : null,
+    previousClose: rollingChange || changeUnavailable ? null : (snapshot.previousClose ?? null),
+    change: changeUnavailable ? null : (snapshot.change ?? null),
+    changePercent: changeUnavailable ? null : (snapshot.changePercent ?? null),
+    volume: snapshot.volume ?? null,
+    changeBasis,
+    volumeSemantics,
+    freshness: typeof snapshot.freshness === 'string' && snapshot.freshness.trim()
+      ? snapshot.freshness.trim()
+      : null,
+    capabilities
+  };
+}
 
 function assertSupportedHistoryPolicy(asset) {
   if (!['VN_EXCHANGE', 'CONTINUOUS_24_7', 'GLOBAL_24_5'].includes(asset.marketPolicy)) {
@@ -72,6 +153,10 @@ function resolveHistoryNow(options) {
  * Fetches and normalizes a delayed market snapshot for a canonical asset symbol.
  * Dispatches to the resolved provider adapter according to asset_provider_mappings.
  *
+ * NOTE: For Crypto assets, this ALWAYS returns the canonical CoinGecko USD snapshot.
+ * Binance USDT realtime observations are strictly reference-only and must be fetched
+ * via getMarketRealtime().
+ *
  * @param {string} rawSymbol - Canonical asset symbol (e.g. 'FPT')
  * @param {Object} [options] - Optional overrides for testing/injection
  * @returns {Promise<Object>} Normalized market snapshot payload
@@ -95,8 +180,77 @@ export async function getMarketSnapshot(rawSymbol, options = {}) {
     throw err;
   }
 
-  return adapter.getSnapshot(asset, mapping, options);
+  const snapshot = await adapter.getSnapshot(asset, mapping, options);
+  return normalizeSnapshotContract(snapshot, asset, mapping, adapter);
 }
+
+/**
+ * Fetches a realtime market reference observation for an asset (currently Binance USDT for CONTINUOUS_24_7).
+ * This is explicitly a reference-only observation and MUST NOT be used for valuation or accounting.
+ *
+ * @param {string} rawSymbol - Canonical asset symbol (e.g. 'BTC')
+ * @param {Object} [options] - Optional overrides for testing/injection
+ * @param {Object} [options.binanceService] - Injected Binance service (testing)
+ * @returns {Promise<Object>} Realtime market reference payload
+ */
+export async function getMarketRealtime(rawSymbol, options = {}) {
+  if (!rawSymbol || typeof rawSymbol !== 'string') {
+    const err = new Error('Invalid symbol parameter');
+    err.status = 400;
+    throw err;
+  }
+
+  const symbol = rawSymbol.trim().toUpperCase();
+  const resolver = options.resolveProviderMappingFn || resolveProviderMapping;
+  const { asset } = await resolver(symbol, options.provider || null, options.providerResolverOptions || {});
+
+  const assetId = asset?.id ?? asset?.assetId;
+  const marketPolicy = asset?.marketPolicy ?? asset?.market_policy;
+
+  if (marketPolicy !== 'CONTINUOUS_24_7' || !assetId || !isBinanceSupported(assetId)) {
+    const err = new Error(`Realtime market reference is not supported for '${asset?.symbol || symbol}'`);
+    err.code = 'REALTIME_UNSUPPORTED';
+    err.status = 404;
+    throw err;
+  }
+
+  const binanceSvc = options.binanceService || getBinanceService();
+  const obs = binanceSvc.getSnapshot(assetId, options);
+
+  if (!obs || obs.price === null) {
+    const err = new Error(`No realtime market observation available for '${asset?.symbol || symbol}'`);
+    err.code = 'REALTIME_UNAVAILABLE';
+    err.status = 404;
+    throw err;
+  }
+
+  return {
+    assetId,
+    symbol: asset.symbol,
+    assetType: asset.assetType ?? asset.asset_type ?? 'crypto',
+    price: obs.price,
+    currency: 'USDT',
+    canonicalQuoteCurrency: asset.quoteCurrency ?? asset.quote_currency ?? 'USD',
+    source: 'binance_websocket',
+    priceSource: 'binance_websocket',
+    observedAt: obs.observedAt,
+    change: obs.rollingOpen !== null ? obs.price - obs.rollingOpen : null,
+    changePercent: obs.rollingOpen !== null && obs.rollingOpen > 0
+      ? ((obs.price - obs.rollingOpen) / obs.rollingOpen) * 100
+      : null,
+    changeBasis: 'ROLLING_24H',
+    dayHigh: obs.rollingHigh ?? null,
+    dayLow: obs.rollingLow ?? null,
+    volume: obs.baseVolume ?? null,
+    volumeSemantics: 'ROLLING_24H_BASE_UNITS',
+    quoteVolume: obs.quoteVolume ?? null,
+    referenceOnly: true,
+    freshness: obs.freshness,
+    connectionState: obs.connectionState
+  };
+}
+
+
 
 /**
  * Fetches and normalizes daily historical market data and calculates period metrics.
