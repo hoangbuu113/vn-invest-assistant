@@ -282,7 +282,8 @@ $$\text{Source Adapter} \longrightarrow \text{Canonical Validation / Sanitizatio
 - **Accounting Isolation**: Canonical Crypto `quote_currency` remains `USD`. Binance `USDT` observations, history, analysis, and approximate VND references must never replace the CoinGecko USD valuation snapshot or enter portfolio/accounting calculations.
 - **No Stablecoin Assumption**: The system does not assert or encode `1 USDT = 1 USD`.
 - **Binance Service Architecture**:
-  - One shared backend WebSocket connection (`wss://stream.binance.com:9443/ws/!miniTicker@arr`).
+  - One shared backend realtime stream connection (`wss://stream.binance.com:9443/ws/!miniTicker@arr`).
+  - One shared multiplexed public historical WebSocket API connection (`wss://ws-api.binance.com:443/ws-api/v3`) for completed daily klines; no Binance REST history fallback.
   - Zero browser-direct connections; zero Binance API keys; zero account/trading APIs; zero broker execution.
   - Asset Detail frontend polls local backend approximately every 2 seconds for active crypto asset.
   - All 40 active Crypto assets use explicit Binance Spot `USDT` mappings; no provider symbol is inferred from a canonical ticker.
@@ -291,7 +292,7 @@ $$\text{Source Adapter} \longrightarrow \text{Canonical Validation / Sanitizatio
 - A `1Y` lookback is a full calendar-year subtraction spanning up to 366 days.
 - Binance daily-klines responses are normalized, deduplicated by canonical UTC date, sorted, filtered to exact Feature 21 calendar boundaries, and exclude the current UTC day.
 - Completed history uses a shared in-memory cache, concurrent request coalescing, coverage-safe stale fallback, and a `CLOSED`/`OPEN`/`HALF_OPEN` circuit breaker.
-- Realtime WebSocket, historical REST, and reference FX failures are isolated from one another.
+- Realtime stream WebSocket, historical WebSocket API, and reference FX failures are isolated from one another.
 
 ### C. Frontend Native-Currency Invariant
 - Native market values display using the relevant authority (`VND` for stocks/ETFs, CoinGecko `USD` for Crypto valuation snapshots, Binance `USDT` for Crypto realtime/history/analysis, and `USD` for Gold).

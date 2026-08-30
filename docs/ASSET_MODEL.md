@@ -17,7 +17,7 @@ Features 16 through 26 establish the canonical schema, ledger authority, provide
   - **Cryptocurrencies (40 Canonical Assets)** (`CONTINUOUS_24_7`, `UTC`, `USD`, `coin`):
     - `BTC`, `ETH`, `SOL`, `BNB`, `XRP`, `TRX`, `ZEC`, `DOGE`, `LINK`, `ADA`, `XLM`, `BCH`, `GRAM`, `LTC`, `HBAR`, `AVAX`, `SHIB`, `SUI`, `UNI`, `NEAR`, `TAO`, `PUMP`, `AAVE`, `ASTER`, `WLFI`, `ONDO`, `ENA`, `MORPHO`, `PEPE`, `DOT`, `WLD`, `ETC`, `POL`, `ATOM`, `JUP`, `APT`, `ARB`, `FET`, `INJ`, `FIL`
     - Canonical valuation snapshot provider: `coingecko` $\rightarrow$ `<EXPLICIT_COINGECKO_ID>` (quoted in `USD`). This authority feeds portfolio/accounting valuation.
-    - Realtime, history, and Analysis V2 provider: `binance` $\rightarrow$ `<EXPLICIT_SPOT_USDT_PAIR>` (quoted in native `USDT`). Realtime uses one shared server-side miniTicker WebSocket; completed UTC daily OHLCV history uses REST klines.
+    - Realtime, history, and Analysis V2 provider: `binance` $\rightarrow$ `<EXPLICIT_SPOT_USDT_PAIR>` (quoted in native `USDT`). Realtime uses one shared server-side miniTicker stream WebSocket; completed UTC daily OHLCV history uses one shared multiplexed Binance WebSocket API connection.
     - `USDT` is never silently redefined as `USD`. Current `≈VND` is approximate/reference-only and never enters accounting or historical analysis.
     - News: CoinDesk official RSS integration with contextual ticker disambiguation
   - **Gold Spot** (`GLOBAL_24_5`, `UTC`, base: `XAU`, quote: `USD`, `oz`):

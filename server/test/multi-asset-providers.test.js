@@ -242,13 +242,10 @@ describe('Feature 20A — Real Multi-Asset Providers & Representative Assets', (
       [Date.parse('2026-08-28T00:00:00.000Z'), '65000', '65500', '64500', '65100', '120'],
       [Date.parse('2026-08-29T00:00:00.000Z'), '66000', '66500', '65500', '66100', '130']
     ];
-    const fetchFn = async () => ({
-      ok: true,
-      json: async () => klines
-    });
+    const wsApiClient = { requestKlines: async () => klines };
 
     const direct = await binanceProvider.getHistory(asset, mapping, {
-      fetchFn,
+      wsApiClient,
       now,
       range: '1M',
       bypassCache: true,
@@ -260,7 +257,7 @@ describe('Feature 20A — Real Multi-Asset Providers & Representative Assets', (
     const throughMarket = await getMarketHistory('BTC', '1M', {
       resolveProviderMappingFn: async () => ({ asset, mapping }),
       getProviderAdapterFn: () => binanceProvider,
-      fetchFn,
+      wsApiClient,
       now,
       bypassCache: true,
       bypassCircuit: true

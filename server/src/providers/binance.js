@@ -4,7 +4,7 @@
  * Provides:
  * 1. 40-asset Binance Spot/USDT canonical universe mapping.
  * 2. Shared resilient WebSocket realtime stream (!miniTicker@arr).
- * 3. Daily REST Kline history with OHLCV for CONTINUOUS_24_7 crypto.
+ * 3. Daily WebSocket API Kline history with OHLCV for CONTINUOUS_24_7 crypto.
  * 4. Shared history cache across consumers with in-flight request coalescing.
  * 5. Provider circuit breaker with CLOSED, OPEN, HALF_OPEN states and backoff cooldown.
  * 6. Stale-while-revalidate fallback for completed history during upstream outages.
@@ -28,6 +28,10 @@ import { getFxRate } from '../fx.js';
 
 const USER_AGENT = 'Mozilla/5.0 (compatible; vn-invest-assistant/2.0)';
 const REST_TIMEOUT_MS = 8000;
+const WS_API_URL = 'wss://ws-api.binance.com:443/ws-api/v3';
+const WS_API_REQUEST_TIMEOUT_MS = 10_000;
+const WS_API_RECONNECT_BASE_MS = 1_000;
+const WS_API_RECONNECT_MAX_MS = 30_000;
 
 // ---------------------------------------------------------------------------
 // 1. Authoritative 40 Binance-Supported Crypto Universe
@@ -263,7 +267,397 @@ export class BinanceHistoryCache {
 export const defaultHistoryCache = new BinanceHistoryCache();
 
 // ---------------------------------------------------------------------------
-// 4. Binance Daily Kline Normalization & Validation
+// 4. Shared Binance WebSocket API Client (Historical Requests)
+// ---------------------------------------------------------------------------
+
+let _wsApiClientInstance = null;
+
+export function getBinanceWsApiClient(options = {}) {
+  if (_wsApiClientInstance) return _wsApiClientInstance;
+  _wsApiClientInstance = createBinanceWsApiClient(options);
+  return _wsApiClientInstance;
+}
+
+export function _resetBinanceWsApiClient() {
+  if (_wsApiClientInstance) {
+    _wsApiClientInstance.destroy();
+    _wsApiClientInstance = null;
+  }
+}
+
+function createWsApiClientError(message, code, status = 502) {
+  return createBinanceError(message, code, status);
+}
+
+function responseErrorFromPayload(payload) {
+  const responseStatus = Number.isInteger(payload?.status) ? payload.status : null;
+  const providerCode = Number.isInteger(payload?.error?.code) ? payload.error.code : null;
+
+  if (responseStatus === 418 || responseStatus === 429) {
+    const error = createWsApiClientError(
+      'Binance WebSocket API rate limit exceeded',
+      'PROVIDER_RATE_LIMITED',
+      503
+    );
+    const retryAfter = Number(payload?.retryAfter ?? payload?.error?.data?.retryAfter);
+    if (Number.isFinite(retryAfter) && retryAfter > Date.now()) {
+      error.retryAfterMs = retryAfter - Date.now();
+    }
+    return error;
+  }
+
+  if (providerCode === -1121) {
+    return createWsApiClientError(
+      'Historical data not found on Binance',
+      'HISTORY_NOT_FOUND',
+      404
+    );
+  }
+
+  return createWsApiClientError(
+    responseStatus === null
+      ? 'Malformed Binance WebSocket API response'
+      : `Binance WebSocket API returned status ${responseStatus}`,
+    responseStatus === null ? 'MALFORMED_PROVIDER_RESPONSE' : 'PROVIDER_ERROR',
+    502
+  );
+}
+
+/**
+ * Creates one persistent, multiplexed public Binance WebSocket API client.
+ * Requests are never replayed after a connection failure; callers retain
+ * cache, stale-fallback, and circuit-breaker authority.
+ */
+export function createBinanceWsApiClient(options = {}) {
+  const isNodeTest = typeof process !== 'undefined' && Boolean(process.env?.NODE_TEST_CONTEXT);
+  const WebSocketImpl = options.WebSocket || globalThis.WebSocket;
+  const wsUrl = options.wsUrl || WS_API_URL;
+  const requestTimeoutMs = Number.isFinite(options.requestTimeoutMs) && options.requestTimeoutMs > 0
+    ? options.requestTimeoutMs
+    : WS_API_REQUEST_TIMEOUT_MS;
+  const reconnectBaseMs = Number.isFinite(options.reconnectBaseMs) && options.reconnectBaseMs >= 0
+    ? options.reconnectBaseMs
+    : WS_API_RECONNECT_BASE_MS;
+  const reconnectMaxMs = Number.isFinite(options.reconnectMaxMs) && options.reconnectMaxMs >= reconnectBaseMs
+    ? options.reconnectMaxMs
+    : WS_API_RECONNECT_MAX_MS;
+  const randomFn = typeof options.randomFn === 'function' ? options.randomFn : Math.random;
+  const closeWhenIdle = options.closeWhenIdle === true ||
+    (options.closeWhenIdle !== false && isNodeTest);
+  const pending = new Map();
+  const connectionWaiters = new Set();
+
+  let socket = null;
+  let connectionState = 'DISCONNECTED';
+  let reconnectAttempt = 0;
+  let reconnectTimer = null;
+  let requestSequence = 0;
+  let destroyed = false;
+
+  function log(level, message) {
+    if (options.silent || isNodeTest) return;
+    console[level === 'ERROR' ? 'error' : 'log'](`[BinanceWsApi] [${level}]`, message);
+  }
+
+  function clearWaiter(waiter) {
+    clearTimeout(waiter.timer);
+    connectionWaiters.delete(waiter);
+  }
+
+  function resolveConnectionWaiters() {
+    for (const waiter of [...connectionWaiters]) {
+      clearWaiter(waiter);
+      waiter.resolve();
+    }
+  }
+
+  function rejectConnectionWaiters(error) {
+    for (const waiter of [...connectionWaiters]) {
+      clearWaiter(waiter);
+      waiter.reject(error);
+    }
+  }
+
+  function rejectPending(error) {
+    for (const [id, entry] of pending.entries()) {
+      clearTimeout(entry.timer);
+      pending.delete(id);
+      entry.reject(error);
+    }
+  }
+
+  function closeIdleTestSocket() {
+    if (!closeWhenIdle || pending.size > 0 || connectionWaiters.size > 0 || !socket) {
+      return;
+    }
+
+    const currentSocket = socket;
+    socket = null;
+    connectionState = 'DISCONNECTED';
+    currentSocket.onopen = null;
+    currentSocket.onmessage = null;
+    currentSocket.onerror = null;
+    currentSocket.onclose = null;
+    try {
+      currentSocket.close();
+    } catch {
+      // Test-only idle shutdown must not alter request results.
+    }
+  }
+
+  function scheduleReconnect() {
+    if (destroyed || reconnectTimer) return;
+
+    connectionState = 'RECONNECTING';
+    const baseDelay = Math.min(
+      reconnectBaseMs * (2 ** reconnectAttempt),
+      reconnectMaxMs
+    );
+    const jitter = reconnectBaseMs === 0
+      ? 0
+      : Math.round(baseDelay * (0.5 + randomFn()));
+    const delay = Math.min(jitter, reconnectMaxMs);
+    reconnectAttempt += 1;
+
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
+      connect();
+    }, delay);
+    reconnectTimer.unref?.();
+  }
+
+  function handleDisconnect(currentSocket) {
+    if (socket !== currentSocket) return;
+
+    socket = null;
+    connectionState = 'DISCONNECTED';
+    rejectPending(createWsApiClientError(
+      'Binance WebSocket API connection closed before response',
+      'PROVIDER_UNAVAILABLE',
+      503
+    ));
+
+    if (!destroyed) {
+      scheduleReconnect();
+    }
+  }
+
+  function connect() {
+    if (destroyed || connectionState === 'CONNECTING' || connectionState === 'CONNECTED') {
+      return;
+    }
+
+    if (!WebSocketImpl) {
+      const error = createWsApiClientError(
+        'WebSocket is unavailable for Binance history',
+        'PROVIDER_UNAVAILABLE',
+        503
+      );
+      rejectConnectionWaiters(error);
+      return;
+    }
+
+    connectionState = 'CONNECTING';
+    let nextSocket;
+    try {
+      nextSocket = new WebSocketImpl(wsUrl);
+    } catch {
+      connectionState = 'DISCONNECTED';
+      scheduleReconnect();
+      return;
+    }
+
+    socket = nextSocket;
+
+    nextSocket.onopen = () => {
+      if (destroyed || socket !== nextSocket) return;
+      connectionState = 'CONNECTED';
+      reconnectAttempt = 0;
+      resolveConnectionWaiters();
+      log('INFO', 'Connected to Binance WebSocket API');
+    };
+
+    nextSocket.onmessage = (event) => {
+      if (destroyed || socket !== nextSocket) return;
+
+      let payload;
+      try {
+        payload = JSON.parse(String(event.data));
+      } catch {
+        return;
+      }
+
+      const id = typeof payload?.id === 'string' ? payload.id : null;
+      const entry = id ? pending.get(id) : null;
+      if (!entry) return;
+
+      clearTimeout(entry.timer);
+      pending.delete(id);
+
+      if (payload.status !== 200) {
+        entry.reject(responseErrorFromPayload(payload));
+        closeIdleTestSocket();
+        return;
+      }
+
+      if (!Array.isArray(payload.result)) {
+        entry.reject(createWsApiClientError(
+          'Malformed Binance WebSocket API Kline response',
+          'MALFORMED_PROVIDER_RESPONSE',
+          502
+        ));
+        closeIdleTestSocket();
+        return;
+      }
+
+      entry.resolve(payload.result);
+      closeIdleTestSocket();
+    };
+
+    nextSocket.onerror = () => {
+      if (destroyed || socket !== nextSocket) return;
+      handleDisconnect(nextSocket);
+      try {
+        nextSocket.close();
+      } catch {
+        // The failed socket may already be closed.
+      }
+    };
+
+    nextSocket.onclose = () => {
+      if (destroyed || socket !== nextSocket) return;
+      handleDisconnect(nextSocket);
+    };
+  }
+
+  function ensureConnected(timeoutMs) {
+    if (destroyed) {
+      return Promise.reject(createWsApiClientError(
+        'Binance WebSocket API client is shut down',
+        'PROVIDER_UNAVAILABLE',
+        503
+      ));
+    }
+    if (connectionState === 'CONNECTED' && socket) {
+      return Promise.resolve();
+    }
+
+    return new Promise((resolve, reject) => {
+      const waiter = {
+        resolve,
+        reject,
+        timer: null
+      };
+      waiter.timer = setTimeout(() => {
+        connectionWaiters.delete(waiter);
+        reject(createWsApiClientError(
+          'Binance WebSocket API connection timed out',
+          'PROVIDER_TIMEOUT',
+          504
+        ));
+      }, timeoutMs);
+      connectionWaiters.add(waiter);
+
+      if (!reconnectTimer) {
+        connect();
+      }
+    });
+  }
+
+  async function request(method, params, requestOptions = {}) {
+    const timeoutMs = Number.isFinite(requestOptions.timeoutMs) && requestOptions.timeoutMs > 0
+      ? requestOptions.timeoutMs
+      : requestTimeoutMs;
+    await ensureConnected(timeoutMs);
+
+    if (destroyed || connectionState !== 'CONNECTED' || !socket) {
+      throw createWsApiClientError(
+        'Binance WebSocket API is unavailable',
+        'PROVIDER_UNAVAILABLE',
+        503
+      );
+    }
+
+    const id = `history-${Date.now().toString(36)}-${++requestSequence}`;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        pending.delete(id);
+        reject(createWsApiClientError(
+          'Binance WebSocket API request timed out',
+          'PROVIDER_TIMEOUT',
+          504
+        ));
+        closeIdleTestSocket();
+      }, timeoutMs);
+      pending.set(id, { resolve, reject, timer });
+
+      try {
+        socket.send(JSON.stringify({ id, method, params }));
+      } catch {
+        clearTimeout(timer);
+        pending.delete(id);
+        reject(createWsApiClientError(
+          'Binance WebSocket API request could not be sent',
+          'PROVIDER_UNAVAILABLE',
+          503
+        ));
+        closeIdleTestSocket();
+      }
+    });
+  }
+
+  function requestKlines(symbol, requestOptions = {}) {
+    return request('klines', {
+      symbol,
+      interval: '1d',
+      limit: 1000
+    }, requestOptions);
+  }
+
+  function destroy() {
+    if (destroyed) return;
+    destroyed = true;
+
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+
+    const error = createWsApiClientError(
+      'Binance WebSocket API client was shut down',
+      'PROVIDER_UNAVAILABLE',
+      503
+    );
+    rejectConnectionWaiters(error);
+    rejectPending(error);
+
+    const currentSocket = socket;
+    socket = null;
+    connectionState = 'DESTROYED';
+    if (currentSocket) {
+      currentSocket.onopen = null;
+      currentSocket.onmessage = null;
+      currentSocket.onerror = null;
+      currentSocket.onclose = null;
+      try {
+        currentSocket.close();
+      } catch {
+        // Ignore shutdown failures.
+      }
+    }
+  }
+
+  return Object.freeze({
+    request,
+    requestKlines,
+    getConnectionState: () => connectionState,
+    getPendingCount: () => pending.size,
+    destroy
+  });
+}
+
+// ---------------------------------------------------------------------------
+// 5. Binance Daily Kline Normalization & Validation
 // ---------------------------------------------------------------------------
 
 function createBinanceError(message, code, status = 502) {
@@ -356,7 +750,7 @@ export function normalizeHistoricalData(rawKlines, symbol, range, options = {}) 
 }
 
 // ---------------------------------------------------------------------------
-// 5. Binance History Fetcher (getHistory)
+// 6. Binance History Fetcher (getHistory)
 // ---------------------------------------------------------------------------
 
 export async function getHistory(asset, mapping, options = {}) {
@@ -372,7 +766,6 @@ export async function getHistory(asset, mapping, options = {}) {
   const startDateUtc = getHistoryRangeStart(todayUtc, requestedRange);
   const cache = options.cache || defaultHistoryCache;
   const circuit = options.circuitBreaker || defaultCircuitBreaker;
-  const fetchFn = options.fetchFn || fetch;
 
   const cacheKey = cache.makeKey(binanceSymbol, requestedRange, todayUtc);
 
@@ -405,33 +798,10 @@ export async function getHistory(asset, mapping, options = {}) {
   const fetchPromise = (async () => {
     let failureCooldownMs = null;
     try {
-      // Fetch daily klines up to 1000 bars
-      const url = `https://api.binance.com/api/v3/klines?symbol=${encodeURIComponent(binanceSymbol)}&interval=1d&limit=1000`;
-
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), REST_TIMEOUT_MS);
-
-      const response = await fetchFn(url, {
-        signal: controller.signal,
-        headers: { 'User-Agent': USER_AGENT, 'Accept': 'application/json' }
+      const wsApiClient = options.wsApiClient || getBinanceWsApiClient();
+      const rawKlines = await wsApiClient.requestKlines(binanceSymbol, {
+        timeoutMs: options.requestTimeoutMs
       });
-      clearTimeout(timeout);
-
-      if (!response.ok) {
-        const retryAfter = Number(response.headers?.get?.('retry-after'));
-        const cooldownMs = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : null;
-        failureCooldownMs = cooldownMs;
-
-        if (response.status === 429) {
-          throw createBinanceError(`Binance rate limit exceeded for '${symbol}'`, 'PROVIDER_RATE_LIMITED', 503);
-        }
-        if (response.status === 404) {
-          throw createBinanceError(`Historical data for '${symbol}' not found on Binance`, 'HISTORY_NOT_FOUND', 404);
-        }
-        throw createBinanceError(`Binance history request returned HTTP ${response.status}`, 'PROVIDER_ERROR', 502);
-      }
-
-      const rawKlines = await response.json();
       if (!Array.isArray(rawKlines)) {
         throw createBinanceError(`Binance returned non-array history for '${symbol}'`, 'MALFORMED_PROVIDER_RESPONSE', 502);
       }
@@ -452,6 +822,7 @@ export async function getHistory(asset, mapping, options = {}) {
       cache.set(cacheKey, normalized, todayUtc, startDateUtc);
       return normalized;
     } catch (err) {
+      failureCooldownMs = Number.isFinite(err?.retryAfterMs) ? err.retryAfterMs : null;
       circuit.recordFailure(failureCooldownMs);
       // Try stale cache fallback if available
       const stale = cache.getStale(binanceSymbol, requestedRange, startDateUtc);
@@ -462,7 +833,14 @@ export async function getHistory(asset, mapping, options = {}) {
           providerStatus: 'stale_fallback'
         };
       }
-      throw err;
+      if (err?.code && Number.isInteger(err?.status)) {
+        throw err;
+      }
+      throw createBinanceError(
+        `Error fetching Binance history for '${symbol}'`,
+        'PROVIDER_ERROR',
+        502
+      );
     } finally {
       cache.inFlight.delete(cacheKey);
     }
@@ -473,7 +851,7 @@ export async function getHistory(asset, mapping, options = {}) {
 }
 
 // ---------------------------------------------------------------------------
-// 6. Binance Snapshot Provider (getSnapshot)
+// 7. Binance Snapshot Provider (getSnapshot)
 // ---------------------------------------------------------------------------
 
 export function normalizeMarketSnapshot(raw, symbol) {
@@ -657,7 +1035,7 @@ export async function attachApproximateVndReference(snapshot, options = {}) {
 }
 
 // ---------------------------------------------------------------------------
-// 7. Binance WebSocket Service (Shared Realtime Connection)
+// 8. Binance WebSocket Service (Shared Realtime Connection)
 // ---------------------------------------------------------------------------
 
 const BINANCE_FRESH_MS = 30_000;   // 30 s: observation considered live
@@ -681,6 +1059,7 @@ export function _resetBinanceService() {
     _serviceInstance.destroy();
     _serviceInstance = null;
   }
+  _resetBinanceWsApiClient();
 }
 
 export function createBinanceService(options = {}) {
@@ -924,16 +1303,23 @@ export function createBinanceService(options = {}) {
 }
 
 // ---------------------------------------------------------------------------
-// 8. Health Signals
+// 9. Health Signals
 // ---------------------------------------------------------------------------
 
 export function getBinanceHealth() {
   const svc = _serviceInstance;
   const wsState = svc ? svc.getConnectionState() : 'DISABLED';
+  const historyWsState = _wsApiClientInstance
+    ? _wsApiClientInstance.getConnectionState()
+    : 'IDLE';
   const circuitState = defaultCircuitBreaker.getState();
 
   const realtime = wsState === 'CONNECTED' ? 'healthy' : (wsState === 'RECONNECTING' || wsState === 'CONNECTING' ? 'degraded' : 'unavailable');
-  const history = circuitState === 'CLOSED' ? 'healthy' : (circuitState === 'HALF_OPEN' ? 'degraded' : 'unavailable');
+  const history = circuitState === 'OPEN'
+    ? 'unavailable'
+    : (circuitState === 'HALF_OPEN' || ['CONNECTING', 'RECONNECTING'].includes(historyWsState)
+      ? 'degraded'
+      : 'healthy');
 
   return {
     binanceRealtime: realtime,
@@ -943,7 +1329,7 @@ export function getBinanceHealth() {
 }
 
 // ---------------------------------------------------------------------------
-// 9. Exported Provider Adapter
+// 10. Exported Provider Adapter
 // ---------------------------------------------------------------------------
 
 export const binanceProvider = Object.freeze({

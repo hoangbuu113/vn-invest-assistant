@@ -83,6 +83,7 @@ describe('Feature 26A.1 — hybrid Crypto quote authority', () => {
   it('routes Crypto valuation snapshots to CoinGecko and history/analysis to Binance', async () => {
     const now = new Date('2026-08-30T10:00:00.000Z');
     const observedUrls = [];
+    let wsRequestCount = 0;
     const cache = new BinanceHistoryCache();
     const fetchFn = async (url) => {
       observedUrls.push(url);
@@ -99,12 +100,14 @@ describe('Feature 26A.1 — hybrid Crypto quote authority', () => {
           })
         };
       }
-      if (url.includes('api.binance.com/api/v3/klines')) {
-        assert.match(url, /symbol=BTCUSDT/);
-        assert.match(url, /interval=1d/);
-        return { ok: true, json: async () => rawDailyKlines() };
-      }
       throw new Error(`Unexpected provider URL: ${url}`);
+    };
+    const wsApiClient = {
+      requestKlines: async (symbol) => {
+        wsRequestCount += 1;
+        assert.equal(symbol, 'BTCUSDT');
+        return rawDailyKlines();
+      }
     };
 
     const providerResolverOptions = resolverOptions(BTC);
@@ -115,7 +118,7 @@ describe('Feature 26A.1 — hybrid Crypto quote authority', () => {
 
     const history = await getMarketHistory('BTC', '1W', {
       now,
-      fetchFn,
+      wsApiClient,
       cache,
       providerResolverOptions
     });
@@ -129,7 +132,7 @@ describe('Feature 26A.1 — hybrid Crypto quote authority', () => {
       range: '1W',
       getMarketHistoryFn: (symbol, range, options) => getMarketHistory(symbol, range, {
         ...options,
-        fetchFn,
+        wsApiClient,
         cache,
         providerResolverOptions
       }),
@@ -140,7 +143,8 @@ describe('Feature 26A.1 — hybrid Crypto quote authority', () => {
     assert.equal(analysis.snapshot.currency, 'USD');
     assert.equal(analysis.snapshot.analysisEligible, false);
     assert.equal(analysis.periods['1W'].status, 'available');
-    assert.equal(observedUrls.filter((url) => url.includes('/api/v3/klines')).length, 1);
+    assert.equal(wsRequestCount, 1);
+    assert.equal(observedUrls.some((url) => url.includes('/api/v3/klines')), false);
     assert.equal(observedUrls.some((url) => url.includes('/market_chart')), false);
   });
 

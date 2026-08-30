@@ -192,17 +192,14 @@ describe('Feature 26A — Binance Market Data Reliability Foundation', () => {
   // ---------------------------------------------------------------------------
   it('I. request coalescing ensures concurrent same-history requests make exactly ONE upstream call', async () => {
     let upstreamCallCount = 0;
-    const mockFetch = async () => {
+    const wsApiClient = { requestKlines: async () => {
       upstreamCallCount++;
       await new Promise(r => setTimeout(r, 15));
-      return {
-        ok: true,
-        json: async () => [
-          [Date.parse('2026-08-27T00:00:00.000Z'), '60000', '61000', '59000', '60500', '1000', 0, 0, 0, 0, 0, '0'],
-          [Date.parse('2026-08-28T00:00:00.000Z'), '60500', '62000', '60000', '61500', '1200', 0, 0, 0, 0, 0, '0']
-        ]
-      };
-    };
+      return [
+        [Date.parse('2026-08-27T00:00:00.000Z'), '60000', '61000', '59000', '60500', '1000', 0, 0, 0, 0, 0, '0'],
+        [Date.parse('2026-08-28T00:00:00.000Z'), '60500', '62000', '60000', '61500', '1200', 0, 0, 0, 0, 0, '0']
+      ];
+    } };
 
     const cache = new BinanceHistoryCache();
     const asset = { symbol: 'BTC', quoteCurrency: 'USDT', marketPolicy: 'CONTINUOUS_24_7', marketTimezone: 'UTC' };
@@ -211,7 +208,7 @@ describe('Feature 26A — Binance Market Data Reliability Foundation', () => {
 
     // Launch 10 simultaneous requests
     const promises = Array.from({ length: 10 }, () =>
-      getHistory(asset, mapping, { range: '1W', now, cache, fetchFn: mockFetch })
+      getHistory(asset, mapping, { range: '1W', now, cache, wsApiClient })
     );
 
     const results = await Promise.all(promises);
@@ -227,15 +224,12 @@ describe('Feature 26A — Binance Market Data Reliability Foundation', () => {
   // ---------------------------------------------------------------------------
   it('J. subsequent request for cached range makes zero upstream calls', async () => {
     let upstreamCallCount = 0;
-    const mockFetch = async () => {
+    const wsApiClient = { requestKlines: async () => {
       upstreamCallCount++;
-      return {
-        ok: true,
-        json: async () => [
-          [Date.parse('2026-08-27T00:00:00.000Z'), '60000', '61000', '59000', '60500', '1000', 0, 0, 0, 0, 0, '0']
-        ]
-      };
-    };
+      return [
+        [Date.parse('2026-08-27T00:00:00.000Z'), '60000', '61000', '59000', '60500', '1000', 0, 0, 0, 0, 0, '0']
+      ];
+    } };
 
     const cache = new BinanceHistoryCache();
     const asset = { symbol: 'BTC', quoteCurrency: 'USDT', marketPolicy: 'CONTINUOUS_24_7', marketTimezone: 'UTC' };
@@ -243,11 +237,11 @@ describe('Feature 26A — Binance Market Data Reliability Foundation', () => {
     const now = new Date('2026-08-29T10:00:00.000Z');
 
     // First call populates cache
-    await getHistory(asset, mapping, { range: '1W', now, cache, fetchFn: mockFetch });
+    await getHistory(asset, mapping, { range: '1W', now, cache, wsApiClient });
     assert.equal(upstreamCallCount, 1);
 
     // Second call hits cache
-    const secondResult = await getHistory(asset, mapping, { range: '1W', now, cache, fetchFn: mockFetch });
+    const secondResult = await getHistory(asset, mapping, { range: '1W', now, cache, wsApiClient });
     assert.equal(upstreamCallCount, 1, 'No additional upstream call should be made');
     assert.equal(secondResult.bars.length, 1);
   });
@@ -263,19 +257,18 @@ describe('Feature 26A — Binance Market Data Reliability Foundation', () => {
     const today = new Date('2026-08-29T10:00:00.000Z');
 
     // 1. Successful fetch yesterday
-    const goodFetch = async () => ({
-      ok: true,
-      json: async () => Array.from({ length: 8 }, (_, index) => {
+    const goodWsApiClient = { requestKlines: async () =>
+      Array.from({ length: 8 }, (_, index) => {
         const timestamp = Date.parse(`2026-08-${String(20 + index).padStart(2, '0')}T00:00:00.000Z`);
         const open = 60000 + index * 100;
         return [timestamp, String(open), String(open + 200), String(open - 200), String(open + 100), '1000', 0, 0, 0, 0, 0, '0'];
       })
-    });
-    await getHistory(asset, mapping, { range: '1W', now: yesterday, cache, fetchFn: goodFetch });
+    };
+    await getHistory(asset, mapping, { range: '1W', now: yesterday, cache, wsApiClient: goodWsApiClient });
 
     // 2. Upstream network failure today
-    const badFetch = async () => { throw new Error('Upstream network failure'); };
-    const fallbackResult = await getHistory(asset, mapping, { range: '1W', now: today, cache, fetchFn: badFetch });
+    const badWsApiClient = { requestKlines: async () => { throw new Error('Upstream network failure'); } };
+    const fallbackResult = await getHistory(asset, mapping, { range: '1W', now: today, cache, wsApiClient: badWsApiClient });
 
     assert.ok(fallbackResult);
     assert.equal(fallbackResult.stale, true);
@@ -292,19 +285,16 @@ describe('Feature 26A — Binance Market Data Reliability Foundation', () => {
     const now = new Date('2026-08-29T10:00:00.000Z');
 
     // Only 1W is cached
-    const goodFetch = async () => ({
-      ok: true,
-      json: async () => [
+    const goodWsApiClient = { requestKlines: async () => [
         [Date.parse('2026-08-27T00:00:00.000Z'), '60000', '61000', '59000', '60500', '1000', 0, 0, 0, 0, 0, '0']
-      ]
-    });
-    await getHistory(asset, mapping, { range: '1W', now, cache, fetchFn: goodFetch });
+      ] };
+    await getHistory(asset, mapping, { range: '1W', now, cache, wsApiClient: goodWsApiClient });
 
     // Requesting 1Y when upstream fails -> 1W cache does not satisfy 1Y
-    const badFetch = async () => { throw new Error('Upstream 500 error'); };
+    const badWsApiClient = { requestKlines: async () => { throw new Error('Upstream 500 error'); } };
     await assert.rejects(
-      () => getHistory(asset, mapping, { range: '1Y', now, cache, fetchFn: badFetch }),
-      /Upstream 500 error/
+      () => getHistory(asset, mapping, { range: '1Y', now, cache, wsApiClient: badWsApiClient }),
+      (error) => error.code === 'PROVIDER_ERROR' && !error.message.includes('Upstream')
     );
   });
 
@@ -329,7 +319,7 @@ describe('Feature 26A — Binance Market Data Reliability Foundation', () => {
   // ---------------------------------------------------------------------------
   it('N. OPEN circuit immediately fails fast or falls back to stale cache without calling fetch', async () => {
     let callCount = 0;
-    const mockFetch = async () => { callCount++; return { ok: true, json: async () => [] }; };
+    const wsApiClient = { requestKlines: async () => { callCount++; return []; } };
 
     const circuit = new CircuitBreaker({ failureThreshold: 1, cooldownMs: 10000 });
     circuit.recordFailure(); // Open circuit
@@ -340,14 +330,14 @@ describe('Feature 26A — Binance Market Data Reliability Foundation', () => {
     const mapping = { canonicalSymbol: 'BTC', binanceSymbol: 'BTCUSDT' };
 
     await assert.rejects(
-      () => getHistory(asset, mapping, { range: '1W', cache, circuitBreaker: circuit, fetchFn: mockFetch }),
+      () => getHistory(asset, mapping, { range: '1W', cache, circuitBreaker: circuit, wsApiClient }),
       (err) => {
         assert.equal(err.code, 'PROVIDER_UNAVAILABLE');
         assert.equal(err.status, 503);
         return true;
       }
     );
-    assert.equal(callCount, 0, 'No fetch should have been attempted while circuit is OPEN');
+    assert.equal(callCount, 0, 'No WebSocket API request should have been attempted while circuit is OPEN');
   });
 
   // ---------------------------------------------------------------------------
@@ -587,18 +577,17 @@ describe('Feature 26A — Binance Market Data Reliability Foundation', () => {
   // W. No raw provider error leakage
   // ---------------------------------------------------------------------------
   it('W. provider errors are mapped to clean typed codes without leaking URLs or raw bodies', async () => {
-    const failingFetch = async () => ({
-      ok: false,
-      status: 500,
-      headers: new Map(),
-      text: async () => 'Internal Server Error http://api.binance.com/secret'
-    });
+    const failingWsApiClient = {
+      requestKlines: async () => {
+        throw new Error('Internal Server Error http://api.binance.com/secret');
+      }
+    };
 
     const asset = { symbol: 'BTC', quoteCurrency: 'USDT', marketPolicy: 'CONTINUOUS_24_7', marketTimezone: 'UTC' };
     const mapping = { canonicalSymbol: 'BTC', binanceSymbol: 'BTCUSDT' };
 
     await assert.rejects(
-      () => getHistory(asset, mapping, { fetchFn: failingFetch, bypassCache: true, bypassCircuit: true }),
+      () => getHistory(asset, mapping, { wsApiClient: failingWsApiClient, bypassCache: true, bypassCircuit: true }),
       (err) => {
         assert.equal(err.code, 'PROVIDER_ERROR');
         assert.ok(!err.message.includes('http://'), 'Must not leak URLs');
@@ -611,18 +600,13 @@ describe('Feature 26A — Binance Market Data Reliability Foundation', () => {
     const circuit = new CircuitBreaker({ failureThreshold: 3, cooldownMs: 5000 });
     const asset = { symbol: 'BTC', quoteCurrency: 'USDT', marketPolicy: 'CONTINUOUS_24_7', marketTimezone: 'UTC' };
     const mapping = { canonicalSymbol: 'BTC', binanceSymbol: 'BTCUSDT' };
-    const failingFetch = async () => ({
-      ok: false,
-      status: 500,
-      headers: new Map(),
-      json: async () => ({})
-    });
+    const failingWsApiClient = { requestKlines: async () => { throw new Error('provider failed'); } };
 
     await assert.rejects(() => getHistory(asset, mapping, {
       now: new Date('2026-08-29T10:00:00.000Z'),
       cache: new BinanceHistoryCache(),
       circuitBreaker: circuit,
-      fetchFn: failingFetch
+      wsApiClient: failingWsApiClient
     }));
     assert.equal(circuit.failureCount, 1);
     assert.equal(circuit.getState(), 'CLOSED');
