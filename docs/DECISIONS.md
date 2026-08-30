@@ -149,7 +149,7 @@ The following architectural and product decisions are confirmed and authoritativ
     - `GLOBAL_24_5`: Evaluated in asset's canonical timezone (`UTC` for Gold Spot). Weekends are excluded; exchange/trading holiday gaps are preserved.
   - **Provider History Rules**:
     - **Yahoo Finance**: Supplies truthful daily OHLCV bars for VN equities and ETFs.
-    - **CoinGecko**: Supplies truthful daily close-only history for 40 canonical cryptocurrencies. Missing OHLC and volume remain `null` and are never synthesized from close.
+    - **Binance Spot**: Supplies truthful completed UTC daily OHLCV history in native `USDT` for all 40 canonical cryptocurrencies through explicit provider mappings. The current UTC day is excluded.
     - **Alpha Vantage**: Supplies truthful daily close-only history for Gold Spot (`XAU/USD`). Missing OHLCV fields remain `null`.
     - **Twelve Data**: `USD/VND` daily history remains intentionally unsupported (`UNSUPPORTED_MARKET_POLICY`) because provider daily timezone boundary cannot currently be reconciled confidently with canonical asset timezone.
   - **Snapshot vs History Invariant**:
@@ -168,7 +168,7 @@ The following architectural and product decisions are confirmed and authoritativ
   - **OHLC Capability and Compatibility**: OHLC metrics are capability-dependent. Close-only history never fabricates OHLC; missing capability returns explicit machine-readable status (`METRIC_REQUIRES_OHLC`, `UNSUPPORTED_HISTORY`).
   - **Completeness and Sufficiency**: Feature 22 uses Feature 21 canonical history completeness and does not apply legacy fixed VN session thresholds across asset classes.
   - **Analysis Ranges**: Supported ranges are `1W`, `1M`, `3M`, `6M`, and `1Y`.
-  - **Asset Support**: VN stocks and VN ETFs supported. Crypto and Gold Spot supported with universal completed-close metrics. USD/VND analysis remains unsupported until trustworthy completed historical capability exists.
+  - **Asset Support**: VN stocks and VN ETFs supported. Crypto supports universal completed-close and capability-dependent OHLC metrics using Binance completed daily history. Gold Spot supports universal completed-close metrics. USD/VND analysis remains unsupported until trustworthy completed historical capability exists.
   - **Interpretation Boundary**: Feature 22 is metrics only: no bullish/bearish label, positive/negative investment judgment, recommendation, opportunity score, risk score, confidence percentage, prediction, or forecast.
 - **Numerical Precision**: Intermediate financial calculations retain full floating-point/numeric precision without premature two-decimal rounding. Rounding is presentation-only.
 - **Data Labeling**: Market snapshots are clearly disclosed as delayed (~15 min for equities) with explicit timestamp provenance. Missing source timestamps remain `null`.
@@ -274,32 +274,34 @@ $$\text{Source Adapter} \longrightarrow \text{Canonical Validation / Sanitizatio
 
 ---
 
-## 8. Multi-Asset Capability Integration & Crypto Realtime (Feature 24)
+## 8. Multi-Asset Capability Integration & Hybrid Crypto Authority (Features 24 & 26)
 
-### A. Canonical Crypto Snapshot vs Binance Realtime Reference Boundary
-- **Canonical Crypto Snapshot & History**: **CoinGecko** (quoted in `USD`) remains the sole authoritative provider for canonical Crypto market snapshots and completed daily history. Feeds portfolio valuation, holdings, canonical watchlist, price alerts, comparison metrics, and Feature 22 quantitative analysis.
-- **Realtime Crypto Reference**: **Binance Spot public WebSocket** (quoted in `USDT`, `referenceOnly = true`) provides rolling-24h market reference strictly for Asset Detail current-price UX.
-- **Leakage Prevention**: Binance USDT realtime observations must **NEVER** leak into canonical consumers (portfolio valuation, holdings, canonical watchlist valuation, alerts, comparison metrics, Feature 22 analysis, or historical price series).
+### A. Canonical Crypto Valuation vs Native Market-Data Boundary
+- **Canonical Valuation Snapshot**: **CoinGecko** (quoted in `USD`) is the authoritative Crypto snapshot for portfolio/accounting valuation and other canonical snapshot consumers.
+- **Realtime, History & Analysis**: **Binance Spot** (quoted in native `USDT`) is authoritative for rolling-24h realtime reference, completed UTC daily OHLCV history, and Feature 22 Analysis V2 inputs.
+- **Accounting Isolation**: Canonical Crypto `quote_currency` remains `USD`. Binance `USDT` observations, history, analysis, and approximate VND references must never replace the CoinGecko USD valuation snapshot or enter portfolio/accounting calculations.
+- **No Stablecoin Assumption**: The system does not assert or encode `1 USDT = 1 USD`.
 - **Binance Service Architecture**:
   - One shared backend WebSocket connection (`wss://stream.binance.com:9443/ws/!miniTicker@arr`).
   - Zero browser-direct connections; zero Binance API keys; zero account/trading APIs; zero broker execution.
   - Asset Detail frontend polls local backend approximately every 2 seconds for active crypto asset.
-  - 5 crypto assets without Binance pairs (`HYPE`, `RAIN`, `WBT`, `XMR`, `LIT`) fall back cleanly to canonical CoinGecko USD snapshot.
+  - All 40 active Crypto assets use explicit Binance Spot `USDT` mappings; no provider symbol is inferred from a canonical ticker.
 
-### B. CoinGecko Resilience & Calendar Lookback Integrity
+### B. Binance Resilience & Calendar Lookback Integrity
 - A `1Y` lookback is a full calendar-year subtraction spanning up to 366 days.
-- CoinGecko public range limitations are handled via deterministic multi-chunk retrieval when needed, merged, deduplicated by canonical date, sorted, and filtered locally to exact Feature 21 calendar boundaries.
-- In-memory cache ensures a 365-day result is never cached as a substitute for a full 366-day calendar-year request.
-- In-flight request coalescing prevents duplicate provider queries.
+- Binance daily-klines responses are normalized, deduplicated by canonical UTC date, sorted, filtered to exact Feature 21 calendar boundaries, and exclude the current UTC day.
+- Completed history uses a shared in-memory cache, concurrent request coalescing, coverage-safe stale fallback, and a `CLOSED`/`OPEN`/`HALF_OPEN` circuit breaker.
+- Realtime WebSocket, historical REST, and reference FX failures are isolated from one another.
 
 ### C. Frontend Native-Currency Invariant
-- Native market values display using the asset's authoritative `quoteCurrency` (VND for stocks/ETFs, USD for Crypto/Gold, USDT for Binance realtime reference).
+- Native market values display using the relevant authority (`VND` for stocks/ETFs, CoinGecko `USD` for Crypto valuation snapshots, Binance `USDT` for Crypto realtime/history/analysis, and `USD` for Gold).
+- Asset Detail may display a server-provided `≈VND` value beside Binance realtime. It is explicitly approximate, reference-only, non-accounting, and omitted when FX is unavailable.
 - Portfolio reporting values are strictly `VND`.
 - Exactly one centralized formatting module (`client/src/utils/formatting.js`) governs financial formatting across the frontend.
 - Zero hard-coded `₫`, `VND`, `USD`, `USDT`, or `HOSE` when canonical metadata exists.
 
 ### D. Capability-Aware History & Analysis Integration
-- Close-only history (Crypto, Gold) is truthful complete history (`ohlc = false`, `volume = false`); range coverage (`5/5 kỳ có dữ liệu`) is strictly separated from metric capability (`Một số chỉ số nội ngày không áp dụng`).
+- Binance Crypto history is truthful completed OHLCV (`ohlc = true`, `volume = true`); Gold remains truthful close-only history (`ohlc = false`, `volume = false`). Range coverage remains separate from metric capability.
 - Obsolete Feature 07 `0 / 0` breadth presentation branch is retired in favor of universal V2 metrics.
 - Known unsupported capability (USD/VND history) yields an explicit unsupported state without issuing useless network requests or fabricating charts.
 

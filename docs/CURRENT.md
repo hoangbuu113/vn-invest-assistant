@@ -2,29 +2,35 @@
 
 ## LATEST VERIFIED CHECKPOINT
 - **Commits**:
-  - `e292f68` — `feat: integrate multi-asset consumers and crypto realtime` (Feature 24A)
-  - `2e2edde` — `feat: complete multi-asset capability integration` (Feature 24B)
+  - `dec06cd` — `feat: add portfolio performance engine` (Feature 25A)
+  - `34ec123` — `feat: add portfolio benchmark integration` (Feature 25B/C)
+  - `2c1be74` — `feat: add portfolio performance dashboard` (Feature 25D)
+  - `d081fe8` — `feat: improve crypto market data reliability` (Feature 26)
 - **Branch**: `main`
-- **Feature 24 Implementation Status**: COMPLETE (24A Backend & 24B Frontend)
+- **Feature 26 Implementation Status**: COMPLETE (hybrid provider authority, resilience, migration, and current-price presentation)
 - **Automated Test Suite**:
-  - Latest Full Backend Regression: 424/424 PASS (Features 01–24 complete test coverage)
-  - Focused Multi-Asset Provider / History Gate: 34/34 PASS
-  - Client Build: Production build clean (`vite build` PASS in 1.43s)
-- **Git Working Tree**: Clean before docs reconciliation
+  - Latest Full Backend Regression: 513/513 PASS
+  - Latest Focused Feature 26 Frontend Contract Gate: 6/6 PASS
+  - Client Build: PASS
+  - `git diff --check`: PASS
+- **Database**: `20260830000000_feature_26a_hybrid_crypto_authority.sql` applied successfully
+- **Financial Integrity**: Existing holdings, portfolio transactions, cash ledger, and cash balance unchanged
+- **Git Working Tree**: Clean after Feature 26 implementation commit; docs reconciliation follows separately
 - **GitHub Remote**: Local git authority (no push without explicit approval)
 
 ## CURRENT PHASE
-MULTI-ASSET CAPABILITY INTEGRATION, REALTIME REFERENCE & DETERMINISTIC ANALYSIS
+FEATURE 26 CLOSEOUT — CRYPTO HYBRID QUOTE AUTHORITY & MARKET-DATA RELIABILITY
 
 ## CURRENT NEXT PROJECT TASK
-Feature 25 — Portfolio Performance & Benchmarking. See `docs/ROADMAP.md`.
+Feature 27 — Market Regime Engine. See `docs/ROADMAP.md`.
 
 ---
 
 ## PRODUCTION & LIVE PROVIDER VERIFIED PATHS
 - **Yahoo Finance**: Vietnamese listed equities & exchange-traded ETFs (`VCB`, `FPT`, `HPG`, `VNM`, `E1VFVN30`, `FUEVFVND`, `FUESSVFL`). Completed daily OHLCV history with `Asia/Ho_Chi_Minh` timezone semantics.
-- **CoinGecko**: Cryptocurrency spot snapshots and completed daily close-only history (40 canonical assets: `BTC`, `ETH`, `SOL`, `BNB`, `XRP`, `TRX`, `HYPE`, `ZEC`, `DOGE`, `RAIN`, `XMR`, `LINK`, `WBT`, `ADA`, `XLM`, `BCH`, `GRAM`, `LTC`, `HBAR`, `AVAX`, `SHIB`, `SUI`, `UNI`, `NEAR`, `TAO`, `PUMP`, `AAVE`, `ASTER`, `WLFI`, `ONDO`, `ENA`, `MORPHO`, `PEPE`, `DOT`, `WLD`, `ETC`, `POL`, `LIT`, `ATOM`, `JUP`) via explicit immutable coin IDs. `UTC` daily calendar semantics; completed periods only; close-only (`open`, `high`, `low`, `volume` are `null`). Authoritative source for canonical Crypto valuation, holdings, alerts, comparison, and Feature 22 analysis. Multi-chunk retrieval supports full 366-day calendar-year lookbacks with deduplication and in-memory caching.
-- **Binance Public WebSocket**: Realtime crypto market reference (~35/40 pairs) via shared backend miniTicker stream (`wss://stream.binance.com:9443/ws/!miniTicker@arr`). Quoted in `USDT` (`referenceOnly = true`), polled by Asset Detail frontend approximately every 2 seconds. Does NOT feed portfolio valuation, holdings, watchlist, alerts, comparison, or Feature 22 analysis. 5 assets without Binance pairs (`HYPE`, `RAIN`, `WBT`, `XMR`, `LIT`) fall back cleanly to canonical CoinGecko USD snapshot.
+- **CoinGecko**: Canonical `USD` valuation-snapshot authority for all 40 Crypto assets. Its current snapshot feeds portfolio/accounting valuation and other canonical snapshot consumers. CoinGecko no longer supplies production Crypto history or Analysis V2.
+- **Binance Spot**: Native `USDT` authority for realtime reference, completed daily OHLCV history, and Analysis V2 across 40 explicit Spot mappings (`BTC`, `ETH`, `SOL`, `BNB`, `XRP`, `TRX`, `ZEC`, `DOGE`, `LINK`, `ADA`, `XLM`, `BCH`, `GRAM`, `LTC`, `HBAR`, `AVAX`, `SHIB`, `SUI`, `UNI`, `NEAR`, `TAO`, `PUMP`, `AAVE`, `ASTER`, `WLFI`, `ONDO`, `ENA`, `MORPHO`, `PEPE`, `DOT`, `WLD`, `ETC`, `POL`, `ATOM`, `JUP`, `APT`, `ARB`, `FET`, `INJ`, `FIL`). Realtime uses one shared server-side miniTicker WebSocket; history uses completed UTC daily klines with cache, coalescing, stale fallback, and a circuit breaker. Binance `USDT` never becomes the canonical `USD` accounting quote.
+- **Current VND Reference**: Asset Detail may display `≈VND` computed server-side from the Binance `USDT` observation and an explicit `USD/VND` rate. The result is marked approximate, reference-only, non-accounting, and non-historical; if FX is unavailable, the `USDT` quote remains available and the VND reference is omitted.
 - **Alpha Vantage**:
   - Gold Spot snapshot and completed daily close-only history (`XAU/USD`) via `GOLD_SILVER_SPOT` with `symbol=XAU`. `UTC` daily calendar semantics; completed periods only; close-only.
   - Multi-asset global news acquisition (`NEWS_SENTIMENT` with broad topics `economy_macro,commodities,forex`) for Gold, FX, and global macroeconomic context. Upstream sentiment, sentiment labels, and relevance scores are strictly discarded.
@@ -35,12 +41,12 @@ Feature 25 — Portfolio Performance & Benchmarking. See `docs/ROADMAP.md`.
 
 ---
 
-## CURRENT MULTI-ASSET INTEGRATION & FRONTEND CAPABILITIES (FEATURE 24)
+## CURRENT MULTI-ASSET INTEGRATION & FRONTEND CAPABILITIES (FEATURES 24–26)
 - **Centralized Financial Formatter**: Exactly one authoritative formatting module (`client/src/utils/formatting.js`) managing native currency amounts (`formatNativeAmount`), market changes (`formatMarketChange`), market contexts (`formatMarketContext`), and asset types (`formatAssetType`).
 - **Native Quote Currency Display Invariant**:
   - VN Stocks / ETFs: `VND`
-  - Canonical Crypto Snapshots / History / Analysis / Alerts: `USD`
-  - Binance Crypto Realtime Reference: `USDT`
+  - Canonical Crypto valuation snapshots / portfolio accounting / alerts: `USD` via CoinGecko
+  - Crypto realtime reference / completed history / Analysis V2: native `USDT` via Binance
   - Gold Spot (`XAU/USD`): `USD`
   - Portfolio Reporting Values: strictly `VND`
   - Zero hard-coded universal `₫`, `VND`, `USD`, `USDT`, or `HOSE`.
@@ -68,11 +74,11 @@ Feature 25 — Portfolio Performance & Benchmarking. See `docs/ROADMAP.md`.
 - Authoritative Transactions: 1 row (`SELL` `E1VFVN30`: 12,121 @ 40,000 VND)
 - Authoritative Cash Ledger: 3 rows (`OPENING_BALANCE`: 100,000,000; `SELL`: 484,840,000; `DEPOSIT`: 21,212,112)
 - Authoritative Current Cash: 606,052,112 VND
-- Remote Canonical Universe: 49 assets total (40 crypto, 7 VN stocks/ETFs, 1 gold spot, 1 FX context) across 4 verified providers
+- Remote Canonical Universe: 49 assets total (40 crypto, 7 VN stocks/ETFs, 1 gold spot, 1 FX context) across 5 verified market-data providers
 
 ---
 
-## COMPLETED FEATURES SUMMARY (01–24)
+## COMPLETED FEATURES SUMMARY (01–26)
 
 - **Features 01–03**: Asset Browser (`/api/assets`), Market Snapshot (delayed Yahoo Finance `/api/market/:symbol`), News Feed (CafeF RSS `/api/news`).
 - **Feature 04**: Investor Profile (`GET`/`PUT /api/profile`), singleton enforcement, holdings management.
@@ -97,7 +103,7 @@ Feature 25 — Portfolio Performance & Benchmarking. See `docs/ROADMAP.md`.
 - **Feature 21**: Asset-Class Market & Historical Semantics (COMPLETE):
   - Normalized multi-asset historical bar engine with asset-class specific calendar policies (`VN_EXCHANGE`, `CONTINUOUS_24_7`, `GLOBAL_24_5`).
   - Canonical calendar lookback windows (`1W`, `1M`, `3M`, `6M`, `1Y`) with current-date exclusivity.
-  - Truthful representation: Yahoo OHLCV for VN equities/ETFs, CoinGecko close-only for 40 cryptos, Alpha Vantage close-only for Gold Spot, explicit unsupported error for USD/VND history.
+  - Truthful representation: Yahoo OHLCV for VN equities/ETFs, Binance completed OHLCV for 40 cryptos (current authority after Feature 26), Alpha Vantage close-only for Gold Spot, explicit unsupported error for USD/VND history.
 - **Feature 22**: Deterministic Analysis V2 (COMPLETE):
   - Provider-neutral quantitative analysis over completed canonical daily history with `methodologyVersion = "v2"`.
   - VN stocks and ETFs support completed-close and capability-dependent OHLC metrics; crypto and Gold Spot support universal completed-close metrics without fabricated OHLCV.
@@ -107,5 +113,12 @@ Feature 25 — Portfolio Performance & Benchmarking. See `docs/ROADMAP.md`.
   - Canonical UUID-authoritative relevance engine with ambiguous ticker protection.
   - In-memory caching with per-source TTLs, in-flight request coalescing, and stale-if-error fallback.
 - **Feature 24**: Existing Feature Multi-Asset Integration (COMPLETE):
-  - **24A**: Backend / Canonical Capability Integration (`e292f68`): Canonical CoinGecko USD snapshot authority, Binance Spot shared WebSocket realtime USDT reference for Asset Detail, CoinGecko 366-day calendar-year retrieval, sanitized provider errors.
+  - **24A**: Backend / Canonical Capability Integration (`e292f68`): Canonical CoinGecko USD snapshot authority, Binance Spot shared WebSocket realtime USDT reference for Asset Detail, and sanitized provider errors. Its CoinGecko history path was superseded by Feature 26.
   - **24B**: Frontend Capability-Aware Integration (`2e2edde`): Centralized native currency formatting, Base 100 common-date comparison, Analysis V2 presentation with clean coverage/capability separation, provider-neutral freshness badges, and VND-only ledger gating notices.
+- **Feature 25**: Portfolio Performance & Benchmarking (COMPLETE):
+  - Auditable portfolio performance engine, benchmark integration, and frontend performance dashboard (`dec06cd`, `34ec123`, `2c1be74`).
+- **Feature 26**: Crypto Market Data Reliability & Hybrid Quote Authority (COMPLETE, `d081fe8`):
+  - CoinGecko remains canonical `USD` valuation-snapshot authority; Binance is native `USDT` realtime, completed daily OHLCV history, and Analysis V2 authority.
+  - Exactly 40 explicit Binance Spot mappings and 40 CoinGecko valuation mappings cover the 40-asset Crypto universe; total active universe remains 49.
+  - Migration `20260830000000_feature_26a_hybrid_crypto_authority.sql` is applied. Existing financial records are unchanged.
+  - Asset Detail displays the Binance `USDT` current quote with an optional server-provided `≈VND` reference that is explicitly approximate and excluded from accounting.

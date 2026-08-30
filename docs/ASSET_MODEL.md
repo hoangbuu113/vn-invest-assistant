@@ -4,9 +4,9 @@ This document defines the canonical architectural and conceptual model for multi
 
 ---
 
-## 1. Current Implementation Status (Features 16–24)
+## 1. Current Implementation Status (Features 16–26)
 
-Features 16 through 24 establish the canonical schema, ledger authority, provider abstraction, FX valuation, full controlled multi-asset universe, normalized historical semantics, deterministic multi-asset analysis, multi-source news foundation, and comprehensive frontend capability integration:
+Features 16 through 26 establish the canonical schema, ledger authority, provider abstraction, FX valuation, full controlled multi-asset universe, normalized historical semantics, deterministic multi-asset analysis, multi-source news foundation, portfolio performance, comprehensive frontend integration, and hybrid Crypto provider authority:
 
 - **Verified Production Universe (49 Canonical Assets)**:
   - **Vietnamese Equities & ETFs** (`VN_EXCHANGE`, `Asia/Ho_Chi_Minh`, `VND`, `share`):
@@ -15,9 +15,10 @@ Features 16 through 24 establish the canonical schema, ledger authority, provide
     - History: Completed daily OHLCV bars supported
     - News: CafeF 4-feed official RSS integration
   - **Cryptocurrencies (40 Canonical Assets)** (`CONTINUOUS_24_7`, `UTC`, `USD`, `coin`):
-    - `BTC` (`bitcoin`), `ETH` (`ethereum`), `SOL` (`solana`), `BNB` (`binancecoin`), `XRP` (`ripple`), `TRX` (`tron`), `HYPE` (`hyperliquid`), `ZEC` (`zcash`), `DOGE` (`dogecoin`), `RAIN` (`rain`), `XMR` (`monero`), `LINK` (`chainlink`), `WBT` (`whitebit`), `ADA` (`cardano`), `XLM` (`stellar`), `BCH` (`bitcoin-cash`), `GRAM` (`the-open-network`), `LTC` (`litecoin`), `HBAR` (`hedera-hashgraph`), `AVAX` (`avalanche-2`), `SHIB` (`shiba-inu`), `SUI` (`sui`), `UNI` (`uniswap`), `NEAR` (`near`), `TAO` (`bittensor`), `PUMP` (`pump-fun`), `AAVE` (`aave`), `ASTER` (`aster-2`), `WLFI` (`world-liberty-financial`), `ONDO` (`ondo-finance`), `ENA` (`ethena`), `MORPHO` (`morpho`), `PEPE` (`pepe`), `DOT` (`polkadot`), `WLD` (`worldcoin-wld`), `ETC` (`ethereum-classic`), `POL` (`polygon-ecosystem-token`), `LIT` (`lighter`), `ATOM` (`cosmos`), `JUP` (`jupiter-exchange-solana`)
-    - Canonical snapshot & history provider: `coingecko` $\rightarrow$ `<EXPLICIT_COINGECKO_ID>` (quoted in `USD`). Completed UTC daily close-only bars supported (`open`, `high`, `low`, `volume` are `null`).
-    - Realtime reference provider: `binance` public miniTicker WebSocket stream (~35/40 pairs, quoted in `USDT`, `referenceOnly = true`). Polled by Asset Detail frontend ~2s; strictly isolated from canonical portfolio/valuation/alerts/comparison paths. 5 assets without Binance pairs fall back to canonical CoinGecko USD snapshot.
+    - `BTC`, `ETH`, `SOL`, `BNB`, `XRP`, `TRX`, `ZEC`, `DOGE`, `LINK`, `ADA`, `XLM`, `BCH`, `GRAM`, `LTC`, `HBAR`, `AVAX`, `SHIB`, `SUI`, `UNI`, `NEAR`, `TAO`, `PUMP`, `AAVE`, `ASTER`, `WLFI`, `ONDO`, `ENA`, `MORPHO`, `PEPE`, `DOT`, `WLD`, `ETC`, `POL`, `ATOM`, `JUP`, `APT`, `ARB`, `FET`, `INJ`, `FIL`
+    - Canonical valuation snapshot provider: `coingecko` $\rightarrow$ `<EXPLICIT_COINGECKO_ID>` (quoted in `USD`). This authority feeds portfolio/accounting valuation.
+    - Realtime, history, and Analysis V2 provider: `binance` $\rightarrow$ `<EXPLICIT_SPOT_USDT_PAIR>` (quoted in native `USDT`). Realtime uses one shared server-side miniTicker WebSocket; completed UTC daily OHLCV history uses REST klines.
+    - `USDT` is never silently redefined as `USD`. Current `≈VND` is approximate/reference-only and never enters accounting or historical analysis.
     - News: CoinDesk official RSS integration with contextual ticker disambiguation
   - **Gold Spot** (`GLOBAL_24_5`, `UTC`, base: `XAU`, quote: `USD`, `oz`):
     - `XAU/USD` (provider: `alphavantage` $\rightarrow$ `XAU` via `GOLD_SILVER_SPOT`)
@@ -45,13 +46,13 @@ Features 16 through 24 establish the canonical schema, ledger authority, provide
 - **Current Intentional Limitations**:
   - USD/VND historical bars remain unsupported due to unresolved daily timezone compatibility.
   - USD/VND deterministic analysis remains unsupported until trustworthy completed historical capability exists.
-  - Crypto and Gold Spot history is close-only, so OHLC-dependent analysis metrics remain explicitly unavailable for those assets.
+  - Gold Spot history remains close-only, so OHLC-dependent analysis metrics remain unavailable for Gold. Crypto uses completed Binance OHLCV history.
   - Non-VND cost basis and unrealized P/L remain unavailable until acquisition-time FX accounting exists.
   - Non-VND BUY/SELL transactions are strictly blocked at database trigger level.
   - The single VND cash ledger remains authoritative for all cash operations (no multi-currency cash balances).
   - Open-ended mutual funds (NAV scheduled) remain deferred.
   - No article database persistence (news is dynamically cached in memory with per-source TTLs).
-  - Binance realtime stream is reference-only for Asset Detail and does not feed canonical valuation, alerts, or historical series.
+  - Binance realtime and approximate VND references do not feed canonical USD valuation or accounting. Binance completed history intentionally feeds Crypto history and Analysis V2.
 
 ---
 
@@ -130,7 +131,7 @@ Historical time series analysis requires asset-aware handling:
 - **Truthful Incomplete Candle Representation**:
   - Missing candle fields (`open`, `high`, `low`, `volume`) are strictly preserved as `null`.
   - Missing values $\neq 0$.
-  - Close-only providers (CoinGecko, Alpha Vantage Gold Spot) must **never** fabricate synthetic OHLC or volume fields from close prices.
+  - Close-only providers (currently Alpha Vantage Gold Spot) must **never** fabricate synthetic OHLC or volume fields from close prices.
 
 ---
 
@@ -170,7 +171,8 @@ The double-ledger architecture is the sole authoritative mechanism for portfolio
 - Feature components (Dashboard, Portfolio, Analysis, Alerts, Watchlist, News) request data through normalized service contracts (`getMarketSnapshot(asset)`, `getHistoricalBars(asset, range)`, `getNewsFeed()`).
 - Specific provider adapters (`server/src/providers/`):
   - **Yahoo Finance**: Vietnamese listed equities & ETFs.
-  - **CoinGecko**: 40 canonical cryptocurrencies.
+  - **CoinGecko**: Canonical USD valuation snapshots for 40 cryptocurrencies.
+  - **Binance Spot**: Native USDT realtime, completed daily OHLCV history, and Analysis V2 inputs for 40 cryptocurrencies.
   - **Alpha Vantage**: Gold Spot (`XAU/USD`).
   - **Twelve Data**: `USD/VND` exchange rate.
 - Application code must never build provider-specific query parameters directly.
@@ -212,7 +214,7 @@ The double-ledger architecture is the sole authoritative mechanism for portfolio
     - Current Yahoo canonical history includes volume, but Feature 22 adds no volume-analysis methodology.
   - **`CONTINUOUS_24_7` crypto**:
     - Completed-close analysis is supported.
-    - OHLC analysis is unsupported with current close-only canonical history.
+    - OHLC analysis is supported when the evaluated Binance completed-history window is complete.
     - Daily volatility is a non-annualized sample statistic despite continuous 24/7 trading.
   - **`GLOBAL_24_5` Gold Spot (`XAU/USD`)**:
     - Completed-close analysis is supported.

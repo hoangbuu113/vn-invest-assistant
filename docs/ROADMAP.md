@@ -14,7 +14,7 @@ This document serves as the durable strategic memory for project sequencing, fea
 
 ---
 
-## 2. Completed Features (01–24)
+## 2. Completed Features (01–26)
 
 - **Feature 01**: Asset Browser
 - **Feature 02**: Market Snapshot
@@ -44,22 +44,28 @@ This document serves as the durable strategic memory for project sequencing, fea
 - **Feature 24**: Existing Feature Multi-Asset Integration (COMPLETE)
   - **Feature 24A**: Backend / Canonical Capability Integration (Commit `e292f68`)
   - **Feature 24B**: Frontend Capability-Aware Integration (Commit `2e2edde`)
+- **Feature 25**: Portfolio Performance & Benchmarking (COMPLETE)
+  - Performance engine (Commit `dec06cd`)
+  - Benchmark integration (Commit `34ec123`)
+  - Performance dashboard (Commit `2c1be74`)
+- **Feature 26**: Crypto Market Data Reliability & Hybrid Quote Authority (COMPLETE)
+  - CoinGecko canonical USD valuation snapshots; Binance native USDT realtime/history/Analysis V2
+  - 40 explicit mappings per provider, resilience controls, and approximate non-accounting VND reference display
+  - Implementation commit `d081fe8`; migration `20260830000000_feature_26a_hybrid_crypto_authority.sql` applied
 
 ---
 
-## 3. Current Next Feature: Feature 25
+## 3. Current Next Feature: Feature 27
 
-### Feature 25 — Portfolio Performance & Benchmarking
+### Feature 27 — Market Regime Engine
 - **Status**: NEXT IN SEQUENCE.
-- **Scope**: Auditable capital-weighted returns (TWR/MWR), realized/unrealized P/L performance tracking, drawdowns, and benchmark comparison (VN-Index, S&P 500).
+- **Scope**: Deterministic macro and market regime indicators (interest-rate environment, inflation trends, and market breadth).
 
 ---
 
-## 4. Ordered Roadmap (Features 25–30)
+## 4. Ordered Roadmap (Features 27–30)
 
-- **Feature 25 — Portfolio Performance & Benchmarking (NEXT)**: Auditable capital-weighted returns (TWR/MWR), realized/unrealized P/L performance tracking, drawdowns, and benchmark comparison (VN-Index, S&P 500).
-- **Feature 26 — Risk & Exposure Analytics**: Multi-dimensional portfolio risk analysis (asset class, currency, sector, concentration risk, historical drawdown, volatility).
-- **Feature 27 — Market Regime Engine**: Deterministic macro and market regime indicators (interest rate environment, inflation trends, market breadth).
+- **Feature 27 — Market Regime Engine (NEXT)**: Deterministic macro and market regime indicators (interest-rate environment, inflation trends, market breadth).
 - **Feature 28 — Opportunity Engine**: Evidence-driven screening and candidate ranking based on transparent quantitative rules and user profile fit.
 - **Feature 29 — AI Investment Brief**: Deterministic-first AI synthesis explaining evidence, portfolio risks, macro factors, and scenario uncertainty without inventing financial scores.
 - **Feature 30 — Release Hardening**: Test data cleanup, full ledger/cash reconciliation, security auditing, production build verification, final documentation freeze, and remote backup.
