@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { apiFetch } from './utils/api.js';
 import { Fintech3DOrb } from './components/Fintech3DOrb.jsx';
 import { MarketTicker } from './components/MarketTicker.jsx';
 import { MoneyFlowAmbience } from './components/MoneyFlowAmbience.jsx';
@@ -350,7 +351,7 @@ function App() {
     }
     setProfileError(null);
 
-    fetch('/api/profile')
+    apiFetch('/api/profile')
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.json();
@@ -385,7 +386,7 @@ function App() {
     setProfileError(null);
     setProfileSuccess(false);
 
-    fetch('/api/profile', {
+    apiFetch('/api/profile', {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json'
@@ -429,7 +430,7 @@ function App() {
     if (isInitial) setHoldingsLoading(true);
     setHoldingsError(null);
 
-    fetch('/api/holdings')
+    apiFetch('/api/holdings')
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.json();
@@ -471,7 +472,7 @@ function App() {
 
   // Load all assets on mount
   useEffect(() => {
-    fetch('/api/assets')
+    apiFetch('/api/assets')
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.json();
@@ -499,7 +500,7 @@ function App() {
     }
     setNewsError(null);
 
-    fetch('/api/news')
+    apiFetch('/api/news')
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.json();
@@ -529,7 +530,7 @@ function App() {
     }
     setPersonalizedError(null);
 
-    fetch('/api/news/personalized')
+    apiFetch('/api/news/personalized')
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.json();
@@ -566,7 +567,7 @@ function App() {
     }
     setPortfolioError(null);
 
-    fetch('/api/portfolio/overview')
+    apiFetch('/api/portfolio/overview')
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.json();
@@ -602,7 +603,7 @@ function App() {
     }
     setCompositionError(null);
 
-    fetch('/api/portfolio/composition', { signal: controller.signal })
+    apiFetch('/api/portfolio/composition', { signal: controller.signal })
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.json();
@@ -636,7 +637,7 @@ function App() {
     }
     setTransactionsError(null);
 
-    fetch('/api/transactions')
+    apiFetch('/api/transactions')
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.json();
@@ -666,7 +667,7 @@ function App() {
     }
     setCashOverviewError(null);
 
-    fetch('/api/cash/overview')
+    apiFetch('/api/cash/overview')
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.json();
@@ -696,7 +697,7 @@ function App() {
     }
     setCashLedgerError(null);
 
-    fetch('/api/cash/ledger')
+    apiFetch('/api/cash/ledger')
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.json();
@@ -779,7 +780,7 @@ function App() {
 
     Promise.allSettled(
       symbols.map((sym) =>
-        fetch(`/api/market/${encodeURIComponent(sym)}`)
+        apiFetch(`/api/market/${encodeURIComponent(sym)}`)
           .then((res) => {
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             return res.json();
@@ -813,7 +814,7 @@ function App() {
     }
     setWatchlistError(null);
 
-    fetch('/api/watchlist')
+    apiFetch('/api/watchlist')
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.json();
@@ -886,7 +887,7 @@ function App() {
     setWatchlistActionLoading(targetIdentifier);
 
     if (isFollowed) {
-      fetch(`/api/watchlist/${encodeURIComponent(targetIdentifier)}`, {
+      apiFetch(`/api/watchlist/${encodeURIComponent(targetIdentifier)}`, {
         method: 'DELETE'
       })
         .then((res) => {
@@ -911,7 +912,7 @@ function App() {
           setWatchlistActionLoading(null);
         });
     } else {
-      fetch('/api/watchlist', {
+      apiFetch('/api/watchlist', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -961,7 +962,7 @@ function App() {
     const controller = new AbortController();
     activeMarketReqRef.current = controller;
 
-    fetch(`/api/market/${encodeURIComponent(symbol)}`, { signal: controller.signal })
+    apiFetch(`/api/market/${encodeURIComponent(symbol)}`, { signal: controller.signal })
       .then(async (res) => {
         const json = await res.json().catch(() => ({}));
         if (!res.ok) {
@@ -1008,7 +1009,7 @@ function App() {
     const controller = new AbortController();
     activeRealtimeReqRef.current = controller;
 
-    fetch(`/api/market/${encodeURIComponent(symbol)}/realtime`, { signal: controller.signal })
+    apiFetch(`/api/market/${encodeURIComponent(symbol)}/realtime`, { signal: controller.signal })
       .then(async (res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.json();
@@ -1092,7 +1093,7 @@ function App() {
     const controller = new AbortController();
     activeHistoryReqRef.current = controller;
 
-    fetch(`/api/market/${encodeURIComponent(symbol)}/history?range=${encodeURIComponent(range)}`, { signal: controller.signal })
+    apiFetch(`/api/market/${encodeURIComponent(symbol)}/history?range=${encodeURIComponent(range)}`, { signal: controller.signal })
       .then((res) => {
         if (!res.ok) throw new Error(HISTORY_UNAVAILABLE_MESSAGE);
         return res.json();
@@ -1142,7 +1143,7 @@ function App() {
     const controller = new AbortController();
     activeAnalysisReqRef.current = controller;
 
-    fetch(`/api/analysis/${encodeURIComponent(symbol)}`, { signal: controller.signal })
+    apiFetch(`/api/analysis/${encodeURIComponent(symbol)}`, { signal: controller.signal })
       .then((res) => {
         if (!res.ok) throw new Error(ANALYSIS_UNAVAILABLE_MESSAGE);
         return res.json();
@@ -1194,7 +1195,7 @@ function App() {
     setAnalysisData(null);
     setAnalysisError(null);
 
-    fetch(`/api/assets/${encodeURIComponent(symbol)}`, { signal: controller.signal })
+    apiFetch(`/api/assets/${encodeURIComponent(symbol)}`, { signal: controller.signal })
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.json();

@@ -1,8 +1,9 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import { sites } from '@openai/sites-vite-plugin';
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), sites()],
   server: {
     port: 5173,
     proxy: {
@@ -15,13 +16,13 @@ export default defineConfig({
   build: {
     rollupOptions: {
       output: {
-        manualChunks: {
-          three: ['three'],
-          framer: ['framer-motion']
+        manualChunks(id) {
+          if (id.includes('/node_modules/three/')) return 'three';
+          if (id.includes('/node_modules/framer-motion/')) return 'framer';
+          return undefined;
         }
       }
     },
     chunkSizeWarningLimit: 600
   }
 });
-

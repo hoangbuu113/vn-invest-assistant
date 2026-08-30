@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { apiFetch } from '../utils/api.js';
 
 const TRACKED_SYMBOLS = ['FPT', 'VCB', 'HPG', 'VNM', 'E1VFVN30'];
 
@@ -12,7 +13,7 @@ export function MarketTicker() {
     // Fetch market data for each symbol from existing API
     Promise.all(
       TRACKED_SYMBOLS.map((sym) =>
-        fetch(`/api/market/${encodeURIComponent(sym)}`)
+        apiFetch(`/api/market/${encodeURIComponent(sym)}`)
           .then((res) => (res.ok ? res.json() : null))
           .then((json) => (json && json.status === 'ok' && json.data ? json.data : null))
           .catch(() => null)

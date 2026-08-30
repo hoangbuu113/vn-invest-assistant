@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { TiltCard, MagneticButton, CountUp } from './MotionHelpers.jsx';
+import { apiFetch } from '../utils/api.js';
 import {
   formatNativeAmount,
   formatMarketChange,
@@ -366,7 +367,7 @@ export function AssetComparisonSection({
       range
     });
 
-    fetch(`/api/comparison?${queryParams.toString()}`, { signal: controller.signal })
+    apiFetch(`/api/comparison?${queryParams.toString()}`, { signal: controller.signal })
       .then((res) => {
         if (!res.ok) {
           return res.json().catch(() => ({})).then((json) => {

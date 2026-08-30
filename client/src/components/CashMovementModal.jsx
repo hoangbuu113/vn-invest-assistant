@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { apiFetch } from '../utils/api.js';
 
 function formatVND(value) {
   if (value === null || value === undefined || isNaN(value)) return '—';
@@ -75,7 +76,7 @@ export default function CashMovementModal({
     const endpoint = isDeposit ? '/api/cash/deposit' : '/api/cash/withdraw';
 
     try {
-      const res = await fetch(endpoint, {
+      const res = await apiFetch(endpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -324,4 +325,3 @@ export default function CashMovementModal({
     </div>
   );
 }
-

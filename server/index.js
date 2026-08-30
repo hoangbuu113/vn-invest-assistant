@@ -52,6 +52,34 @@ const PORT = process.env.PORT || 5000;
 
 export const ALLOWED_RISK_TOLERANCE = ['low', 'moderate', 'high'];
 export const ALLOWED_INVESTMENT_HORIZON = ['short', 'medium', 'long'];
+export const LOCAL_DEVELOPMENT_ORIGINS = [
+  'http://localhost:5173',
+  'http://127.0.0.1:5173'
+];
+
+export function getCorsAllowedOrigins(configuredOrigins = process.env.CORS_ORIGINS) {
+  const origins = new Set(LOCAL_DEVELOPMENT_ORIGINS);
+
+  if (typeof configuredOrigins === 'string') {
+    configuredOrigins
+      .split(',')
+      .map((origin) => origin.trim().replace(/\/+$/, ''))
+      .filter(Boolean)
+      .forEach((origin) => origins.add(origin));
+  }
+
+  return origins;
+}
+
+export function createCorsOptions(configuredOrigins) {
+  const allowedOrigins = getCorsAllowedOrigins(configuredOrigins);
+
+  return {
+    origin(origin, callback) {
+      callback(null, !origin || allowedOrigins.has(origin));
+    }
+  };
+}
 
 /**
  * Strict validator for financial numbers (no string or boolean coercion).
@@ -96,13 +124,14 @@ export function createApp(services = {}) {
     createOpeningPositionFn = createOpeningPosition,
     correctOpeningPositionFn = correctOpeningPosition,
     cancelOpeningPositionFn = cancelOpeningPosition,
+    corsOrigins = process.env.CORS_ORIGINS,
     transactionClient,
     cashClient,
     positionClient
   } = services;
 
   const app = express();
-  app.use(cors());
+  app.use(cors(createCorsOptions(corsOrigins)));
   app.use(express.json());
 
   // Basic system health endpoint with provider status

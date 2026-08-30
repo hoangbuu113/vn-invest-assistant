@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { TiltCard } from './MotionHelpers.jsx';
 import { formatNativeAmount } from '../utils/formatting.js';
+import { apiFetch } from '../utils/api.js';
 
 export default function AlertCenterSection({
   onSelectAsset,
@@ -17,7 +18,7 @@ export default function AlertCenterSection({
     setLoading(true);
     setActionError(null);
     try {
-      const res = await fetch('/api/alerts');
+      const res = await apiFetch('/api/alerts');
       const json = await res.json();
       if (res.ok && json.status === 'ok') {
         setAlerts(json.data || []);
@@ -40,7 +41,7 @@ export default function AlertCenterSection({
     setActionError(null);
     setEvalSummary(null);
     try {
-      const res = await fetch('/api/alerts/evaluate', {
+      const res = await apiFetch('/api/alerts/evaluate', {
         method: 'POST'
       });
       const json = await res.json();
@@ -65,7 +66,7 @@ export default function AlertCenterSection({
 
   const handleDelete = async (alertId) => {
     try {
-      const res = await fetch(`/api/alerts/${alertId}`, {
+      const res = await apiFetch(`/api/alerts/${alertId}`, {
         method: 'DELETE'
       });
       const json = await res.json();
@@ -81,7 +82,7 @@ export default function AlertCenterSection({
 
   const handleReactivate = async (alertId) => {
     try {
-      const res = await fetch(`/api/alerts/${alertId}/reactivate`, {
+      const res = await apiFetch(`/api/alerts/${alertId}/reactivate`, {
         method: 'POST'
       });
       const json = await res.json();

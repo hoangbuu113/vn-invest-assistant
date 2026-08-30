@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { apiFetch } from '../utils/api.js';
 
 const ASSET_TYPE_LABELS = {
   stock: 'Cổ phiếu',
@@ -230,7 +231,7 @@ export default function TransactionModal({
     setLoading(true);
 
     try {
-      const res = await fetch('/api/transactions', {
+      const res = await apiFetch('/api/transactions', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -874,4 +875,3 @@ export default function TransactionModal({
     </div>
   );
 }
-

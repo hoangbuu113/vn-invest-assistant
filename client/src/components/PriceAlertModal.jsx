@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { formatNativeAmount } from '../utils/formatting.js';
+import { apiFetch } from '../utils/api.js';
 
 export default function PriceAlertModal({
   isOpen,
@@ -41,7 +42,7 @@ export default function PriceAlertModal({
     setSuccessMsg(null);
 
     try {
-      const res = await fetch('/api/alerts', {
+      const res = await apiFetch('/api/alerts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

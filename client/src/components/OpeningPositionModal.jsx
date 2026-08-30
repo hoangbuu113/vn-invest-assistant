@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { MagneticButton } from './MotionHelpers.jsx';
+import { apiFetch } from '../utils/api.js';
 
 const overlayVariants = {
   hidden: { opacity: 0 },
@@ -135,7 +136,7 @@ export default function OpeningPositionModal({
 
       setLoading(true);
       try {
-        const res = await fetch(`/api/positions/opening/${encodeURIComponent(openingId)}/cancel`, {
+        const res = await apiFetch(`/api/positions/opening/${encodeURIComponent(openingId)}/cancel`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({})
@@ -182,7 +183,7 @@ export default function OpeningPositionModal({
 
     try {
       if (mode === 'CREATE') {
-        const res = await fetch('/api/positions/opening', {
+        const res = await apiFetch('/api/positions/opening', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -208,7 +209,7 @@ export default function OpeningPositionModal({
         if (!openingId) {
           throw new Error('Không tìm thấy mã vị thế ban đầu để sửa.');
         }
-        const res = await fetch(`/api/positions/opening/${encodeURIComponent(openingId)}`, {
+        const res = await apiFetch(`/api/positions/opening/${encodeURIComponent(openingId)}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -552,4 +553,3 @@ export default function OpeningPositionModal({
     </AnimatePresence>
   );
 }
-

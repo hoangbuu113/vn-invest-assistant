@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { formatPercentVN, formatVNDReporting } from '../utils/formatting.js';
+import { apiFetch } from '../utils/api.js';
 
 const PERFORMANCE_RANGES = ['1W', '1M', '3M', '6M', '1Y'];
 
@@ -65,7 +66,7 @@ function formatSignedVnd(value) {
 }
 
 async function fetchApiData(url, signal) {
-  const response = await fetch(url, { signal });
+  const response = await apiFetch(url, { signal });
   let payload = null;
   try {
     payload = await response.json();
