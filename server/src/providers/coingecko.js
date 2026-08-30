@@ -514,13 +514,16 @@ export async function getHistory(asset, mapping, options = {}) {
 
 export const coingeckoProvider = Object.freeze({
   name: 'coingecko',
+  role: 'canonical_usd_valuation_snapshot',
   capabilities: Object.freeze({
     snapshot: true,
-    history: true,
-    analysis: true,
+    history: false,
+    analysis: false,
     ohlcHistory: false,
     snapshotChangeBasis: 'ROLLING_24H'
   }),
   getSnapshot,
+  // Kept as a direct legacy utility for deterministic compatibility tests.
+  // Production market routing rejects history for this valuation-only adapter.
   getHistory
 });

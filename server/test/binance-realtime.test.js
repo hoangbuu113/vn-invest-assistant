@@ -24,13 +24,9 @@ const NEW_CRYPTO = [
   { symbol: 'BNB',   id: '66c7d650-f440-4e84-9469-ce0d070ede6b' },
   { symbol: 'XRP',   id: '4bebf6d3-cf96-4a88-8474-d4a4e706989a' },
   { symbol: 'TRX',   id: 'bdf8e845-dfe3-45a1-b852-642a0b886b7d' },
-  { symbol: 'HYPE',  id: '40bd9c87-9fdb-47d2-962d-96df16f58c00' },
   { symbol: 'ZEC',   id: 'a9cdfcc6-1518-4087-bbcd-8ac4704474a4' },
   { symbol: 'DOGE',  id: '44c7fdab-fbaf-45ce-84e5-3ed3e8fe5b54' },
-  { symbol: 'RAIN',  id: '98736587-f37d-42a9-9c22-237dbf82187f' },
-  { symbol: 'XMR',   id: 'f80f1162-2b13-4b2b-84dc-e208fc3fbedc' },
   { symbol: 'LINK',  id: 'c2534c6b-9eb5-4a78-b93f-969bb8f7df65' },
-  { symbol: 'WBT',   id: '8f755ede-0630-4055-aef5-84ecc2512c59' },
   { symbol: 'ADA',   id: '5af019d9-3cc5-4904-8cd1-25389feec501' },
   { symbol: 'XLM',   id: '5b3bea95-edd8-4a89-918b-d8c3b0156399' },
   { symbol: 'BCH',   id: '11a31ef1-568f-4c10-8a13-5007e7d57a5b' },
@@ -55,20 +51,24 @@ const NEW_CRYPTO = [
   { symbol: 'WLD',   id: '4635d9d6-f30f-4dd4-9632-67873ce5e3b1' },
   { symbol: 'ETC',   id: 'd9ac0ecd-fab0-4e6e-98a9-0cff5b1b3fe7' },
   { symbol: 'POL',   id: '22deaafe-2849-4c75-980c-c0c8e3b42bc9' },
-  { symbol: 'LIT',   id: 'f64d16cc-1bce-4f81-a64b-e5acbbe1a07e' },
   { symbol: 'ATOM',  id: '9c8f9012-9973-406e-89a3-6350f095b59b' },
-  { symbol: 'JUP',   id: '871267a7-954b-4d39-8299-3c0299fe8be8' }
+  { symbol: 'JUP',   id: '871267a7-954b-4d39-8299-3c0299fe8be8' },
+  { symbol: 'APT',   id: 'd3c678a1-5801-4475-8025-aa80e5572bb1' },
+  { symbol: 'ARB',   id: 'b6e3f422-9214-4a27-a169-d75fa6319c52' },
+  { symbol: 'FET',   id: 'c5a89233-1498-4d62-97ec-08e62d471e43' },
+  { symbol: 'INJ',   id: 'e9712a44-f655-4683-9b88-51829e1db874' },
+  { symbol: 'FIL',   id: 'a8471b55-e7d9-4820-b0c3-f26e3c15aa65' }
 ];
 
 const ALL_CRYPTO = [...EXISTING_CRYPTO, ...NEW_CRYPTO];
 
-// Exactly 5 assets NOT supported by Binance Spot TRADING
-const BINANCE_UNSUPPORTED = [
-  { symbol: 'HYPE', id: '40bd9c87-9fdb-47d2-962d-96df16f58c00' }, // not listed
-  { symbol: 'RAIN', id: '98736587-f37d-42a9-9c22-237dbf82187f' }, // not listed
-  { symbol: 'XMR',  id: 'f80f1162-2b13-4b2b-84dc-e208fc3fbedc' }, // XMRUSDT = BREAK
-  { symbol: 'WBT',  id: '8f755ede-0630-4055-aef5-84ecc2512c59' }, // not listed
-  { symbol: 'LIT',  id: 'f64d16cc-1bce-4f81-a64b-e5acbbe1a07e' }  // LITUSDT = BREAK
+// Non-crypto or retired assets NOT in Binance 40
+const NON_BINANCE_ASSETS = [
+  { symbol: 'HYPE', id: '40bd9c87-9fdb-47d2-962d-96df16f58c00' },
+  { symbol: 'RAIN', id: '98736587-f37d-42a9-9c22-237dbf82187f' },
+  { symbol: 'XMR',  id: 'f80f1162-2b13-4b2b-84dc-e208fc3fbedc' },
+  { symbol: 'WBT',  id: '8f755ede-0630-4055-aef5-84ecc2512c59' },
+  { symbol: 'LIT',  id: 'f64d16cc-1bce-4f81-a64b-e5acbbe1a07e' }
 ];
 
 class MockWebSocket {
@@ -90,21 +90,21 @@ describe('Feature 24A — Binance Realtime & Canonical Separation', () => {
   // ---------------------------------------------------------------------------
   // A. Mapping completeness
   // ---------------------------------------------------------------------------
-  it('A. BINANCE_USDT_MAPPING contains exactly 35 entries with valid UUID keys', () => {
-    assert.equal(Object.keys(BINANCE_USDT_MAPPING).length, 35);
+  it('A. BINANCE_USDT_MAPPING contains exactly 40 entries with valid UUID keys', () => {
+    assert.equal(Object.keys(BINANCE_USDT_MAPPING).length, 40);
     for (const assetId of Object.keys(BINANCE_USDT_MAPPING)) {
       assert.match(assetId, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
     }
   });
 
-  it('A2. all 35 mapping UUIDs exist in canonical crypto universe', () => {
+  it('A2. all 40 mapping UUIDs exist in canonical crypto universe', () => {
     const allIds = new Set(ALL_CRYPTO.map(a => a.id));
     for (const assetId of Object.keys(BINANCE_USDT_MAPPING)) {
       assert.ok(allIds.has(assetId), `Mapping UUID ${assetId} not in canonical universe`);
     }
   });
 
-  it('A3. all 35 mapped assets correspond to the correct canonicalSymbol', () => {
+  it('A3. all 40 mapped assets correspond to the correct canonicalSymbol', () => {
     const idToSymbol = new Map(ALL_CRYPTO.map(a => [a.id, a.symbol]));
     for (const [assetId, entry] of Object.entries(BINANCE_USDT_MAPPING)) {
       const expected = idToSymbol.get(assetId);
@@ -115,8 +115,8 @@ describe('Feature 24A — Binance Realtime & Canonical Separation', () => {
   // ---------------------------------------------------------------------------
   // B. Unsupported assets
   // ---------------------------------------------------------------------------
-  it('B. HYPE, RAIN, XMR, WBT, LIT are NOT supported on Binance Spot', () => {
-    for (const { symbol, id } of BINANCE_UNSUPPORTED) {
+  it('B. HYPE, RAIN, XMR, WBT, LIT are NOT in Binance Spot universe', () => {
+    for (const { symbol, id } of NON_BINANCE_ASSETS) {
       assert.equal(isBinanceSupported(id), false, `${symbol} should not be Binance supported`);
       assert.ok(!Object.prototype.hasOwnProperty.call(BINANCE_USDT_MAPPING, id));
     }
@@ -134,15 +134,15 @@ describe('Feature 24A — Binance Realtime & Canonical Separation', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // C. One service covers all 35 mapped assets
+  // C. One service covers all 40 mapped assets
   // ---------------------------------------------------------------------------
-  it('C. one service instance handles all 35 supported assets', () => {
+  it('C. one service instance handles all 40 supported assets', () => {
     const svc = makeDisabledService();
     let count = 0;
     for (const assetId of Object.keys(BINANCE_USDT_MAPPING)) {
       if (svc.isBinanceSupported(assetId)) count++;
     }
-    assert.equal(count, 35);
+    assert.equal(count, 40);
     svc.destroy();
   });
 
@@ -407,9 +407,9 @@ describe('Feature 24A — Binance Realtime & Canonical Separation', () => {
   // ---------------------------------------------------------------------------
   // N. Unique binanceSymbol values in mapping
   // ---------------------------------------------------------------------------
-  it('N. all 35 mapping entries have unique binanceSymbol values', () => {
+  it('N. all 40 mapping entries have unique binanceSymbol values', () => {
     const symbols = Object.values(BINANCE_USDT_MAPPING).map(e => e.binanceSymbol);
-    assert.equal(new Set(symbols).size, 35);
+    assert.equal(new Set(symbols).size, 40);
   });
 
   // ---------------------------------------------------------------------------

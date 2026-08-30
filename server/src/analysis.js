@@ -411,9 +411,13 @@ function normalizeSnapshotContext(snapshot) {
   if (!snapshot || typeof snapshot !== 'object') return null;
   return {
     price: optionalPositiveNumber(snapshot.price),
+    currency: typeof snapshot.currency === 'string' && snapshot.currency.trim()
+      ? snapshot.currency.trim().toUpperCase()
+      : null,
     priceAsOf: typeof snapshot.priceAsOf === 'string' && snapshot.priceAsOf ? snapshot.priceAsOf : null,
     freshness: typeof snapshot.freshness === 'string' && snapshot.freshness ? snapshot.freshness : null,
-    priceSource: typeof snapshot.priceSource === 'string' && snapshot.priceSource ? snapshot.priceSource : null
+    priceSource: typeof snapshot.priceSource === 'string' && snapshot.priceSource ? snapshot.priceSource : null,
+    analysisEligible: false
   };
 }
 

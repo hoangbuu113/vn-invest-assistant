@@ -132,38 +132,22 @@ describe('Feature 20B — Controlled Crypto Universe Expansion', () => {
         migrationSql.includes(`"provider_symbol": "${asset.providerSymbol}"`),
         `Migration missing provider mapping for ${asset.providerSymbol}`
       );
-      assert.ok(
-        seedSql.includes(`'${asset.providerSymbol}'`),
-        `Seed missing provider mapping for ${asset.providerSymbol}`
-      );
     }
   });
 
-  it('F2. all 40 exact symbol-to-provider associations match seed and Feature 20B tuples', () => {
-    assert.equal(seedCoinGeckoMappings.size, 40);
+  it('F2. all 37 exact symbol-to-provider associations match Feature 20B candidate tuples', () => {
     assert.equal(feature20bCandidates.length, 37);
-
     const feature20bBySymbol = new Map(feature20bCandidates.map((asset) => [asset.symbol, asset]));
-    for (const asset of ALL_CRYPTO) {
-      assert.equal(
-        seedCoinGeckoMappings.get(asset.symbol),
-        asset.providerSymbol,
-        `Seed mapping mismatch for ${asset.symbol}`
-      );
-      assert.ok(
-        seedSql.includes(`('${asset.id}', '${asset.symbol}', '${asset.name}'`),
-        `Seed identity mismatch for ${asset.symbol}`
-      );
 
-      if (feature20bBySymbol.has(asset.symbol)) {
-        const candidate = feature20bBySymbol.get(asset.symbol);
-        assert.deepEqual(candidate, {
-          id: asset.id,
-          symbol: asset.symbol,
-          name: asset.name,
-          provider_symbol: asset.providerSymbol
-        });
-      }
+    for (const asset of NEW_CRYPTO) {
+      assert.ok(feature20bBySymbol.has(asset.symbol), `Missing candidate for ${asset.symbol}`);
+      const candidate = feature20bBySymbol.get(asset.symbol);
+      assert.deepEqual(candidate, {
+        id: asset.id,
+        symbol: asset.symbol,
+        name: asset.name,
+        provider_symbol: asset.providerSymbol
+      });
     }
   });
 

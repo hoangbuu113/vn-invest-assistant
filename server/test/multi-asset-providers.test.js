@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import { getTwelveDataFxRate, twelvedataProvider } from '../src/providers/twelvedata.js';
 import { coingeckoProvider } from '../src/providers/coingecko.js';
+import { binanceProvider } from '../src/providers/binance.js';
 import { alphavantageProvider } from '../src/providers/alphavantage.js';
 import { yahooProvider } from '../src/providers/yahoo.js';
 import { getProviderAdapter, MARKET_PROVIDERS } from '../src/providers/index.js';
@@ -222,7 +223,7 @@ describe('Feature 20A — Real Multi-Asset Providers & Representative Assets', (
   });
 
   // G. crypto history uses its explicit 24/7 UTC policy instead of Vietnam sessions
-  it('G. crypto history requests use explicit CoinGecko daily data and CONTINUOUS_24_7 semantics', async () => {
+  it('G. crypto history requests use explicit Binance daily data and CONTINUOUS_24_7 semantics', async () => {
     const asset = {
       id: 'uuid-btc',
       symbol: 'BTC',
@@ -233,35 +234,39 @@ describe('Feature 20A — Real Multi-Asset Providers & Representative Assets', (
       market_timezone: 'UTC',
       marketTimezone: 'UTC'
     };
-    const mapping = { provider: 'coingecko', providerSymbol: 'bitcoin' };
+    const mapping = { provider: 'binance', providerSymbol: 'BTCUSDT', providerMarket: 'SPOT' };
     const now = new Date('2026-08-29T12:00:00.000Z');
-    const prices = [
-      [Date.parse('2026-07-20T00:00:00.000Z'), 60000],
-      [Date.parse('2026-08-01T00:00:00.000Z'), 62000],
-      [Date.parse('2026-08-28T00:00:00.000Z'), 65000],
-      [Date.parse('2026-08-29T00:00:00.000Z'), 66000]
+    const klines = [
+      [Date.parse('2026-07-20T00:00:00.000Z'), '60000', '60500', '59500', '60100', '100'],
+      [Date.parse('2026-08-01T00:00:00.000Z'), '62000', '62500', '61500', '62100', '110'],
+      [Date.parse('2026-08-28T00:00:00.000Z'), '65000', '65500', '64500', '65100', '120'],
+      [Date.parse('2026-08-29T00:00:00.000Z'), '66000', '66500', '65500', '66100', '130']
     ];
     const fetchFn = async () => ({
       ok: true,
-      json: async () => ({ prices, market_caps: [], total_volumes: [] })
+      json: async () => klines
     });
 
-    const direct = await coingeckoProvider.getHistory(asset, mapping, {
-      apiKey: 'test-key',
+    const direct = await binanceProvider.getHistory(asset, mapping, {
       fetchFn,
       now,
-      range: '1M'
+      range: '1M',
+      bypassCache: true,
+      bypassCircuit: true
     });
     assert.deepEqual(direct.bars.map((bar) => bar.date), ['2026-08-01', '2026-08-28']);
-    assert.ok(direct.bars.every((bar) => bar.open === null && bar.high === null && bar.low === null && bar.volume === null));
+    assert.ok(direct.bars.every((bar) => bar.open !== null && bar.high !== null && bar.low !== null && bar.volume !== null));
 
     const throughMarket = await getMarketHistory('BTC', '1M', {
       resolveProviderMappingFn: async () => ({ asset, mapping }),
-      getProviderAdapterFn: () => coingeckoProvider,
-      apiKey: 'test-key',
+      getProviderAdapterFn: () => binanceProvider,
       fetchFn,
-      now
+      now,
+      bypassCache: true,
+      bypassCircuit: true
     });
+    assert.equal(throughMarket.provider, 'binance');
+    assert.equal(throughMarket.quoteCurrency, 'USDT');
     assert.equal(throughMarket.marketPolicy, 'CONTINUOUS_24_7');
     assert.equal(throughMarket.marketTimezone, 'UTC');
   });
@@ -601,7 +606,8 @@ describe('Feature 20A — Real Multi-Asset Providers & Representative Assets', (
     const cases = [
       [yahooProvider, { snapshot: true, history: true, analysis: true, ohlcHistory: true }],
       [yahooProvider, { snapshot: true, history: true, analysis: true, ohlcHistory: true }],
-      [coingeckoProvider, { snapshot: true, history: true, analysis: true, ohlcHistory: false }],
+      [coingeckoProvider, { snapshot: true, history: false, analysis: false, ohlcHistory: false }],
+      [binanceProvider, { snapshot: false, history: true, analysis: true, ohlcHistory: true }],
       [alphavantageProvider, { snapshot: true, history: true, analysis: true, ohlcHistory: false }],
       [twelvedataProvider, { snapshot: true, history: false, analysis: false, ohlcHistory: false }]
     ];

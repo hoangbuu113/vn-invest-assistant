@@ -23,6 +23,7 @@ import { getPortfolioOverview } from './src/portfolio.js';
 import { getPortfolioComposition } from './src/composition.js';
 import { getPortfolioPerformance } from './src/performance.js';
 import { getPortfolioBenchmark } from './src/benchmarks.js';
+import { getBinanceHealth } from './src/providers/index.js';
 import { getAssetAnalysis } from './src/analysis.js';
 import { getAssetComparison } from './src/comparison.js';
 import {
@@ -75,6 +76,7 @@ export function createApp(services = {}) {
     getPortfolioCompositionFn = getPortfolioComposition,
     getPortfolioPerformanceFn = getPortfolioPerformance,
     getPortfolioBenchmarkFn = getPortfolioBenchmark,
+    getBinanceHealthFn = getBinanceHealth,
     checkSupabaseConnectionFn = checkSupabaseConnection,
     getAssetAnalysisFn = getAssetAnalysis,
     getAssetComparisonFn = getAssetComparison,
@@ -103,11 +105,15 @@ export function createApp(services = {}) {
   app.use(cors());
   app.use(express.json());
 
-  // Basic system health endpoint
+  // Basic system health endpoint with provider status
   app.get('/api/health', (req, res) => {
+    const providerHealth = typeof getBinanceHealthFn === 'function' ? getBinanceHealthFn() : {};
     res.json({
       status: 'ok',
-      message: 'VN Invest Assistant API is running'
+      message: 'VN Invest Assistant API is running',
+      providers: {
+        ...providerHealth
+      }
     });
   });
 

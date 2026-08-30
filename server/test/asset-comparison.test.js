@@ -10,6 +10,7 @@ import {
 } from '../src/comparison.js';
 import { yahooProvider } from '../src/providers/yahoo.js';
 import { coingeckoProvider } from '../src/providers/coingecko.js';
+import { binanceProvider } from '../src/providers/binance.js';
 import { alphavantageProvider } from '../src/providers/alphavantage.js';
 import { twelvedataProvider } from '../src/providers/twelvedata.js';
 import { createApp } from '../index.js';
@@ -183,8 +184,12 @@ describe('Feature 11 — Asset Comparison / So sánh tài sản', () => {
       'XAU/USD': alphavantageProvider,
       'USD/VND': twelvedataProvider
     };
+    const historyAdapters = {
+      ...adapters,
+      BTC: binanceProvider
+    };
 
-    function historyFixture(symbol, dates, closes, { ohlc = false } = {}) {
+    function historyFixture(symbol, dates, closes, { ohlc = false, quoteCurrency = null } = {}) {
       const asset = assetFixtures[symbol];
       return {
         symbol,
@@ -192,7 +197,7 @@ describe('Feature 11 — Asset Comparison / So sánh tài sản', () => {
         range: '1M',
         marketPolicy: asset.marketPolicy,
         marketTimezone: asset.marketTimezone,
-        quoteCurrency: asset.quoteCurrency,
+        quoteCurrency: quoteCurrency || asset.quoteCurrency,
         freshness: 'delayed',
         dataAsOf: dates.at(-1),
         dataCompleteness: 'complete',
@@ -213,7 +218,12 @@ describe('Feature 11 — Asset Comparison / So sánh tài sản', () => {
     it('uses V2 universal metrics and genuine common canonical dates with one evaluation clock', async () => {
       const histories = {
         FPT: historyFixture('FPT', ['2026-08-01', '2026-08-02', '2026-08-04', '2026-08-05'], [100, 101, 110, 108], { ohlc: true }),
-        BTC: historyFixture('BTC', ['2026-08-01', '2026-08-03', '2026-08-04', '2026-08-05'], [60000, 61000, 63000, 62000]),
+        BTC: historyFixture(
+          'BTC',
+          ['2026-08-01', '2026-08-03', '2026-08-04', '2026-08-05'],
+          [60000, 61000, 63000, 62000],
+          { ohlc: true, quoteCurrency: 'USDT' }
+        ),
         'XAU/USD': historyFixture('XAU/USD', ['2026-08-01', '2026-08-04', '2026-08-05'], [2500, 2525, 2510])
       };
       const snapshots = {
@@ -227,11 +237,15 @@ describe('Feature 11 — Asset Comparison / So sánh tài sản', () => {
 
       const comparison = await getAssetComparison(['FPT', 'BTC', 'XAU/USD', 'USD/VND'], '1M', {
         now,
-        resolveProviderMappingFn: async (symbol) => ({
+        resolveProviderMappingFn: async (symbol, _provider, resolverOptions = {}) => ({
           asset: assetFixtures[symbol],
-          mapping: { provider: adapters[symbol].name, providerSymbol: symbol }
+          mapping: {
+            provider: (resolverOptions.capability === 'history' ? historyAdapters : adapters)[symbol].name,
+            providerSymbol: symbol === 'BTC' && resolverOptions.capability === 'history' ? 'BTCUSDT' : symbol
+          }
         }),
-        getProviderAdapterFn: (provider) => Object.values(adapters).find((adapter) => adapter.name === provider),
+        getProviderAdapterFn: (provider) => [...Object.values(adapters), binanceProvider]
+          .find((adapter) => adapter.name === provider),
         getMarketSnapshotFn: async (symbol, options) => {
           observedNowObjects.push(options.now);
           return snapshots[symbol];
@@ -251,6 +265,7 @@ describe('Feature 11 — Asset Comparison / So sánh tài sản', () => {
 
       assert.equal(comparison.assets.find((asset) => asset.symbol === 'FPT').snapshot.quoteCurrency, 'VND');
       assert.equal(comparison.assets.find((asset) => asset.symbol === 'BTC').snapshot.quoteCurrency, 'USD');
+      assert.equal(comparison.assets.find((asset) => asset.symbol === 'BTC').historyQuoteCurrency, 'USDT');
       assert.equal(comparison.assets.find((asset) => asset.symbol === 'XAU/USD').snapshot.quoteCurrency, 'USD');
 
       const cryptoAnalysis = comparison.assets.find((asset) => asset.symbol === 'BTC').analysis;

@@ -140,50 +140,24 @@ describe('Feature 24A CoinGecko runtime resilience', () => {
     assert.ok(oneYear.warnings.some((warning) => warning.code === 'PARTIAL_HISTORY_COVERAGE'));
   });
 
-  test('D–E. concurrent detail history and production analysis reuse one CoinGecko history request', async () => {
-    const cache = createCoinGeckoRequestCache();
+  test('D–E. production history rejects the CoinGecko valuation-only adapter before any request', async () => {
     let calls = 0;
-    let release;
-    const gate = new Promise((resolve) => { release = resolve; });
     const fetchFn = async () => {
       calls++;
-      await gate;
       return historyResponse();
     };
     const baseOptions = {
-      cache,
-      cacheNowMs: CACHE_NOW_MS,
       fetchFn,
       apiKey: 'test-key',
       resolveProviderMappingFn: async () => ({ asset: BTC_ASSET, mapping: BTC_MAPPING }),
       getProviderAdapterFn: () => coingeckoProvider
     };
 
-    const detailHistory = getMarketHistory('BTC', '1M', { ...baseOptions, now: NOW });
-    const analysis = getAssetAnalysis('BTC', {
-      now: NOW,
-      getMarketHistoryFn: (symbol, range, options) => getMarketHistory(symbol, range, {
-        ...baseOptions,
-        ...options
-      }),
-      getMarketSnapshotFn: async () => ({
-        symbol: 'BTC',
-        price: 999,
-        priceAsOf: '2026-08-29T11:00:00.000Z',
-        freshness: 'delayed',
-        priceSource: 'fixture'
-      })
-    });
-
-    await new Promise((resolve) => setImmediate(resolve));
-    assert.equal(calls, 1);
-    release();
-    const [history, result] = await Promise.all([detailHistory, analysis]);
-
-    assert.equal(calls, 1);
-    assert.equal(history.range, '1M');
-    assert.equal(result.symbol, 'BTC');
-    assert.equal(result.analysisPrice, historyResponsePriceAt('2026-08-28'));
+    await assert.rejects(
+      () => getMarketHistory('BTC', '1M', { ...baseOptions, now: NOW }),
+      (error) => error.status === 422 && error.code === 'UNSUPPORTED_HISTORY'
+    );
+    assert.equal(calls, 0);
   });
 
   test('F–I. a limited snapshot uses valid stale data explicitly, then observes cooldown without inventing a price', async () => {
@@ -260,7 +234,7 @@ describe('Feature 24A CoinGecko runtime resilience', () => {
     assert.ok(stale.warnings.some((warning) => warning.code === 'STALE_PROVIDER_DATA'));
   });
 
-  test('F, H–J. no cached provider data yields controlled 503 responses and never fake snapshot or analysis data', async () => {
+  test('F, H–J. no cached snapshot data yields controlled 503 and CoinGecko cannot enter analysis', async () => {
     const snapshotCache = createCoinGeckoRequestCache();
     let snapshotCalls = 0;
     const limitedSnapshot = () => coingeckoProvider.getSnapshot(BTC_ASSET, BTC_MAPPING, {
@@ -307,8 +281,8 @@ describe('Feature 24A CoinGecko runtime resilience', () => {
       })
     }), '/api/analysis/BTC');
 
-    assert.equal(analysisRoute.status, 503);
-    assert.equal(analysisRoute.body.code, 'PROVIDER_RATE_LIMITED');
+    assert.equal(analysisRoute.status, 422);
+    assert.equal(analysisRoute.body.code, 'UNSUPPORTED_HISTORY');
     assert.equal(analysisRoute.body.data, undefined);
   });
 

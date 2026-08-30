@@ -1,5 +1,11 @@
 import { resolveProviderMapping } from './assets.js';
-import { getProviderAdapter, MARKET_PROVIDERS, isBinanceSupported, getBinanceService } from './providers/index.js';
+import {
+  attachApproximateVndReference,
+  getProviderAdapter,
+  MARKET_PROVIDERS,
+  isBinanceSupported,
+  getBinanceService
+} from './providers/index.js';
 import {
   getCanonicalDate,
   getHistoryRangeStart,
@@ -149,13 +155,19 @@ function resolveHistoryNow(options) {
   return options.now;
 }
 
+function providerResolverOptions(options, capability) {
+  return {
+    ...(options.providerResolverOptions || {}),
+    capability
+  };
+}
+
 /**
  * Fetches and normalizes a delayed market snapshot for a canonical asset symbol.
  * Dispatches to the resolved provider adapter according to asset_provider_mappings.
  *
- * NOTE: For Crypto assets, this ALWAYS returns the canonical CoinGecko USD snapshot.
- * Binance USDT realtime observations are strictly reference-only and must be fetched
- * via getMarketRealtime().
+ * Crypto snapshots use the canonical CoinGecko USD valuation authority. Binance
+ * USDT observations remain history/realtime inputs and never replace accounting quotes.
  *
  * @param {string} rawSymbol - Canonical asset symbol (e.g. 'FPT')
  * @param {Object} [options] - Optional overrides for testing/injection
@@ -170,10 +182,14 @@ export async function getMarketSnapshot(rawSymbol, options = {}) {
 
   const symbol = rawSymbol.trim().toUpperCase();
   const resolver = options.resolveProviderMappingFn || resolveProviderMapping;
-  const { asset, mapping } = await resolver(symbol, options.provider || null, options.providerResolverOptions || {});
+  const { asset, mapping } = await resolver(
+    symbol,
+    options.provider || null,
+    providerResolverOptions(options, 'snapshot')
+  );
 
   const adapter = resolveAdapter(mapping, asset, options);
-  if (typeof adapter.getSnapshot !== 'function') {
+  if (!getAssetMarketCapabilities(asset, adapter).snapshot || typeof adapter.getSnapshot !== 'function') {
     const err = new Error(`Provider '${mapping.provider}' does not support market snapshots`);
     err.code = 'UNSUPPORTED_PROVIDER';
     err.status = 422;
@@ -202,7 +218,11 @@ export async function getMarketRealtime(rawSymbol, options = {}) {
 
   const symbol = rawSymbol.trim().toUpperCase();
   const resolver = options.resolveProviderMappingFn || resolveProviderMapping;
-  const { asset } = await resolver(symbol, options.provider || null, options.providerResolverOptions || {});
+  const { asset } = await resolver(
+    symbol,
+    options.provider || null,
+    providerResolverOptions(options, 'realtime')
+  );
 
   const assetId = asset?.id ?? asset?.assetId;
   const marketPolicy = asset?.marketPolicy ?? asset?.market_policy;
@@ -224,13 +244,13 @@ export async function getMarketRealtime(rawSymbol, options = {}) {
     throw err;
   }
 
-  return {
+  return attachApproximateVndReference({
     assetId,
     symbol: asset.symbol,
     assetType: asset.assetType ?? asset.asset_type ?? 'crypto',
     price: obs.price,
     currency: 'USDT',
-    canonicalQuoteCurrency: asset.quoteCurrency ?? asset.quote_currency ?? 'USD',
+    canonicalQuoteCurrency: asset.quoteCurrency ?? asset.quote_currency ?? null,
     source: 'binance_websocket',
     priceSource: 'binance_websocket',
     observedAt: obs.observedAt,
@@ -247,7 +267,7 @@ export async function getMarketRealtime(rawSymbol, options = {}) {
     referenceOnly: true,
     freshness: obs.freshness,
     connectionState: obs.connectionState
-  };
+  }, options);
 }
 
 
@@ -278,11 +298,21 @@ export async function getMarketHistory(rawSymbol, rawRange = '1M', options = {})
   }
 
   const resolver = options.resolveProviderMappingFn || resolveProviderMapping;
-  const { asset, mapping } = await resolver(symbol, options.provider || null, options.providerResolverOptions || {});
+  const { asset, mapping } = await resolver(
+    symbol,
+    options.provider || null,
+    providerResolverOptions(options, 'history')
+  );
 
   assertSupportedHistoryPolicy(asset);
 
   const adapter = resolveAdapter(mapping, asset, options);
+  if (adapter.role === 'canonical_usd_valuation_snapshot') {
+    const err = new Error(`Provider '${mapping.provider}' is valuation-snapshot-only and does not support market history`);
+    err.code = 'UNSUPPORTED_HISTORY';
+    err.status = 422;
+    throw err;
+  }
   if (typeof adapter.getHistory !== 'function') {
     const err = new Error(`Provider '${mapping.provider}' does not support market history`);
     err.code = 'UNSUPPORTED_PROVIDER';
@@ -312,7 +342,11 @@ export async function getAnalysisHistory(rawSymbol, options = {}) {
 
   const symbol = rawSymbol.trim().toUpperCase();
   const resolver = options.resolveProviderMappingFn || resolveProviderMapping;
-  const { asset, mapping } = await resolver(symbol, options.provider || null, options.providerResolverOptions || {});
+  const { asset, mapping } = await resolver(
+    symbol,
+    options.provider || null,
+    providerResolverOptions(options, 'analysis')
+  );
 
   assertVietnamHistoryPolicy(asset);
 

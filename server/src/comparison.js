@@ -179,7 +179,9 @@ function projectSnapshot(snapshot, asset, error = null) {
   return {
     status: price === null ? 'unavailable' : 'available',
     price,
-    quoteCurrency: asset.quoteCurrency ?? asset.quote_currency ?? null,
+    quoteCurrency: typeof snapshot?.currency === 'string' && snapshot.currency.trim()
+      ? snapshot.currency.trim().toUpperCase()
+      : (asset.quoteCurrency ?? asset.quote_currency ?? null),
     priceAsOf: snapshot?.priceAsOf ?? null,
     freshness: snapshot?.freshness ?? null,
     priceSource: snapshot?.priceSource ?? null,
@@ -335,41 +337,73 @@ export async function getAssetComparison(rawSymbols, rawRange = '1M', options = 
   const getMarketHistoryFn = options.getMarketHistoryFn || getMarketHistory;
 
   const resolvedAssets = await Promise.all(selection.symbols.map(async (symbol) => {
-    const { asset, mapping } = await resolveProviderMappingFn(
+    const snapshotResolution = await resolveProviderMappingFn(
       symbol,
       null,
-      options.providerResolverOptions || {}
+      { ...(options.providerResolverOptions || {}), capability: 'snapshot' }
     );
-    const adapter = getProviderAdapterFn(mapping.provider);
-    if (!adapter) {
+    const historyResolution = await resolveProviderMappingFn(
+      symbol,
+      null,
+      { ...(options.providerResolverOptions || {}), capability: 'history' }
+    );
+    const snapshotAdapter = getProviderAdapterFn(snapshotResolution.mapping.provider);
+    const historyAdapter = getProviderAdapterFn(historyResolution.mapping.provider);
+    if (!snapshotAdapter || !historyAdapter) {
+      const missingProvider = !snapshotAdapter
+        ? snapshotResolution.mapping.provider
+        : historyResolution.mapping.provider;
       throw comparisonError(
-        `Provider '${mapping.provider}' is unsupported for asset '${asset.symbol}'`,
+        `Provider '${missingProvider}' is unsupported for asset '${snapshotResolution.asset.symbol}'`,
         'UNSUPPORTED_PROVIDER',
         422
       );
     }
+    const snapshotCapabilities = getAssetMarketCapabilities(snapshotResolution.asset, snapshotAdapter);
+    const historyCapabilities = getAssetMarketCapabilities(snapshotResolution.asset, historyAdapter);
     return {
-      asset,
-      mapping,
-      adapter,
-      capabilities: getAssetMarketCapabilities(asset, adapter)
+      asset: snapshotResolution.asset,
+      snapshotMapping: snapshotResolution.mapping,
+      historyMapping: historyResolution.mapping,
+      snapshotAdapter,
+      historyAdapter,
+      capabilities: {
+        snapshot: snapshotCapabilities.snapshot,
+        history: historyCapabilities.history,
+        analysis: historyCapabilities.analysis,
+        ohlcHistory: historyCapabilities.ohlcHistory,
+        snapshotChangeBasis: snapshotCapabilities.snapshotChangeBasis
+      }
     };
   }));
 
   const results = await Promise.all(resolvedAssets.map(async (resolved) => {
-    const { asset, mapping, adapter, capabilities } = resolved;
-    const providerOptions = {
+    const {
+      asset,
+      snapshotMapping,
+      historyMapping,
+      snapshotAdapter,
+      historyAdapter,
+      capabilities
+    } = resolved;
+    const snapshotProviderOptions = {
       ...options.providerOptions,
       now,
-      resolveProviderMappingFn: async () => ({ asset, mapping }),
-      providerAdapter: adapter
+      resolveProviderMappingFn: async () => ({ asset, mapping: snapshotMapping }),
+      providerAdapter: snapshotAdapter
+    };
+    const historyProviderOptions = {
+      ...options.providerOptions,
+      now,
+      resolveProviderMappingFn: async () => ({ asset, mapping: historyMapping }),
+      providerAdapter: historyAdapter
     };
 
     let snapshot = null;
     let snapshotError = null;
     if (capabilities.snapshot) {
       try {
-        snapshot = await getMarketSnapshotFn(asset.symbol, providerOptions);
+        snapshot = await getMarketSnapshotFn(asset.symbol, snapshotProviderOptions);
       } catch (error) {
         snapshotError = error;
       }
@@ -379,7 +413,7 @@ export async function getAssetComparison(rawSymbols, rawRange = '1M', options = 
     let historyError = null;
     if (capabilities.history) {
       try {
-        history = await getMarketHistoryFn(asset.symbol, range, providerOptions);
+        history = await getMarketHistoryFn(asset.symbol, range, historyProviderOptions);
       } catch (error) {
         historyError = error;
       }
@@ -432,7 +466,7 @@ export async function getAssetComparison(rawSymbols, rawRange = '1M', options = 
   } else {
     base100 = buildCommonDateBase100(expectedHistoryAssets.map((result) => ({
       symbol: result.asset.symbol,
-      quoteCurrency: result.asset.quoteCurrency ?? result.asset.quote_currency ?? null,
+      quoteCurrency: result.history?.quoteCurrency ?? null,
       history: result.history
     })));
   }
@@ -447,6 +481,7 @@ export async function getAssetComparison(rawSymbols, rawRange = '1M', options = 
       name: result.asset.name ?? result.asset.symbol,
       assetType: result.asset.assetType ?? result.asset.asset_type ?? null,
       quoteCurrency: result.asset.quoteCurrency ?? result.asset.quote_currency ?? null,
+      historyQuoteCurrency: result.history?.quoteCurrency ?? null,
       marketPolicy: result.asset.marketPolicy ?? result.asset.market_policy ?? null,
       marketTimezone: result.asset.marketTimezone ?? result.asset.market_timezone ?? null,
       capabilities: result.capabilities,

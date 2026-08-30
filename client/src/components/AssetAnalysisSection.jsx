@@ -128,7 +128,7 @@ export function AssetAnalysisSection({
 
         <div className="fintech-banner banner-warning" style={{ margin: '0.5rem 0' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', flexWrap: 'wrap', gap: '0.5rem' }}>
-            <span>Không thể tải dữ liệu phân tích tài sản ({error}).</span>
+            <span>{error}</span>
             {onRetry && (
               <MagneticButton onClick={onRetry} className="fintech-btn btn-secondary btn-sm">
                 Thử lại

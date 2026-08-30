@@ -57,6 +57,9 @@ const HISTORY_RANGES = [
   { id: '1Y', label: '1N' }
 ];
 
+const HISTORY_UNAVAILABLE_MESSAGE = 'Dữ liệu lịch sử tạm thời chưa khả dụng. Vui lòng thử lại sau.';
+const ANALYSIS_UNAVAILABLE_MESSAGE = 'Phân tích tạm thời chưa khả dụng vì dữ liệu lịch sử chưa tải được.';
+
 const NAV_TABS = [
   { id: 'dashboard', label: 'Tổng quan', icon: '⚡' },
   { id: 'portfolio', label: 'Danh mục', icon: '📊' },
@@ -1091,7 +1094,7 @@ function App() {
 
     fetch(`/api/market/${encodeURIComponent(symbol)}/history?range=${encodeURIComponent(range)}`, { signal: controller.signal })
       .then((res) => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (!res.ok) throw new Error(HISTORY_UNAVAILABLE_MESSAGE);
         return res.json();
       })
       .then((json) => {
@@ -1101,13 +1104,13 @@ function App() {
             setHistoryData(json.data);
           }
         } else {
-          throw new Error(json.message || 'Không thể tải dữ liệu lịch sử giá');
+          throw new Error(HISTORY_UNAVAILABLE_MESSAGE);
         }
         setHistoryLoading(false);
       })
       .catch((err) => {
         if (controller.signal.aborted || err.name === 'AbortError') return;
-        setHistoryError(err.message || 'Dữ liệu lịch sử giá không khả dụng');
+        setHistoryError(HISTORY_UNAVAILABLE_MESSAGE);
         setHistoryLoading(false);
       });
   }, []);
@@ -1141,11 +1144,7 @@ function App() {
 
     fetch(`/api/analysis/${encodeURIComponent(symbol)}`, { signal: controller.signal })
       .then((res) => {
-        if (!res.ok) {
-          return res.json().catch(() => ({})).then((json) => {
-            throw new Error(json.message || `HTTP ${res.status}`);
-          });
-        }
+        if (!res.ok) throw new Error(ANALYSIS_UNAVAILABLE_MESSAGE);
         return res.json();
       })
       .then((json) => {
@@ -1155,13 +1154,13 @@ function App() {
             setAnalysisData(json.data);
           }
         } else {
-          throw new Error(json.message || 'Không thể tải phân tích tài sản');
+          throw new Error(ANALYSIS_UNAVAILABLE_MESSAGE);
         }
         setAnalysisLoading(false);
       })
       .catch((err) => {
         if (controller.signal.aborted || err.name === 'AbortError') return;
-        setAnalysisError(err.message || 'Dữ liệu phân tích tài sản không khả dụng');
+        setAnalysisError(ANALYSIS_UNAVAILABLE_MESSAGE);
         setAnalysisLoading(false);
       });
   }, []);
@@ -2929,6 +2928,13 @@ function App() {
                   {(() => {
                     const isRealtime = !!realtimeData && realtimeData.price !== null;
                     const displayData = isRealtime ? realtimeData : marketData;
+                    const referenceVnd = isRealtime ? realtimeData.referenceVnd : null;
+                    const showReferenceVnd = referenceVnd?.approximate === true
+                      && referenceVnd?.referenceOnly === true
+                      && referenceVnd?.accountingEligible === false
+                      && typeof referenceVnd?.value === 'number'
+                      && Number.isFinite(referenceVnd.value)
+                      && referenceVnd.value > 0;
 
                     return (
                       <TiltCard className="fintech-card" style={{ padding: '1.5rem' }}>
@@ -2995,11 +3001,24 @@ function App() {
                         {displayData && (
                           <div>
                             <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.85rem', marginBottom: '1.25rem', flexWrap: 'wrap' }}>
-                              <span style={{ fontSize: '2.15rem', fontWeight: 800, color: 'var(--color-slate-900)', letterSpacing: '-0.02em' }}>
-                                {displayData.price !== null ? (
-                                  formatNativeAmount(displayData.price, displayData.currency)
-                                ) : 'N/A'}
-                              </span>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem', minWidth: 0 }}>
+                                <span style={{ fontSize: '2.15rem', fontWeight: 800, color: 'var(--color-slate-900)', letterSpacing: '-0.02em' }}>
+                                  {displayData.price !== null ? (
+                                    formatNativeAmount(displayData.price, displayData.currency)
+                                  ) : 'N/A'}
+                                </span>
+                                {showReferenceVnd && (
+                                  <span
+                                    title="Giá VND tham chiếu, không dùng cho định giá danh mục"
+                                    style={{ fontSize: '0.88rem', fontWeight: 650, color: 'var(--color-slate-500)', lineHeight: 1.35 }}
+                                  >
+                                    ≈ {formatNativeAmount(referenceVnd.value, 'VND')}
+                                    <span style={{ marginLeft: '0.45rem', fontSize: '0.72rem', fontWeight: 600, color: 'var(--color-slate-400)' }}>
+                                      Giá tham chiếu · không dùng cho định giá danh mục
+                                    </span>
+                                  </span>
+                                )}
+                              </div>
 
                               {displayData.change !== null && displayData.change !== undefined ? (
                                 <span className={`fintech-badge ${(displayData.change || 0) >= 0 ? 'badge-gain' : 'badge-loss'}`} style={{ fontSize: '0.88rem', padding: '4px 12px' }}>
@@ -3116,7 +3135,7 @@ function App() {
                       {historyError && !historyLoading && (
                         <div className="fintech-banner banner-warning" style={{ margin: '0.5rem 0' }}>
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', flexWrap: 'wrap', gap: '0.5rem' }}>
-                            <span>Không thể tải dữ liệu lịch sử giá ({historyError}).</span>
+                            <span>{historyError}</span>
                             <MagneticButton
                               onClick={() => fetchHistoryData(selectedSymbol, historyRange)}
                               className="fintech-btn btn-secondary btn-sm"

@@ -1,6 +1,7 @@
 -- ==========================================================
 -- Seed Data: 002_seed_assets.sql
 -- Purpose: Initial canonical universe of 49 assets (VN Equities, ETFs, Crypto, Gold Spot, FX Context)
+-- Feature 26A.1: 40 Crypto assets with USD accounting snapshots and Binance Spot/USDT history
 -- Idempotent: ON CONFLICT (symbol) DO NOTHING
 -- ==========================================================
 
@@ -28,22 +29,16 @@ VALUES
     ('9f0ffc4f-950f-4125-94b0-d5911cdfaad7', 'FUEVFVND', 'Dragon Capital DCVFMVN Diamond ETF', 'etf', 'HOSE', 'HOSE', 'VND', NULL, 'VN_EXCHANGE', 'Asia/Ho_Chi_Minh', 'share', TRUE),
     ('557ba9ab-fca8-44ff-a230-4166796e3d62', 'FUESSVFL', 'SSIAM VNFIN LEAD ETF', 'etf', 'HOSE', 'HOSE', 'VND', NULL, 'VN_EXCHANGE', 'Asia/Ho_Chi_Minh', 'share', TRUE),
 
-    -- 2. Representative Cryptocurrencies (Feature 20A)
+    -- 2. 40 Liquid Cryptocurrencies (Feature 26A Binance Spot Universe)
     ('1aca9503-acf1-4450-9b75-4f8935324398', 'BTC', 'Bitcoin', 'crypto', NULL, 'GLOBAL', 'USD', NULL, 'CONTINUOUS_24_7', 'UTC', 'coin', TRUE),
     ('66f2e0e6-e375-4693-8f9d-ea423f47e751', 'ETH', 'Ethereum', 'crypto', NULL, 'GLOBAL', 'USD', NULL, 'CONTINUOUS_24_7', 'UTC', 'coin', TRUE),
     ('8ea1c52b-a999-4d1e-8b02-f8e7e8042118', 'SOL', 'Solana', 'crypto', NULL, 'GLOBAL', 'USD', NULL, 'CONTINUOUS_24_7', 'UTC', 'coin', TRUE),
-
-    -- 3. Expanded Crypto Universe (Feature 20B)
     ('66c7d650-f440-4e84-9469-ce0d070ede6b', 'BNB', 'BNB', 'crypto', NULL, 'GLOBAL', 'USD', NULL, 'CONTINUOUS_24_7', 'UTC', 'coin', TRUE),
     ('4bebf6d3-cf96-4a88-8474-d4a4e706989a', 'XRP', 'XRP', 'crypto', NULL, 'GLOBAL', 'USD', NULL, 'CONTINUOUS_24_7', 'UTC', 'coin', TRUE),
     ('bdf8e845-dfe3-45a1-b852-642a0b886b7d', 'TRX', 'TRON', 'crypto', NULL, 'GLOBAL', 'USD', NULL, 'CONTINUOUS_24_7', 'UTC', 'coin', TRUE),
-    ('40bd9c87-9fdb-47d2-962d-96df16f58c00', 'HYPE', 'Hyperliquid', 'crypto', NULL, 'GLOBAL', 'USD', NULL, 'CONTINUOUS_24_7', 'UTC', 'coin', TRUE),
     ('a9cdfcc6-1518-4087-bbcd-8ac4704474a4', 'ZEC', 'Zcash', 'crypto', NULL, 'GLOBAL', 'USD', NULL, 'CONTINUOUS_24_7', 'UTC', 'coin', TRUE),
     ('44c7fdab-fbaf-45ce-84e5-3ed3e8fe5b54', 'DOGE', 'Dogecoin', 'crypto', NULL, 'GLOBAL', 'USD', NULL, 'CONTINUOUS_24_7', 'UTC', 'coin', TRUE),
-    ('98736587-f37d-42a9-9c22-237dbf82187f', 'RAIN', 'Rain', 'crypto', NULL, 'GLOBAL', 'USD', NULL, 'CONTINUOUS_24_7', 'UTC', 'coin', TRUE),
-    ('f80f1162-2b13-4b2b-84dc-e208fc3fbedc', 'XMR', 'Monero', 'crypto', NULL, 'GLOBAL', 'USD', NULL, 'CONTINUOUS_24_7', 'UTC', 'coin', TRUE),
     ('c2534c6b-9eb5-4a78-b93f-969bb8f7df65', 'LINK', 'Chainlink', 'crypto', NULL, 'GLOBAL', 'USD', NULL, 'CONTINUOUS_24_7', 'UTC', 'coin', TRUE),
-    ('8f755ede-0630-4055-aef5-84ecc2512c59', 'WBT', 'WhiteBIT Coin', 'crypto', NULL, 'GLOBAL', 'USD', NULL, 'CONTINUOUS_24_7', 'UTC', 'coin', TRUE),
     ('5af019d9-3cc5-4904-8cd1-25389feec501', 'ADA', 'Cardano', 'crypto', NULL, 'GLOBAL', 'USD', NULL, 'CONTINUOUS_24_7', 'UTC', 'coin', TRUE),
     ('5b3bea95-edd8-4a89-918b-d8c3b0156399', 'XLM', 'Stellar', 'crypto', NULL, 'GLOBAL', 'USD', NULL, 'CONTINUOUS_24_7', 'UTC', 'coin', TRUE),
     ('11a31ef1-568f-4c10-8a13-5007e7d57a5b', 'BCH', 'Bitcoin Cash', 'crypto', NULL, 'GLOBAL', 'USD', NULL, 'CONTINUOUS_24_7', 'UTC', 'coin', TRUE),
@@ -68,14 +63,18 @@ VALUES
     ('4635d9d6-f30f-4dd4-9632-67873ce5e3b1', 'WLD', 'Worldcoin', 'crypto', NULL, 'GLOBAL', 'USD', NULL, 'CONTINUOUS_24_7', 'UTC', 'coin', TRUE),
     ('d9ac0ecd-fab0-4e6e-98a9-0cff5b1b3fe7', 'ETC', 'Ethereum Classic', 'crypto', NULL, 'GLOBAL', 'USD', NULL, 'CONTINUOUS_24_7', 'UTC', 'coin', TRUE),
     ('22deaafe-2849-4c75-980c-c0c8e3b42bc9', 'POL', 'POL (ex-MATIC)', 'crypto', NULL, 'GLOBAL', 'USD', NULL, 'CONTINUOUS_24_7', 'UTC', 'coin', TRUE),
-    ('f64d16cc-1bce-4f81-a64b-e5acbbe1a07e', 'LIT', 'Lighter', 'crypto', NULL, 'GLOBAL', 'USD', NULL, 'CONTINUOUS_24_7', 'UTC', 'coin', TRUE),
     ('9c8f9012-9973-406e-89a3-6350f095b59b', 'ATOM', 'Cosmos Hub', 'crypto', NULL, 'GLOBAL', 'USD', NULL, 'CONTINUOUS_24_7', 'UTC', 'coin', TRUE),
     ('871267a7-954b-4d39-8299-3c0299fe8be8', 'JUP', 'Jupiter', 'crypto', NULL, 'GLOBAL', 'USD', NULL, 'CONTINUOUS_24_7', 'UTC', 'coin', TRUE),
+    ('d3c678a1-5801-4475-8025-aa80e5572bb1', 'APT', 'Aptos', 'crypto', NULL, 'GLOBAL', 'USD', NULL, 'CONTINUOUS_24_7', 'UTC', 'coin', TRUE),
+    ('b6e3f422-9214-4a27-a169-d75fa6319c52', 'ARB', 'Arbitrum', 'crypto', NULL, 'GLOBAL', 'USD', NULL, 'CONTINUOUS_24_7', 'UTC', 'coin', TRUE),
+    ('c5a89233-1498-4d62-97ec-08e62d471e43', 'FET', 'Artificial Superintelligence Alliance', 'crypto', NULL, 'GLOBAL', 'USD', NULL, 'CONTINUOUS_24_7', 'UTC', 'coin', TRUE),
+    ('e9712a44-f655-4683-9b88-51829e1db874', 'INJ', 'Injective', 'crypto', NULL, 'GLOBAL', 'USD', NULL, 'CONTINUOUS_24_7', 'UTC', 'coin', TRUE),
+    ('a8471b55-e7d9-4820-b0c3-f26e3c15aa65', 'FIL', 'Filecoin', 'crypto', NULL, 'GLOBAL', 'USD', NULL, 'CONTINUOUS_24_7', 'UTC', 'coin', TRUE),
 
-    -- 4. Gold Spot (Feature 20A)
+    -- 3. Gold Spot (Feature 20A)
     ('28f1c02e-9974-4d44-95ff-34837390ca74', 'XAU/USD', 'Gold Spot / US Dollar', 'gold', NULL, 'GLOBAL', 'USD', 'XAU', 'GLOBAL_24_5', 'UTC', 'oz', TRUE),
 
-    -- 5. Foreign Exchange Context (Feature 20A)
+    -- 4. Foreign Exchange Context (Feature 20A)
     ('d18509bc-f7fa-47f1-9a90-7d347c7b4038', 'USD/VND', 'US Dollar / Vietnamese Dong', 'fx', NULL, 'GLOBAL', 'VND', 'USD', 'GLOBAL_24_5', 'Asia/Ho_Chi_Minh', NULL, TRUE)
 ON CONFLICT (symbol) DO NOTHING;
 
@@ -85,6 +84,27 @@ SELECT assets.id, 'yahoo', assets.symbol || '.VN'
 FROM public.assets AS assets
 WHERE assets.symbol IN ('FPT', 'VCB', 'HPG', 'VNM', 'E1VFVN30', 'FUEVFVND', 'FUESSVFL')
 ON CONFLICT (asset_id, provider) DO NOTHING;
+
+-- Explicit Provider Mappings (Binance Spot)
+INSERT INTO public.asset_provider_mappings (asset_id, provider, provider_symbol, provider_market)
+SELECT assets.id, 'binance', mappings.provider_symbol, 'SPOT'
+FROM (
+    VALUES
+        ('BTC', 'BTCUSDT'), ('ETH', 'ETHUSDT'), ('SOL', 'SOLUSDT'), ('BNB', 'BNBUSDT'),
+        ('XRP', 'XRPUSDT'), ('TRX', 'TRXUSDT'), ('ZEC', 'ZECUSDT'), ('DOGE', 'DOGEUSDT'),
+        ('LINK', 'LINKUSDT'), ('ADA', 'ADAUSDT'), ('XLM', 'XLMUSDT'), ('BCH', 'BCHUSDT'),
+        ('GRAM', 'GRAMUSDT'), ('LTC', 'LTCUSDT'), ('HBAR', 'HBARUSDT'), ('AVAX', 'AVAXUSDT'),
+        ('SHIB', 'SHIBUSDT'), ('SUI', 'SUIUSDT'), ('UNI', 'UNIUSDT'), ('NEAR', 'NEARUSDT'),
+        ('TAO', 'TAOUSDT'), ('PUMP', 'PUMPUSDT'), ('AAVE', 'AAVEUSDT'), ('ASTER', 'ASTERUSDT'),
+        ('WLFI', 'WLFIUSDT'), ('ONDO', 'ONDOUSDT'), ('ENA', 'ENAUSDT'), ('MORPHO', 'MORPHOUSDT'),
+        ('PEPE', 'PEPEUSDT'), ('DOT', 'DOTUSDT'), ('WLD', 'WLDUSDT'), ('ETC', 'ETCUSDT'),
+        ('POL', 'POLUSDT'), ('ATOM', 'ATOMUSDT'), ('JUP', 'JUPUSDT'), ('APT', 'APTUSDT'),
+        ('ARB', 'ARBUSDT'), ('FET', 'FETUSDT'), ('INJ', 'INJUSDT'), ('FIL', 'FILUSDT')
+) AS mappings(symbol, provider_symbol)
+INNER JOIN public.assets AS assets ON assets.symbol = mappings.symbol
+ON CONFLICT (asset_id, provider) DO UPDATE SET
+    provider_symbol = EXCLUDED.provider_symbol,
+    provider_market = EXCLUDED.provider_market;
 
 -- Explicit Provider Mappings (CoinGecko)
 INSERT INTO public.asset_provider_mappings (asset_id, provider, provider_symbol)
@@ -112,10 +132,6 @@ SELECT assets.id, 'coingecko', 'tron' FROM public.assets WHERE symbol = 'TRX'
 ON CONFLICT (asset_id, provider) DO NOTHING;
 
 INSERT INTO public.asset_provider_mappings (asset_id, provider, provider_symbol)
-SELECT assets.id, 'coingecko', 'hyperliquid' FROM public.assets WHERE symbol = 'HYPE'
-ON CONFLICT (asset_id, provider) DO NOTHING;
-
-INSERT INTO public.asset_provider_mappings (asset_id, provider, provider_symbol)
 SELECT assets.id, 'coingecko', 'zcash' FROM public.assets WHERE symbol = 'ZEC'
 ON CONFLICT (asset_id, provider) DO NOTHING;
 
@@ -124,19 +140,7 @@ SELECT assets.id, 'coingecko', 'dogecoin' FROM public.assets WHERE symbol = 'DOG
 ON CONFLICT (asset_id, provider) DO NOTHING;
 
 INSERT INTO public.asset_provider_mappings (asset_id, provider, provider_symbol)
-SELECT assets.id, 'coingecko', 'rain' FROM public.assets WHERE symbol = 'RAIN'
-ON CONFLICT (asset_id, provider) DO NOTHING;
-
-INSERT INTO public.asset_provider_mappings (asset_id, provider, provider_symbol)
-SELECT assets.id, 'coingecko', 'monero' FROM public.assets WHERE symbol = 'XMR'
-ON CONFLICT (asset_id, provider) DO NOTHING;
-
-INSERT INTO public.asset_provider_mappings (asset_id, provider, provider_symbol)
 SELECT assets.id, 'coingecko', 'chainlink' FROM public.assets WHERE symbol = 'LINK'
-ON CONFLICT (asset_id, provider) DO NOTHING;
-
-INSERT INTO public.asset_provider_mappings (asset_id, provider, provider_symbol)
-SELECT assets.id, 'coingecko', 'whitebit' FROM public.assets WHERE symbol = 'WBT'
 ON CONFLICT (asset_id, provider) DO NOTHING;
 
 INSERT INTO public.asset_provider_mappings (asset_id, provider, provider_symbol)
@@ -236,15 +240,31 @@ SELECT assets.id, 'coingecko', 'polygon-ecosystem-token' FROM public.assets WHER
 ON CONFLICT (asset_id, provider) DO NOTHING;
 
 INSERT INTO public.asset_provider_mappings (asset_id, provider, provider_symbol)
-SELECT assets.id, 'coingecko', 'lighter' FROM public.assets WHERE symbol = 'LIT'
-ON CONFLICT (asset_id, provider) DO NOTHING;
-
-INSERT INTO public.asset_provider_mappings (asset_id, provider, provider_symbol)
 SELECT assets.id, 'coingecko', 'cosmos' FROM public.assets WHERE symbol = 'ATOM'
 ON CONFLICT (asset_id, provider) DO NOTHING;
 
 INSERT INTO public.asset_provider_mappings (asset_id, provider, provider_symbol)
 SELECT assets.id, 'coingecko', 'jupiter-exchange-solana' FROM public.assets WHERE symbol = 'JUP'
+ON CONFLICT (asset_id, provider) DO NOTHING;
+
+INSERT INTO public.asset_provider_mappings (asset_id, provider, provider_symbol)
+SELECT assets.id, 'coingecko', 'aptos' FROM public.assets WHERE symbol = 'APT'
+ON CONFLICT (asset_id, provider) DO NOTHING;
+
+INSERT INTO public.asset_provider_mappings (asset_id, provider, provider_symbol)
+SELECT assets.id, 'coingecko', 'arbitrum' FROM public.assets WHERE symbol = 'ARB'
+ON CONFLICT (asset_id, provider) DO NOTHING;
+
+INSERT INTO public.asset_provider_mappings (asset_id, provider, provider_symbol)
+SELECT assets.id, 'coingecko', 'fetch-ai' FROM public.assets WHERE symbol = 'FET'
+ON CONFLICT (asset_id, provider) DO NOTHING;
+
+INSERT INTO public.asset_provider_mappings (asset_id, provider, provider_symbol)
+SELECT assets.id, 'coingecko', 'injective-protocol' FROM public.assets WHERE symbol = 'INJ'
+ON CONFLICT (asset_id, provider) DO NOTHING;
+
+INSERT INTO public.asset_provider_mappings (asset_id, provider, provider_symbol)
+SELECT assets.id, 'coingecko', 'filecoin' FROM public.assets WHERE symbol = 'FIL'
 ON CONFLICT (asset_id, provider) DO NOTHING;
 
 -- Explicit Provider Mappings (Alpha Vantage Gold Spot)

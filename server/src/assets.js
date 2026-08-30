@@ -10,6 +10,7 @@ export const MARKET_POLICIES = Object.freeze([
 
 const CURRENCY_CODE_PATTERN = /^[A-Z][A-Z0-9]{0,11}$/;
 const PROVIDER_PATTERN = /^[a-z][a-z0-9_-]*$/;
+const PROVIDER_CAPABILITIES = new Set(['snapshot', 'history', 'analysis', 'realtime']);
 
 function firstDefined(object, camelName, snakeName) {
   if (Object.prototype.hasOwnProperty.call(object, camelName)) return object[camelName];
@@ -125,6 +126,17 @@ function unavailableError(message, code, status = 422) {
   return error;
 }
 
+function defaultProviderForAsset(asset, capability) {
+  if (asset.assetType === 'crypto') {
+    return capability === 'history' || capability === 'analysis' || capability === 'realtime'
+      ? 'binance'
+      : 'coingecko';
+  }
+  if (asset.assetType === 'gold') return 'alphavantage';
+  if (asset.assetType === 'fx') return 'twelvedata';
+  return 'yahoo';
+}
+
 export async function resolveProviderMapping(assetOrSymbol, provider, options = {}) {
   let getAssetBySymbolFn = options.getAssetBySymbolFn;
   let getAssetProviderMappingFn = options.getAssetProviderMappingFn;
@@ -148,15 +160,16 @@ export async function resolveProviderMapping(assetOrSymbol, provider, options = 
     throw unavailableError(`Asset '${normalizedAsset.symbol}' is inactive`, 'ASSET_INACTIVE');
   }
 
+  const capability = typeof options.capability === 'string'
+    ? options.capability.trim().toLowerCase()
+    : 'snapshot';
+  if (!PROVIDER_CAPABILITIES.has(capability)) {
+    throw unavailableError(`Invalid provider capability '${options.capability}'`, 'INVALID_PROVIDER_CAPABILITY', 400);
+  }
+
   const resolvedProvider = typeof provider === 'string' && provider.trim()
     ? provider.trim().toLowerCase()
-    : (normalizedAsset.assetType === 'crypto'
-        ? 'coingecko'
-        : normalizedAsset.assetType === 'gold'
-          ? 'alphavantage'
-          : normalizedAsset.assetType === 'fx'
-            ? 'twelvedata'
-            : 'yahoo');
+    : defaultProviderForAsset(normalizedAsset, capability);
 
   if (!PROVIDER_PATTERN.test(resolvedProvider)) {
     throw unavailableError('Invalid provider identifier', 'INVALID_PROVIDER', 400);
