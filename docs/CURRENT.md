@@ -15,25 +15,27 @@
 - **Branch**: `main`
 - **Feature 26 Implementation Status**: COMPLETE in production at backend commit `cf049da`; display-consistency closeout COMPLETE at local commit `5059467` (hybrid provider authority, resilience, migration, and current-price presentation)
 - **Feature 27 Implementation Status**: COMPLETE at commit `e38dcba`. Reduced Vietnam Market Regime foundation is committed. NSO CPI is the usable production domain; SBV money-market may return unavailable when official releases cannot be parsed; market breadth is explicitly `SOURCE_NOT_PROVISIONED`.
+- **Feature 28 Implementation Status**: COMPLETE. The deterministic Opportunity Engine uses separate asset-class cohorts, transparent evidence and ranking, isolated profile-fit assessment, and explicit candidate capability states.
 - **Automated Test Suite**:
-  - Latest Local Full Backend Regression: 539/539 PASS (includes Feature 27)
+  - Latest Local Full Backend Regression: 555/555 PASS (includes Feature 28)
   - Latest Verified Production Feature 26 Backend Regression: 521/521 PASS
   - Latest Focused Feature 26 Display/Authority Gate: 11/11 PASS
   - Focused Feature 27 Gate: 13/13 PASS
+  - Focused Feature 28 Gate: 16/16 PASS
   - Client Build: PASS
   - `git diff --check`: PASS
 - **Database**: `20260830000000_feature_26a_hybrid_crypto_authority.sql` applied successfully
 - **Financial Integrity**: Existing holdings, portfolio transactions, cash ledger, and cash balance unchanged
 - **Production Frontend**: `https://vn-invest-assistant.vn-invest-assistant.workers.dev` (Cloudflare, root HTTP 200 verified)
 - **Production Backend**: `https://vn-invest-assistant-api.onrender.com` (Render, health status `ok` verified)
-- **Git Working Tree**: CLEAN at Feature 27 implementation commit `e38dcba`
-- **GitHub Remote**: `origin/main` remains at `a22228b`; local `main` is 3 commits ahead before this documentation closeout
+- **Git Working Tree**: CLEAN after the Feature 28 checkpoint commit
+- **GitHub Remote**: `origin/main` remains at `a22228b`; local `main` is 5 commits ahead
 
 ## CURRENT PHASE
-FEATURE 28 — OPPORTUNITY ENGINE (NEXT)
+FEATURE 29 — AI INVESTMENT BRIEF (NEXT)
 
 ## CURRENT NEXT PROJECT TASK
-Feature 28A methodology audit. Do not push or deploy.
+Feature 29 methodology audit. Do not push or deploy.
 
 ---
 
@@ -89,7 +91,7 @@ Feature 28A methodology audit. Do not push or deploy.
 
 ---
 
-## COMPLETED FEATURES SUMMARY (01–26)
+## COMPLETED FEATURES SUMMARY (01–28)
 
 - **Features 01–03**: Asset Browser (`/api/assets`), Market Snapshot (delayed Yahoo Finance `/api/market/:symbol`), News Feed (CafeF RSS `/api/news`).
 - **Feature 04**: Investor Profile (`GET`/`PUT /api/profile`), singleton enforcement, holdings management.
@@ -137,3 +139,6 @@ Feature 28A methodology audit. Do not push or deploy.
   - Official NSO CPI domain exposes headline CPI YoY, reference period, publication date, provenance, and exact three-month YoY delta when M and M-3 are available.
   - Official SBV money-market domain exposes latest verified VND overnight interbank observation when parseable and derives 4-week trend only with 8 valid chronological official observations; otherwise it degrades to insufficient/unavailable without substitution.
   - Market breadth remains explicitly unavailable with reason `SOURCE_NOT_PROVISIONED`; no breadth is fabricated from the canonical asset universe.
+- **Feature 28**: Deterministic Opportunity Engine (COMPLETE):
+  - `GET /api/opportunities` produces transparent within-cohort descriptive ranking from completed Analysis V2 evidence, explicit capability states, and isolated profile/context information.
+  - It introduces no database persistence, migration, opaque score, recommendation, prediction, confidence percentage, or cross-asset-class ranking.

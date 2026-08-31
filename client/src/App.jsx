@@ -29,6 +29,7 @@ import CashMovementModal from './components/CashMovementModal.jsx';
 import CashManagementSection from './components/CashManagementSection.jsx';
 import OpeningPositionModal from './components/OpeningPositionModal.jsx';
 import { PortfolioPerformanceSection } from './components/PortfolioPerformanceSection.jsx';
+import { OpportunitySection } from './components/OpportunitySection.jsx';
 import {
   formatNativeAmount,
   formatMarketChange,
@@ -71,6 +72,7 @@ const NAV_TABS = [
   { id: 'dashboard', label: 'Tổng quan', icon: '⚡' },
   { id: 'portfolio', label: 'Danh mục', icon: '📊' },
   { id: 'watchlist', label: 'Theo dõi', icon: '⭐' },
+  { id: 'opportunities', label: 'Cơ hội', icon: '◎' },
   { id: 'news', label: 'Tin tức', icon: '📰' },
   { id: 'assets', label: 'Tài sản', icon: '📈' },
   { id: 'profile', label: 'Hồ sơ đầu tư', icon: '👤' }
@@ -222,7 +224,7 @@ const sectionItemVariants = {
 };
 
 function App() {
-  const [activeTab, setActiveTab] = useState('dashboard'); // 'dashboard' | 'portfolio' | 'watchlist' | 'news' | 'assets' | 'profile'
+  const [activeTab, setActiveTab] = useState('dashboard');
 
   // Profile state
   const [profile, setProfile] = useState(null);
@@ -340,6 +342,13 @@ function App() {
   const [compositionRefreshing, setCompositionRefreshing] = useState(false);
   const [compositionError, setCompositionError] = useState(null);
   const activeCompositionReqRef = useRef(null);
+
+  // Deterministic Opportunity Engine state (Feature 28)
+  const [opportunityData, setOpportunityData] = useState(null);
+  const [opportunityLoading, setOpportunityLoading] = useState(false);
+  const [opportunityRefreshing, setOpportunityRefreshing] = useState(false);
+  const [opportunityError, setOpportunityError] = useState(null);
+  const activeOpportunityReqRef = useRef(null);
 
   // Watchlist state (Feature 08)
   const [watchlist, setWatchlist] = useState([]);
@@ -636,6 +645,58 @@ function App() {
         }
       });
   }, []);
+
+  // Fetch Feature 28 opportunity evidence only when its screen is requested.
+  // The retained App state prevents repeat navigation from re-acquiring all histories.
+  const fetchOpportunities = useCallback((isInitial = false) => {
+    if (activeOpportunityReqRef.current) {
+      activeOpportunityReqRef.current.abort();
+    }
+    const controller = new AbortController();
+    activeOpportunityReqRef.current = controller;
+
+    if (isInitial) setOpportunityLoading(true);
+    else setOpportunityRefreshing(true);
+    setOpportunityError(null);
+
+    apiFetch('/api/opportunities', { signal: controller.signal })
+      .then(async (response) => {
+        const body = await response.json().catch(() => null);
+        if (body?.data) {
+          return { response, body };
+        }
+        throw new Error(body?.message || `HTTP ${response.status}`);
+      })
+      .then(({ response, body }) => {
+        if (controller.signal.aborted) return;
+        setOpportunityData(body.data);
+        if (!response.ok) {
+          setOpportunityError('Các nguồn dữ liệu thị trường đồng loạt tạm thời không khả dụng. Trạng thái từng tài sản vẫn được giữ nguyên.');
+        }
+      })
+      .catch((requestError) => {
+        if (controller.signal.aborted || requestError?.name === 'AbortError') return;
+        setOpportunityError(requestError?.message || 'Không thể tải danh sách cơ hội mô tả.');
+      })
+      .finally(() => {
+        if (activeOpportunityReqRef.current === controller) {
+          activeOpportunityReqRef.current = null;
+          setOpportunityLoading(false);
+          setOpportunityRefreshing(false);
+        }
+      });
+  }, []);
+
+  useEffect(() => {
+    if (activeTab !== 'opportunities' || opportunityData || activeOpportunityReqRef.current) return;
+    fetchOpportunities(true);
+  }, [activeTab, opportunityData, fetchOpportunities]);
+
+  // Profile and portfolio/watchlist mutations invalidate only the retained UI response.
+  // Provider/history caches remain owned by the existing market-data layer.
+  useEffect(() => {
+    setOpportunityData(null);
+  }, [profile?.risk_tolerance, profile?.investment_horizon, holdings, watchlist, compositionData]);
 
   // Fetch portfolio transactions (Feature 14)
   const fetchTransactions = useCallback((isInitial = false) => {
@@ -1282,6 +1343,7 @@ function App() {
       if (activeRealtimeReqRef.current) activeRealtimeReqRef.current.abort();
       if (activeHistoryReqRef.current) activeHistoryReqRef.current.abort();
       if (activeAnalysisReqRef.current) activeAnalysisReqRef.current.abort();
+      if (activeOpportunityReqRef.current) activeOpportunityReqRef.current.abort();
     };
   }, []);
 
@@ -1767,6 +1829,26 @@ function App() {
                   </div>
                 )}
               </motion.div>
+            </motion.section>
+          )}
+
+          {/* FEATURE 28: DETERMINISTIC OPPORTUNITY ENGINE */}
+          {activeTab === 'opportunities' && (
+            <motion.section
+              key="opportunities-view"
+              variants={pageVariants}
+              initial="initial"
+              animate="animate"
+              exit="exit"
+            >
+              <OpportunitySection
+                data={opportunityData}
+                loading={opportunityLoading}
+                refreshing={opportunityRefreshing}
+                error={opportunityError}
+                onRefresh={() => fetchOpportunities(Boolean(!opportunityData))}
+                onSelectAsset={handleSelectAsset}
+              />
             </motion.section>
           )}
 

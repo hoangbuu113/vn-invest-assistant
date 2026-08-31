@@ -27,6 +27,7 @@ import { getBinanceHealth } from './src/providers/index.js';
 import { getAssetAnalysis } from './src/analysis.js';
 import { getAssetComparison } from './src/comparison.js';
 import { buildVietnamRegime, getVietnamRegime, isUsableRegimeDomain } from './src/regime.js';
+import { getOpportunities } from './src/opportunities.js';
 import {
   createPortfolioTransaction,
   getPortfolioTransactions,
@@ -110,6 +111,7 @@ export function createApp(services = {}) {
     getAssetAnalysisFn = getAssetAnalysis,
     getAssetComparisonFn = getAssetComparison,
     getVietnamRegimeFn = getVietnamRegime,
+    getOpportunitiesFn = getOpportunities,
     getWatchlistFn = getWatchlist,
     addToWatchlistFn = addToWatchlist,
     removeFromWatchlistFn = removeFromWatchlist,
@@ -742,6 +744,38 @@ export function createApp(services = {}) {
       return res.status(503).json({
         ...unavailable,
         code: 'REGIME_SOURCES_UNAVAILABLE',
+      });
+    }
+  });
+
+  // Deterministic opportunity screen (Feature 28 — descriptive within-class ranking only)
+  app.get('/api/opportunities', async (req, res) => {
+    const now = new Date();
+    try {
+      const result = await getOpportunitiesFn({
+        now,
+        getAssetsFn,
+        getInvestorProfileFn,
+        getHoldingsFn,
+        getWatchlistFn,
+        getPortfolioCompositionFn: () => getPortfolioCompositionFn({ getPortfolioOverviewFn }),
+        getAssetAnalysisFn: (symbol, options) => getAssetAnalysisFn(symbol, {
+          ...options,
+          getMarketHistoryFn
+        }),
+        getVietnamRegimeFn
+      });
+      const unavailable = result?.status === 'unavailable';
+      return res.status(unavailable ? 503 : 200).json({
+        status: unavailable ? 'error' : 'ok',
+        ...(unavailable ? { code: 'OPPORTUNITY_SERVICE_UNAVAILABLE' } : {}),
+        data: result
+      });
+    } catch (error) {
+      return res.status(error.status || 503).json({
+        status: 'error',
+        code: error.code || 'OPPORTUNITY_SERVICE_UNAVAILABLE',
+        message: 'Không thể tạo danh sách cơ hội mô tả lúc này'
       });
     }
   });

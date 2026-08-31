@@ -58,18 +58,18 @@ This document serves as the durable strategic memory for project sequencing, fea
 
 ---
 
-## 3. Current Next Feature: Feature 28
+## 3. Current Next Feature: Feature 29
 
-### Feature 28 — Opportunity Engine
+### Feature 29 — AI Investment Brief
 - **Status**: NEXT.
-- **Scope**: Evidence-driven screening and candidate ranking based on transparent quantitative rules and user profile fit. No opaque scores, predictions, recommendations, or fabricated confidence.
+- **Scope**: Deterministic-first AI synthesis explaining evidence, portfolio risks, macro factors, and scenario uncertainty without inventing financial scores.
 
 ---
 
 ## 4. Ordered Roadmap (Features 28–30)
 
-- **Feature 28 — Opportunity Engine (NEXT)**: Evidence-driven screening and candidate ranking based on transparent quantitative rules and user profile fit.
-- **Feature 29 — AI Investment Brief**: Deterministic-first AI synthesis explaining evidence, portfolio risks, macro factors, and scenario uncertainty without inventing financial scores.
+- **Feature 28 — Opportunity Engine (COMPLETE)**: Evidence-driven screening and candidate ranking based on transparent quantitative rules and user profile fit.
+- **Feature 29 — AI Investment Brief (NEXT)**: Deterministic-first AI synthesis explaining evidence, portfolio risks, macro factors, and scenario uncertainty without inventing financial scores.
 - **Feature 30 — Release Hardening**: Test data cleanup, full ledger/cash reconciliation, security auditing, production build verification, final documentation freeze, and remote backup.
 
 ---
