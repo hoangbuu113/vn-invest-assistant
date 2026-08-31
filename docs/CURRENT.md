@@ -11,31 +11,34 @@
   - `a22228b` — `deploy: add Cloudflare Pages/Workers static frontend + allow its CORS origin`
   - `5059467` — `fix: align crypto watchlist realtime display` (Feature 26 production closeout)
   - `e38dcba` — `feat: add vietnam market regime foundation` (Feature 27)
+  - `39648da` — `feat: add deterministic opportunity engine` (Feature 28)
 - **Documentation Rebaseline Commit**: `e514b53` — `docs: rebaseline after feature 26 closeout`
 - **Branch**: `main`
 - **Feature 26 Implementation Status**: COMPLETE in production at backend commit `cf049da`; display-consistency closeout COMPLETE at local commit `5059467` (hybrid provider authority, resilience, migration, and current-price presentation)
 - **Feature 27 Implementation Status**: COMPLETE at commit `e38dcba`. Reduced Vietnam Market Regime foundation is committed. NSO CPI is the usable production domain; SBV money-market may return unavailable when official releases cannot be parsed; market breadth is explicitly `SOURCE_NOT_PROVISIONED`.
 - **Feature 28 Implementation Status**: COMPLETE. The deterministic Opportunity Engine uses separate asset-class cohorts, transparent evidence and ranking, isolated profile-fit assessment, and explicit candidate capability states.
+- **Feature 29 Implementation Status**: COMPLETE. The guarded AI Investment Brief uses a closed deterministic fact registry, evidence-linked prose validation, a deterministic fallback, and an opt-in OpenAI adapter that is disabled by default.
 - **Automated Test Suite**:
-  - Latest Local Full Backend Regression: 555/555 PASS (includes Feature 28)
+  - Latest Local Full Backend Regression: 578/578 PASS (includes Feature 29)
   - Latest Verified Production Feature 26 Backend Regression: 521/521 PASS
   - Latest Focused Feature 26 Display/Authority Gate: 11/11 PASS
   - Focused Feature 27 Gate: 13/13 PASS
   - Focused Feature 28 Gate: 16/16 PASS
+  - Focused Feature 29 Gate: 23/23 PASS
   - Client Build: PASS
   - `git diff --check`: PASS
 - **Database**: `20260830000000_feature_26a_hybrid_crypto_authority.sql` applied successfully
 - **Financial Integrity**: Existing holdings, portfolio transactions, cash ledger, and cash balance unchanged
 - **Production Frontend**: `https://vn-invest-assistant.vn-invest-assistant.workers.dev` (Cloudflare, root HTTP 200 verified)
 - **Production Backend**: `https://vn-invest-assistant-api.onrender.com` (Render, health status `ok` verified)
-- **Git Working Tree**: CLEAN after the Feature 28 checkpoint commit
-- **GitHub Remote**: `origin/main` remains at `a22228b`; local `main` is 5 commits ahead
+- **Git Working Tree**: CLEAN after the Feature 29 checkpoint commit
+- **GitHub Remote**: `origin/main` remains at `39648da`; local `main` is ahead after the Feature 29 checkpoint commit
 
 ## CURRENT PHASE
-FEATURE 29 — AI INVESTMENT BRIEF (NEXT)
+FEATURE 30 — RELEASE HARDENING (NEXT)
 
 ## CURRENT NEXT PROJECT TASK
-Feature 29 methodology audit. Do not push or deploy.
+Feature 30 release hardening. Do not push or deploy unless explicitly authorized.
 
 ---
 
@@ -91,7 +94,7 @@ Feature 29 methodology audit. Do not push or deploy.
 
 ---
 
-## COMPLETED FEATURES SUMMARY (01–28)
+## COMPLETED FEATURES SUMMARY (01–29)
 
 - **Features 01–03**: Asset Browser (`/api/assets`), Market Snapshot (delayed Yahoo Finance `/api/market/:symbol`), News Feed (CafeF RSS `/api/news`).
 - **Feature 04**: Investor Profile (`GET`/`PUT /api/profile`), singleton enforcement, holdings management.
@@ -142,3 +145,7 @@ Feature 29 methodology audit. Do not push or deploy.
 - **Feature 28**: Deterministic Opportunity Engine (COMPLETE):
   - `GET /api/opportunities` produces transparent within-cohort descriptive ranking from completed Analysis V2 evidence, explicit capability states, and isolated profile/context information.
   - It introduces no database persistence, migration, opaque score, recommendation, prediction, confidence percentage, or cross-asset-class ranking.
+- **Feature 29**: Guarded AI Investment Brief (COMPLETE):
+  - `POST /api/investment-brief` generates an evidence-linked Vietnamese AI brief from deterministic portfolio, performance, composition, opportunity, regime, and personalized-news facts.
+  - Live AI is disabled by default; deterministic fallback works without an API key. Live generation requires `AI_BRIEF_ENABLED=true` plus a configured server-side OpenAI key.
+  - Cache and request budgets are process-local; no brief persistence, database migration, background generation, score, recommendation, prediction, or confidence percentage is introduced.

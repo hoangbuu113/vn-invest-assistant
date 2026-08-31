@@ -3740,3 +3740,210 @@ body {
     animation: none !important;
   }
 }
+
+/* Feature 29 — guarded investment brief */
+.investment-brief-panel {
+  margin-top: 1.25rem;
+  padding: 1.25rem;
+}
+
+.investment-brief-header,
+.investment-brief-title-row,
+.investment-brief-meta,
+.investment-brief-evidence-list {
+  display: flex;
+  align-items: center;
+}
+
+.investment-brief-header {
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.investment-brief-header h3 {
+  margin: 0.3rem 0 0.25rem;
+  color: var(--color-slate-900);
+  font-size: 1.15rem;
+}
+
+.investment-brief-header p,
+.investment-brief-privacy,
+.investment-brief-disclaimer {
+  margin: 0;
+  color: var(--color-slate-500);
+  font-size: 0.82rem;
+  line-height: 1.55;
+}
+
+.investment-brief-title-row {
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.investment-brief-kicker,
+.investment-brief-status {
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 800;
+  padding: 0.25rem 0.55rem;
+}
+
+.investment-brief-kicker {
+  background: var(--color-brand-50);
+  border: 1px solid var(--color-brand-200);
+  color: var(--color-brand-700);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.investment-brief-status {
+  background: var(--color-slate-100);
+  color: var(--color-slate-600);
+}
+
+.investment-brief-status.status-partial,
+.investment-brief-status.status-fallback {
+  background: #fff7ed;
+  color: #9a3412;
+}
+
+.investment-brief-privacy {
+  border-left: 3px solid var(--color-brand-300);
+  margin-top: 1rem;
+  padding: 0.55rem 0.75rem;
+}
+
+.investment-brief-empty,
+.investment-brief-loading {
+  background: rgba(248, 250, 252, 0.75);
+  border: 1px dashed var(--border-subtle);
+  border-radius: var(--radius-md);
+  color: var(--color-slate-500);
+  font-size: 0.85rem;
+  margin-top: 1rem;
+  padding: 1rem;
+}
+
+.investment-brief-loading {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.investment-brief-loading .skeleton-shimmer {
+  height: 1rem;
+}
+
+.investment-brief-error {
+  margin: 1rem 0 0;
+}
+
+.investment-brief-content {
+  margin-top: 1rem;
+}
+
+.investment-brief-meta {
+  color: var(--color-slate-500);
+  flex-wrap: wrap;
+  font-size: 0.75rem;
+  gap: 0.5rem 1rem;
+}
+
+.investment-brief-sections {
+  display: grid;
+  gap: 0.85rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 1rem;
+}
+
+.investment-brief-section {
+  background: rgba(248, 250, 252, 0.75);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 0.9rem;
+}
+
+.investment-brief-section h4 {
+  color: var(--color-slate-800);
+  font-size: 0.9rem;
+  margin: 0 0 0.65rem;
+}
+
+.investment-brief-statement + .investment-brief-statement {
+  border-top: 1px solid var(--border-subtle);
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+}
+
+.investment-brief-statement p {
+  color: var(--color-slate-700);
+  font-size: 0.85rem;
+  line-height: 1.55;
+  margin: 0;
+}
+
+.investment-brief-evidence-list {
+  align-items: stretch;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-top: 0.65rem;
+}
+
+.investment-brief-evidence {
+  background: #fff;
+  border: 1px solid var(--color-brand-100);
+  border-radius: 8px;
+  display: inline-flex;
+  flex-direction: column;
+  max-width: 100%;
+  padding: 0.4rem 0.55rem;
+}
+
+.investment-brief-evidence span,
+.investment-brief-evidence small {
+  color: var(--color-slate-500);
+  font-size: 0.68rem;
+}
+
+.investment-brief-evidence strong {
+  color: var(--color-slate-900);
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+}
+
+.investment-brief-asof {
+  color: var(--color-slate-600);
+  font-size: 0.78rem;
+  margin-top: 1rem;
+}
+
+.investment-brief-asof summary {
+  cursor: pointer;
+  font-weight: 750;
+}
+
+.investment-brief-asof ul {
+  line-height: 1.7;
+  margin-bottom: 0;
+}
+
+.investment-brief-disclaimer {
+  border-top: 1px solid var(--border-subtle);
+  margin-top: 1rem;
+  padding-top: 0.8rem;
+}
+
+@media (max-width: 720px) {
+  .investment-brief-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .investment-brief-header .fintech-btn {
+    justify-content: center;
+    width: 100%;
+  }
+
+  .investment-brief-sections {
+    grid-template-columns: 1fr;
+  }
+}

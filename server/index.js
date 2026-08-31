@@ -28,6 +28,7 @@ import { getAssetAnalysis } from './src/analysis.js';
 import { getAssetComparison } from './src/comparison.js';
 import { buildVietnamRegime, getVietnamRegime, isUsableRegimeDomain } from './src/regime.js';
 import { getOpportunities } from './src/opportunities.js';
+import { getInvestmentBrief } from './src/investmentBrief.js';
 import {
   createPortfolioTransaction,
   getPortfolioTransactions,
@@ -112,6 +113,7 @@ export function createApp(services = {}) {
     getAssetComparisonFn = getAssetComparison,
     getVietnamRegimeFn = getVietnamRegime,
     getOpportunitiesFn = getOpportunities,
+    getInvestmentBriefFn = getInvestmentBrief,
     getWatchlistFn = getWatchlist,
     addToWatchlistFn = addToWatchlist,
     removeFromWatchlistFn = removeFromWatchlist,
@@ -776,6 +778,40 @@ export function createApp(services = {}) {
         status: 'error',
         code: error.code || 'OPPORTUNITY_SERVICE_UNAVAILABLE',
         message: 'Không thể tạo danh sách cơ hội mô tả lúc này'
+      });
+    }
+  });
+
+  // Guarded AI investment brief (Feature 29 — deterministic facts remain authoritative)
+  app.post('/api/investment-brief', async (req, res) => {
+    const now = new Date();
+    try {
+      const result = await getInvestmentBriefFn({
+        now,
+        getPortfolioOverviewFn,
+        getPortfolioPerformanceFn,
+        getVietnamRegimeFn,
+        getOpportunitiesFn,
+        getPersonalizedNewsFeedFn,
+        getNewsFeedFn,
+        getAssetsFn,
+        getInvestorProfileFn,
+        getHoldingsFn,
+        getWatchlistFn,
+        getAssetAnalysisFn,
+        getMarketHistoryFn
+      });
+      return res.status(result?.status === 'unavailable' ? 503 : 200).json(result);
+    } catch (error) {
+      const statusCode = error?.status === 429 ? 429 : 503;
+      return res.status(statusCode).json({
+        methodologyVersion: 'ai-brief-v1',
+        status: 'unavailable',
+        generationMode: 'deterministic_fallback',
+        code: statusCode === 429 ? (error.code || 'AI_BRIEF_RATE_LIMITED') : 'AI_BRIEF_UNAVAILABLE',
+        message: statusCode === 429
+          ? 'Tần suất tạo bản tin đang được giới hạn. Vui lòng thử lại sau.'
+          : 'Không thể tạo bản tin đầu tư lúc này.'
       });
     }
   });

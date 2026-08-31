@@ -14,7 +14,7 @@ This document serves as the durable strategic memory for project sequencing, fea
 
 ---
 
-## 2. Completed Features (01–27)
+## 2. Completed Features (01–29)
 
 - **Feature 01**: Asset Browser
 - **Feature 02**: Market Snapshot
@@ -55,22 +55,24 @@ This document serves as the durable strategic memory for project sequencing, fea
 - **Feature 27**: Market Regime Engine (COMPLETE)
   - Reduced Vietnam-first official-source foundation for NSO CPI, SBV money-market observations, and explicit unprovisioned market breadth.
   - Implementation commit `e38dcba`
+- **Feature 28**: Opportunity Engine (COMPLETE)
+- **Feature 29**: AI Investment Brief (COMPLETE)
 
 ---
 
-## 3. Current Next Feature: Feature 29
+## 3. Current Next Feature: Feature 30
 
-### Feature 29 — AI Investment Brief
+### Feature 30 — Release Hardening
 - **Status**: NEXT.
-- **Scope**: Deterministic-first AI synthesis explaining evidence, portfolio risks, macro factors, and scenario uncertainty without inventing financial scores.
+- **Scope**: Test data cleanup, full ledger/cash reconciliation, security auditing, production build verification, final documentation freeze, and remote backup.
 
 ---
 
 ## 4. Ordered Roadmap (Features 28–30)
 
 - **Feature 28 — Opportunity Engine (COMPLETE)**: Evidence-driven screening and candidate ranking based on transparent quantitative rules and user profile fit.
-- **Feature 29 — AI Investment Brief (NEXT)**: Deterministic-first AI synthesis explaining evidence, portfolio risks, macro factors, and scenario uncertainty without inventing financial scores.
-- **Feature 30 — Release Hardening**: Test data cleanup, full ledger/cash reconciliation, security auditing, production build verification, final documentation freeze, and remote backup.
+- **Feature 29 — AI Investment Brief (COMPLETE)**: Deterministic-first AI synthesis explaining evidence, portfolio risks, macro factors, and scenario uncertainty without inventing financial scores.
+- **Feature 30 — Release Hardening (NEXT)**: Test data cleanup, full ledger/cash reconciliation, security auditing, production build verification, final documentation freeze, and remote backup.
 
 ---
 

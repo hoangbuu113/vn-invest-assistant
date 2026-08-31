@@ -30,6 +30,7 @@ import CashManagementSection from './components/CashManagementSection.jsx';
 import OpeningPositionModal from './components/OpeningPositionModal.jsx';
 import { PortfolioPerformanceSection } from './components/PortfolioPerformanceSection.jsx';
 import { OpportunitySection } from './components/OpportunitySection.jsx';
+import { InvestmentBriefPanel } from './components/InvestmentBriefPanel.jsx';
 import {
   formatNativeAmount,
   formatMarketChange,
@@ -1740,6 +1741,10 @@ function App() {
 
               <motion.div variants={sectionItemVariants}>
                 <VietnamRegimePanel />
+              </motion.div>
+
+              <motion.div variants={sectionItemVariants}>
+                <InvestmentBriefPanel />
               </motion.div>
 
               {/* SECTION 4: TIN MỚI (News Preview - 4 Balanced Responsive Columns) */}
