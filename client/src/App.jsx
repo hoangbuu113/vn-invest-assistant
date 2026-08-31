@@ -37,6 +37,11 @@ import {
   formatMarketContext,
   getMarketDisplayDecimals
 } from './utils/formatting.js';
+import {
+  getWatchlistDisplayCurrency,
+  isCryptoDisplayAsset,
+  selectCryptoWatchlistDisplayData
+} from './utils/watchlistDisplay.js';
 
 const CATEGORY_STYLES = {
   market: { label: 'Thị trường', bg: '#eff6ff', color: '#1d4ed8', border: '#bfdbfe', accent: '#2563eb' },
@@ -159,9 +164,9 @@ function computeWatchlistMovers(watchlistItems, marketDataMap = {}) {
         price,
         change,
         changePercent,
-        currency: item.asset?.quote_currency || item.asset?.quoteCurrency || mkt.currency || 'VND',
+        currency: getWatchlistDisplayCurrency(mkt, item.asset),
         changeBasis: mkt.changeBasis || (item.asset?.market_policy === 'CONTINUOUS_24_7' ? 'ROLLING_24H' : 'PREVIOUS_SESSION_CLOSE'),
-        updatedAt: mkt.updatedAt || null
+        updatedAt: mkt.updatedAt || mkt.observedAt || null
       });
     }
   }
@@ -341,7 +346,10 @@ function App() {
   const [watchlistRefreshing, setWatchlistRefreshing] = useState(false);
   const [watchlistError, setWatchlistError] = useState(null);
   const [watchlistActionLoading, setWatchlistActionLoading] = useState(null);
+  // Canonical snapshots remain separate because alerts and accounting-adjacent
+  // consumers must never receive Binance's reference-only USDT observation.
   const [watchlistMarketData, setWatchlistMarketData] = useState({});
+  const [watchlistDisplayMarketData, setWatchlistDisplayMarketData] = useState({});
   const [watchlistMarketLoading, setWatchlistMarketLoading] = useState(false);
 
   // Fetch investor profile data
@@ -763,44 +771,63 @@ function App() {
     return () => clearInterval(intervalId);
   }, [activeTab, fetchPortfolio, fetchComposition, fetchTransactions, fetchCashOverview, fetchCashLedger]);
 
-  // Fetch delayed market data for watchlist items (Feature 08)
+  // Fetch display prices for Watchlist and Dashboard while preserving the
+  // canonical snapshot map used by alert threshold defaults.
   const fetchWatchlistMarketData = useCallback((items) => {
     if (!items || items.length === 0) {
       setWatchlistMarketLoading(false);
       return;
     }
 
-    const symbols = [...new Set(items.map((i) => i.asset?.symbol).filter(Boolean))];
-    if (symbols.length === 0) {
+    const targets = [...new Map(
+      items
+        .map((item) => [item.asset?.symbol, item.asset])
+        .filter(([symbol]) => Boolean(symbol))
+    ).entries()].map(([symbol, asset]) => ({ symbol, asset }));
+
+    if (targets.length === 0) {
       setWatchlistMarketLoading(false);
       return;
     }
 
     setWatchlistMarketLoading(true);
 
+    const fetchMarketPayload = (path) => apiFetch(path)
+      .then((res) => {
+        if (!res.ok) return null;
+        return res.json();
+      })
+      .then((json) => (json?.status === 'ok' && json.data ? json.data : null))
+      .catch(() => null);
+
     Promise.allSettled(
-      symbols.map((sym) =>
-        apiFetch(`/api/market/${encodeURIComponent(sym)}`)
-          .then((res) => {
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            return res.json();
-          })
-          .then((json) => {
-            if (json.status === 'ok' && json.data) {
-              return { symbol: sym, data: json.data };
-            }
-            return { symbol: sym, data: null };
-          })
-          .catch(() => ({ symbol: sym, data: null }))
-      )
-    ).then((results) => {
-      const newMarketData = {};
-      results.forEach((r) => {
-        if (r.status === 'fulfilled' && r.value) {
-          newMarketData[r.value.symbol] = r.value.data;
+      targets.map(async ({ symbol, asset }) => {
+        const encodedSymbol = encodeURIComponent(symbol);
+        const snapshotPromise = fetchMarketPayload(`/api/market/${encodedSymbol}`);
+
+        snapshotPromise.then((snapshot) => {
+          setWatchlistMarketData((prev) => ({ ...prev, [symbol]: snapshot }));
+        });
+
+        if (!isCryptoDisplayAsset(asset)) {
+          const snapshot = await snapshotPromise;
+          setWatchlistDisplayMarketData((prev) => ({ ...prev, [symbol]: snapshot }));
+          return;
         }
-      });
-      setWatchlistMarketData((prev) => ({ ...prev, ...newMarketData }));
+
+        const realtime = await fetchMarketPayload(`/api/market/${encodedSymbol}/realtime`);
+        const realtimeDisplay = selectCryptoWatchlistDisplayData({ realtime });
+
+        if (realtimeDisplay) {
+          setWatchlistDisplayMarketData((prev) => ({ ...prev, [symbol]: realtimeDisplay }));
+          return;
+        }
+
+        const snapshot = await snapshotPromise;
+        const fallbackDisplay = selectCryptoWatchlistDisplayData({ snapshot });
+        setWatchlistDisplayMarketData((prev) => ({ ...prev, [symbol]: fallbackDisplay }));
+      })
+    ).then(() => {
       setWatchlistMarketLoading(false);
     });
   }, []);
@@ -1488,7 +1515,7 @@ function App() {
 
                   {/* Section 5: Watchlist Movers Highlights */}
                   {(() => {
-                    const movers = computeWatchlistMovers(watchlist, watchlistMarketData);
+                    const movers = computeWatchlistMovers(watchlist, watchlistDisplayMarketData);
                     if (!movers.topGainer && !movers.topDecliner) return null;
 
                     return (
@@ -1575,8 +1602,9 @@ function App() {
                         {watchlist.slice(0, 5).map((item) => {
                           const asset = item.asset || {};
                           const sym = asset.symbol || 'N/A';
-                          const mkt = watchlistMarketData[sym];
+                          const mkt = watchlistDisplayMarketData[sym];
                           const hasPrice = mkt && typeof mkt.price === 'number' && Number.isFinite(mkt.price) && mkt.price > 0;
+                          const displayCurrency = getWatchlistDisplayCurrency(mkt, asset);
                           const isGain = hasPrice && (mkt.change || 0) > 0;
                           const isLoss = hasPrice && (mkt.change || 0) < 0;
 
@@ -1617,7 +1645,7 @@ function App() {
 
                               <div style={{ textAlign: 'right' }}>
                                 <div style={{ fontWeight: 700, color: 'var(--color-slate-900)', fontSize: '0.9rem' }}>
-                                  {hasPrice ? formatNativeAmount(mkt.price, asset.quote_currency || asset.quoteCurrency || mkt.currency || 'VND') : 'Chưa có giá'}
+                                  {hasPrice ? formatNativeAmount(mkt.price, displayCurrency) : 'Chưa có giá'}
                                 </div>
                                 <div style={{ marginTop: '2px' }}>
                                   {hasPrice && mkt.changePercent !== null && mkt.changePercent !== undefined ? (
@@ -2284,8 +2312,9 @@ function App() {
                         {watchlist.map((item) => {
                           const asset = item.asset || {};
                           const sym = asset.symbol || 'N/A';
-                          const mkt = watchlistMarketData[sym];
+                          const mkt = watchlistDisplayMarketData[sym];
                           const hasPrice = mkt && typeof mkt.price === 'number' && isFinite(mkt.price) && mkt.price > 0;
+                          const displayCurrency = getWatchlistDisplayCurrency(mkt, asset);
                           const isGain = hasPrice && (mkt.change || 0) > 0;
                           const isLoss = hasPrice && (mkt.change || 0) < 0;
                           const isActionLoading =
@@ -2328,7 +2357,7 @@ function App() {
                               <td style={{ textAlign: 'right' }}>
                                 {hasPrice ? (
                                   <span style={{ fontWeight: 800, color: 'var(--color-slate-900)', fontSize: '0.95rem' }}>
-                                    {formatNativeAmount(mkt.price, asset.quote_currency || asset.quoteCurrency || mkt.currency || 'VND')}
+                                    {formatNativeAmount(mkt.price, displayCurrency)}
                                   </span>
                                 ) : (
                                   <span style={{ fontSize: '0.8rem', color: 'var(--color-slate-400)', fontStyle: 'italic' }}>
@@ -2341,7 +2370,7 @@ function App() {
                               <td style={{ textAlign: 'right' }}>
                                 {hasPrice && mkt.change !== null && mkt.change !== undefined ? (
                                   <span className={`fintech-badge ${isGain ? 'badge-gain' : isLoss ? 'badge-loss' : 'badge-neutral'}`}>
-                                    {formatMarketChange(mkt.change, asset.quote_currency || asset.quoteCurrency || mkt.currency || 'VND')}
+                                    {formatMarketChange(mkt.change, displayCurrency)}
                                     {mkt.changePercent !== null && mkt.changePercent !== undefined
                                       ? ` (${mkt.changePercent > 0 ? '+' : ''}${Number(mkt.changePercent).toFixed(2)}%)`
                                       : ''}
@@ -2353,7 +2382,9 @@ function App() {
 
                               {/* 6. Market Updated Time */}
                               <td style={{ textAlign: 'right', fontSize: '0.78rem', color: 'var(--color-slate-500)' }}>
-                                {hasPrice && mkt.updatedAt ? formatPublishedTime(mkt.updatedAt) : '—'}
+                                {hasPrice && (mkt.updatedAt || mkt.observedAt)
+                                  ? formatPublishedTime(mkt.updatedAt || mkt.observedAt)
+                                  : '—'}
                               </td>
 
                               {/* 7. Quick Actions */}

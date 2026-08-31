@@ -6,17 +6,22 @@
   - `34ec123` — `feat: add portfolio benchmark integration` (Feature 25B/C)
   - `2c1be74` — `feat: add portfolio performance dashboard` (Feature 25D)
   - `d081fe8` — `feat: improve crypto market data reliability` (Feature 26)
+  - `cf049da` — `fix: use Binance WebSocket API for history` (production backend)
+  - `6f76d02` — `fix: point public site frontend at production API in prod builds`
+  - `a22228b` — `deploy: add Cloudflare Pages/Workers static frontend + allow its CORS origin`
 - **Branch**: `main`
-- **Feature 26 Implementation Status**: COMPLETE (hybrid provider authority, resilience, migration, and current-price presentation)
+- **Feature 26 Implementation Status**: COMPLETE in production at backend commit `cf049da` (hybrid provider authority, resilience, migration, and current-price presentation)
 - **Automated Test Suite**:
-  - Latest Full Backend Regression: 513/513 PASS
-  - Latest Focused Feature 26 Frontend Contract Gate: 6/6 PASS
+  - Latest Full Backend Regression: 521/521 PASS
+  - Latest Focused Feature 26 Display/Authority Gate: 11/11 PASS
   - Client Build: PASS
   - `git diff --check`: PASS
 - **Database**: `20260830000000_feature_26a_hybrid_crypto_authority.sql` applied successfully
 - **Financial Integrity**: Existing holdings, portfolio transactions, cash ledger, and cash balance unchanged
-- **Git Working Tree**: Clean after Feature 26 implementation commit; docs reconciliation follows separately
-- **GitHub Remote**: Local git authority (no push without explicit approval)
+- **Production Frontend**: `https://vn-invest-assistant.vn-invest-assistant.workers.dev` (Cloudflare, root HTTP 200 verified)
+- **Production Backend**: `https://vn-invest-assistant-api.onrender.com` (Render, health status `ok` verified)
+- **Git Working Tree**: Feature 26 Crypto display-consistency closeout is locally verified but not committed or deployed
+- **GitHub Remote**: `origin/main` synchronized with local `main` at `a22228b`
 
 ## CURRENT PHASE
 FEATURE 26 CLOSEOUT — CRYPTO HYBRID QUOTE AUTHORITY & MARKET-DATA RELIABILITY
