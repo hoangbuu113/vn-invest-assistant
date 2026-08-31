@@ -316,3 +316,14 @@ $$\text{Source Adapter} \longrightarrow \text{Canonical Validation / Sanitizatio
 
 ### G. Ledger Authority & Non-VND Gating
 - BUY/SELL and opening positions remain strictly VND-only at DB trigger/RPC level; frontend gates non-VND assets before submit with clear visible notices. Cash ledger remains VND-only.
+
+---
+
+## 9. Vietnam Market Regime Foundation (Feature 27)
+
+- **Independent Domain Contract**: Vietnam money-market, inflation, and market-breadth capabilities are reported independently. Partial official data is usable; one unavailable domain never fabricates values or blocks another valid domain.
+- **Inflation Authority**: Official NSO Vietnam CPI releases are the sole production authority. Headline CPI YoY is read directly from each official release, and `threeMonthDeltaPp = CPI_YoY(M) - CPI_YoY(M-3)`. Missing M-3 yields `null`; YoY is never reconstructed from MoM values and publication dates are never hard-coded.
+- **Money-Market Authority**: Official SBV weekly releases/PDFs are the sole production authority for the VND overnight interbank weekly average rate. Four-week comparison fields require eight distinct, consecutive verified official observations. Missing weeks are never interpolated; insufficient history preserves only the latest verified official rate.
+- **Market-Breadth Boundary**: No production-quality representative source is provisioned. Breadth returns `status = "unavailable"` and `reason = "SOURCE_NOT_PROVISIONED"`; it is never reconstructed from the project's seven Vietnamese assets.
+- **Interpretation Boundary**: Feature 27B exposes raw descriptive indicators and capability states only—no composite score, directional regime label, confidence percentage, prediction, or recommendation.
+- **Persistence and Resilience**: Data is read through source-specific in-memory caches with request coalescing and bounded stale-if-error fallback. Feature 27 introduces no database table or migration.

@@ -26,6 +26,7 @@ import { getPortfolioBenchmark } from './src/benchmarks.js';
 import { getBinanceHealth } from './src/providers/index.js';
 import { getAssetAnalysis } from './src/analysis.js';
 import { getAssetComparison } from './src/comparison.js';
+import { buildVietnamRegime, getVietnamRegime, isUsableRegimeDomain } from './src/regime.js';
 import {
   createPortfolioTransaction,
   getPortfolioTransactions,
@@ -108,6 +109,7 @@ export function createApp(services = {}) {
     checkSupabaseConnectionFn = checkSupabaseConnection,
     getAssetAnalysisFn = getAssetAnalysis,
     getAssetComparisonFn = getAssetComparison,
+    getVietnamRegimeFn = getVietnamRegime,
     getWatchlistFn = getWatchlist,
     addToWatchlistFn = addToWatchlist,
     removeFromWatchlistFn = removeFromWatchlist,
@@ -718,6 +720,29 @@ export function createApp(services = {}) {
       };
       if (error.code) response.code = error.code;
       return res.status(statusCode).json(response);
+    }
+  });
+
+  // Vietnam market-regime context (Feature 27 — independent official-source domains)
+  app.get('/api/regime/vietnam', async (req, res) => {
+    const now = new Date();
+    try {
+      const result = await getVietnamRegimeFn({ now });
+      const usable = isUsableRegimeDomain(result?.moneyMarket) || isUsableRegimeDomain(result?.inflation);
+      if (!usable) {
+        return res.status(503).json({
+          ...result,
+          status: 'unavailable',
+          code: 'REGIME_SOURCES_UNAVAILABLE'
+        });
+      }
+      return res.json(result);
+    } catch {
+      const unavailable = buildVietnamRegime({ moneyMarket: null, inflation: null, now });
+      return res.status(503).json({
+        ...unavailable,
+        code: 'REGIME_SOURCES_UNAVAILABLE',
+      });
     }
   });
 

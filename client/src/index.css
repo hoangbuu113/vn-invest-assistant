@@ -748,6 +748,108 @@ body {
   gap: 1rem;
 }
 
+.vietnam-regime-panel {
+  padding: 1.25rem;
+  margin-bottom: 1.5rem;
+}
+
+.regime-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.regime-panel-header h3 {
+  margin: 0;
+  color: var(--color-slate-900);
+  font-size: 1.1rem;
+  font-weight: 800;
+}
+
+.regime-panel-header p {
+  margin: 0.25rem 0 0;
+  color: var(--color-slate-500);
+  font-size: 0.8rem;
+}
+
+.regime-domain-grid,
+.regime-loading {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.85rem;
+}
+
+.regime-loading .skeleton-shimmer {
+  min-height: 130px;
+  border-radius: var(--radius-md);
+}
+
+.regime-domain-card {
+  min-width: 0;
+  padding: 0.95rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: rgba(248, 250, 252, 0.72);
+}
+
+.regime-domain-title {
+  margin-bottom: 0.75rem;
+  color: var(--color-slate-700);
+  font-size: 0.82rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.035em;
+}
+
+.regime-value-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.75rem;
+  margin-bottom: 0.55rem;
+  color: var(--color-slate-500);
+  font-size: 0.82rem;
+}
+
+.regime-value-row strong {
+  color: var(--color-slate-900);
+  font-size: 1rem;
+  text-align: right;
+}
+
+.regime-state-note {
+  margin: 0.4rem 0;
+  color: var(--color-slate-500);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.regime-source-line {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  margin-top: 0.75rem;
+  padding-top: 0.65rem;
+  border-top: 1px solid var(--border-subtle);
+  color: var(--color-slate-400);
+  font-size: 0.7rem;
+  line-height: 1.35;
+}
+
+@media (max-width: 820px) {
+  .regime-domain-grid,
+  .regime-loading {
+    grid-template-columns: 1fr;
+  }
+
+  .regime-panel-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
 @media (max-width: 1100px) {
   .dashboard-news-grid {
     grid-template-columns: repeat(2, 1fr);

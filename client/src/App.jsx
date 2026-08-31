@@ -6,6 +6,7 @@ import { MarketTicker } from './components/MarketTicker.jsx';
 import { MoneyFlowAmbience } from './components/MoneyFlowAmbience.jsx';
 import { WealthOrbit } from './components/WealthOrbit.jsx';
 import { EconomicPulseRail } from './components/EconomicPulseRail.jsx';
+import { VietnamRegimePanel } from './components/VietnamRegimePanel.jsx';
 import {
   TiltCard,
   MagneticButton,
@@ -1674,6 +1675,10 @@ function App() {
                   </div>
                 </motion.div>
               </div>
+
+              <motion.div variants={sectionItemVariants}>
+                <VietnamRegimePanel />
+              </motion.div>
 
               {/* SECTION 4: TIN MỚI (News Preview - 4 Balanced Responsive Columns) */}
               <motion.div variants={sectionItemVariants} className="fintech-card" style={{ padding: '1.25rem' }}>

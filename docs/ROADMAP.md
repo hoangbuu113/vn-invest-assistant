@@ -58,14 +58,14 @@ This document serves as the durable strategic memory for project sequencing, fea
 ## 3. Current Next Feature: Feature 27
 
 ### Feature 27 — Market Regime Engine
-- **Status**: NEXT IN SEQUENCE.
-- **Scope**: Deterministic macro and market regime indicators (interest-rate environment, inflation trends, and market breadth).
+- **Status**: IN PROGRESS — reduced Vietnam-first foundation implemented locally, pending review/commit.
+- **Scope**: Independent official-source domains for NSO headline CPI, SBV VND overnight interbank observations, and an explicit unprovisioned market-breadth capability. The foundation is descriptive only and degrades per domain without fabricated values.
 
 ---
 
 ## 4. Ordered Roadmap (Features 27–30)
 
-- **Feature 27 — Market Regime Engine (NEXT)**: Deterministic macro and market regime indicators (interest-rate environment, inflation trends, market breadth).
+- **Feature 27 — Market Regime Engine (IN PROGRESS)**: Reduced Vietnam-first official-source foundation for inflation and money-market context; market breadth remains unavailable until a sufficiently trustworthy source is provisioned.
 - **Feature 28 — Opportunity Engine**: Evidence-driven screening and candidate ranking based on transparent quantitative rules and user profile fit.
 - **Feature 29 — AI Investment Brief**: Deterministic-first AI synthesis explaining evidence, portfolio risks, macro factors, and scenario uncertainty without inventing financial scores.
 - **Feature 30 — Release Hardening**: Test data cleanup, full ledger/cash reconciliation, security auditing, production build verification, final documentation freeze, and remote backup.

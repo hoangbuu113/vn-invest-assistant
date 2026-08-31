@@ -10,25 +10,29 @@
   - `6f76d02` — `fix: point public site frontend at production API in prod builds`
   - `a22228b` — `deploy: add Cloudflare Pages/Workers static frontend + allow its CORS origin`
   - `5059467` — `fix: align crypto watchlist realtime display` (Feature 26 production closeout)
+- **Documentation Rebaseline Commit**: `e514b53` — `docs: rebaseline after feature 26 closeout`
 - **Branch**: `main`
 - **Feature 26 Implementation Status**: COMPLETE in production at backend commit `cf049da`; display-consistency closeout COMPLETE at local commit `5059467` (hybrid provider authority, resilience, migration, and current-price presentation)
+- **Feature 27B Implementation Status**: Reduced Vietnam Market Regime foundation IMPLEMENTED LOCALLY and awaiting review/commit. NSO CPI is the usable production domain; SBV money-market history degrades truthfully when official releases are not parseable; market breadth is explicitly unprovisioned.
 - **Automated Test Suite**:
-  - Latest Full Backend Regression: 521/521 PASS
+  - Latest Local Full Backend Regression: 539/539 PASS (includes Feature 27B)
+  - Latest Verified Production Feature 26 Backend Regression: 521/521 PASS
   - Latest Focused Feature 26 Display/Authority Gate: 11/11 PASS
+  - Focused Feature 27B Gate: 13/13 PASS
   - Client Build: PASS
   - `git diff --check`: PASS
 - **Database**: `20260830000000_feature_26a_hybrid_crypto_authority.sql` applied successfully
 - **Financial Integrity**: Existing holdings, portfolio transactions, cash ledger, and cash balance unchanged
 - **Production Frontend**: `https://vn-invest-assistant.vn-invest-assistant.workers.dev` (Cloudflare, root HTTP 200 verified)
 - **Production Backend**: `https://vn-invest-assistant-api.onrender.com` (Render, health status `ok` verified)
-- **Git Working Tree**: CLEAN at `5059467`
-- **GitHub Remote**: `origin/main` remains at `a22228b`; local `main` is 1 commit ahead
+- **Git Working Tree**: DIRTY at `e514b53` with intended, uncommitted Feature 27B implementation files
+- **GitHub Remote**: `origin/main` remains at `a22228b`; local `main` is 2 commits ahead before the uncommitted Feature 27B patch
 
 ## CURRENT PHASE
-FEATURE 27 — MARKET REGIME ENGINE
+FEATURE 27B — VIETNAM MARKET REGIME FOUNDATION (IMPLEMENTED LOCALLY, NOT COMMITTED)
 
 ## CURRENT NEXT PROJECT TASK
-Feature 27 — Market Regime Engine. See `docs/ROADMAP.md`.
+Review and checkpoint the reduced Feature 27B implementation. No deployment has been performed.
 
 ---
 
