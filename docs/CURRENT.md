@@ -9,8 +9,9 @@
   - `cf049da` — `fix: use Binance WebSocket API for history` (production backend)
   - `6f76d02` — `fix: point public site frontend at production API in prod builds`
   - `a22228b` — `deploy: add Cloudflare Pages/Workers static frontend + allow its CORS origin`
+  - `5059467` — `fix: align crypto watchlist realtime display` (Feature 26 production closeout)
 - **Branch**: `main`
-- **Feature 26 Implementation Status**: COMPLETE in production at backend commit `cf049da` (hybrid provider authority, resilience, migration, and current-price presentation)
+- **Feature 26 Implementation Status**: COMPLETE in production at backend commit `cf049da`; display-consistency closeout COMPLETE at local commit `5059467` (hybrid provider authority, resilience, migration, and current-price presentation)
 - **Automated Test Suite**:
   - Latest Full Backend Regression: 521/521 PASS
   - Latest Focused Feature 26 Display/Authority Gate: 11/11 PASS
@@ -20,11 +21,11 @@
 - **Financial Integrity**: Existing holdings, portfolio transactions, cash ledger, and cash balance unchanged
 - **Production Frontend**: `https://vn-invest-assistant.vn-invest-assistant.workers.dev` (Cloudflare, root HTTP 200 verified)
 - **Production Backend**: `https://vn-invest-assistant-api.onrender.com` (Render, health status `ok` verified)
-- **Git Working Tree**: Feature 26 Crypto display-consistency closeout is locally verified but not committed or deployed
-- **GitHub Remote**: `origin/main` synchronized with local `main` at `a22228b`
+- **Git Working Tree**: CLEAN at `5059467`
+- **GitHub Remote**: `origin/main` remains at `a22228b`; local `main` is 1 commit ahead
 
 ## CURRENT PHASE
-FEATURE 26 CLOSEOUT — CRYPTO HYBRID QUOTE AUTHORITY & MARKET-DATA RELIABILITY
+FEATURE 27 — MARKET REGIME ENGINE
 
 ## CURRENT NEXT PROJECT TASK
 Feature 27 — Market Regime Engine. See `docs/ROADMAP.md`.
@@ -122,7 +123,7 @@ Feature 27 — Market Regime Engine. See `docs/ROADMAP.md`.
   - **24B**: Frontend Capability-Aware Integration (`2e2edde`): Centralized native currency formatting, Base 100 common-date comparison, Analysis V2 presentation with clean coverage/capability separation, provider-neutral freshness badges, and VND-only ledger gating notices.
 - **Feature 25**: Portfolio Performance & Benchmarking (COMPLETE):
   - Auditable portfolio performance engine, benchmark integration, and frontend performance dashboard (`dec06cd`, `34ec123`, `2c1be74`).
-- **Feature 26**: Crypto Market Data Reliability & Hybrid Quote Authority (COMPLETE, `d081fe8`):
+- **Feature 26**: Crypto Market Data Reliability & Hybrid Quote Authority (COMPLETE, implementation `d081fe8`, production backend `cf049da`, display-consistency closeout `5059467`):
   - CoinGecko remains canonical `USD` valuation-snapshot authority; Binance is native `USDT` realtime, completed daily OHLCV history, and Analysis V2 authority.
   - Exactly 40 explicit Binance Spot mappings and 40 CoinGecko valuation mappings cover the 40-asset Crypto universe; total active universe remains 49.
   - Migration `20260830000000_feature_26a_hybrid_crypto_authority.sql` is applied. Existing financial records are unchanged.
