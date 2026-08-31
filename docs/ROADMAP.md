@@ -14,7 +14,7 @@ This document serves as the durable strategic memory for project sequencing, fea
 
 ---
 
-## 2. Completed Features (01–26)
+## 2. Completed Features (01–27)
 
 - **Feature 01**: Asset Browser
 - **Feature 02**: Market Snapshot
@@ -52,21 +52,23 @@ This document serves as the durable strategic memory for project sequencing, fea
   - CoinGecko canonical USD valuation snapshots; Binance native USDT realtime/history/Analysis V2
   - 40 explicit mappings per provider, resilience controls, and approximate non-accounting VND reference display
   - Implementation commit `d081fe8`; migration `20260830000000_feature_26a_hybrid_crypto_authority.sql` applied
+- **Feature 27**: Market Regime Engine (COMPLETE)
+  - Reduced Vietnam-first official-source foundation for NSO CPI, SBV money-market observations, and explicit unprovisioned market breadth.
+  - Implementation commit `e38dcba`
 
 ---
 
-## 3. Current Next Feature: Feature 27
+## 3. Current Next Feature: Feature 28
 
-### Feature 27 — Market Regime Engine
-- **Status**: IN PROGRESS — reduced Vietnam-first foundation implemented locally, pending review/commit.
-- **Scope**: Independent official-source domains for NSO headline CPI, SBV VND overnight interbank observations, and an explicit unprovisioned market-breadth capability. The foundation is descriptive only and degrades per domain without fabricated values.
+### Feature 28 — Opportunity Engine
+- **Status**: NEXT.
+- **Scope**: Evidence-driven screening and candidate ranking based on transparent quantitative rules and user profile fit. No opaque scores, predictions, recommendations, or fabricated confidence.
 
 ---
 
-## 4. Ordered Roadmap (Features 27–30)
+## 4. Ordered Roadmap (Features 28–30)
 
-- **Feature 27 — Market Regime Engine (IN PROGRESS)**: Reduced Vietnam-first official-source foundation for inflation and money-market context; market breadth remains unavailable until a sufficiently trustworthy source is provisioned.
-- **Feature 28 — Opportunity Engine**: Evidence-driven screening and candidate ranking based on transparent quantitative rules and user profile fit.
+- **Feature 28 — Opportunity Engine (NEXT)**: Evidence-driven screening and candidate ranking based on transparent quantitative rules and user profile fit.
 - **Feature 29 — AI Investment Brief**: Deterministic-first AI synthesis explaining evidence, portfolio risks, macro factors, and scenario uncertainty without inventing financial scores.
 - **Feature 30 — Release Hardening**: Test data cleanup, full ledger/cash reconciliation, security auditing, production build verification, final documentation freeze, and remote backup.
 

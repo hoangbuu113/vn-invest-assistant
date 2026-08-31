@@ -10,29 +10,30 @@
   - `6f76d02` — `fix: point public site frontend at production API in prod builds`
   - `a22228b` — `deploy: add Cloudflare Pages/Workers static frontend + allow its CORS origin`
   - `5059467` — `fix: align crypto watchlist realtime display` (Feature 26 production closeout)
+  - `e38dcba` — `feat: add vietnam market regime foundation` (Feature 27)
 - **Documentation Rebaseline Commit**: `e514b53` — `docs: rebaseline after feature 26 closeout`
 - **Branch**: `main`
 - **Feature 26 Implementation Status**: COMPLETE in production at backend commit `cf049da`; display-consistency closeout COMPLETE at local commit `5059467` (hybrid provider authority, resilience, migration, and current-price presentation)
-- **Feature 27B Implementation Status**: Reduced Vietnam Market Regime foundation IMPLEMENTED LOCALLY and awaiting review/commit. NSO CPI is the usable production domain; SBV money-market history degrades truthfully when official releases are not parseable; market breadth is explicitly unprovisioned.
+- **Feature 27 Implementation Status**: COMPLETE at commit `e38dcba`. Reduced Vietnam Market Regime foundation is committed. NSO CPI is the usable production domain; SBV money-market may return unavailable when official releases cannot be parsed; market breadth is explicitly `SOURCE_NOT_PROVISIONED`.
 - **Automated Test Suite**:
-  - Latest Local Full Backend Regression: 539/539 PASS (includes Feature 27B)
+  - Latest Local Full Backend Regression: 539/539 PASS (includes Feature 27)
   - Latest Verified Production Feature 26 Backend Regression: 521/521 PASS
   - Latest Focused Feature 26 Display/Authority Gate: 11/11 PASS
-  - Focused Feature 27B Gate: 13/13 PASS
+  - Focused Feature 27 Gate: 13/13 PASS
   - Client Build: PASS
   - `git diff --check`: PASS
 - **Database**: `20260830000000_feature_26a_hybrid_crypto_authority.sql` applied successfully
 - **Financial Integrity**: Existing holdings, portfolio transactions, cash ledger, and cash balance unchanged
 - **Production Frontend**: `https://vn-invest-assistant.vn-invest-assistant.workers.dev` (Cloudflare, root HTTP 200 verified)
 - **Production Backend**: `https://vn-invest-assistant-api.onrender.com` (Render, health status `ok` verified)
-- **Git Working Tree**: DIRTY at `e514b53` with intended, uncommitted Feature 27B implementation files
-- **GitHub Remote**: `origin/main` remains at `a22228b`; local `main` is 2 commits ahead before the uncommitted Feature 27B patch
+- **Git Working Tree**: CLEAN at Feature 27 implementation commit `e38dcba`
+- **GitHub Remote**: `origin/main` remains at `a22228b`; local `main` is 3 commits ahead before this documentation closeout
 
 ## CURRENT PHASE
-FEATURE 27B — VIETNAM MARKET REGIME FOUNDATION (IMPLEMENTED LOCALLY, NOT COMMITTED)
+FEATURE 28 — OPPORTUNITY ENGINE (NEXT)
 
 ## CURRENT NEXT PROJECT TASK
-Review and checkpoint the reduced Feature 27B implementation. No deployment has been performed.
+Feature 28A methodology audit. Do not push or deploy.
 
 ---
 
@@ -132,3 +133,7 @@ Review and checkpoint the reduced Feature 27B implementation. No deployment has 
   - Exactly 40 explicit Binance Spot mappings and 40 CoinGecko valuation mappings cover the 40-asset Crypto universe; total active universe remains 49.
   - Migration `20260830000000_feature_26a_hybrid_crypto_authority.sql` is applied. Existing financial records are unchanged.
   - Asset Detail displays the Binance `USDT` current quote with an optional server-provided `≈VND` reference that is explicitly approximate and excluded from accounting.
+- **Feature 27**: Vietnam Market Regime Foundation (COMPLETE, implementation `e38dcba`):
+  - Official NSO CPI domain exposes headline CPI YoY, reference period, publication date, provenance, and exact three-month YoY delta when M and M-3 are available.
+  - Official SBV money-market domain exposes latest verified VND overnight interbank observation when parseable and derives 4-week trend only with 8 valid chronological official observations; otherwise it degrades to insufficient/unavailable without substitution.
+  - Market breadth remains explicitly unavailable with reason `SOURCE_NOT_PROVISIONED`; no breadth is fabricated from the canonical asset universe.
