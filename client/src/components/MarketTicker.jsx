@@ -39,7 +39,7 @@ export function MarketTicker() {
             <span>THỊ TRƯỜNG</span>
           </div>
           <span style={{ fontSize: '0.78rem', color: 'var(--color-slate-400)' }}>
-            Đang tải chỉ số thị trường (trễ ~15p)...
+            Đang tải dữ liệu thị trường tham khảo...
           </span>
         </div>
       </div>
@@ -56,7 +56,7 @@ export function MarketTicker() {
         <div className="ticker-label-badge">
           <span className="ticker-live-dot" />
           <span>THỊ TRƯỜNG VN</span>
-          <span className="ticker-delay-tag">Trễ ~15p</span>
+          <span className="ticker-delay-tag">Theo nhà cung cấp</span>
         </div>
 
         {/* Scrolling Tape Container */}

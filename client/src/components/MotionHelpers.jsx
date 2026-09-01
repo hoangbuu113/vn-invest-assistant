@@ -48,70 +48,10 @@ export function GlobalCursorSpotlight() {
 }
 
 /**
- * PointerHalo: Subtle secondary pointer aura on desktop.
+ * PointerHalo: Clean, non-distracting pointer handling.
  */
 export function PointerHalo() {
-  const mouseX = useMotionValue(-100);
-  const mouseY = useMotionValue(-100);
-  const [isHoveringClickable, setIsHoveringClickable] = useState(false);
-
-  const springConfig = { damping: 20, stiffness: 300 };
-  const smoothX = useSpring(mouseX, springConfig);
-  const smoothY = useSpring(mouseY, springConfig);
-
-  useEffect(() => {
-    if (window.matchMedia('(pointer: coarse)').matches) return;
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-
-    const handleMouseMove = (e) => {
-      mouseX.set(e.clientX);
-      mouseY.set(e.clientY);
-
-      const target = e.target;
-      if (
-        target &&
-        (target.tagName === 'BUTTON' ||
-          target.tagName === 'A' ||
-          target.tagName === 'INPUT' ||
-          target.tagName === 'SELECT' ||
-          target.closest('button') ||
-          target.closest('a') ||
-          target.classList.contains('row-interactive') ||
-          target.classList.contains('radio-card-item'))
-      ) {
-        setIsHoveringClickable(true);
-      } else {
-        setIsHoveringClickable(false);
-      }
-    };
-
-    window.addEventListener('mousemove', handleMouseMove, { passive: true });
-    return () => window.removeEventListener('mousemove', handleMouseMove);
-  }, [mouseX, mouseY]);
-
-  return (
-    <motion.div
-      style={{
-        position: 'fixed',
-        top: 0,
-        left: 0,
-        width: 32,
-        height: 32,
-        x: useTransform(smoothX, (x) => x - 16),
-        y: useTransform(smoothY, (y) => y - 16),
-        borderRadius: '50%',
-        border: '1.5px solid rgba(37, 99, 235, 0.35)',
-        backgroundColor: 'rgba(37, 99, 235, 0.04)',
-        pointerEvents: 'none',
-        zIndex: 9999,
-        transition: 'width 0.2s ease, height 0.2s ease'
-      }}
-      animate={{
-        scale: isHoveringClickable ? 1.6 : 1,
-        borderColor: isHoveringClickable ? 'rgba(37, 99, 235, 0.6)' : 'rgba(37, 99, 235, 0.25)'
-      }}
-    />
-  );
+  return null;
 }
 
 /**

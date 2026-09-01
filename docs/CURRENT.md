@@ -29,12 +29,12 @@
   - Client Build: PASS (~190ms, 0 vulnerabilities)
   - `git diff --check`: PASS
 - **Database**: `20260830000000_feature_26a_hybrid_crypto_authority.sql` and `20260901000000_feature_30b1_single_owner_security.sql` applied successfully
-- **Financial Integrity**: Authoritative holdings, portfolio transactions, cash ledger, opening baselines, and cash balance (606,052,112 VND) unchanged
+- **Financial Integrity**: Authoritative clean first-use baseline (0 holdings, 0 transactions, 0 opening baselines, 0 cash ledger rows, 0 VND current cash, 0 watchlist items, 0 alerts)
 - **Production Frontend**: `https://vn-invest-assistant.vn-invest-assistant.workers.dev` (Cloudflare, Owner Gate active, root HTTP 200 verified)
 - **Production Backend**: `https://vn-invest-assistant-api.onrender.com` (Render, live at commit `58a5c21`, health status `ok`, owner authentication active)
-- **Git Working Tree**: CLEAN after Feature 30B2 release hardening checkpoint
+- **Git Working Tree**: DIRTY with Feature 30B4 UI/UX polish (uncommitted; ready for review)
 - **GitHub Remote**: `origin/main` synchronized at commit `58a5c21`
-- **Feature 30 Security & Hardening Status**: IN PROGRESS. Feature 30B1 production security activation and Feature 30B2 release cleanup & error hardening are COMPLETE (error sanitization across Express/Twelve Data/Alpha Vantage/Binance, dependency audit 0 vulnerabilities, obsolete `@openai/sites-vite-plugin` and stale CORS origin removed, `server/.env.example` contract updated with names only, numeric safety in portfolio valuation hardened with explicit invalid handling).
+- **Feature 30 Security & Hardening Status**: IN PROGRESS. Feature 30B1 production security activation, Feature 30B2 release error & dependency hardening, Feature 30B3 controlled test-data reset, and Feature 30B4 final UI/UX polish are COMPLETE.
 
 ## CURRENT PHASE
 FEATURE 30 — RELEASE HARDENING (IN PROGRESS)
