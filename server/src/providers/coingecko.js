@@ -19,6 +19,11 @@ export const COINGECKO_CACHE_POLICY = Object.freeze({
   historyStaleMs: 2 * DAY_MS,
   // Prevent sequential consumers from retrying during the same UI refresh cycle.
   rateLimitCooldownMs: 5 * 60 * 1000,
+  // Concurrent HTTP consumers join one official /simple/price multi-ID request.
+  snapshotBatchWindowMs: 15,
+  // The canonical universe contains 40 Crypto assets; cap each provider request
+  // so future universe growth remains bounded and deterministic.
+  snapshotBatchMaxIds: 40,
   // CoinGecko's public API rejects history earlier than the trailing 365 days.
   publicHistoryLookbackDays: 365
 });
@@ -35,6 +40,8 @@ export function createCoinGeckoRequestCache() {
 }
 
 const defaultRequestCache = createCoinGeckoRequestCache();
+const snapshotBatchStates = new WeakMap();
+const SNAPSHOT_RATE_LIMIT_SCOPE = '__all_snapshots__';
 
 function resolveRequestCache(options) {
   if (options.cache === null) return null;
@@ -178,12 +185,13 @@ async function loadCachedResource({
   return request;
 }
 
-function staleSnapshot(snapshot) {
+function staleSnapshot(snapshot, { nowMs, loadedAtMs, reason }) {
   return {
     ...snapshot,
     freshness: 'stale',
     cacheStatus: 'stale',
-    staleReason: 'PROVIDER_RATE_LIMITED'
+    staleReason: reason,
+    cacheAgeMs: Math.max(0, nowMs - loadedAtMs)
   };
 }
 
@@ -194,6 +202,277 @@ function staleHistorySource(source) {
     cacheStatus: 'stale',
     staleReason: 'PROVIDER_RATE_LIMITED'
   };
+}
+
+function createMalformedSnapshotError() {
+  const error = new Error('CoinGecko snapshot provider returned malformed data');
+  error.status = 502;
+  error.code = 'MALFORMED_PROVIDER_RESPONSE';
+  return error;
+}
+
+function createMissingSnapshotError(symbol) {
+  const error = new Error(`No market quote available for '${symbol}' on CoinGecko`);
+  error.status = 404;
+  error.code = 'SNAPSHOT_NOT_FOUND';
+  return error;
+}
+
+function isTemporarySnapshotError(error) {
+  return [
+    'PROVIDER_RATE_LIMITED',
+    'PROVIDER_ERROR',
+    'PROVIDER_TIMEOUT',
+    'MALFORMED_PROVIDER_RESPONSE',
+    'PARTIAL_PROVIDER_RESPONSE'
+  ].includes(error?.code);
+}
+
+function normalizeSnapshotObservation(asset, coinData, loadedAtMs) {
+  if (!coinData || typeof coinData !== 'object' || Array.isArray(coinData)) {
+    throw createMalformedSnapshotError();
+  }
+
+  const price = typeof coinData.usd === 'number' && Number.isFinite(coinData.usd) && coinData.usd > 0
+    ? coinData.usd
+    : null;
+  if (price === null) throw createMalformedSnapshotError();
+
+  const changePercent = typeof coinData.usd_24h_change === 'number' && Number.isFinite(coinData.usd_24h_change)
+    ? coinData.usd_24h_change
+    : null;
+  const volume = typeof coinData.usd_24h_vol === 'number' && Number.isFinite(coinData.usd_24h_vol) && coinData.usd_24h_vol >= 0
+    ? coinData.usd_24h_vol
+    : null;
+  const rawTs = coinData.last_updated_at;
+  const priceAsOf = typeof rawTs === 'number' && Number.isFinite(rawTs) && rawTs > 0
+    ? new Date(rawTs * 1000).toISOString()
+    : null;
+
+  let change = null;
+  if (changePercent !== null && (1 + changePercent / 100) > 0) {
+    const rollingReference = price / (1 + changePercent / 100);
+    change = price - rollingReference;
+  }
+
+  return {
+    symbol: asset.symbol,
+    currency: 'USD',
+    exchange: null,
+    price,
+    previousClose: null,
+    change,
+    changePercent,
+    dayHigh: null,
+    dayLow: null,
+    volume,
+    updatedAt: priceAsOf,
+    priceAsOf,
+    priceSource: 'coingecko_market_snapshot',
+    freshness: 'delayed',
+    cacheStatus: 'fresh',
+    cachedAt: new Date(loadedAtMs).toISOString(),
+    changeBasis: 'ROLLING_24H',
+    volumeSemantics: 'ROLLING_24H_QUOTE_CURRENCY'
+  };
+}
+
+async function fetchSnapshotBatch({ requests, fetchFn, headers }) {
+  const coinIds = requests.map((request) => request.coinId).sort();
+  const url = `https://api.coingecko.com/api/v3/simple/price?ids=${encodeURIComponent(coinIds.join(','))}&vs_currencies=usd&include_24hr_vol=true&include_24hr_change=true&include_last_updated_at=true&precision=full`;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
+
+  try {
+    const response = await fetchFn(url, { signal: controller.signal, headers });
+    if (!response.ok) {
+      throw createProviderResponseError({
+        symbol: requests.map((request) => request.symbol).join(','),
+        resource: 'snapshot',
+        response
+      });
+    }
+
+    let data;
+    try {
+      data = await response.json();
+    } catch {
+      throw createMalformedSnapshotError();
+    }
+    assertNoProviderPayloadError(data, 'snapshot');
+    if (!data || typeof data !== 'object' || Array.isArray(data)) {
+      throw createMalformedSnapshotError();
+    }
+    return data;
+  } catch (error) {
+    if (error?.name === 'AbortError') {
+      const timeoutError = new Error('CoinGecko market data request timed out');
+      timeoutError.status = 504;
+      timeoutError.code = 'PROVIDER_TIMEOUT';
+      throw timeoutError;
+    }
+    if (error?.status && error?.code) throw error;
+    const providerError = new Error('CoinGecko snapshot provider request failed');
+    providerError.status = 502;
+    providerError.code = 'PROVIDER_ERROR';
+    throw providerError;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function cachedStaleOrError({ entry, error, nowMs }) {
+  if (
+    entry
+    && Number.isFinite(entry.loadedAtMs)
+    && nowMs < entry.staleUntilMs
+    && isTemporarySnapshotError(error)
+  ) {
+    return {
+      value: staleSnapshot(entry.value, {
+        nowMs,
+        loadedAtMs: entry.loadedAtMs,
+        reason: error.code
+      })
+    };
+  }
+  return { error };
+}
+
+function getSnapshotBatchState(cache) {
+  let state = snapshotBatchStates.get(cache);
+  if (!state) {
+    state = { groups: new Set() };
+    snapshotBatchStates.set(cache, state);
+  }
+  return state;
+}
+
+function findOrCreateBatchGroup(cache, fetchFn, apiKey, headers) {
+  const state = getSnapshotBatchState(cache);
+  for (const group of state.groups) {
+    if (!group.closed && group.fetchFn === fetchFn && group.apiKey === apiKey) return group;
+  }
+
+  const group = {
+    state,
+    cache,
+    fetchFn,
+    apiKey,
+    headers,
+    requests: new Map(),
+    timer: null,
+    closed: false
+  };
+  state.groups.add(group);
+  return group;
+}
+
+function settleSnapshotRequest(maps, request, outcome) {
+  maps.inFlight.delete(request.coinId);
+  if (outcome.error) request.reject(outcome.error);
+  else request.resolve(outcome.value);
+}
+
+async function flushSnapshotBatch(group) {
+  if (group.closed) return;
+  group.closed = true;
+  if (group.timer) clearTimeout(group.timer);
+  group.state.groups.delete(group);
+
+  const requests = [...group.requests.values()];
+  const maps = assertCacheShape(group.cache, 'snapshot');
+  const batchNowMs = Math.max(...requests.map((request) => request.nowMs));
+
+  try {
+    const data = await fetchSnapshotBatch({
+      requests,
+      fetchFn: group.fetchFn,
+      headers: group.headers
+    });
+    maps.rateLimits.delete(SNAPSHOT_RATE_LIMIT_SCOPE);
+
+    for (const request of requests) {
+      const entry = maps.entries.get(request.coinId);
+      const coinData = data[request.coinId];
+      if (coinData === undefined) {
+        const missing = createMissingSnapshotError(request.symbol);
+        missing.code = 'PARTIAL_PROVIDER_RESPONSE';
+        missing.status = 502;
+        settleSnapshotRequest(maps, request, cachedStaleOrError({
+          entry,
+          error: missing,
+          nowMs: request.nowMs
+        }));
+        continue;
+      }
+
+      try {
+        const value = normalizeSnapshotObservation(request.asset, coinData, request.nowMs);
+        maps.entries.set(request.coinId, {
+          value,
+          loadedAtMs: request.nowMs,
+          freshUntilMs: request.nowMs + COINGECKO_CACHE_POLICY.snapshotFreshMs,
+          staleUntilMs: request.nowMs + COINGECKO_CACHE_POLICY.snapshotStaleMs
+        });
+        settleSnapshotRequest(maps, request, { value });
+      } catch (error) {
+        settleSnapshotRequest(maps, request, cachedStaleOrError({
+          entry,
+          error,
+          nowMs: request.nowMs
+        }));
+      }
+    }
+  } catch (error) {
+    if (error?.code === 'PROVIDER_RATE_LIMITED') {
+      const cooldownMs = Number.isFinite(error.retryAfterMs)
+        ? Math.max(error.retryAfterMs, COINGECKO_CACHE_POLICY.rateLimitCooldownMs)
+        : COINGECKO_CACHE_POLICY.rateLimitCooldownMs;
+      maps.rateLimits.set(SNAPSHOT_RATE_LIMIT_SCOPE, batchNowMs + cooldownMs);
+    }
+
+    for (const request of requests) {
+      settleSnapshotRequest(maps, request, cachedStaleOrError({
+        entry: maps.entries.get(request.coinId),
+        error,
+        nowMs: request.nowMs
+      }));
+    }
+  }
+}
+
+function loadCachedSnapshot({ cache, asset, coinId, symbol, nowMs, fetchFn, apiKey, headers }) {
+  const maps = assertCacheShape(cache, 'snapshot');
+  const entry = maps.entries.get(coinId);
+  if (entry && nowMs < entry.freshUntilMs) return Promise.resolve(entry.value);
+
+  const limitedUntilMs = maps.rateLimits.get(SNAPSHOT_RATE_LIMIT_SCOPE) || 0;
+  if (nowMs < limitedUntilMs) {
+    const error = createRateLimitError('snapshot', limitedUntilMs - nowMs);
+    const outcome = cachedStaleOrError({ entry, error, nowMs });
+    return outcome.error ? Promise.reject(outcome.error) : Promise.resolve(outcome.value);
+  }
+
+  const pending = maps.inFlight.get(coinId);
+  if (pending) return pending;
+
+  const group = findOrCreateBatchGroup(cache, fetchFn, apiKey, headers);
+  const promise = new Promise((resolve, reject) => {
+    group.requests.set(coinId, { asset, coinId, symbol, nowMs, resolve, reject });
+  });
+  maps.inFlight.set(coinId, promise);
+
+  if (group.requests.size >= COINGECKO_CACHE_POLICY.snapshotBatchMaxIds) {
+    void flushSnapshotBatch(group);
+  } else if (!group.timer) {
+    group.timer = setTimeout(
+      () => void flushSnapshotBatch(group),
+      COINGECKO_CACHE_POLICY.snapshotBatchWindowMs
+    );
+  }
+
+  return promise;
 }
 
 /**
@@ -218,7 +497,6 @@ export async function getSnapshot(asset, mapping, options = {}) {
 
   const normalizedCoinId = coinId.trim().toLowerCase();
   const apiKey = options.apiKey !== undefined ? options.apiKey : process.env.COINGECKO_API_KEY;
-  const url = `https://api.coingecko.com/api/v3/simple/price?ids=${encodeURIComponent(normalizedCoinId)}&vs_currencies=usd&include_24hr_vol=true&include_24hr_change=true&include_last_updated_at=true`;
   const fetchFn = options.fetchFn || fetch;
 
   const headers = {
@@ -232,88 +510,26 @@ export async function getSnapshot(asset, mapping, options = {}) {
   const cacheNowMs = getCacheNowMs(options);
 
   try {
-    return await loadCachedResource({
-      cache,
-      resource: 'snapshot',
-      key: normalizedCoinId,
-      nowMs: cacheNowMs,
-      getFreshUntil: (loadedAtMs) => loadedAtMs + COINGECKO_CACHE_POLICY.snapshotFreshMs,
-      getStaleUntil: (loadedAtMs) => loadedAtMs + COINGECKO_CACHE_POLICY.snapshotStaleMs,
-      markStale: staleSnapshot,
-      load: async () => {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 8000);
-        try {
-          const response = await fetchFn(url, {
-            signal: controller.signal,
-            headers
-          });
+    if (cache) {
+      return await loadCachedSnapshot({
+        cache,
+        asset,
+        coinId: normalizedCoinId,
+        symbol,
+        nowMs: cacheNowMs,
+        fetchFn,
+        apiKey,
+        headers
+      });
+    }
 
-          if (!response.ok) {
-            throw createProviderResponseError({ symbol, resource: 'snapshot', response });
-          }
-
-          const data = await response.json();
-          assertNoProviderPayloadError(data, 'snapshot');
-          const coinData = data?.[normalizedCoinId];
-
-          if (!coinData || typeof coinData !== 'object') {
-            const error = new Error(`No market quote available for '${symbol}' on CoinGecko`);
-            error.status = 404;
-            error.code = 'SNAPSHOT_NOT_FOUND';
-            throw error;
-          }
-
-          const rawPrice = Number(coinData.usd);
-          const price = Number.isFinite(rawPrice) && rawPrice > 0 ? rawPrice : null;
-
-          if (price === null) {
-            const error = new Error(`Invalid market price received for '${symbol}'`);
-            error.status = 404;
-            error.code = 'SNAPSHOT_NOT_FOUND';
-            throw error;
-          }
-
-          const rawChangePercent = Number(coinData.usd_24h_change);
-          const changePercent = Number.isFinite(rawChangePercent) ? rawChangePercent : null;
-
-          const rawVol = Number(coinData.usd_24h_vol);
-          const volume = Number.isFinite(rawVol) && rawVol >= 0 ? rawVol : null;
-
-          const rawTs = Number(coinData.last_updated_at);
-          const priceAsOf = Number.isFinite(rawTs) && rawTs > 0
-            ? new Date(rawTs * 1000).toISOString()
-            : null;
-
-          let change = null;
-          if (price !== null && changePercent !== null && (1 + changePercent / 100) > 0) {
-            const rollingReference = price / (1 + changePercent / 100);
-            change = price - rollingReference;
-          }
-
-          return {
-            symbol: asset.symbol,
-            currency: 'USD',
-            exchange: null,
-            price,
-            previousClose: null,
-            change,
-            changePercent,
-            dayHigh: null,
-            dayLow: null,
-            volume,
-            updatedAt: priceAsOf,
-            priceAsOf,
-            priceSource: 'coingecko_market_snapshot',
-            freshness: 'delayed',
-            changeBasis: 'ROLLING_24H',
-            volumeSemantics: 'ROLLING_24H_QUOTE_CURRENCY'
-          };
-        } finally {
-          clearTimeout(timeout);
-        }
-      }
+    const data = await fetchSnapshotBatch({
+      requests: [{ asset, coinId: normalizedCoinId, symbol, nowMs: cacheNowMs }],
+      fetchFn,
+      headers
     });
+    if (data[normalizedCoinId] === undefined) throw createMissingSnapshotError(symbol);
+    return normalizeSnapshotObservation(asset, data[normalizedCoinId], cacheNowMs);
   } catch (err) {
     if (err.status) {
       throw err;
@@ -324,7 +540,7 @@ export async function getSnapshot(asset, mapping, options = {}) {
       timeoutErr.code = 'PROVIDER_TIMEOUT';
       throw timeoutErr;
     }
-    const internalErr = new Error(err.message || 'Error fetching CoinGecko market data');
+    const internalErr = new Error('CoinGecko market data provider request failed');
     internalErr.status = 502;
     internalErr.code = 'PROVIDER_ERROR';
     throw internalErr;

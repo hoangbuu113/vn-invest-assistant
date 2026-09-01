@@ -2,7 +2,8 @@ import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { getAssetAnalysis } from '../src/analysis.js';
-import { getMarketHistory } from '../src/market.js';
+import { getMarketHistory, getMarketSnapshot } from '../src/market.js';
+import { getPortfolioOverview } from '../src/portfolio.js';
 import {
   COINGECKO_CACHE_POLICY,
   coingeckoProvider,
@@ -20,6 +21,8 @@ const BTC_ASSET = Object.freeze({
 });
 
 const BTC_MAPPING = Object.freeze({ provider: 'coingecko', providerSymbol: 'bitcoin' });
+const ETH_ASSET = Object.freeze({ ...BTC_ASSET, id: 'asset-eth', symbol: 'ETH' });
+const ETH_MAPPING = Object.freeze({ provider: 'coingecko', providerSymbol: 'ethereum' });
 const NOW = new Date('2026-08-29T12:00:00.000Z');
 const CACHE_NOW_MS = Date.parse('2026-08-29T12:00:00.000Z');
 
@@ -94,6 +97,34 @@ describe('Feature 24A CoinGecko runtime resilience', () => {
     assert.equal(COINGECKO_CACHE_POLICY.snapshotFreshMs, 5 * 60 * 1000);
   });
 
+  test('A2. concurrent different assets share one official multi-ID snapshot request', async () => {
+    const cache = createCoinGeckoRequestCache();
+    const requestedIds = [];
+    let calls = 0;
+    const fetchFn = async (url) => {
+      calls += 1;
+      requestedIds.push(new URL(url).searchParams.get('ids').split(',').sort());
+      return mockResponse({
+        ...snapshotBody('bitcoin', 64250.5),
+        ...snapshotBody('ethereum', 3520.25)
+      });
+    };
+    const options = { cache, cacheNowMs: CACHE_NOW_MS, fetchFn, apiKey: 'test-key' };
+
+    const [bitcoin, ethereum] = await Promise.all([
+      coingeckoProvider.getSnapshot(BTC_ASSET, BTC_MAPPING, options),
+      coingeckoProvider.getSnapshot(ETH_ASSET, ETH_MAPPING, options)
+    ]);
+
+    assert.equal(calls, 1);
+    assert.deepEqual(requestedIds, [['bitcoin', 'ethereum']]);
+    assert.equal(bitcoin.price, 64250.5);
+    assert.equal(ethereum.price, 3520.25);
+    assert.equal(bitcoin.currency, 'USD');
+    assert.equal(ethereum.currency, 'USD');
+    assert.equal(bitcoin.cacheStatus, 'fresh');
+  });
+
   test('B. concurrent snapshot requests for the same canonical CoinGecko ID coalesce', async () => {
     const cache = createCoinGeckoRequestCache();
     let calls = 0;
@@ -108,12 +139,89 @@ describe('Feature 24A CoinGecko runtime resilience', () => {
 
     const first = coingeckoProvider.getSnapshot(BTC_ASSET, BTC_MAPPING, options);
     const second = coingeckoProvider.getSnapshot(BTC_ASSET, BTC_MAPPING, options);
-    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setTimeout(
+      resolve,
+      COINGECKO_CACHE_POLICY.snapshotBatchWindowMs + 5
+    ));
     assert.equal(calls, 1);
     release();
 
     const [left, right] = await Promise.all([first, second]);
     assert.deepEqual(left, right);
+  });
+
+  test('B2. cache expiry refreshes once while an unexpired hit stays local', async () => {
+    const cache = createCoinGeckoRequestCache();
+    let calls = 0;
+    const fetchFn = async () => {
+      calls += 1;
+      return mockResponse(snapshotBody('bitcoin', 64000 + calls));
+    };
+
+    const first = await coingeckoProvider.getSnapshot(BTC_ASSET, BTC_MAPPING, {
+      cache, cacheNowMs: CACHE_NOW_MS, fetchFn, apiKey: 'test-key'
+    });
+    const hit = await coingeckoProvider.getSnapshot(BTC_ASSET, BTC_MAPPING, {
+      cache,
+      cacheNowMs: CACHE_NOW_MS + COINGECKO_CACHE_POLICY.snapshotFreshMs - 1,
+      fetchFn,
+      apiKey: 'test-key'
+    });
+    const refreshed = await coingeckoProvider.getSnapshot(BTC_ASSET, BTC_MAPPING, {
+      cache,
+      cacheNowMs: CACHE_NOW_MS + COINGECKO_CACHE_POLICY.snapshotFreshMs + 1,
+      fetchFn,
+      apiKey: 'test-key'
+    });
+
+    assert.equal(calls, 2);
+    assert.equal(first.price, 64001);
+    assert.equal(hit.price, 64001);
+    assert.equal(refreshed.price, 64002);
+  });
+
+  test('B3. a partial batch resolves valid assets and never fabricates a missing quote', async () => {
+    const cache = createCoinGeckoRequestCache();
+    let calls = 0;
+    const fetchFn = async () => {
+      calls += 1;
+      return mockResponse(snapshotBody('bitcoin', 64250.5));
+    };
+    const options = { cache, cacheNowMs: CACHE_NOW_MS, fetchFn, apiKey: 'test-key' };
+
+    const [bitcoin, ethereum] = await Promise.allSettled([
+      coingeckoProvider.getSnapshot(BTC_ASSET, BTC_MAPPING, options),
+      coingeckoProvider.getSnapshot(ETH_ASSET, ETH_MAPPING, options)
+    ]);
+
+    assert.equal(calls, 1);
+    assert.equal(bitcoin.status, 'fulfilled');
+    assert.equal(bitcoin.value.price, 64250.5);
+    assert.equal(ethereum.status, 'rejected');
+    assert.equal(ethereum.reason.status, 502);
+    assert.equal(ethereum.reason.code, 'PARTIAL_PROVIDER_RESPONSE');
+    assert.equal(ethereum.reason.price, undefined);
+  });
+
+  test('B4. malformed batch payloads fail safely and do not populate the cache', async () => {
+    const cache = createCoinGeckoRequestCache();
+    let calls = 0;
+    const fetchFn = async () => {
+      calls += 1;
+      return calls === 1
+        ? mockResponse([])
+        : mockResponse(snapshotBody('bitcoin', 64250.5));
+    };
+    const options = { cache, cacheNowMs: CACHE_NOW_MS, fetchFn, apiKey: 'test-key' };
+
+    await assert.rejects(
+      () => coingeckoProvider.getSnapshot(BTC_ASSET, BTC_MAPPING, options),
+      (error) => error.status === 502 && error.code === 'MALFORMED_PROVIDER_RESPONSE'
+    );
+    const recovered = await coingeckoProvider.getSnapshot(BTC_ASSET, BTC_MAPPING, options);
+
+    assert.equal(calls, 2);
+    assert.equal(recovered.price, 64250.5);
   });
 
   test('C. one public-plan-safe daily superset serves repeated 1M and 1Y history requests', async () => {
@@ -189,6 +297,16 @@ describe('Feature 24A CoinGecko runtime resilience', () => {
       fetchFn,
       apiKey: 'test-key'
     });
+    const staleRoute = await requestApp(createApp({
+      getMarketSnapshotFn: () => getMarketSnapshot('BTC', {
+        cache,
+        cacheNowMs: staleAt + 2000,
+        fetchFn,
+        apiKey: 'test-key',
+        resolveProviderMappingFn: async () => ({ asset: BTC_ASSET, mapping: BTC_MAPPING }),
+        providerAdapter: coingeckoProvider
+      })
+    }), '/api/market/BTC');
 
     assert.equal(first.price, 1.0042);
     assert.equal(stale.price, first.price);
@@ -196,7 +314,19 @@ describe('Feature 24A CoinGecko runtime resilience', () => {
     assert.equal(stale.freshness, 'stale');
     assert.equal(stale.cacheStatus, 'stale');
     assert.equal(stale.staleReason, 'PROVIDER_RATE_LIMITED');
-    assert.deepEqual(cooledDown, stale);
+    assert.equal(stale.cachedAt, new Date(CACHE_NOW_MS).toISOString());
+    assert.equal(stale.cacheAgeMs, COINGECKO_CACHE_POLICY.snapshotFreshMs + 1);
+    assert.equal(cooledDown.price, stale.price);
+    assert.equal(cooledDown.priceAsOf, stale.priceAsOf);
+    assert.equal(cooledDown.cacheStatus, 'stale');
+    assert.equal(cooledDown.staleReason, 'PROVIDER_RATE_LIMITED');
+    assert.equal(cooledDown.cacheAgeMs, stale.cacheAgeMs + 1000);
+    assert.equal(staleRoute.status, 200);
+    assert.equal(staleRoute.body.data.freshness, 'stale');
+    assert.equal(staleRoute.body.data.cacheStatus, 'stale');
+    assert.equal(staleRoute.body.data.priceAsOf, first.priceAsOf);
+    assert.equal(staleRoute.body.data.cachedAt, first.cachedAt);
+    assert.equal(staleRoute.body.data.cacheAgeMs, stale.cacheAgeMs + 2000);
     assert.equal(calls, 2);
   });
 
@@ -284,6 +414,84 @@ describe('Feature 24A CoinGecko runtime resilience', () => {
     assert.equal(analysisRoute.status, 422);
     assert.equal(analysisRoute.body.code, 'UNSUPPORTED_HISTORY');
     assert.equal(analysisRoute.body.data, undefined);
+  });
+
+  test('J2. portfolio consumers share the canonical batched USD snapshot path without USDT substitution', async () => {
+    const cache = createCoinGeckoRequestCache();
+    let calls = 0;
+    let requestedUrl;
+    const fetchFn = async (url) => {
+      calls += 1;
+      requestedUrl = new URL(url);
+      return mockResponse({
+        ...snapshotBody('bitcoin', 64000),
+        ...snapshotBody('ethereum', 3200)
+      });
+    };
+    const resolutions = {
+      BTC: { asset: BTC_ASSET, mapping: BTC_MAPPING },
+      ETH: { asset: ETH_ASSET, mapping: ETH_MAPPING }
+    };
+    const holdings = [
+      {
+        id: 'holding-btc',
+        asset_id: BTC_ASSET.id,
+        quantity: 1,
+        average_cost: 60000,
+        asset: {
+          id: BTC_ASSET.id,
+          symbol: 'BTC',
+          name: 'Bitcoin',
+          asset_type: 'crypto',
+          quote_currency: 'USD'
+        }
+      },
+      {
+        id: 'holding-eth',
+        asset_id: ETH_ASSET.id,
+        quantity: 2,
+        average_cost: 3000,
+        asset: {
+          id: ETH_ASSET.id,
+          symbol: 'ETH',
+          name: 'Ethereum',
+          asset_type: 'crypto',
+          quote_currency: 'USD'
+        }
+      }
+    ];
+
+    const overview = await getPortfolioOverview({
+      getCashOverviewFn: async () => ({ currentCash: 0 }),
+      getHoldingsFn: async () => holdings,
+      getMarketSnapshotFn: (symbol) => getMarketSnapshot(symbol, {
+        cache,
+        cacheNowMs: CACHE_NOW_MS,
+        fetchFn,
+        apiKey: 'test-key',
+        resolveProviderMappingFn: async () => resolutions[symbol],
+        providerAdapter: coingeckoProvider
+      }),
+      getFxRateFn: async () => ({
+        baseCurrency: 'USD',
+        quoteCurrency: 'VND',
+        rate: 26000,
+        provider: 'fixture_fx',
+        sourceTimestamp: NOW.toISOString(),
+        availability: 'available',
+        freshness: 'delayed',
+        reason: null
+      })
+    });
+
+    assert.equal(calls, 1);
+    assert.deepEqual(requestedUrl.searchParams.get('ids').split(',').sort(), ['bitcoin', 'ethereum']);
+    assert.equal(requestedUrl.searchParams.get('vs_currencies'), 'usd');
+    assert.doesNotMatch(requestedUrl.toString(), /usdt/i);
+    assert.equal(overview.holdings[0].nativeCurrency, 'USD');
+    assert.equal(overview.holdings[1].nativeCurrency, 'USD');
+    assert.equal(overview.holdings[0].latestPrice, 64000);
+    assert.equal(overview.holdings[1].latestPrice, 3200);
   });
 
   test('K–M. cache keys isolate crypto assets and all probes remain mocked and read-only', async () => {
