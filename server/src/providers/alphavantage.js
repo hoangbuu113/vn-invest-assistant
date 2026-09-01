@@ -120,8 +120,9 @@ export async function getSnapshot(asset, mapping, options = {}) {
       timeoutErr.status = 504;
       throw timeoutErr;
     }
-    const internalErr = new Error(err.message || 'Error fetching Alpha Vantage market data');
-    internalErr.status = 500;
+    const internalErr = new Error('Error fetching Alpha Vantage market data');
+    internalErr.status = 502;
+    internalErr.code = 'PROVIDER_ERROR';
     throw internalErr;
   }
 }
@@ -248,7 +249,7 @@ export async function getHistory(asset, mapping, options = {}) {
       timeoutErr.code = 'PROVIDER_TIMEOUT';
       throw timeoutErr;
     }
-    const internalErr = new Error(err.message || 'Error fetching Alpha Vantage market history');
+    const internalErr = new Error('Error fetching Alpha Vantage market history');
     internalErr.status = 502;
     internalErr.code = 'PROVIDER_ERROR';
     throw internalErr;

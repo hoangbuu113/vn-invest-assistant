@@ -20,29 +20,27 @@
 - **Feature 28 Implementation Status**: COMPLETE. The deterministic Opportunity Engine uses separate asset-class cohorts, transparent evidence and ranking, isolated profile-fit assessment, and explicit candidate capability states.
 - **Feature 29 Implementation Status**: COMPLETE. The guarded AI Investment Brief uses a closed deterministic fact registry, evidence-linked prose validation, a deterministic fallback, and an opt-in OpenAI adapter that is disabled by default.
 - **Automated Test Suite**:
-  - Latest Local Full Backend Regression: 590/590 PASS (includes Feature 30B1 security coverage)
-  - Latest Verified Production Feature 26 Backend Regression: 521/521 PASS
-  - Latest Focused Feature 26 Display/Authority Gate: 11/11 PASS
-  - Focused Feature 27 Gate: 13/13 PASS
-  - Focused Feature 28 Gate: 16/16 PASS
-  - Focused Feature 29 Gate: 23/23 PASS
-  - Focused Feature 30B1 Security Gate: 11/11 PASS
-  - Focused Transaction/Cash/Opening-Position Gate: 57/57 PASS
-  - Client Build: PASS
+  - Latest Local Full Backend Regression: 600/600 PASS (includes 9 dedicated Feature 30B2 release hardening tests)
+  - Latest Focused Feature 30B2 Gate: 9/9 PASS
+  - Latest Focused Feature 30B1 Security Gate: 11/11 PASS
+  - Latest Focused Feature 29 Gate: 23/23 PASS
+  - Latest Focused Feature 28 Gate: 16/16 PASS
+  - Latest Focused Feature 27 Gate: 13/13 PASS
+  - Client Build: PASS (~190ms, 0 vulnerabilities)
   - `git diff --check`: PASS
 - **Database**: `20260830000000_feature_26a_hybrid_crypto_authority.sql` and `20260901000000_feature_30b1_single_owner_security.sql` applied successfully
 - **Financial Integrity**: Authoritative holdings, portfolio transactions, cash ledger, opening baselines, and cash balance (606,052,112 VND) unchanged
 - **Production Frontend**: `https://vn-invest-assistant.vn-invest-assistant.workers.dev` (Cloudflare, Owner Gate active, root HTTP 200 verified)
 - **Production Backend**: `https://vn-invest-assistant-api.onrender.com` (Render, live at commit `58a5c21`, health status `ok`, owner authentication active)
-- **Git Working Tree**: CLEAN after Feature 30B1 activation and frontend deployment
+- **Git Working Tree**: CLEAN after Feature 30B2 release hardening checkpoint
 - **GitHub Remote**: `origin/main` synchronized at commit `58a5c21`
-- **Feature 30 Security Status**: IN PROGRESS. Feature 30B1 production security activation is COMPLETE. Database permission migration `20260901000000_feature_30b1_single_owner_security.sql` is applied in Supabase. Direct anon Supabase private access is revoked. Render backend enforces single-owner Bearer token authentication (`OWNER_ACCESS_TOKEN` and privileged `SUPABASE_SECRET_KEY`). Cloudflare frontend enforces the Owner Gate session unlock (`sessionStorage` only, zero bundled secrets). Feature 30 remains IN PROGRESS; Feature 30B2 is NEXT.
+- **Feature 30 Security & Hardening Status**: IN PROGRESS. Feature 30B1 production security activation and Feature 30B2 release cleanup & error hardening are COMPLETE (error sanitization across Express/Twelve Data/Alpha Vantage/Binance, dependency audit 0 vulnerabilities, obsolete `@openai/sites-vite-plugin` and stale CORS origin removed, `server/.env.example` contract updated with names only, numeric safety in portfolio valuation hardened with explicit invalid handling).
 
 ## CURRENT PHASE
 FEATURE 30 — RELEASE HARDENING (IN PROGRESS)
 
 ## CURRENT NEXT PROJECT TASK
-FEATURE 30B2 — Production Hardening & Operational Audit
+FEATURE 30 Final Checkpoint & Operational Verification
 
 ---
 

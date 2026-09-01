@@ -192,8 +192,7 @@ export function createApp(services = {}) {
     } catch (error) {
       return res.status(500).json({
         status: 'error',
-        message: 'Failed to fetch investor profile',
-        details: error.message
+        message: 'Failed to fetch investor profile'
       });
     }
   });
@@ -255,8 +254,7 @@ export function createApp(services = {}) {
     } catch (error) {
       return res.status(error.statusCode || 500).json({
         status: 'error',
-        message: 'Failed to update investor profile',
-        details: error.message
+        message: 'Failed to update investor profile'
       });
     }
   });
@@ -273,8 +271,7 @@ export function createApp(services = {}) {
     } catch (error) {
       return res.status(500).json({
         status: 'error',
-        message: 'Failed to fetch holdings',
-        details: error.message
+        message: 'Failed to fetch holdings'
       });
     }
   });
@@ -319,8 +316,7 @@ export function createApp(services = {}) {
       const statusCode = error.statusCode || 500;
       return res.status(statusCode).json({
         status: 'error',
-        message: error.message || 'Failed to create opening position',
-        details: error.message
+        message: error.statusCode ? error.message : 'Failed to create opening position'
       });
     }
   });
@@ -365,8 +361,7 @@ export function createApp(services = {}) {
       const statusCode = error.statusCode || 500;
       return res.status(statusCode).json({
         status: 'error',
-        message: error.message || 'Failed to correct opening position',
-        details: error.message
+        message: error.statusCode ? error.message : 'Failed to correct opening position'
       });
     }
   });
@@ -391,8 +386,7 @@ export function createApp(services = {}) {
       const statusCode = error.statusCode || 500;
       return res.status(statusCode).json({
         status: 'error',
-        message: error.message || 'Failed to cancel opening position',
-        details: error.message
+        message: error.statusCode ? error.message : 'Failed to cancel opening position'
       });
     }
   });
@@ -423,8 +417,7 @@ export function createApp(services = {}) {
       const statusCode = error.statusCode || 500;
       return res.status(statusCode).json({
         status: 'error',
-        message: error.message || 'Failed to fetch portfolio transactions',
-        details: error.message
+        message: error.statusCode ? error.message : 'Failed to fetch portfolio transactions'
       });
     }
   });
@@ -496,8 +489,7 @@ export function createApp(services = {}) {
       const statusCode = error.statusCode || 500;
       return res.status(statusCode).json({
         status: 'error',
-        message: error.message || 'Failed to create portfolio transaction',
-        details: error.message
+        message: error.statusCode ? error.message : 'Failed to create portfolio transaction'
       });
     }
   });
@@ -515,8 +507,7 @@ export function createApp(services = {}) {
     } catch (error) {
       return res.status(error.statusCode || 500).json({
         status: 'error',
-        message: error.message || 'Failed to fetch cash overview',
-        details: error.message
+        message: error.statusCode ? error.message : 'Failed to fetch cash overview'
       });
     }
   });
@@ -533,8 +524,7 @@ export function createApp(services = {}) {
     } catch (error) {
       return res.status(error.statusCode || 500).json({
         status: 'error',
-        message: error.message || 'Failed to fetch cash ledger',
-        details: error.message
+        message: error.statusCode ? error.message : 'Failed to fetch cash ledger'
       });
     }
   });
@@ -558,8 +548,7 @@ export function createApp(services = {}) {
     } catch (error) {
       return res.status(error.statusCode || 500).json({
         status: 'error',
-        message: error.message || `Failed to create ${entryType.toLowerCase()}`,
-        details: error.message
+        message: error.statusCode ? error.message : `Failed to create ${entryType.toLowerCase()}`
       });
     }
   }
@@ -584,8 +573,7 @@ export function createApp(services = {}) {
     } catch (error) {
       return res.status(500).json({
         status: 'error',
-        message: 'Failed to fetch assets from database',
-        details: error.message
+        message: 'Failed to fetch assets from database'
       });
     }
   });
@@ -608,8 +596,7 @@ export function createApp(services = {}) {
     } catch (error) {
       return res.status(500).json({
         status: 'error',
-        message: 'Failed to fetch asset from database',
-        details: error.message
+        message: 'Failed to fetch asset from database'
       });
     }
   });
@@ -730,8 +717,7 @@ export function createApp(services = {}) {
       const statusCode = error.statusCode || (error.code === 'NEWS_SOURCES_UNAVAILABLE' ? 503 : 500);
       const response = {
         status: 'error',
-        message: 'Failed to fetch personalized news feed',
-        details: error.message
+        message: 'Failed to fetch personalized news feed'
       };
       if (error.code) response.code = error.code;
       return res.status(statusCode).json(response);
@@ -838,8 +824,7 @@ export function createApp(services = {}) {
     } catch (error) {
       return res.status(500).json({
         status: 'error',
-        message: 'Failed to generate portfolio overview',
-        details: error.message
+        message: 'Failed to generate portfolio overview'
       });
     }
   });
@@ -855,8 +840,7 @@ export function createApp(services = {}) {
     } catch (error) {
       return res.status(500).json({
         status: 'error',
-        message: 'Failed to generate portfolio composition',
-        details: error.message
+        message: 'Failed to generate portfolio composition'
       });
     }
   });
@@ -972,8 +956,7 @@ export function createApp(services = {}) {
     } catch (error) {
       return res.status(500).json({
         status: 'error',
-        message: 'Failed to fetch watchlist',
-        details: error.message
+        message: 'Failed to fetch watchlist'
       });
     }
   });
@@ -1011,8 +994,7 @@ export function createApp(services = {}) {
       const statusCode = error.statusCode || 500;
       return res.status(statusCode).json({
         status: 'error',
-        message: error.message || 'Failed to add to watchlist',
-        details: error.message
+        message: error.statusCode ? error.message : 'Failed to add to watchlist'
       });
     }
   });
@@ -1037,8 +1019,7 @@ export function createApp(services = {}) {
       const statusCode = error.statusCode || 500;
       return res.status(statusCode).json({
         status: 'error',
-        message: error.message || 'Failed to remove from watchlist',
-        details: error.message
+        message: error.statusCode ? error.message : 'Failed to remove from watchlist'
       });
     }
   });
@@ -1055,8 +1036,7 @@ export function createApp(services = {}) {
     } catch (error) {
       return res.status(500).json({
         status: 'error',
-        message: 'Failed to fetch price alerts',
-        details: error.message
+        message: 'Failed to fetch price alerts'
       });
     }
   });
@@ -1104,8 +1084,7 @@ export function createApp(services = {}) {
       const statusCode = error.statusCode || 500;
       return res.status(statusCode).json({
         status: 'error',
-        message: error.message || 'Failed to create price alert',
-        details: error.message
+        message: error.statusCode ? error.message : 'Failed to create price alert'
       });
     }
   });
@@ -1130,8 +1109,7 @@ export function createApp(services = {}) {
       const statusCode = error.statusCode || 500;
       return res.status(statusCode).json({
         status: 'error',
-        message: error.message || 'Failed to delete price alert',
-        details: error.message
+        message: error.statusCode ? error.message : 'Failed to delete price alert'
       });
     }
   });
@@ -1148,8 +1126,7 @@ export function createApp(services = {}) {
     } catch (error) {
       return res.status(500).json({
         status: 'error',
-        message: 'Failed to evaluate price alerts',
-        details: error.message
+        message: 'Failed to evaluate price alerts'
       });
     }
   });
@@ -1174,8 +1151,7 @@ export function createApp(services = {}) {
       const statusCode = error.statusCode || 500;
       return res.status(statusCode).json({
         status: 'error',
-        message: error.message || 'Failed to reactivate price alert',
-        details: error.message
+        message: error.statusCode ? error.message : 'Failed to reactivate price alert'
       });
     }
   });

@@ -972,7 +972,7 @@ export async function getSnapshot(asset, mapping, options = {}) {
     if (err.name === 'AbortError') {
       throw createBinanceError(`Market quote request timed out for '${symbol}'`, 'PROVIDER_TIMEOUT', 504);
     }
-    throw createBinanceError(`Error fetching market quote for '${symbol}': ${err.message}`, 'PROVIDER_ERROR', 502);
+    throw createBinanceError(`Error fetching market quote for '${symbol}'`, 'PROVIDER_ERROR', 502);
   }
 }
 

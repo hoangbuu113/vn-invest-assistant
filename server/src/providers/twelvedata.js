@@ -44,18 +44,21 @@ export async function getTwelveDataFxRate(baseCurrency, quoteCurrency = REPORTIN
     clearTimeout(timeout);
 
     if (!response.ok) {
-      return createUnavailableFxRate(normalizedBase, normalizedQuote, 'FX_PROVIDER_ERROR', {
+      const isRateLimit = response.status === 429;
+      return createUnavailableFxRate(normalizedBase, normalizedQuote, isRateLimit ? 'FX_PROVIDER_RATE_LIMITED' : 'FX_PROVIDER_ERROR', {
         provider: 'twelvedata',
-        reason: `Upstream returned status ${response.status}`
+        reason: isRateLimit ? 'FX_PROVIDER_RATE_LIMITED' : 'FX_PROVIDER_ERROR'
       });
     }
 
     const data = await response.json();
     if (data?.status === 'error' || (typeof data?.code === 'number' && data.code >= 400)) {
+      const isRateLimit = data?.code === 429 || (typeof data?.message === 'string' && /rate|limit|credits/i.test(data.message));
+      const reasonCode = isRateLimit ? 'FX_PROVIDER_RATE_LIMITED' : 'FX_PROVIDER_ERROR';
       return createUnavailableFxRate(
         normalizedBase,
         normalizedQuote,
-        data.message || 'FX_PROVIDER_ERROR',
+        reasonCode,
         { provider: 'twelvedata' }
       );
     }
@@ -105,7 +108,7 @@ export async function getTwelveDataFxRate(baseCurrency, quoteCurrency = REPORTIN
     }
     return createUnavailableFxRate(normalizedBase, normalizedQuote, 'FX_PROVIDER_ERROR', {
       provider: 'twelvedata',
-      reason: err.message
+      reason: 'FX_PROVIDER_ERROR'
     });
   }
 }
@@ -135,7 +138,7 @@ export async function getSnapshot(asset, mapping, options = {}) {
 
   const rate = await getTwelveDataFxRate(baseCurrency, quoteCurrency, options);
   if (rate.availability !== 'available') {
-    const err = new Error(rate.reason || `Market data for '${symbol}' is unavailable`);
+    const err = new Error(`Market data for '${symbol}' is unavailable`);
     err.status = rate.reason === 'FX_PROVIDER_UNCONFIGURED' ? 422 : 502;
     err.code = rate.reason || 'PROVIDER_ERROR';
     throw err;

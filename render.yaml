@@ -12,7 +12,7 @@ services:
       - key: NODE_VERSION
         value: 24.19.0
       - key: CORS_ORIGINS
-        value: https://vn-invest-assistant.hoangbuu1010.chatgpt.site,https://vn-invest-assistant.vn-invest-assistant.workers.dev
+        value: https://vn-invest-assistant.vn-invest-assistant.workers.dev
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_PUBLISHABLE_KEY

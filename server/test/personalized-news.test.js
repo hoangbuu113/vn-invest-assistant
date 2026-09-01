@@ -466,7 +466,7 @@ describe('Feature 13 — Personalized Relevant News / Tin của tôi', () => {
       assert.equal(res.status, 500);
       assert.equal(body.status, 'error');
       assert.ok(body.message.includes('Failed to fetch personalized news feed'));
-      assert.ok(body.details.includes('Database connection timeout'));
+      assert.equal(body.details, undefined, 'Internal database details must not leak to client');
     });
   });
 });

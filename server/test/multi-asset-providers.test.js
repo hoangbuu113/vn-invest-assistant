@@ -65,7 +65,7 @@ describe('Feature 20A — Real Multi-Asset Providers & Representative Assets', (
       fetchFn: errorFetch
     });
     assert.equal(errorResult.availability, 'unavailable');
-    assert.equal(errorResult.reason, 'Invalid API key');
+    assert.equal(errorResult.reason, 'FX_PROVIDER_ERROR');
 
     // 4. Malformed/negative rate
     const negativeFetch = async () => ({

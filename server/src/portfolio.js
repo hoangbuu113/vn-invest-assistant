@@ -21,6 +21,17 @@ function validPositiveNumber(value) {
   return typeof value === 'number' && Number.isFinite(value) && value > 0;
 }
 
+function normalizeNonNegativeFinancialNumber(value) {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) && value >= 0 ? value : null;
+  }
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value.trim());
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+  }
+  return null;
+}
+
 function providerCurrencyMismatch(snapshot, canonicalCurrency) {
   if (!snapshot || snapshot.currency === null || snapshot.currency === undefined) return false;
   if (typeof snapshot.currency !== 'string' || !snapshot.currency.trim()) return true;
@@ -46,22 +57,12 @@ function fxRateForCurrency(fxRatesMap, currency) {
  *    and expose valuation and P/L coverage independently.
  */
 export function calculatePortfolioValuation(profile, holdings, snapshotsMap = {}, fxRatesMap = {}) {
-  const cashAvailable = profile && typeof profile.cash_available === 'number' && !isNaN(profile.cash_available) && isFinite(profile.cash_available)
-    ? profile.cash_available
-    : (typeof profile?.cash_available === 'string' && !isNaN(Number(profile.cash_available)) ? Number(profile.cash_available) : 0);
+  const cashAvailable = profile ? normalizeNonNegativeFinancialNumber(profile.cash_available) ?? 0 : 0;
 
   const holdingsWithMarket = (Array.isArray(holdings) ? holdings : []).map((holding) => {
-    const rawQuantity = holding.quantity;
-    const quantity = typeof rawQuantity === 'number' && !isNaN(rawQuantity) && isFinite(rawQuantity)
-      ? rawQuantity
-      : Number(rawQuantity || 0);
+    const quantity = normalizeNonNegativeFinancialNumber(holding.quantity);
+    const averageCost = normalizeNonNegativeFinancialNumber(holding.average_cost);
 
-    const rawAvgCost = holding.average_cost;
-    const averageCost = typeof rawAvgCost === 'number' && !isNaN(rawAvgCost) && isFinite(rawAvgCost)
-      ? rawAvgCost
-      : Number(rawAvgCost || 0);
-
-    const nativeCostBasis = quantity * averageCost;
     const symbol = holding.asset?.symbol || null;
     const nativeCurrency = canonicalQuoteCurrency(holding);
 
@@ -84,6 +85,15 @@ export function calculatePortfolioValuation(profile, holdings, snapshotsMap = {}
     let fxProvider = null;
     let fxFreshness = null;
 
+    if (quantity === null) {
+      valuationReason = 'MALFORMED_HOLDING_QUANTITY';
+      pnlReason = 'MALFORMED_HOLDING_QUANTITY';
+    } else if (averageCost === null) {
+      pnlReason = 'MALFORMED_HOLDING_COST';
+    }
+
+    const nativeCostBasis = quantity !== null && averageCost !== null ? quantity * averageCost : null;
+
     const snapshot = symbol ? snapshotsMap[symbol] : null;
     const hasValidPrice = validPositiveNumber(snapshot?.price);
 
@@ -93,12 +103,19 @@ export function calculatePortfolioValuation(profile, holdings, snapshotsMap = {}
       marketUpdatedAt = snapshot.priceAsOf || snapshot.updatedAt || null;
     }
 
-    if (!nativeCurrency) {
+    if (quantity === null) {
+      pricingStatus = hasValidPrice ? 'available' : 'unavailable';
+      valuationStatus = 'unavailable';
+      valuationReason = 'MALFORMED_HOLDING_QUANTITY';
+      pnlStatus = 'unavailable';
+      pnlReason = 'MALFORMED_HOLDING_QUANTITY';
+      costBasis = null;
+    } else if (!nativeCurrency) {
       valuationReason = 'MISSING_CANONICAL_CURRENCY';
       pnlReason = 'MISSING_CANONICAL_CURRENCY';
     } else if (!hasValidPrice) {
       valuationReason = 'MISSING_NATIVE_PRICE';
-      pnlReason = 'MISSING_NATIVE_PRICE';
+      pnlReason = averageCost === null ? 'MALFORMED_HOLDING_COST' : 'MISSING_NATIVE_PRICE';
       if (nativeCurrency === REPORTING_CURRENCY) {
         costBasis = nativeCostBasis;
       }
@@ -107,7 +124,7 @@ export function calculatePortfolioValuation(profile, holdings, snapshotsMap = {}
       latestPrice = null;
       marketUpdatedAt = null;
       valuationReason = 'PROVIDER_CURRENCY_MISMATCH';
-      pnlReason = 'PROVIDER_CURRENCY_MISMATCH';
+      pnlReason = averageCost === null ? 'MALFORMED_HOLDING_COST' : 'PROVIDER_CURRENCY_MISMATCH';
       if (nativeCurrency === REPORTING_CURRENCY) {
         costBasis = nativeCostBasis;
       }
@@ -117,14 +134,21 @@ export function calculatePortfolioValuation(profile, holdings, snapshotsMap = {}
       if (nativeCurrency === REPORTING_CURRENCY) {
         reportingMarketValue = nativeMarketValue;
         marketValue = reportingMarketValue;
-        costBasis = nativeCostBasis;
-        unrealizedPnL = reportingMarketValue - costBasis;
-        unrealizedPnLPercent = costBasis > 0 ? (unrealizedPnL / costBasis) * 100 : null;
         pricingStatus = 'available';
         valuationStatus = 'available';
         valuationReason = null;
-        pnlStatus = 'available';
-        pnlReason = null;
+
+        if (averageCost === null) {
+          costBasis = null;
+          pnlStatus = 'unavailable';
+          pnlReason = 'MALFORMED_HOLDING_COST';
+        } else {
+          costBasis = nativeCostBasis;
+          unrealizedPnL = reportingMarketValue - costBasis;
+          unrealizedPnLPercent = costBasis > 0 ? (unrealizedPnL / costBasis) * 100 : null;
+          pnlStatus = 'available';
+          pnlReason = null;
+        }
       } else {
         const fxRate = normalizeFxRate(
           fxRateForCurrency(fxRatesMap, nativeCurrency),
@@ -135,7 +159,7 @@ export function calculatePortfolioValuation(profile, holdings, snapshotsMap = {}
         fxRateTimestamp = fxRate.sourceTimestamp;
         fxProvider = fxRate.provider;
         fxFreshness = fxRate.freshness;
-        pnlReason = 'NON_VND_PNL_UNAVAILABLE';
+        pnlReason = averageCost === null ? 'MALFORMED_HOLDING_COST' : 'NON_VND_PNL_UNAVAILABLE';
 
         if (fxRate.availability === 'available') {
           reportingMarketValue = nativeMarketValue * fxRate.rate;
