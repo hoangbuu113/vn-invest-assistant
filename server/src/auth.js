@@ -16,6 +16,7 @@ export const PRIVATE_API_PREFIXES = Object.freeze([
 ]);
 
 export const MIN_OWNER_ACCESS_TOKEN_LENGTH = 32;
+export const MIN_ALERT_SCHEDULER_TOKEN_LENGTH = 32;
 
 export function isPrivateApiPath(pathname) {
   if (typeof pathname !== 'string') return false;
@@ -74,6 +75,45 @@ export function createOwnerAuthMiddleware({ ownerAccessToken } = {}) {
 
     if (!ownerTokensMatch(candidate, configuredToken)) {
       return authFailure(res, 403, 'OWNER_AUTH_INVALID', 'Owner authentication failed');
+    }
+
+    return next();
+  };
+}
+
+export function createAlertSchedulerAuthMiddleware({ alertSchedulerToken } = {}) {
+  const configuredToken = typeof alertSchedulerToken === 'string' &&
+    alertSchedulerToken.length >= MIN_ALERT_SCHEDULER_TOKEN_LENGTH
+    ? alertSchedulerToken
+    : null;
+
+  return function requireAlertScheduler(req, res, next) {
+    if (!configuredToken) {
+      return authFailure(
+        res,
+        503,
+        'ALERT_SCHEDULER_NOT_CONFIGURED',
+        'Background alert evaluation is unavailable'
+      );
+    }
+
+    const candidate = readBearerToken(req.get('authorization'));
+    if (!candidate) {
+      return authFailure(
+        res,
+        401,
+        'ALERT_SCHEDULER_AUTH_REQUIRED',
+        'Alert scheduler authentication is required'
+      );
+    }
+
+    if (!ownerTokensMatch(candidate, configuredToken)) {
+      return authFailure(
+        res,
+        403,
+        'ALERT_SCHEDULER_AUTH_INVALID',
+        'Alert scheduler authentication failed'
+      );
     }
 
     return next();

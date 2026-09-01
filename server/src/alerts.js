@@ -16,6 +16,10 @@ export const ALERT_STATUS_LABELS = {
   triggered: 'Đã kích hoạt'
 };
 
+export function isStaleAlertSnapshot(snapshot) {
+  return snapshot?.freshness === 'stale' || snapshot?.cacheStatus === 'stale';
+}
+
 /**
  * Validates if direction is a supported alert condition ('above' | 'below').
  */
@@ -90,6 +94,20 @@ export function evaluateSingleAlert(alert, snapshot, options = {}) {
   const validPrice = snapshot && typeof snapshot === 'object' && typeof snapshot.price === 'number' && Number.isFinite(snapshot.price) && snapshot.price > 0
     ? snapshot.price
     : null;
+
+  // A stale last-good observation remains useful for display, but it must never
+  // produce a new one-shot trigger because the threshold crossing time is unknown.
+  if (validPrice !== null && isStaleAlertSnapshot(snapshot)) {
+    return {
+      alert,
+      triggered: false,
+      evaluated: false,
+      status: 'stale',
+      evaluatedPrice: validPrice,
+      evaluatedAt: nowIso,
+      reason: 'market_price_stale'
+    };
+  }
 
   // Unavailable price -> remains active, no fake trigger
   if (validPrice === null) {
@@ -177,6 +195,7 @@ export function evaluateAlertsBatch(alerts, marketSnapshotsMap = {}, options = {
       evaluatedCount: 0,
       triggeredCount: 0,
       unavailableCount: 0,
+      staleCount: 0,
       results: [],
       updatedAlerts: []
     };
@@ -185,6 +204,7 @@ export function evaluateAlertsBatch(alerts, marketSnapshotsMap = {}, options = {
   let evaluatedCount = 0;
   let triggeredCount = 0;
   let unavailableCount = 0;
+  let staleCount = 0;
 
   const results = [];
   const updatedAlerts = [];
@@ -203,8 +223,11 @@ export function evaluateAlertsBatch(alerts, marketSnapshotsMap = {}, options = {
     if (outcome.triggered) {
       triggeredCount++;
     }
-    if (outcome.status === 'unavailable' && alert.status === 'active') {
+    if (['unavailable', 'stale'].includes(outcome.status) && alert.status === 'active') {
       unavailableCount++;
+    }
+    if (outcome.status === 'stale' && alert.status === 'active') {
+      staleCount++;
     }
   }
 
@@ -212,8 +235,8 @@ export function evaluateAlertsBatch(alerts, marketSnapshotsMap = {}, options = {
     evaluatedCount,
     triggeredCount,
     unavailableCount,
+    staleCount,
     results,
     updatedAlerts
   };
 }
-

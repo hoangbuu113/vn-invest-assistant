@@ -1100,6 +1100,45 @@ export async function reactivateAlert(alertId, client = privateSupabase) {
 }
 
 /**
+ * Conditionally persists one active-alert evaluation. The status predicate is
+ * part of the production update, making a one-shot trigger safe across
+ * overlapping requests and process restarts.
+ */
+export async function persistActiveAlertEvaluation(updated, profileId, client = privateSupabase) {
+  const db = client || privateSupabase;
+  if (!db) throw new Error('Private database access is not configured');
+
+  let values;
+  if (updated?.status === 'triggered') {
+    values = {
+      status: 'triggered',
+      triggered_at: updated.triggered_at,
+      last_evaluated_price: updated.last_evaluated_price,
+      last_evaluated_at: updated.last_evaluated_at
+    };
+  } else if (updated?.status === 'active' && updated.last_evaluated_at) {
+    values = {
+      last_evaluated_price: updated.last_evaluated_price,
+      last_evaluated_at: updated.last_evaluated_at
+    };
+  } else {
+    return false;
+  }
+
+  const { data, error } = await db
+    .from('price_alerts')
+    .update(values)
+    .eq('id', updated.id)
+    .eq('profile_id', profileId)
+    .eq('status', 'active')
+    .select('id')
+    .maybeSingle();
+
+  if (error) throw new Error(`Database update error: ${error.message}`);
+  return Boolean(data);
+}
+
+/**
  * Evaluates all active alerts for the singleton profile against market snapshots and persists any state changes.
  */
 export async function evaluateAndPersistAlerts({ getMarketSnapshotFn = getMarketSnapshot, now = new Date() } = {}, client = privateSupabase) {
@@ -1129,6 +1168,7 @@ export async function evaluateAndPersistAlerts({ getMarketSnapshotFn = getMarket
       evaluatedCount: 0,
       triggeredCount: 0,
       unavailableCount: 0,
+      staleCount: 0,
       alerts: allAlerts
     };
   }
@@ -1151,35 +1191,19 @@ export async function evaluateAndPersistAlerts({ getMarketSnapshotFn = getMarket
   );
 
   // 3. Evaluate using deterministic evaluation engine
-  const { evaluatedCount, triggeredCount, unavailableCount, updatedAlerts } = evaluateAlertsBatch(
+  const { evaluatedCount, unavailableCount, staleCount, updatedAlerts } = evaluateAlertsBatch(
     activeAlerts,
     marketSnapshotsMap,
     { now }
   );
 
-  // 4. Persist any state changes for evaluated or triggered alerts
+  // 4. Persist state changes only while the row is still active. PostgreSQL
+  // re-checks this predicate after row locking, so overlapping scheduler/manual
+  // evaluations cannot claim the same one-shot trigger twice.
+  let persistedTriggeredCount = 0;
   for (const updated of updatedAlerts) {
-    if (updated.status === 'triggered') {
-      await db
-        .from('price_alerts')
-        .update({
-          status: 'triggered',
-          triggered_at: updated.triggered_at,
-          last_evaluated_price: updated.last_evaluated_price,
-          last_evaluated_at: updated.last_evaluated_at
-        })
-        .eq('id', updated.id)
-        .eq('profile_id', profile.id);
-    } else if (updated.last_evaluated_at) {
-      await db
-        .from('price_alerts')
-        .update({
-          last_evaluated_price: updated.last_evaluated_price,
-          last_evaluated_at: updated.last_evaluated_at
-        })
-        .eq('id', updated.id)
-        .eq('profile_id', profile.id);
-    }
+    const persisted = await persistActiveAlertEvaluation(updated, profile.id, db);
+    if (updated.status === 'triggered' && persisted) persistedTriggeredCount++;
   }
 
   // 5. Re-fetch all alerts to return up-to-date list
@@ -1187,8 +1211,9 @@ export async function evaluateAndPersistAlerts({ getMarketSnapshotFn = getMarket
 
   return {
     evaluatedCount,
-    triggeredCount,
+    triggeredCount: persistedTriggeredCount,
     unavailableCount,
+    staleCount,
     alerts: refreshedAlerts
   };
 }

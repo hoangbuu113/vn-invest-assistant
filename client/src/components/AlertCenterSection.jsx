@@ -50,8 +50,9 @@ export default function AlertCenterSection({
         const triggered = json.data?.triggeredCount || 0;
         const evaluated = json.data?.evaluatedCount || 0;
         const unavailable = json.data?.unavailableCount || 0;
+        const stale = json.data?.staleCount || 0;
         setEvalSummary({
-          message: `Đã kiểm tra ${evaluated} cảnh báo: ${triggered} cảnh báo mới đạt điều kiện${unavailable > 0 ? `, ${unavailable} mã chưa có dữ liệu giá` : ''}.`,
+          message: `Đã kiểm tra ${evaluated} cảnh báo: ${triggered} cảnh báo mới đạt điều kiện${unavailable > 0 ? `, ${unavailable} mã không có giá đủ mới${stale > 0 ? ` (${stale} mã chỉ có dữ liệu cũ)` : ''}` : ''}.`,
           triggered
         });
       } else {
@@ -184,7 +185,7 @@ export default function AlertCenterSection({
       >
         <span style={{ fontSize: '1rem', lineHeight: 1 }}>ⓘ</span>
         <div>
-          Cảnh báo chỉ kích hoạt một lần và được kiểm tra khi bạn làm mới dữ liệu trong ứng dụng. Phiên bản hiện tại chưa gửi thông báo nền.
+          Cảnh báo chỉ kích hoạt một lần và được kiểm tra tự động khoảng 15 phút một lần khi nguồn giá sẵn sàng. Bạn vẫn có thể kiểm tra thủ công; phiên bản này không gửi push, email hoặc SMS.
         </div>
       </div>
 

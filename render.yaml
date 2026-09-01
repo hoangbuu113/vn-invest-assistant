@@ -21,6 +21,8 @@ services:
         sync: false
       - key: OWNER_ACCESS_TOKEN
         sync: false
+      - key: ALERT_SCHEDULER_TOKEN
+        sync: false
       - key: TWELVE_DATA_API_KEY
         sync: false
       - key: ALPHA_VANTAGE_API_KEY

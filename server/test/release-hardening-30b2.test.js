@@ -194,6 +194,7 @@ describe('Feature 30B2 — Release Cleanup & Error Hardening', () => {
         'SUPABASE_PUBLISHABLE_KEY',
         'SUPABASE_SECRET_KEY',
         'OWNER_ACCESS_TOKEN',
+        'ALERT_SCHEDULER_TOKEN',
         'TWELVE_DATA_API_KEY',
         'ALPHA_VANTAGE_API_KEY',
         'AI_BRIEF_ENABLED'

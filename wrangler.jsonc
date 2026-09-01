@@ -1,12 +1,17 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "vn-invest-assistant",
+  "main": "client/server/index.js",
   "compatibility_date": "2026-08-28",
   "observability": {
     "enabled": true
   },
   "assets": {
     "directory": "client/dist",
+    "binding": "ASSETS",
     "not_found_handling": "single-page-application"
+  },
+  "triggers": {
+    "crons": ["*/15 * * * *"]
   }
 }

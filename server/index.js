@@ -1,7 +1,11 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import { createOwnerAuthMiddleware, PRIVATE_API_PREFIXES } from './src/auth.js';
+import {
+  createAlertSchedulerAuthMiddleware,
+  createOwnerAuthMiddleware,
+  PRIVATE_API_PREFIXES
+} from './src/auth.js';
 import {
   checkSupabaseConnection,
   getAssets,
@@ -136,13 +140,15 @@ export function createApp(services = {}) {
     transactionClient,
     cashClient,
     positionClient,
-    ownerAccessToken = process.env.OWNER_ACCESS_TOKEN
+    ownerAccessToken = process.env.OWNER_ACCESS_TOKEN,
+    alertSchedulerToken = process.env.ALERT_SCHEDULER_TOKEN
   } = services;
 
   const app = express();
   app.use(cors(createCorsOptions(corsOrigins)));
   app.use(express.json());
   app.use(createOwnerAuthMiddleware({ ownerAccessToken }));
+  const requireAlertScheduler = createAlertSchedulerAuthMiddleware({ alertSchedulerToken });
 
   // Basic system health endpoint with provider status
   app.get('/api/health', (req, res) => {
@@ -1124,6 +1130,29 @@ export function createApp(services = {}) {
         data: summary
       });
     } catch (error) {
+      return res.status(500).json({
+        status: 'error',
+        message: 'Failed to evaluate price alerts'
+      });
+    }
+  });
+
+  app.post('/api/internal/alerts/evaluate', requireAlertScheduler, async (req, res) => {
+    try {
+      const summary = await evaluateAndPersistAlertsFn({
+        getMarketSnapshotFn,
+        now: new Date()
+      });
+      return res.json({
+        status: 'ok',
+        data: {
+          evaluatedCount: summary.evaluatedCount,
+          triggeredCount: summary.triggeredCount,
+          unavailableCount: summary.unavailableCount,
+          staleCount: summary.staleCount
+        }
+      });
+    } catch (_error) {
       return res.status(500).json({
         status: 'error',
         message: 'Failed to evaluate price alerts'
