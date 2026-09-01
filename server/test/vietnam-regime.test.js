@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { createApp } from '../index.js';
 import { RegimeCache } from '../src/regime/cache.js';
 import {
+  NSO_CPI_CHART_URL,
   buildInflationDomain,
   fetchNsoInflation,
   parseNsoCpiRelease,
@@ -98,21 +99,39 @@ describe('Feature 27B — Vietnam market regime foundation', () => {
     assert.equal(domain.threeMonthDeltaPp, null);
   });
 
-  test('fetches controlled official NSO pages without deriving YoY from MoM', async () => {
+  test('fetches only the official NSO archive and structured chart without deriving YoY from MoM', async () => {
     const indexUrl = 'https://www.nso.gov.vn/cpi-vi/';
     const julyUrl = 'https://www.nso.gov.vn/tin-tuc-thong-ke/2026/08/chi-so-gia-tieu-dung-thang-bay/';
     const aprilUrl = 'https://www.nso.gov.vn/tin-tuc-thong-ke/2026/05/chi-so-gia-tieu-dung-thang-tu/';
     const pages = new Map([
-      [indexUrl, `<a href="${julyUrl}">Chỉ số giá tiêu dùng tháng Bảy</a><a href="${aprilUrl}">Chỉ số giá tiêu dùng tháng Tư</a>`],
-      [julyUrl, '<p>Chỉ số giá tiêu dùng (CPI) tháng Bảy giảm 0,12% so với tháng trước; tăng 4,45% so với cùng kỳ năm trước.</p><p>Kỳ tham chiếu: 7/2026</p><p>Ngày đăng: 03/08/2026</p>'],
-      [aprilUrl, '<p>Chỉ số giá tiêu dùng (CPI) tháng Tư tăng 0,21% so với tháng trước; tăng 5,46% so với cùng kỳ năm trước.</p><p>Kỳ tham chiếu: 4/2026</p><p>Ngày đăng: 03/05/2026</p>']
+      [indexUrl, `
+        <a href="${julyUrl}"><section class="item"><h3>Chỉ số giá tiêu dùng tháng Bảy</h3>
+          <span>Ngày đăng: 03/08/2026</span><span>Kỳ tham chiếu: 7/2026</span>
+        </section></a>
+        <a href="${aprilUrl}"><section class="item"><h3>Chỉ số giá tiêu dùng tháng Tư</h3>
+          <span>Ngày đăng: 03/05/2026</span><span>Kỳ tham chiếu: Tháng 4/2026</span>
+        </section></a>
+      `],
+      [NSO_CPI_CHART_URL, `
+        <script>var official = {
+          chart_args: {"series":[{"data":[["4/2026",5.46],["7/2026",4.45]]}]},
+          post_id: 24238
+        };</script>
+      `]
     ]);
+    const requestedUrls = [];
     const domain = await fetchNsoInflation({
-      fetchFn: async (url) => response(pages.get(url) || '', { ok: pages.has(url), status: pages.has(url) ? 200 : 404 })
+      now: new Date('2026-09-01T00:00:00Z'),
+      fetchFn: async (url) => {
+        requestedUrls.push(url);
+        return response(pages.get(url) || '', { ok: pages.has(url), status: pages.has(url) ? 200 : 404 });
+      }
     });
+    assert.deepEqual(requestedUrls.sort(), [NSO_CPI_CHART_URL, indexUrl].sort());
     assert.equal(domain.status, 'available');
     assert.equal(domain.headlineCpiYoYPct, 4.45);
     assert.equal(domain.threeMonthDeltaPp, 4.45 - 5.46);
+    assert.equal(domain.provenance.chartUrl, NSO_CPI_CHART_URL);
   });
 
   test('parses a verified SBV weekly overnight-rate observation', () => {

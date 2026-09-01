@@ -48,7 +48,7 @@ export async function getVietnamRegime({
   requireNow(now);
   const [moneyMarket, inflation] = await Promise.all([
     cache.fetchWithCache('moneyMarket', fetchSbvMoneyMarketFn, { now }),
-    cache.fetchWithCache('inflation', fetchNsoInflationFn, { now })
+    cache.fetchWithCache('inflation', () => fetchNsoInflationFn({ now }), { now })
   ]);
   return buildVietnamRegime({ moneyMarket, inflation, now });
 }

@@ -20,12 +20,12 @@
   - Singleton Investor Profile: 1 record (`cash_available = 0`, moderate risk tolerance, medium horizon)
   - Remote Canonical Universe: 49 assets (40 crypto, 7 VN stocks/ETFs, 1 gold spot, 1 FX context) across 5 verified providers (89 provider mappings)
 - **Automated Test Suite**:
-  - Full Backend Regression: 600/600 PASS (88 test suites)
+  - Full Backend Regression: 607/607 PASS (89 test suites)
   - Focused Feature 30B2 Hardening Gate: 9/9 PASS
   - Focused Feature 30B1 Security Gate: 11/11 PASS
   - Focused Feature 29 AI Brief Gate: 23/23 PASS
   - Focused Feature 28 Opportunity Engine Gate: 16/16 PASS
-  - Focused Feature 27 Market Regime Gate: 13/13 PASS
+  - Focused Feature 27 Market Regime Gate: 20/20 PASS
   - Dependencies: `npm audit` 0 vulnerabilities on both server and client
   - Client Build: PASS (~190ms, 0 errors, 0 warnings)
   - Git Diff & Formatting: `git diff --check` PASS
@@ -143,7 +143,7 @@ READY / ALL 30 ROADMAP FEATURES DELIVERED
   - Migration `20260830000000_feature_26a_hybrid_crypto_authority.sql` is applied. Existing financial records are unchanged.
   - Asset Detail displays the Binance `USDT` current quote with an optional server-provided `≈VND` reference that is explicitly approximate and excluded from accounting.
 - **Feature 27**: Vietnam Market Regime Foundation (COMPLETE, implementation `e38dcba`):
-  - Official NSO CPI domain exposes headline CPI YoY, reference period, publication date, provenance, and exact three-month YoY delta when M and M-3 are available.
+  - Official NSO CPI domain cross-checks archive publication/reference metadata against the official structured CPI chart series, exposes exact headline CPI YoY and three-month YoY delta when M and M-3 are available, and marks overdue official releases stale instead of presenting them as current.
   - Official SBV money-market domain exposes latest verified VND overnight interbank observation when parseable and derives 4-week trend only with 8 valid chronological official observations; otherwise it degrades to insufficient/unavailable without substitution.
   - Market breadth remains explicitly unavailable with reason `SOURCE_NOT_PROVISIONED`; no breadth is fabricated from the canonical asset universe.
 - **Feature 28**: Deterministic Opportunity Engine (COMPLETE):
