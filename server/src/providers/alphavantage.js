@@ -5,7 +5,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 export const ALPHA_VANTAGE_CACHE_POLICY = Object.freeze({
   // Twelve Gold snapshot acquisitions/day leaves room inside the documented
-  // 25-call free daily budget for daily history and the existing 4-hour news feed.
+  // free daily budget for daily history and one optional news acquisition/day.
   snapshotFreshMs: 2 * 60 * 60 * 1000,
   snapshotStaleMs: DAY_MS,
   historyFreshBoundary: 'NEXT_UTC_DAY',
@@ -24,6 +24,16 @@ export function createAlphaVantageRequestCache() {
 }
 
 const defaultRequestCache = createAlphaVantageRequestCache();
+
+/**
+ * Exposes only the process-local shared quota cooldown, never credentials or
+ * cached market data. Optional Alpha Vantage consumers use this to avoid an
+ * upstream call after Gold has already observed a provider quota response.
+ */
+export function getDefaultAlphaVantageQuotaCooldownMs(nowMs = Date.now()) {
+  const safeNowMs = Number.isFinite(nowMs) ? nowMs : Date.now();
+  return Math.max(0, defaultRequestCache.quotaLimitedUntilMs - safeNowMs);
+}
 
 function resolveRequestCache(options) {
   if (options.cache === null) return null;

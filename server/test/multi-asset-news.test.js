@@ -653,11 +653,12 @@ describe('Feature 23 — Multi-Asset News Foundation', () => {
       assert.equal(callCount, 1, 'Cache hit: no second fetch');
     });
 
-    test('AM. Alpha Vantage 4-hour fresh TTL configuration', () => {
+    test('AM. Alpha Vantage optional news uses one daily acquisition and bounded stale fallback', () => {
       const cache = new NewsCache();
       const avConfig = cache.configs['alphavantage-news'];
-      assert.equal(avConfig.freshTtlMs, 4 * 3600 * 1000, 'Fresh TTL must be 4 hours');
-      assert.equal(avConfig.staleTtlMs, 24 * 3600 * 1000, 'Stale TTL must be 24 hours');
+      assert.equal(avConfig.freshTtlMs, 24 * 3600 * 1000, 'Fresh TTL must be 24 hours');
+      assert.equal(avConfig.staleTtlMs, 72 * 3600 * 1000, 'Stale window must be bounded to 72 hours');
+      assert.equal(avConfig.errorTtlMs, 24 * 3600 * 1000, 'Quota errors suppress optional news retries for 24 hours');
     });
 
     test('AN. concurrent identical refreshes coalesced into single in-flight call', async () => {
@@ -758,4 +759,3 @@ describe('Feature 23 — Multi-Asset News Foundation', () => {
     });
   });
 });
-

@@ -1,11 +1,13 @@
 import { normalizeUrl } from '../url.js';
 import { cleanPlainText } from '../text.js';
 import { normalizePublishedAt } from '../time.js';
+import { getDefaultAlphaVantageQuotaCooldownMs } from '../../providers/alphavantage.js';
 
 export const ALPHA_VANTAGE_BASE_URL = 'https://www.alphavantage.co/query';
 export const ALPHA_VANTAGE_TOPICS = 'economy_macro,commodities,forex';
 
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+export const MAX_ALPHA_VANTAGE_NEWS_ITEMS = 50;
 
 /**
  * Derives a provider-neutral category from Alpha Vantage topic metadata and headline content.
@@ -56,24 +58,30 @@ export function parseAlphaVantageNews(jsonPayload) {
     return { items: [], skippedCount: 0, error: 'SOURCE_MALFORMED' };
   }
 
-  // Check for rate limit or info message notes from Alpha Vantage
-  if (data['Note'] || data['Information']) {
-    return { items: [], skippedCount: 0, error: 'RATE_LIMIT_OR_INFO' };
+  // Alpha Vantage sometimes reports quota state in a successful JSON response.
+  const providerInfo = data.Note || data.Information;
+  if (providerInfo) {
+    const isRateLimit = typeof providerInfo === 'string' && /rate|frequency|limit|quota/i.test(providerInfo);
+    return {
+      items: [],
+      skippedCount: 0,
+      error: isRateLimit ? 'PROVIDER_RATE_LIMITED' : 'PROVIDER_ERROR'
+    };
   }
 
   if (data['Error Message']) {
     return { items: [], skippedCount: 0, error: 'PROVIDER_ERROR' };
   }
 
-  const rawFeed = data.feed || [];
+  const rawFeed = data.feed;
   if (!Array.isArray(rawFeed)) {
-    return { items: [], skippedCount: 0, error: 'EMPTY_OR_INVALID_FEED' };
+    return { items: [], skippedCount: 0, error: 'SOURCE_MALFORMED' };
   }
 
   const items = [];
-  let skippedCount = 0;
+  let skippedCount = Math.max(0, rawFeed.length - MAX_ALPHA_VANTAGE_NEWS_ITEMS);
 
-  for (const item of rawFeed) {
+  for (const item of rawFeed.slice(0, MAX_ALPHA_VANTAGE_NEWS_ITEMS)) {
     const rawUrl = item.url;
     const normalizedLink = normalizeUrl(rawUrl);
 
@@ -123,13 +131,21 @@ export function parseAlphaVantageNews(jsonPayload) {
  * @param {Function} [options.fetchFn=fetch]
  * @returns {Promise<object>}
  */
-export async function fetchAlphaVantageNews({
-  apiKey = process.env.ALPHA_VANTAGE_API_KEY,
-  limit = 50,
-  timeoutMs = 8000,
-  fetchFn = fetch
-} = {}) {
-  const fetchedAt = new Date().toISOString();
+export async function fetchAlphaVantageNews(options = {}) {
+  const {
+    apiKey = process.env.ALPHA_VANTAGE_API_KEY,
+    limit = MAX_ALPHA_VANTAGE_NEWS_ITEMS,
+    timeoutMs = 8000,
+    fetchFn = fetch,
+    nowFn = Date.now
+  } = options;
+  const usesDefaultFetch = options.fetchFn === undefined;
+  const getQuotaCooldownMsFn = options.getQuotaCooldownMsFn || (
+    usesDefaultFetch ? getDefaultAlphaVantageQuotaCooldownMs : (() => 0)
+  );
+  const clockValue = nowFn();
+  const nowMs = Number.isFinite(clockValue) ? clockValue : Date.now();
+  const fetchedAt = new Date(nowMs).toISOString();
 
   if (!apiKey || typeof apiKey !== 'string' || !apiKey.trim()) {
     return {
@@ -145,10 +161,29 @@ export async function fetchAlphaVantageNews({
     };
   }
 
+  const quotaCooldownMs = getQuotaCooldownMsFn(nowMs);
+  if (Number.isFinite(quotaCooldownMs) && quotaCooldownMs > 0) {
+    return {
+      sourceId: 'alphavantage-news',
+      name: 'Alpha Vantage News',
+      language: 'en',
+      status: 'error',
+      fetchedAt,
+      items: [],
+      articleCount: 0,
+      skippedCount: 0,
+      errorCode: 'PROVIDER_RATE_LIMITED'
+    };
+  }
+
+  const providerLimit = Number.isInteger(limit) && limit > 0
+    ? Math.min(limit, MAX_ALPHA_VANTAGE_NEWS_ITEMS)
+    : MAX_ALPHA_VANTAGE_NEWS_ITEMS;
+
   const queryParams = new URLSearchParams({
     function: 'NEWS_SENTIMENT',
     topics: ALPHA_VANTAGE_TOPICS,
-    limit: String(limit),
+    limit: String(providerLimit),
     apikey: apiKey.trim()
   });
 
@@ -165,8 +200,6 @@ export async function fetchAlphaVantageNews({
         'Accept': 'application/json'
       }
     });
-    clearTimeout(timeout);
-
     if (!res.ok) {
       return {
         sourceId: 'alphavantage-news',
@@ -177,7 +210,7 @@ export async function fetchAlphaVantageNews({
         items: [],
         articleCount: 0,
         skippedCount: 0,
-        errorCode: `HTTP_${res.status}`
+        errorCode: res.status === 429 ? 'PROVIDER_RATE_LIMITED' : `HTTP_${res.status}`
       };
     }
 
@@ -210,7 +243,6 @@ export async function fetchAlphaVantageNews({
       errorCode: null
     };
   } catch (err) {
-    clearTimeout(timeout);
     const isTimeout = err.name === 'AbortError';
     return {
       sourceId: 'alphavantage-news',
@@ -223,6 +255,7 @@ export async function fetchAlphaVantageNews({
       skippedCount: 0,
       errorCode: isTimeout ? 'SOURCE_TIMEOUT' : 'SOURCE_FETCH_FAILED'
     };
+  } finally {
+    clearTimeout(timeout);
   }
 }
-

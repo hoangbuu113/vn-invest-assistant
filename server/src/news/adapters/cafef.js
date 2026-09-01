@@ -1,7 +1,8 @@
-import { XMLParser } from 'fast-xml-parser';
+import { XMLParser, XMLValidator } from 'fast-xml-parser';
 import { normalizeUrl } from '../url.js';
 import { cleanPlainText } from '../text.js';
 import { normalizePublishedAt } from '../time.js';
+import { deduplicateArticles } from '../dedupe.js';
 
 export const CAFEF_FEEDS = [
   {
@@ -23,6 +24,8 @@ export const CAFEF_FEEDS = [
 ];
 
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+export const MAX_CAFEF_ITEMS_PER_FEED = 50;
+export const MAX_CAFEF_ARTICLES = 100;
 
 const xmlParser = new XMLParser({
   ignoreAttributes: false,
@@ -75,19 +78,35 @@ export function isRelevantNewsItem(item) {
  */
 export function parseCafeFRss(xml, category = 'market') {
   if (!xml || typeof xml !== 'string') {
-    return { items: [], skippedCount: 0 };
+    return { items: [], skippedCount: 0, error: 'SOURCE_MALFORMED' };
   }
 
-  const parsed = xmlParser.parse(xml);
+  if (XMLValidator.validate(xml) !== true) {
+    return { items: [], skippedCount: 0, error: 'SOURCE_MALFORMED' };
+  }
+
+  let parsed;
+  try {
+    parsed = xmlParser.parse(xml);
+  } catch {
+    return { items: [], skippedCount: 0, error: 'SOURCE_MALFORMED' };
+  }
+
+  const hasChannel = parsed?.rss && Object.hasOwn(parsed.rss, 'channel');
+  const channel = parsed?.rss?.channel;
+  if (!hasChannel || (channel !== '' && typeof channel !== 'object')) {
+    return { items: [], skippedCount: 0, error: 'SOURCE_MALFORMED' };
+  }
+
   let rawItems = parsed?.rss?.channel?.item || [];
   if (!Array.isArray(rawItems)) {
     rawItems = rawItems ? [rawItems] : [];
   }
 
   const items = [];
-  let skippedCount = 0;
+  let skippedCount = Math.max(0, rawItems.length - MAX_CAFEF_ITEMS_PER_FEED);
 
-  for (const item of rawItems) {
+  for (const item of rawItems.slice(0, MAX_CAFEF_ITEMS_PER_FEED)) {
     const guidVal = typeof item.guid === 'object'
       ? (item.guid['#text'] || item.guid['__text'] || item.link)
       : (item.guid || item.link);
@@ -126,7 +145,13 @@ export function parseCafeFRss(xml, category = 'market') {
     }
   }
 
-  return { items, skippedCount };
+  return { items, skippedCount, error: null };
+}
+
+function feedErrorCode(error) {
+  if (error?.name === 'AbortError') return 'SOURCE_TIMEOUT';
+  if (typeof error?.code === 'string' && error.code) return error.code;
+  return 'SOURCE_FETCH_FAILED';
 }
 
 /**
@@ -155,17 +180,22 @@ export async function fetchCafeFNews({
             'Accept': 'application/rss+xml, application/xml, text/xml;q=0.9, */*;q=0.8'
           }
         });
-        clearTimeout(timeout);
-
         if (!res.ok) {
-          throw new Error(`HTTP ${res.status}`);
+          const error = new Error('CafeF feed request failed');
+          error.code = `HTTP_${res.status}`;
+          throw error;
         }
 
         const text = await res.text();
-        return parseCafeFRss(text, feed.category);
-      } catch (err) {
+        const parsed = parseCafeFRss(text, feed.category);
+        if (parsed.error) {
+          const error = new Error('CafeF feed payload was malformed');
+          error.code = parsed.error;
+          throw error;
+        }
+        return parsed;
+      } finally {
         clearTimeout(timeout);
-        throw err;
       }
     })
   );
@@ -174,14 +204,31 @@ export async function fetchCafeFNews({
   let totalSkipped = 0;
   let successCount = 0;
   let failureCount = 0;
+  const feedsStatus = [];
 
-  for (const res of feedResults) {
+  for (let index = 0; index < feedResults.length; index++) {
+    const res = feedResults[index];
+    const feed = feeds[index];
     if (res.status === 'fulfilled') {
       successCount++;
       successfulFeedItems.push(...res.value.items);
       totalSkipped += res.value.skippedCount;
+      feedsStatus.push({
+        category: feed.category,
+        status: res.value.items.length > 0 ? 'ok' : 'empty',
+        articleCount: res.value.items.length,
+        skippedCount: res.value.skippedCount,
+        errorCode: null
+      });
     } else {
       failureCount++;
+      feedsStatus.push({
+        category: feed.category,
+        status: 'error',
+        articleCount: 0,
+        skippedCount: 0,
+        errorCode: feedErrorCode(res.reason)
+      });
     }
   }
 
@@ -197,13 +244,24 @@ export async function fetchCafeFNews({
       items: [],
       articleCount: 0,
       skippedCount: totalSkipped,
-      errorCode: 'SOURCE_FETCH_FAILED'
+      errorCode: 'SOURCE_FETCH_FAILED',
+      feeds: feedsStatus
     };
   }
 
+  const dedupedItems = deduplicateArticles(successfulFeedItems)
+    .sort((left, right) => {
+      const timeDiff = Date.parse(right.publishedAt) - Date.parse(left.publishedAt);
+      if (timeDiff !== 0) return timeDiff;
+      return String(left.id || '').localeCompare(String(right.id || ''));
+    });
+  totalSkipped += successfulFeedItems.length - dedupedItems.length;
+  totalSkipped += Math.max(0, dedupedItems.length - MAX_CAFEF_ARTICLES);
+  const boundedItems = dedupedItems.slice(0, MAX_CAFEF_ARTICLES);
+
   const status = failureCount > 0
     ? 'degraded'
-    : (successfulFeedItems.length === 0 ? 'empty' : 'ok');
+    : (boundedItems.length === 0 ? 'empty' : 'ok');
 
   return {
     sourceId: 'cafef',
@@ -211,10 +269,10 @@ export async function fetchCafeFNews({
     language: 'vi',
     status,
     fetchedAt,
-    items: successfulFeedItems,
-    articleCount: successfulFeedItems.length,
+    items: boundedItems,
+    articleCount: boundedItems.length,
     skippedCount: totalSkipped,
-    errorCode: null
+    errorCode: failureCount > 0 ? 'PARTIAL_FEED_FAILURE' : null,
+    feeds: feedsStatus
   };
 }
-

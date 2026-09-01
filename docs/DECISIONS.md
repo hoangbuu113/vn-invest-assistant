@@ -251,10 +251,11 @@ $$\text{Source Adapter} \longrightarrow \text{Canonical Validation / Sanitizatio
 - In-memory cache TTLs:
   - CafeF: 5-minute fresh TTL, 30-minute stale-if-error fallback.
   - CoinDesk: 5-minute fresh TTL, 30-minute stale-if-error fallback.
-  - Alpha Vantage News: 4-hour fresh TTL, 24-hour stale-if-error fallback.
+  - Alpha Vantage News: 24-hour fresh TTL, 72-hour maximum-age stale-if-error fallback. This optional daily enrichment budget leaves Alpha Vantage capacity for authoritative Gold snapshot/history acquisition.
 - Successful empty results are cached to prevent hammering empty endpoints.
+- Controlled source failures use bounded negative-cache cooldowns (1 minute for RSS sources; 24 hours for optional Alpha Vantage news) without creating or caching any article.
 - Concurrent in-flight requests for the same source are coalesced into a single Promise.
-- *Account Quota Clarification*: Feature 23 limits normal `NEWS_SENTIMENT` refresh frequency per process. Alpha Vantage quota is shared across other project features (e.g. Gold spot snapshot and history); Feature 23 does not guarantee whole-account daily quota limits.
+- *Account Quota Clarification*: Feature 23 limits normal `NEWS_SENTIMENT` refresh frequency per process and honors a quota cooldown already observed by the authoritative Gold adapter. News-side failures never impose a longer Gold cooldown. Alpha Vantage quota is still account-wide and process-local caching cannot guarantee whole-account daily limits across restarts or other clients.
 
 ### M. Language Policy
 - Original source language is preserved without automated translation (CafeF: Vietnamese `vi`, CoinDesk & Alpha Vantage: English `en`).

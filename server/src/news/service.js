@@ -6,6 +6,26 @@ import { deduplicateArticles } from './dedupe.js';
 import { globalNewsCache } from './cache.js';
 import { getAssets, getAssetById } from '../supabase.js';
 
+export const DEFAULT_NEWS_LIMIT = 30;
+export const MAX_NEWS_LIMIT = 100;
+export const MAX_SOURCE_ARTICLES = 100;
+
+function parseNewsLimit(limit) {
+  const parsedLimit = Number(limit);
+  if (!Number.isInteger(parsedLimit) || parsedLimit < 1 || parsedLimit > MAX_NEWS_LIMIT) {
+    const err = new Error(`Invalid limit parameter. Must be an integer between 1 and ${MAX_NEWS_LIMIT}.`);
+    err.statusCode = 400;
+    err.code = 'INVALID_LIMIT';
+    throw err;
+  }
+  return parsedLimit;
+}
+
+function validTimestampMs(value) {
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
 export class NewsService {
   constructor({
     cache = globalNewsCache,
@@ -42,11 +62,17 @@ export class NewsService {
     const contributingTimestamps = [];
 
     for (const src of sourceResults) {
+      if (!src || typeof src !== 'object') {
+        hasDegradedOrErrorOrStale = true;
+        continue;
+      }
+
       if (src.status === 'ok' || src.status === 'empty' || src.status === 'degraded' || src.status === 'stale') {
         hasSuccess = true;
         if (Array.isArray(src.items) && src.items.length > 0) {
-          rawArticles.push(...src.items);
-          if (src.fetchedAt) contributingTimestamps.push(new Date(src.fetchedAt).getTime());
+          rawArticles.push(...src.items.slice(0, MAX_SOURCE_ARTICLES));
+          const fetchedAtMs = validTimestampMs(src.fetchedAt);
+          if (fetchedAtMs !== null) contributingTimestamps.push(fetchedAtMs);
         }
       }
 
@@ -64,9 +90,14 @@ export class NewsService {
       dataAsOf = new Date(oldestTime).toISOString();
     } else {
       const validTimes = sourceResults
-        .filter((s) => s.status === 'ok' || s.status === 'empty' || s.status === 'degraded' || s.status === 'stale')
-        .map((s) => s.fetchedAt ? new Date(s.fetchedAt).getTime() : 0)
-        .filter((t) => t > 0);
+        .filter((s) => s && (
+          s.status === 'ok' ||
+          s.status === 'empty' ||
+          s.status === 'degraded' ||
+          s.status === 'stale'
+        ))
+        .map((s) => validTimestampMs(s.fetchedAt))
+        .filter((t) => t !== null);
       if (validTimes.length > 0) {
         dataAsOf = new Date(Math.min(...validTimes)).toISOString();
       }
@@ -124,7 +155,20 @@ export class NewsService {
       fetchedAt: s.fetchedAt,
       articleCount: s.articleCount || 0,
       skippedCount: s.skippedCount || 0,
-      errorCode: s.errorCode || null
+      errorCode: s.errorCode || null,
+      cacheStatus: s.cacheStatus || null,
+      cacheAgeMs: Number.isFinite(s.cacheAgeMs) ? s.cacheAgeMs : null,
+      cachedStatus: s.cachedStatus || null,
+      staleReason: s.staleReason || null,
+      feeds: Array.isArray(s.feeds)
+        ? s.feeds.slice(0, 4).map((feed) => ({
+            category: feed.category,
+            status: feed.status,
+            articleCount: feed.articleCount || 0,
+            skippedCount: feed.skippedCount || 0,
+            errorCode: feed.errorCode || null
+          }))
+        : undefined
     }));
   }
 
@@ -135,15 +179,9 @@ export class NewsService {
    * @param {string} [options.assetId]
    * @returns {Promise<object>}
    */
-  async getNewsFeed({ limit = 30, assetId } = {}) {
+  async getNewsFeed({ limit = DEFAULT_NEWS_LIMIT, assetId } = {}) {
     // 1. Validate limit
-    const parsedLimit = Number(limit);
-    if (!Number.isInteger(parsedLimit) || parsedLimit < 1 || parsedLimit > 100) {
-      const err = new Error('Invalid limit parameter. Must be an integer between 1 and 100.');
-      err.statusCode = 400;
-      err.code = 'INVALID_LIMIT';
-      throw err;
-    }
+    const parsedLimit = parseNewsLimit(limit);
 
     // 2. Fetch canonical assets
     let canonicalAssets = [];
@@ -221,10 +259,15 @@ export class NewsService {
    * @param {Function} options.getWatchlistFn
    * @returns {Promise<object>}
    */
-  async getPersonalizedNewsFeed({ getHoldingsFn, getWatchlistFn }) {
+  async getPersonalizedNewsFeed({
+    getHoldingsFn,
+    getWatchlistFn,
+    limit = DEFAULT_NEWS_LIMIT
+  }) {
     if (!getHoldingsFn || !getWatchlistFn) {
       throw new Error('getHoldingsFn and getWatchlistFn are required for personalized news');
     }
+    const parsedLimit = parseNewsLimit(limit);
 
     const [holdings, watchlist, canonicalAssets] = await Promise.all([
       getHoldingsFn(),
@@ -288,7 +331,7 @@ export class NewsService {
         userAssetCount: 0,
         userAssets: [],
         partial: false,
-        dataAsOf: new Date().toISOString(),
+        dataAsOf: null,
         sources: []
       };
     }
@@ -321,8 +364,8 @@ export class NewsService {
 
     return {
       status: 'ok',
-      count: personalizedArticles.length,
-      data: personalizedArticles,
+      count: Math.min(personalizedArticles.length, parsedLimit),
+      data: personalizedArticles.slice(0, parsedLimit),
       userAssetCount: userAssets.length,
       userAssets: userAssets.map((a) => ({ symbol: a.symbol, name: a.name })),
       partial,
@@ -333,4 +376,3 @@ export class NewsService {
 }
 
 export const globalNewsService = new NewsService();
-

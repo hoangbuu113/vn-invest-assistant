@@ -1,11 +1,13 @@
-import { XMLParser } from 'fast-xml-parser';
+import { XMLParser, XMLValidator } from 'fast-xml-parser';
 import { normalizeUrl } from '../url.js';
 import { cleanPlainText } from '../text.js';
 import { normalizePublishedAt } from '../time.js';
+import { deduplicateArticles } from '../dedupe.js';
 
 export const COINDESK_RSS_URL = 'https://www.coindesk.com/arc/outboundfeeds/rss/';
 
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+export const MAX_COINDESK_ARTICLES = 50;
 
 const xmlParser = new XMLParser({
   ignoreAttributes: false,
@@ -19,19 +21,40 @@ const xmlParser = new XMLParser({
  */
 export function parseCoinDeskRss(xml) {
   if (!xml || typeof xml !== 'string') {
-    return { items: [], skippedCount: 0 };
+    return { items: [], skippedCount: 0, error: 'SOURCE_MALFORMED' };
   }
 
-  const parsed = xmlParser.parse(xml);
+  if (XMLValidator.validate(xml) !== true) {
+    return { items: [], skippedCount: 0, error: 'SOURCE_MALFORMED' };
+  }
+
+  let parsed;
+  try {
+    parsed = xmlParser.parse(xml);
+  } catch {
+    return { items: [], skippedCount: 0, error: 'SOURCE_MALFORMED' };
+  }
+
+  const channel = parsed?.rss?.channel;
+  const isRss = Boolean(parsed?.rss) && Object.hasOwn(parsed.rss, 'channel') && (
+    channel === '' || typeof channel === 'object'
+  );
+  const isAtom = Object.hasOwn(parsed || {}, 'feed') && (
+    parsed.feed === '' || typeof parsed.feed === 'object'
+  );
+  if (!isRss && !isAtom) {
+    return { items: [], skippedCount: 0, error: 'SOURCE_MALFORMED' };
+  }
+
   let rawItems = parsed?.rss?.channel?.item || parsed?.feed?.entry || [];
   if (!Array.isArray(rawItems)) {
     rawItems = rawItems ? [rawItems] : [];
   }
 
   const items = [];
-  let skippedCount = 0;
+  let skippedCount = Math.max(0, rawItems.length - MAX_COINDESK_ARTICLES);
 
-  for (const item of rawItems) {
+  for (const item of rawItems.slice(0, MAX_COINDESK_ARTICLES)) {
     const guidVal = typeof item.guid === 'object'
       ? (item.guid['#text'] || item.guid['__text'] || item.link)
       : (item.guid || item.link || item.id);
@@ -73,7 +96,9 @@ export function parseCoinDeskRss(xml) {
     });
   }
 
-  return { items, skippedCount };
+  const dedupedItems = deduplicateArticles(items);
+  skippedCount += items.length - dedupedItems.length;
+  return { items: dedupedItems, skippedCount, error: null };
 }
 
 /**
@@ -102,8 +127,6 @@ export async function fetchCoinDeskNews({
         'Accept': 'application/rss+xml, application/xml, text/xml;q=0.9, */*;q=0.8'
       }
     });
-    clearTimeout(timeout);
-
     if (!res.ok) {
       return {
         sourceId: 'coindesk',
@@ -119,7 +142,20 @@ export async function fetchCoinDeskNews({
     }
 
     const xml = await res.text();
-    const { items, skippedCount } = parseCoinDeskRss(xml);
+    const { items, skippedCount, error } = parseCoinDeskRss(xml);
+    if (error) {
+      return {
+        sourceId: 'coindesk',
+        name: 'CoinDesk',
+        language: 'en',
+        status: 'error',
+        fetchedAt,
+        items: [],
+        articleCount: 0,
+        skippedCount,
+        errorCode: error
+      };
+    }
 
     return {
       sourceId: 'coindesk',
@@ -133,7 +169,6 @@ export async function fetchCoinDeskNews({
       errorCode: null
     };
   } catch (err) {
-    clearTimeout(timeout);
     const isTimeout = err.name === 'AbortError';
     return {
       sourceId: 'coindesk',
@@ -146,6 +181,7 @@ export async function fetchCoinDeskNews({
       skippedCount: 0,
       errorCode: isTimeout ? 'SOURCE_TIMEOUT' : 'SOURCE_FETCH_FAILED'
     };
+  } finally {
+    clearTimeout(timeout);
   }
 }
-

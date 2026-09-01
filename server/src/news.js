@@ -12,7 +12,13 @@ import { normalizePublishedAt } from './news/time.js';
 import { deduplicateArticles } from './news/dedupe.js';
 import { matchArticleAssets, attachRelatedAssets } from './news/relevance.js';
 import { NewsCache, globalNewsCache } from './news/cache.js';
-import { NewsService, globalNewsService } from './news/service.js';
+import {
+  DEFAULT_NEWS_LIMIT,
+  MAX_NEWS_LIMIT,
+  MAX_SOURCE_ARTICLES,
+  NewsService,
+  globalNewsService
+} from './news/service.js';
 
 export {
   CAFEF_FEEDS,
@@ -32,6 +38,9 @@ export {
   attachRelatedAssets,
   NewsCache,
   globalNewsCache,
+  DEFAULT_NEWS_LIMIT,
+  MAX_NEWS_LIMIT,
+  MAX_SOURCE_ARTICLES,
   NewsService,
   globalNewsService
 };
@@ -175,17 +184,29 @@ export async function getNewsFeed(options = {}) {
 export async function getPersonalizedNewsFeed({
   getNewsFeedFn = getNewsFeed,
   getHoldingsFn,
-  getWatchlistFn
+  getWatchlistFn,
+  limit = DEFAULT_NEWS_LIMIT
 } = {}) {
   if (!getHoldingsFn || !getWatchlistFn) {
     throw new Error('getHoldingsFn and getWatchlistFn are required to generate personalized news feed');
+  }
+  const parsedLimit = Number(limit);
+  if (!Number.isInteger(parsedLimit) || parsedLimit < 1 || parsedLimit > MAX_NEWS_LIMIT) {
+    const error = new Error(`Invalid limit parameter. Must be an integer between 1 and ${MAX_NEWS_LIMIT}.`);
+    error.statusCode = 400;
+    error.code = 'INVALID_LIMIT';
+    throw error;
   }
 
   // The production path delegates to Feature 23's canonical aggregation and
   // UUID-authoritative personalization service. The injected feed path below
   // exists only for deterministic route tests and applies the same UUID rule.
   if (getNewsFeedFn === getNewsFeed) {
-    return globalNewsService.getPersonalizedNewsFeed({ getHoldingsFn, getWatchlistFn });
+    return globalNewsService.getPersonalizedNewsFeed({
+      getHoldingsFn,
+      getWatchlistFn,
+      limit: parsedLimit
+    });
   }
 
   const [holdings, watchlist] = await Promise.all([
@@ -225,13 +246,13 @@ export async function getPersonalizedNewsFeed({
       userAssetCount: 0,
       userAssets: [],
       partial: false,
-      dataAsOf: new Date().toISOString(),
+      dataAsOf: null,
       sources: []
     };
   }
 
   // Fetch news feed items
-  const feedResult = await getNewsFeedFn();
+  const feedResult = await getNewsFeedFn({ limit: parsedLimit });
   let rawArticles = [];
   let partial = false;
   let dataAsOf = null;
@@ -267,9 +288,9 @@ export async function getPersonalizedNewsFeed({
 
   return {
     status: 'ok',
-    count: personalizedArticles.length,
-    data: personalizedArticles,
-    news: personalizedArticles,
+    count: Math.min(personalizedArticles.length, parsedLimit),
+    data: personalizedArticles.slice(0, parsedLimit),
+    news: personalizedArticles.slice(0, parsedLimit),
     userAssetCount: userAssets.length,
     userAssets: userAssets.map((a) => ({ symbol: a.symbol, name: a.name })),
     partial,
