@@ -12,6 +12,7 @@
   - `5059467` — `fix: align crypto watchlist realtime display` (Feature 26 production closeout)
   - `e38dcba` — `feat: add vietnam market regime foundation` (Feature 27)
   - `39648da` — `feat: add deterministic opportunity engine` (Feature 28)
+  - `bfc22dd` — `security: protect single-owner financial access` (Feature 30B1 checkpoint)
 - **Documentation Rebaseline Commit**: `e514b53` — `docs: rebaseline after feature 26 closeout`
 - **Branch**: `main`
 - **Feature 26 Implementation Status**: COMPLETE in production at backend commit `cf049da`; display-consistency closeout COMPLETE at local commit `5059467` (hybrid provider authority, resilience, migration, and current-price presentation)
@@ -33,15 +34,15 @@
 - **Financial Integrity**: Existing holdings, portfolio transactions, cash ledger, and cash balance unchanged
 - **Production Frontend**: `https://vn-invest-assistant.vn-invest-assistant.workers.dev` (Cloudflare, root HTTP 200 verified)
 - **Production Backend**: `https://vn-invest-assistant-api.onrender.com` (Render, health status `ok` verified)
-- **Git Working Tree**: DIRTY with intended, uncommitted Feature 30B1 security-hardening changes only
-- **GitHub Remote**: `origin/main` remains at `39648da`; local `main` is ahead after the Feature 29 checkpoint commit
-- **Feature 30 Security Status**: IN PROGRESS. Local code now defines a single-owner bearer boundary, session-only frontend unlock, server-only privileged Supabase access, and a forward permission migration. Production is **not** secure under this contract until the migration is reviewed/applied, `OWNER_ACCESS_TOKEN` and `SUPABASE_SERVICE_ROLE_KEY` are configured server-side, and the verified code is deployed.
+- **Git Working Tree**: CLEAN after the Feature 30B1 security configuration checkpoint
+- **GitHub Remote**: `origin/main` remains at `39648da`; local `main` is ahead with Feature 29 and Feature 30B1 security checkpoints
+- **Feature 30 Security Status**: IN PROGRESS. Local code defines a single-owner bearer boundary, session-only frontend unlock, server-only privileged Supabase access, and a forward permission migration. The preferred privileged server credential is `SUPABASE_SECRET_KEY`; legacy `SUPABASE_SERVICE_ROLE_KEY` remains a temporary fallback. Production is **not** secure under this contract until the migration is applied, `OWNER_ACCESS_TOKEN` and a privileged Supabase key are configured server-side, and the verified code is deployed.
 
 ## CURRENT PHASE
 FEATURE 30 — RELEASE HARDENING (IN PROGRESS)
 
 ## CURRENT NEXT PROJECT TASK
-Complete Feature 30B1 verification and independent review. Do not apply the security migration remotely, push, or deploy unless explicitly authorized.
+Activate Feature 30B1 only after the privileged Supabase server credential is provisioned and production migration/deployment is explicitly authorized.
 
 ---
 

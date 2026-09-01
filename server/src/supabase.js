@@ -8,7 +8,24 @@ dotenv.config();
 
 const rawUrl = process.env.SUPABASE_URL;
 const publicSupabaseKey = process.env.SUPABASE_PUBLISHABLE_KEY || process.env.SUPABASE_ANON_KEY;
-const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+export function resolvePrivilegedSupabaseKey(environment = process.env) {
+  const secretKey = typeof environment?.SUPABASE_SECRET_KEY === 'string'
+    ? environment.SUPABASE_SECRET_KEY.trim()
+    : '';
+  if (secretKey && secretKey !== 'your-supabase-secret-key') return secretKey;
+
+  const legacyServiceRoleKey = typeof environment?.SUPABASE_SERVICE_ROLE_KEY === 'string'
+    ? environment.SUPABASE_SERVICE_ROLE_KEY.trim()
+    : '';
+  if (legacyServiceRoleKey && legacyServiceRoleKey !== 'your-supabase-service-role-key') {
+    return legacyServiceRoleKey;
+  }
+
+  return null;
+}
+
+const privilegedSupabaseKey = resolvePrivilegedSupabaseKey();
 
 // Sanitize URL in case trailing slashes or /rest/v1 were included
 const supabaseUrl = rawUrl
@@ -25,9 +42,8 @@ export const isSupabaseConfigured = Boolean(
 
 export const isPrivilegedSupabaseConfigured = Boolean(
   supabaseUrl &&
-  serviceRoleKey &&
-  supabaseUrl !== 'https://your-project-id.supabase.co' &&
-  serviceRoleKey !== 'your-supabase-service-role-key'
+  privilegedSupabaseKey &&
+  supabaseUrl !== 'https://your-project-id.supabase.co'
 );
 
 const CLIENT_AUTH_OPTIONS = {
@@ -43,7 +59,7 @@ export const publicSupabase = isSupabaseConfigured
   : null;
 
 export const privateSupabase = isPrivilegedSupabaseConfigured
-  ? createClient(supabaseUrl, serviceRoleKey, CLIENT_AUTH_OPTIONS)
+  ? createClient(supabaseUrl, privilegedSupabaseKey, CLIENT_AUTH_OPTIONS)
   : null;
 
 // Backward-compatible public metadata client. Private data-access functions

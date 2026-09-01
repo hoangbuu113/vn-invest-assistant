@@ -10,6 +10,7 @@ import {
   PRIVATE_API_PREFIXES,
   readBearerToken
 } from '../src/auth.js';
+import { resolvePrivilegedSupabaseKey } from '../src/supabase.js';
 
 const OWNER_TOKEN = 'test-owner-token-with-high-entropy-placeholder';
 
@@ -226,6 +227,24 @@ describe('Feature 30B1 — single-owner HTTP boundary', () => {
 });
 
 describe('Feature 30B1 — database permission and client separation contract', () => {
+  test('modern Supabase secret keys take precedence while legacy keys remain a fail-closed fallback', () => {
+    const modernKey = 'sb_secret_modern-server-key';
+    const legacyKey = 'legacy-service-role-key';
+
+    assert.equal(resolvePrivilegedSupabaseKey({
+      SUPABASE_SECRET_KEY: modernKey,
+      SUPABASE_SERVICE_ROLE_KEY: legacyKey
+    }), modernKey);
+    assert.equal(resolvePrivilegedSupabaseKey({
+      SUPABASE_SERVICE_ROLE_KEY: legacyKey
+    }), legacyKey);
+    assert.equal(resolvePrivilegedSupabaseKey({}), null);
+    assert.equal(resolvePrivilegedSupabaseKey({
+      SUPABASE_SECRET_KEY: 'your-supabase-secret-key',
+      SUPABASE_SERVICE_ROLE_KEY: 'your-supabase-service-role-key'
+    }), null);
+  });
+
   test('forward migration removes public policies and privileges from every private table', async () => {
     const migration = await readFile(
       new URL('../../supabase/migrations/20260901000000_feature_30b1_single_owner_security.sql', import.meta.url),
@@ -274,7 +293,7 @@ describe('Feature 30B1 — database permission and client separation contract', 
     const source = await readFile(new URL('../src/supabase.js', import.meta.url), 'utf8');
     assert.match(source, /export const publicSupabase/);
     assert.match(source, /export const privateSupabase/);
-    assert.match(source, /serviceRoleKey/);
+    assert.match(source, /resolvePrivilegedSupabaseKey/);
     assert.match(source, /getAssets\(client = supabase\)/);
     assert.match(source, /getInvestorProfile\(client = privateSupabase\)/);
     assert.match(source, /getHoldings\(client = privateSupabase\)/);
