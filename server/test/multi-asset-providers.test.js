@@ -449,7 +449,7 @@ describe('Feature 20A — Real Multi-Asset Providers & Representative Assets', (
         { provider: 'alphavantage', providerSymbol: 'XAU' },
         { apiKey: 'key', fetchFn: limitFetch }
       ),
-      (err) => err.status === 502
+      (err) => err.status === 503 && err.code === 'PROVIDER_RATE_LIMITED'
     );
   });
 
