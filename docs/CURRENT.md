@@ -30,19 +30,19 @@
   - Focused Transaction/Cash/Opening-Position Gate: 57/57 PASS
   - Client Build: PASS
   - `git diff --check`: PASS
-- **Database**: `20260830000000_feature_26a_hybrid_crypto_authority.sql` applied successfully
-- **Financial Integrity**: Existing holdings, portfolio transactions, cash ledger, and cash balance unchanged
-- **Production Frontend**: `https://vn-invest-assistant.vn-invest-assistant.workers.dev` (Cloudflare, root HTTP 200 verified)
-- **Production Backend**: `https://vn-invest-assistant-api.onrender.com` (Render, health status `ok` verified)
-- **Git Working Tree**: CLEAN after the Feature 30B1 security configuration checkpoint
-- **GitHub Remote**: `origin/main` remains at `39648da`; local `main` is ahead with Feature 29 and Feature 30B1 security checkpoints
-- **Feature 30 Security Status**: IN PROGRESS. Local code defines a single-owner bearer boundary, session-only frontend unlock, server-only privileged Supabase access, and a forward permission migration. The preferred privileged server credential is `SUPABASE_SECRET_KEY`; legacy `SUPABASE_SERVICE_ROLE_KEY` remains a temporary fallback. Production is **not** secure under this contract until the migration is applied, `OWNER_ACCESS_TOKEN` and a privileged Supabase key are configured server-side, and the verified code is deployed.
+- **Database**: `20260830000000_feature_26a_hybrid_crypto_authority.sql` and `20260901000000_feature_30b1_single_owner_security.sql` applied successfully
+- **Financial Integrity**: Authoritative holdings, portfolio transactions, cash ledger, opening baselines, and cash balance (606,052,112 VND) unchanged
+- **Production Frontend**: `https://vn-invest-assistant.vn-invest-assistant.workers.dev` (Cloudflare, Owner Gate active, root HTTP 200 verified)
+- **Production Backend**: `https://vn-invest-assistant-api.onrender.com` (Render, live at commit `58a5c21`, health status `ok`, owner authentication active)
+- **Git Working Tree**: CLEAN after Feature 30B1 activation and frontend deployment
+- **GitHub Remote**: `origin/main` synchronized at commit `58a5c21`
+- **Feature 30 Security Status**: IN PROGRESS. Feature 30B1 production security activation is COMPLETE. Database permission migration `20260901000000_feature_30b1_single_owner_security.sql` is applied in Supabase. Direct anon Supabase private access is revoked. Render backend enforces single-owner Bearer token authentication (`OWNER_ACCESS_TOKEN` and privileged `SUPABASE_SECRET_KEY`). Cloudflare frontend enforces the Owner Gate session unlock (`sessionStorage` only, zero bundled secrets). Feature 30 remains IN PROGRESS; Feature 30B2 is NEXT.
 
 ## CURRENT PHASE
 FEATURE 30 — RELEASE HARDENING (IN PROGRESS)
 
 ## CURRENT NEXT PROJECT TASK
-Activate Feature 30B1 only after the privileged Supabase server credential is provisioned and production migration/deployment is explicitly authorized.
+FEATURE 30B2 — Production Hardening & Operational Audit
 
 ---
 
