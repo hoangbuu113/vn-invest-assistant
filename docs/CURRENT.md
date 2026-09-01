@@ -87,12 +87,15 @@ FEATURE 30 Final Checkpoint & Operational Verification
 
 ---
 
-## FINANCIAL DEVELOPMENT BASELINE
-- Authoritative Holdings: 2 rows (`E1VFVN30`: 111,003 @ 35,000 VND; `FPT`: 12 @ 35,000 VND)
-- Authoritative Transactions: 1 row (`SELL` `E1VFVN30`: 12,121 @ 40,000 VND)
-- Authoritative Cash Ledger: 3 rows (`OPENING_BALANCE`: 100,000,000; `SELL`: 484,840,000; `DEPOSIT`: 21,212,112)
-- Authoritative Current Cash: 606,052,112 VND
-- Remote Canonical Universe: 49 assets total (40 crypto, 7 VN stocks/ETFs, 1 gold spot, 1 FX context) across 5 verified market-data providers
+## FINANCIAL DEVELOPMENT BASELINE (CLEAN INITIAL STATE)
+- Authoritative Holdings: 0 rows (clean first-use state)
+- Authoritative Transactions: 0 rows
+- Authoritative Position Opening Baselines: 0 rows
+- Authoritative Cash Ledger: 0 rows (activation opening balance: 0 VND)
+- Authoritative Current Cash: 0 VND
+- Authoritative Watchlist: 0 rows
+- Authoritative Price Alerts: 0 rows
+- Remote Canonical Universe: 49 assets total (40 crypto, 7 VN stocks/ETFs, 1 gold spot, 1 FX context) across 5 verified market-data providers (89 provider mappings)
 
 ---
 
