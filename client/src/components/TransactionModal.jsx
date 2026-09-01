@@ -1,20 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { apiFetch } from '../utils/api.js';
-
-const ASSET_TYPE_LABELS = {
-  stock: 'Cổ phiếu',
-  etf: 'ETF',
-  fund: 'Quỹ đầu tư',
-  gold: 'Vàng',
-  deposit: 'Tiền gửi',
-  bank_deposit: 'Tiền gửi',
-  bond: 'Trái phiếu'
-};
-
-function formatAssetType(type) {
-  if (!type) return '';
-  return ASSET_TYPE_LABELS[String(type).toLowerCase()] || type;
-}
+import { formatAssetType } from '../utils/formatting.js';
+import { isHoldableVndAsset } from '../utils/assetCapabilities.js';
 
 function translateErrorMessage(msg) {
   if (!msg) return 'Không thể ghi nhận giao dịch.';
@@ -110,11 +97,11 @@ export default function TransactionModal({
     return heldSymbolMap.get(selectedSymbol.toUpperCase()) || null;
   }, [selectedSymbol, heldSymbolMap]);
 
-  // Filtered asset list (VND-denominated assets only)
+  // Filtered asset list (Holdable VND-denominated assets only)
   const filteredAssets = useMemo(() => {
     const query = assetSearchQuery.trim().toLowerCase();
     let list = Array.isArray(assets)
-      ? assets.filter((a) => (a.quote_currency || a.quoteCurrency || 'VND').toUpperCase() === 'VND')
+      ? assets.filter((a) => isHoldableVndAsset(a))
       : [];
 
     // If SELL mode, prioritize held assets
@@ -131,7 +118,8 @@ export default function TransactionModal({
     return list.filter((a) => {
       const sym = (a.symbol || '').toLowerCase();
       const name = (a.name || '').toLowerCase();
-      return sym.includes(query) || name.includes(query);
+      const typeLabel = formatAssetType(a.asset_type || a.assetType).toLowerCase();
+      return sym.includes(query) || name.includes(query) || typeLabel.includes(query);
     });
   }, [assets, assetSearchQuery, transactionType, heldSymbolMap]);
 
@@ -142,7 +130,7 @@ export default function TransactionModal({
   }, [selectedSymbol, assets]);
 
   const isVndSelectedAsset = selectedAssetObject
-    ? (selectedAssetObject.quote_currency || selectedAssetObject.quoteCurrency || 'VND').toUpperCase() === 'VND'
+    ? isHoldableVndAsset(selectedAssetObject)
     : true;
 
   if (!isOpen) return null;

@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { MagneticButton } from './MotionHelpers.jsx';
 import { apiFetch } from '../utils/api.js';
+import { formatAssetType } from '../utils/formatting.js';
+import { isHoldableVndAsset } from '../utils/assetCapabilities.js';
 
 const overlayVariants = {
   hidden: { opacity: 0 },
@@ -23,18 +25,6 @@ const modalVariants = {
     transition: { duration: 0.15 }
   }
 };
-
-function formatAssetType(assetType) {
-  const map = {
-    stock: 'Cổ phiếu',
-    etf: 'ETF',
-    fund: 'Quỹ đầu tư',
-    gold: 'Vàng',
-    fx: 'Ngoại hối',
-    crypto: 'Tiền mã hóa'
-  };
-  return map[String(assetType).toLowerCase()] || assetType || 'Tài sản';
-}
 
 function translateOpeningError(error) {
   if (!error) return 'Đã xảy ra lỗi không xác định. Vui lòng thử lại.';
@@ -112,16 +102,15 @@ export default function OpeningPositionModal({
 
   if (!isOpen) return null;
 
-  // Filter available assets (excluding already held assets in CREATE mode, and restricted to VND assets)
+  // Filter available assets (excluding already held assets in CREATE mode, restricted to holdable VND assets)
   const availableAssets = (assets || []).filter((a) => {
-    const isVnd = (a.quote_currency || a.quoteCurrency || 'VND').toUpperCase() === 'VND';
-    if (!isVnd) return false;
+    if (!isHoldableVndAsset(a)) return false;
     if (mode !== 'CREATE') return true;
     return !(holdings || []).some((h) => h.asset_id === a.id);
   });
 
   const selectedAsset = (assets || []).find((a) => a.id === assetId) || targetHolding?.asset || null;
-  const isVndAsset = selectedAsset ? (selectedAsset.quote_currency || selectedAsset.quoteCurrency || 'VND').toUpperCase() === 'VND' : true;
+  const isVndAsset = selectedAsset ? isHoldableVndAsset(selectedAsset) : true;
 
   const handleSubmit = async (e) => {
     if (e) e.preventDefault();

@@ -8,6 +8,7 @@ import {
   formatPercentVN,
   formatAssetType
 } from '../utils/formatting.js';
+import { isHistoricalComparisonSupported } from '../utils/assetCapabilities.js';
 
 const PERIODS = [
   { id: '1W', label: '1T', name: '1 tuần' },
@@ -402,11 +403,14 @@ export function AssetComparisonSection({
   const activePeriodConfig = PERIODS.find((p) => p.id === selectedPeriod) || PERIODS[1];
 
   const availableDropdownAssets = availableAssets.filter((a) => {
+    if (!isHistoricalComparisonSupported(a)) return false;
     const sym = a.symbol?.toUpperCase();
     if (selectedSymbols.includes(sym)) return false;
     if (!searchQuery.trim()) return true;
     const q = searchQuery.trim().toLowerCase();
-    return sym?.toLowerCase().includes(q) || a.name?.toLowerCase().includes(q);
+    const name = (a.name || '').toLowerCase();
+    const typeLabel = formatAssetType(a.asset_type || a.assetType).toLowerCase();
+    return sym?.toLowerCase().includes(q) || name.includes(q) || typeLabel.includes(q);
   });
 
   const comparedAssets = comparisonData?.assets || [];
@@ -455,7 +459,7 @@ export function AssetComparisonSection({
       </div>
 
       {/* Asset Selector & Controls Bar */}
-      <TiltCard className="fintech-card" style={{ padding: '1.25rem', marginBottom: '1.25rem' }} tiltMax={1}>
+      <TiltCard className="fintech-card" style={{ padding: '1.25rem', marginBottom: '1.25rem', overflow: 'visible', zIndex: 30 }} tiltMax={1}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
           {/* Selected Asset Chips */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
@@ -526,18 +530,19 @@ export function AssetComparisonSection({
                       top: '100%',
                       left: 0,
                       marginTop: '6px',
-                      width: '260px',
+                      width: '320px',
+                      maxWidth: 'calc(100vw - 32px)',
                       backgroundColor: 'var(--color-surface, #ffffff)',
-                      borderRadius: 'var(--radius-md)',
-                      border: '1px solid var(--border-default)',
-                      boxShadow: '0 10px 25px rgba(0,0,0,0.12)',
-                      zIndex: 50,
+                      borderRadius: 'var(--radius-md, 12px)',
+                      border: '1px solid var(--border-default, #e2e8f0)',
+                      boxShadow: '0 12px 28px -4px rgba(15, 23, 42, 0.18), 0 4px 10px -2px rgba(0, 0, 0, 0.05)',
+                      zIndex: 100,
                       padding: '8px'
                     }}
                   >
                     <input
                       type="text"
-                      placeholder="Tìm mã hoặc tên..."
+                      placeholder="Tìm mã, tên (BTC, Vàng, FPT...)"
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
                       autoFocus
@@ -545,16 +550,17 @@ export function AssetComparisonSection({
                         width: '100%',
                         padding: '6px 10px',
                         borderRadius: '6px',
-                        border: '1px solid var(--border-subtle)',
+                        border: '1px solid var(--border-subtle, #cbd5e1)',
                         fontSize: '0.82rem',
                         marginBottom: '6px',
-                        boxSizing: 'border-box'
+                        boxSizing: 'border-box',
+                        outline: 'none'
                       }}
                     />
-                    <div style={{ maxHeight: '180px', overflowY: 'auto' }}>
+                    <div style={{ maxHeight: '220px', overflowY: 'auto' }}>
                       {availableDropdownAssets.length === 0 ? (
-                        <div style={{ padding: '8px', fontSize: '0.78rem', color: 'var(--color-slate-400)', textAlign: 'center' }}>
-                          Không tìm thấy tài sản phù hợp
+                        <div style={{ padding: '12px 8px', fontSize: '0.78rem', color: 'var(--color-slate-400)', textAlign: 'center' }}>
+                          Không tìm thấy tài sản hỗ trợ so sánh lịch sử phù hợp
                         </div>
                       ) : (
                         availableDropdownAssets.map((a) => (
@@ -563,19 +569,42 @@ export function AssetComparisonSection({
                             onClick={() => handleAddSymbol(a.symbol)}
                             style={{
                               padding: '6px 8px',
-                              borderRadius: '4px',
+                              borderRadius: '6px',
                               cursor: 'pointer',
                               display: 'flex',
                               justifyContent: 'space-between',
                               alignItems: 'center',
                               fontSize: '0.82rem',
-                              transition: 'background-color 0.15s ease'
+                              transition: 'background-color 0.12s ease',
+                              gap: '8px'
                             }}
-                            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'var(--color-slate-100)'}
-                            onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-slate-100, #f1f5f9)')}
+                            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
                           >
-                            <span style={{ fontWeight: 800, color: 'var(--color-slate-900)' }}>{a.symbol}</span>
-                            <span style={{ fontSize: '0.75rem', color: 'var(--color-slate-500)' }}>{formatAssetType(a.asset_type)}</span>
+                            <div style={{ minWidth: 0, flex: 1 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <span style={{ fontWeight: 800, color: 'var(--color-slate-900)' }}>{a.symbol}</span>
+                              </div>
+                              {a.name && a.name !== a.symbol && (
+                                <div
+                                  style={{
+                                    fontSize: '0.74rem',
+                                    color: 'var(--color-slate-500)',
+                                    whiteSpace: 'nowrap',
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis'
+                                  }}
+                                >
+                                  {a.name}
+                                </div>
+                              )}
+                            </div>
+                            <span
+                              className="fintech-badge badge-neutral"
+                              style={{ fontSize: '0.7rem', padding: '1px 6px', whiteSpace: 'nowrap', flexShrink: 0 }}
+                            >
+                              {formatAssetType(a.asset_type || a.assetType)}
+                            </span>
                           </div>
                         ))
                       )}
