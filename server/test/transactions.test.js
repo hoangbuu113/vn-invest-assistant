@@ -13,6 +13,17 @@ import {
 } from '../src/transactions.js';
 
 const SINGLETON_PROFILE_ID = '11111111-1111-4111-8111-111111111111';
+const OWNER_ACCESS_TOKEN = 'test-owner-token-with-high-entropy-placeholder';
+
+function ownerFetch(url, options = {}) {
+  return fetch(url, {
+    ...options,
+    headers: {
+      ...(options.headers || {}),
+      Authorization: `Bearer ${OWNER_ACCESS_TOKEN}`
+    }
+  });
+}
 const FOREIGN_PROFILE_ID = '22222222-2222-4222-8222-222222222222';
 const FPT_ASSET_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const VCB_ASSET_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
@@ -519,7 +530,7 @@ describe('Feature 14 — Actual Express Routes + Actual Production Data Access',
 
   before(async () => {
     fake = createFakeTransactionDatabase();
-    const app = createApp({ transactionClient: fake.client });
+    const app = createApp({ transactionClient: fake.client, ownerAccessToken: OWNER_ACCESS_TOKEN });
     server = http.createServer(app);
     await new Promise(resolve => server.listen(0, resolve));
     baseUrl = `http://127.0.0.1:${server.address().port}`;
@@ -530,7 +541,7 @@ describe('Feature 14 — Actual Express Routes + Actual Production Data Access',
   });
 
   test('P. POST and GET use production routes and production RPC data-access functions', async () => {
-    const createResponse = await fetch(`${baseUrl}/api/transactions`, {
+    const createResponse = await ownerFetch(`${baseUrl}/api/transactions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -549,7 +560,7 @@ describe('Feature 14 — Actual Express Routes + Actual Production Data Access',
     assert.equal(created.data.transaction.executedAt, '2026-08-28T10:00:00.000Z');
     assert.equal(created.methodology.costBasisMethod, 'weighted_average');
 
-    const listResponse = await fetch(`${baseUrl}/api/transactions?symbol=fpt`);
+    const listResponse = await ownerFetch(`${baseUrl}/api/transactions?symbol=fpt`);
     const listed = await listResponse.json();
     assert.equal(listResponse.status, 200);
     assert.equal(listed.count, 1);
@@ -578,7 +589,7 @@ describe('Feature 14 — Actual Express Routes + Actual Production Data Access',
 
     for (const body of invalidBodies) {
       const callCount = fake.state.rpcCalls.length;
-      const response = await fetch(`${baseUrl}/api/transactions`, {
+      const response = await ownerFetch(`${baseUrl}/api/transactions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body)
@@ -604,7 +615,7 @@ describe('Feature 14 — Actual Express Routes + Actual Production Data Access',
       }
     ];
     for (const body of invalidBodies) {
-      const response = await fetch(`${baseUrl}/api/transactions`, {
+      const response = await ownerFetch(`${baseUrl}/api/transactions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body)
@@ -614,7 +625,7 @@ describe('Feature 14 — Actual Express Routes + Actual Production Data Access',
   });
 
   test('asset absence and invalid SELL conditions keep deterministic client errors', async () => {
-    const absentAsset = await fetch(`${baseUrl}/api/transactions`, {
+    const absentAsset = await ownerFetch(`${baseUrl}/api/transactions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -623,7 +634,7 @@ describe('Feature 14 — Actual Express Routes + Actual Production Data Access',
     });
     assert.equal(absentAsset.status, 400);
 
-    const nonexistentHolding = await fetch(`${baseUrl}/api/transactions`, {
+    const nonexistentHolding = await ownerFetch(`${baseUrl}/api/transactions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

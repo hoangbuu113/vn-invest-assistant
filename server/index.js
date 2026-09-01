@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import { createOwnerAuthMiddleware, PRIVATE_API_PREFIXES } from './src/auth.js';
 import {
   checkSupabaseConnection,
   getAssets,
@@ -55,6 +56,7 @@ const PORT = process.env.PORT || 5000;
 
 export const ALLOWED_RISK_TOLERANCE = ['low', 'moderate', 'high'];
 export const ALLOWED_INVESTMENT_HORIZON = ['short', 'medium', 'long'];
+export { PRIVATE_API_PREFIXES };
 export const LOCAL_DEVELOPMENT_ORIGINS = [
   'http://localhost:5173',
   'http://127.0.0.1:5173'
@@ -133,12 +135,14 @@ export function createApp(services = {}) {
     corsOrigins = process.env.CORS_ORIGINS,
     transactionClient,
     cashClient,
-    positionClient
+    positionClient,
+    ownerAccessToken = process.env.OWNER_ACCESS_TOKEN
   } = services;
 
   const app = express();
   app.use(cors(createCorsOptions(corsOrigins)));
   app.use(express.json());
+  app.use(createOwnerAuthMiddleware({ ownerAccessToken }));
 
   // Basic system health endpoint with provider status
   app.get('/api/health', (req, res) => {
@@ -165,8 +169,15 @@ export function createApp(services = {}) {
 
     return res.status(503).json({
       status: 'error',
-      message: 'Database connection check failed',
-      details: result.error
+      message: 'Database connection check failed'
+    });
+  });
+
+  app.get('/api/owner/session', (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    return res.json({
+      status: 'ok',
+      data: { unlocked: true }
     });
   });
 

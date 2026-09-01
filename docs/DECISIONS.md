@@ -354,3 +354,15 @@ $$\text{Source Adapter} \longrightarrow \text{Canonical Validation / Sanitizatio
 - **Fallback and Failure Semantics**: Disabled configuration, missing API key, timeout, provider failure, malformed output, or validation rejection yields an evidence-linked deterministic fallback. Failure of the authoritative portfolio core returns an unavailable response and prevents secondary acquisition or provider invocation.
 - **Cost and Request Controls**: Generation is manual only. Identical fact packets share a fifteen-minute in-memory cache and concurrent requests are coalesced. Uncached live attempts are protected by a sixty-second process cooldown and a configurable daily process budget that defaults to twenty; cache hits consume no live-generation budget.
 - **Privacy and Persistence**: The UI discloses that a minimized fact packet is sent to the configured AI provider only when live AI is enabled. Feature 29 adds no database table, migration, brief persistence, background schedule, automatic refresh, recommendation, prediction, confidence measure, or trading action.
+
+---
+
+## 12. Single-Owner Security Boundary (Feature 30B1)
+
+- **Authentication Model**: V1 uses one high-entropy owner bearer credential supplied through `OWNER_ACCESS_TOKEN`. The backend authenticates private requests with constant-time digest comparison. No signup, OAuth, multi-user identity, or credential hard-coding is introduced.
+- **Frontend Credential Lifetime**: The owner enters the credential through a minimal unlock flow. It may exist only in memory or `sessionStorage`; locking clears it, and `localStorage` is prohibited. The credential is attached only to private API requests.
+- **Private API Boundary**: Profile, holdings, opening positions, transactions, cash, portfolio views, watchlist, alerts, personalized news, opportunities, and investment-brief generation require owner authentication for both reads and writes. Investment-brief authentication applies even in deterministic fallback mode.
+- **Public API Boundary**: Health, canonical asset browsing, generic market snapshot/realtime/history, Analysis V2, cross-asset comparison, generic news, and Vietnam regime context remain public and contain no personal state.
+- **Database Authority**: Private tables and financial RPCs are callable only by the backend's server-only Supabase `service_role` client. Browser code never receives this key. Public/publishable Supabase access is retained only for intentionally public canonical asset and provider-mapping metadata.
+- **Direct Access Prohibition**: `anon` and `authenticated` roles have no direct access to private tables and no execution authority over private financial RPCs. RLS remains enabled and existing financial validation, atomicity, VND, immutability, and projection guards are not weakened.
+- **Deployment Gate**: The security contract is not effective in production until the forward migration is reviewed and applied, both server-only credentials are configured, and authenticated HTTP plus direct-anon denial probes pass after deployment.

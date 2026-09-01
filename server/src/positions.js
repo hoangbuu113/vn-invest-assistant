@@ -1,4 +1,4 @@
-import { supabase } from './supabase.js';
+import { privateSupabase } from './supabase.js';
 
 function requireDatabaseClient(client) {
   if (!client) {
@@ -77,7 +77,7 @@ function normalizeOpeningResult(data) {
   };
 }
 
-export async function createOpeningPosition({ assetId, quantity, averageCost }, client = supabase) {
+export async function createOpeningPosition({ assetId, quantity, averageCost }, client = privateSupabase) {
   const db = requireDatabaseClient(client);
   const { data, error } = await db.rpc('create_opening_position', {
     p_asset_id: assetId,
@@ -92,7 +92,7 @@ export async function createOpeningPosition({ assetId, quantity, averageCost }, 
   return normalizeOpeningResult(data);
 }
 
-export async function correctOpeningPosition({ id, quantity, averageCost }, client = supabase) {
+export async function correctOpeningPosition({ id, quantity, averageCost }, client = privateSupabase) {
   const db = requireDatabaseClient(client);
   const { data, error } = await db.rpc('correct_opening_position', {
     p_opening_position_id: id,
@@ -107,7 +107,7 @@ export async function correctOpeningPosition({ id, quantity, averageCost }, clie
   return normalizeOpeningResult(data);
 }
 
-export async function cancelOpeningPosition({ id }, client = supabase) {
+export async function cancelOpeningPosition({ id }, client = privateSupabase) {
   const db = requireDatabaseClient(client);
   const { data, error } = await db.rpc('cancel_opening_position', {
     p_opening_position_id: id

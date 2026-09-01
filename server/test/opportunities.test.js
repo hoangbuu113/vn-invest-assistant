@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { createApp } from '../index.js';
+import { ownerFetch, TEST_OWNER_ACCESS_TOKEN } from './helpers/owner-auth.js';
 import {
   OPPORTUNITY_METHODOLOGY_VERSION,
   buildOpportunityReport,
@@ -13,6 +14,8 @@ import {
   buildOpportunityViewModel,
   opportunityReasonLabel
 } from '../../client/src/utils/opportunityDisplay.js';
+
+process.env.OWNER_ACCESS_TOKEN = TEST_OWNER_ACCESS_TOKEN;
 
 const NOW = new Date('2026-08-31T05:00:00.000Z');
 
@@ -344,7 +347,7 @@ test('Feature 28 opportunity methodology', async (t) => {
       });
       try {
         const address = server.address();
-        const response = await fetch(`http://127.0.0.1:${address.port}/api/opportunities`);
+        const response = await ownerFetch(`http://127.0.0.1:${address.port}/api/opportunities`);
         return { response, body: await response.json() };
       } finally {
         await new Promise((resolve) => server.close(resolve));

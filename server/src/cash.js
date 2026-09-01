@@ -1,4 +1,4 @@
-import { supabase } from './supabase.js';
+import { privateSupabase } from './supabase.js';
 
 export const CASH_MOVEMENT_TYPES = Object.freeze(['DEPOSIT', 'WITHDRAWAL']);
 
@@ -68,7 +68,7 @@ export function normalizeCashOverview(data) {
   };
 }
 
-export async function getCashOverview(client = supabase) {
+export async function getCashOverview(client = privateSupabase) {
   const db = requireDatabaseClient(client);
   const { data, error } = await db.rpc('get_cash_overview');
 
@@ -79,7 +79,7 @@ export async function getCashOverview(client = supabase) {
   return normalizeCashOverview(data);
 }
 
-export async function getCashLedger(client = supabase) {
+export async function getCashLedger(client = privateSupabase) {
   const db = requireDatabaseClient(client);
   const { data, error } = await db.rpc('list_cash_ledger_entries');
 
@@ -93,7 +93,7 @@ export async function getCashLedger(client = supabase) {
   return data.map(normalizeCashLedgerEntry);
 }
 
-export async function createCashMovement({ entryType, amount }, client = supabase) {
+export async function createCashMovement({ entryType, amount }, client = privateSupabase) {
   const db = requireDatabaseClient(client);
   const { data, error } = await db.rpc('create_cash_movement', {
     p_entry_type: entryType,

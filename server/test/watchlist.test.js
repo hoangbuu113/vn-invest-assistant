@@ -2,11 +2,14 @@ import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { createApp } from '../index.js';
+import { ownerFetch, TEST_OWNER_ACCESS_TOKEN } from './helpers/owner-auth.js';
 import {
   getWatchlist,
   addToWatchlist,
   removeFromWatchlist
 } from '../src/supabase.js';
+
+process.env.OWNER_ACCESS_TOKEN = TEST_OWNER_ACCESS_TOKEN;
 
 describe('Feature 08 — Watchlist / Danh sách theo dõi (Isolated Automated Tests)', () => {
   const SINGLETON_PROFILE_ID = '11111111-1111-1111-1111-111111111111';
@@ -408,7 +411,7 @@ describe('Feature 08 — Watchlist / Danh sách theo dõi (Isolated Automated Te
     });
 
     test('8. GET /api/watchlist returns 200 with only singleton profile watchlist items', async () => {
-      const res = await fetch(baseUrl + '/api/watchlist');
+      const res = await ownerFetch(baseUrl + '/api/watchlist');
       const json = await res.json();
 
       assert.equal(res.status, 200);
@@ -419,7 +422,7 @@ describe('Feature 08 — Watchlist / Danh sách theo dõi (Isolated Automated Te
     });
 
     test('9. POST /api/watchlist adds valid asset and returns 201', async () => {
-      const res = await fetch(baseUrl + '/api/watchlist', {
+      const res = await ownerFetch(baseUrl + '/api/watchlist', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ symbol: 'HPG' })
@@ -433,7 +436,7 @@ describe('Feature 08 — Watchlist / Danh sách theo dõi (Isolated Automated Te
     });
 
     test('10. POST /api/watchlist duplicate add is conflict-safe and idempotent', async () => {
-      const res = await fetch(baseUrl + '/api/watchlist', {
+      const res = await ownerFetch(baseUrl + '/api/watchlist', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ symbol: 'HPG' })
@@ -446,7 +449,7 @@ describe('Feature 08 — Watchlist / Danh sách theo dõi (Isolated Automated Te
     });
 
     test('11. POST /api/watchlist rejects empty payload with 400', async () => {
-      const res = await fetch(baseUrl + '/api/watchlist', {
+      const res = await ownerFetch(baseUrl + '/api/watchlist', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({})
@@ -459,7 +462,7 @@ describe('Feature 08 — Watchlist / Danh sách theo dõi (Isolated Automated Te
     });
 
     test('12. POST /api/watchlist returns 400 for nonexistent asset', async () => {
-      const res = await fetch(baseUrl + '/api/watchlist', {
+      const res = await ownerFetch(baseUrl + '/api/watchlist', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ symbol: 'NONEXISTENT' })
@@ -473,7 +476,7 @@ describe('Feature 08 — Watchlist / Danh sách theo dõi (Isolated Automated Te
 
     test('13. POST /api/watchlist returns 500 when database error occurs', async () => {
       dbErrorActive = true;
-      const res = await fetch(baseUrl + '/api/watchlist', {
+      const res = await ownerFetch(baseUrl + '/api/watchlist', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ symbol: 'HPG' })
@@ -486,7 +489,7 @@ describe('Feature 08 — Watchlist / Danh sách theo dõi (Isolated Automated Te
     });
 
     test('14. DELETE /api/watchlist/:assetId removes asset from watchlist', async () => {
-      const res = await fetch(baseUrl + '/api/watchlist/HPG', {
+      const res = await ownerFetch(baseUrl + '/api/watchlist/HPG', {
         method: 'DELETE'
       });
       const json = await res.json();
@@ -496,13 +499,13 @@ describe('Feature 08 — Watchlist / Danh sách theo dõi (Isolated Automated Te
       assert.equal(json.data.deleted, true);
 
       // Verify it was removed
-      const checkRes = await fetch(baseUrl + '/api/watchlist');
+      const checkRes = await ownerFetch(baseUrl + '/api/watchlist');
       const checkJson = await checkRes.json();
       assert.ok(!checkJson.data.some(w => w.asset?.symbol === 'HPG'));
     });
 
     test('15. DELETE /api/watchlist/:assetId for nonexistent item returns sensible 200 response', async () => {
-      const res = await fetch(baseUrl + '/api/watchlist/NONEXISTENT', {
+      const res = await ownerFetch(baseUrl + '/api/watchlist/NONEXISTENT', {
         method: 'DELETE'
       });
       const json = await res.json();

@@ -7,7 +7,8 @@ import { normalizeAsset, normalizeProviderMapping } from './assets.js';
 dotenv.config();
 
 const rawUrl = process.env.SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_PUBLISHABLE_KEY || process.env.SUPABASE_ANON_KEY;
+const publicSupabaseKey = process.env.SUPABASE_PUBLISHABLE_KEY || process.env.SUPABASE_ANON_KEY;
+const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 // Sanitize URL in case trailing slashes or /rest/v1 were included
 const supabaseUrl = rawUrl
@@ -16,15 +17,38 @@ const supabaseUrl = rawUrl
 
 export const isSupabaseConfigured = Boolean(
   supabaseUrl &&
-  supabaseKey &&
+  publicSupabaseKey &&
   supabaseUrl !== 'https://your-project-id.supabase.co' &&
-  supabaseKey !== 'your-supabase-publishable-key' &&
-  supabaseKey !== 'your-supabase-anon-key'
+  publicSupabaseKey !== 'your-supabase-publishable-key' &&
+  publicSupabaseKey !== 'your-supabase-anon-key'
 );
 
-export const supabase = isSupabaseConfigured
-  ? createClient(supabaseUrl, supabaseKey)
+export const isPrivilegedSupabaseConfigured = Boolean(
+  supabaseUrl &&
+  serviceRoleKey &&
+  supabaseUrl !== 'https://your-project-id.supabase.co' &&
+  serviceRoleKey !== 'your-supabase-service-role-key'
+);
+
+const CLIENT_AUTH_OPTIONS = {
+  auth: {
+    persistSession: false,
+    autoRefreshToken: false,
+    detectSessionInUrl: false
+  }
+};
+
+export const publicSupabase = isSupabaseConfigured
+  ? createClient(supabaseUrl, publicSupabaseKey, CLIENT_AUTH_OPTIONS)
   : null;
+
+export const privateSupabase = isPrivilegedSupabaseConfigured
+  ? createClient(supabaseUrl, serviceRoleKey, CLIENT_AUTH_OPTIONS)
+  : null;
+
+// Backward-compatible public metadata client. Private data-access functions
+// intentionally default to privateSupabase instead.
+export const supabase = publicSupabase;
 
 const ASSET_SELECT_FIELDS = [
   'id',
@@ -219,10 +243,10 @@ function normalizeProfile(row) {
  * Fetches the single investor profile from Supabase.
  * Reads the authoritative singleton profile row.
  */
-export async function getInvestorProfile(client = supabase) {
-  const db = client || supabase;
+export async function getInvestorProfile(client = privateSupabase) {
+  const db = client || privateSupabase;
   if (!db) {
-    throw new Error('Supabase credentials are not configured. Please set SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY in server/.env');
+    throw new Error('Private database access is not configured');
   }
 
   const { data, error } = await db
@@ -274,10 +298,10 @@ export async function getInvestorProfile(client = supabase) {
  * Updates non-cash preferences for the single investor profile.
  * Feature 15 cash is ledger-managed and cannot be written through this path.
  */
-export async function updateInvestorProfile(input, client = supabase) {
-  const db = client || supabase;
+export async function updateInvestorProfile(input, client = privateSupabase) {
+  const db = client || privateSupabase;
   if (!db) {
-    throw new Error('Supabase credentials are not configured. Please set SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY in server/.env');
+    throw new Error('Private database access is not configured');
   }
 
   if (Object.prototype.hasOwnProperty.call(input || {}, 'cash_available')) {
@@ -350,10 +374,10 @@ function normalizeHolding(row) {
 /**
  * Fetches all holdings for the single investor profile with joined asset information.
  */
-export async function getHoldings(client = supabase) {
-  const db = client || supabase;
+export async function getHoldings(client = privateSupabase) {
+  const db = client || privateSupabase;
   if (!db) {
-    throw new Error('Supabase credentials are not configured. Please set SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY in server/.env');
+    throw new Error('Private database access is not configured');
   }
 
   const profile = await getInvestorProfile(db);
@@ -395,10 +419,10 @@ export async function getHoldings(client = supabase) {
 /**
  * Adds a new holding for the singleton investor profile.
  */
-export async function addHolding({ asset_id, quantity, average_cost }, client = supabase) {
-  const db = client || supabase;
+export async function addHolding({ asset_id, quantity, average_cost }, client = privateSupabase) {
+  const db = client || privateSupabase;
   if (!db) {
-    throw new Error('Supabase credentials are not configured. Please set SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY in server/.env');
+    throw new Error('Private database access is not configured');
   }
 
   const profile = await getInvestorProfile(db);
@@ -466,10 +490,10 @@ export async function addHolding({ asset_id, quantity, average_cost }, client = 
 /**
  * Updates an existing holding by ID, strictly scoped to the singleton profile.
  */
-export async function updateHolding(id, { quantity, average_cost }, client = supabase) {
-  const db = client || supabase;
+export async function updateHolding(id, { quantity, average_cost }, client = privateSupabase) {
+  const db = client || privateSupabase;
   if (!db) {
-    throw new Error('Supabase credentials are not configured. Please set SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY in server/.env');
+    throw new Error('Private database access is not configured');
   }
 
   if (!id || typeof id !== 'string') {
@@ -514,10 +538,10 @@ export async function updateHolding(id, { quantity, average_cost }, client = sup
 /**
  * Deletes a holding by ID, strictly scoped to the singleton profile.
  */
-export async function deleteHolding(id, client = supabase) {
-  const db = client || supabase;
+export async function deleteHolding(id, client = privateSupabase) {
+  const db = client || privateSupabase;
   if (!db) {
-    throw new Error('Supabase credentials are not configured. Please set SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY in server/.env');
+    throw new Error('Private database access is not configured');
   }
 
   if (!id || typeof id !== 'string') {
@@ -620,10 +644,10 @@ function normalizeWatchlistItem(row) {
 /**
  * Fetches all watchlist items for the single investor profile with joined asset metadata.
  */
-export async function getWatchlist(client = supabase) {
-  const db = client || supabase;
+export async function getWatchlist(client = privateSupabase) {
+  const db = client || privateSupabase;
   if (!db) {
-    throw new Error('Supabase credentials are not configured. Please set SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY in server/.env');
+    throw new Error('Private database access is not configured');
   }
 
   const profile = await getInvestorProfile(db);
@@ -645,10 +669,10 @@ export async function getWatchlist(client = supabase) {
  * Adds an asset to the singleton investor profile's watchlist.
  * Deterministic and idempotent.
  */
-export async function addToWatchlist({ asset_id, symbol }, client = supabase) {
-  const db = client || supabase;
+export async function addToWatchlist({ asset_id, symbol }, client = privateSupabase) {
+  const db = client || privateSupabase;
   if (!db) {
-    throw new Error('Supabase credentials are not configured. Please set SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY in server/.env');
+    throw new Error('Private database access is not configured');
   }
 
   if ((!asset_id || typeof asset_id !== 'string') && (!symbol || typeof symbol !== 'string')) {
@@ -731,10 +755,10 @@ export async function addToWatchlist({ asset_id, symbol }, client = supabase) {
  * assetIdentifier can be an asset UUID, symbol, or watchlist item ID.
  * Returns deterministic sensible result even if item not in watchlist.
  */
-export async function removeFromWatchlist(assetIdentifier, client = supabase) {
-  const db = client || supabase;
+export async function removeFromWatchlist(assetIdentifier, client = privateSupabase) {
+  const db = client || privateSupabase;
   if (!db) {
-    throw new Error('Supabase credentials are not configured. Please set SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY in server/.env');
+    throw new Error('Private database access is not configured');
   }
 
   if (!assetIdentifier || typeof assetIdentifier !== 'string' || !assetIdentifier.trim()) {
@@ -841,10 +865,10 @@ export function normalizeAlert(row) {
 /**
  * Fetches all price alerts for the singleton investor profile.
  */
-export async function getAlerts(client = supabase) {
-  const db = client || supabase;
+export async function getAlerts(client = privateSupabase) {
+  const db = client || privateSupabase;
   if (!db) {
-    throw new Error('Supabase credentials are not configured. Please set SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY in server/.env');
+    throw new Error('Private database access is not configured');
   }
 
   const profile = await getInvestorProfile(db);
@@ -866,10 +890,10 @@ export async function getAlerts(client = supabase) {
  * Creates a new one-shot price alert for the singleton investor profile.
  * Prevents exact duplicates deterministically (returns existing alert without error).
  */
-export async function createAlert({ symbol, asset_id, direction, target_price }, client = supabase) {
-  const db = client || supabase;
+export async function createAlert({ symbol, asset_id, direction, target_price }, client = privateSupabase) {
+  const db = client || privateSupabase;
   if (!db) {
-    throw new Error('Supabase credentials are not configured. Please set SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY in server/.env');
+    throw new Error('Private database access is not configured');
   }
 
   const cleanDir = typeof direction === 'string' ? direction.trim().toLowerCase() : '';
@@ -967,10 +991,10 @@ export async function createAlert({ symbol, asset_id, direction, target_price },
 /**
  * Deletes a price alert by ID scoped to the singleton investor profile.
  */
-export async function deleteAlert(alertId, client = supabase) {
-  const db = client || supabase;
+export async function deleteAlert(alertId, client = privateSupabase) {
+  const db = client || privateSupabase;
   if (!db) {
-    throw new Error('Supabase credentials are not configured. Please set SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY in server/.env');
+    throw new Error('Private database access is not configured');
   }
 
   if (!alertId || typeof alertId !== 'string' || !alertId.trim()) {
@@ -1019,10 +1043,10 @@ export async function deleteAlert(alertId, client = supabase) {
 /**
  * Reactivates a triggered alert back to active status.
  */
-export async function reactivateAlert(alertId, client = supabase) {
-  const db = client || supabase;
+export async function reactivateAlert(alertId, client = privateSupabase) {
+  const db = client || privateSupabase;
   if (!db) {
-    throw new Error('Supabase credentials are not configured. Please set SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY in server/.env');
+    throw new Error('Private database access is not configured');
   }
 
   if (!alertId || typeof alertId !== 'string' || !alertId.trim()) {
@@ -1062,10 +1086,10 @@ export async function reactivateAlert(alertId, client = supabase) {
 /**
  * Evaluates all active alerts for the singleton profile against market snapshots and persists any state changes.
  */
-export async function evaluateAndPersistAlerts({ getMarketSnapshotFn = getMarketSnapshot, now = new Date() } = {}, client = supabase) {
-  const db = client || supabase;
+export async function evaluateAndPersistAlerts({ getMarketSnapshotFn = getMarketSnapshot, now = new Date() } = {}, client = privateSupabase) {
+  const db = client || privateSupabase;
   if (!db) {
-    throw new Error('Supabase credentials are not configured. Please set SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY in server/.env');
+    throw new Error('Private database access is not configured');
   }
 
   const profile = await getInvestorProfile(db);
@@ -1156,10 +1180,10 @@ export async function evaluateAndPersistAlerts({ getMarketSnapshotFn = getMarket
 /**
  * Fetches the cash ledger activation record for the singleton profile.
  */
-export async function getCashActivation(client = supabase) {
-  const db = client || supabase;
+export async function getCashActivation(client = privateSupabase) {
+  const db = client || privateSupabase;
   if (!db) {
-    throw new Error('Supabase credentials are not configured. Please set SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY in server/.env');
+    throw new Error('Private database access is not configured');
   }
 
   const profile = await getInvestorProfile(db);
@@ -1186,10 +1210,10 @@ export async function getCashActivation(client = supabase) {
 /**
  * Fetches all position opening baselines for the singleton profile.
  */
-export async function getPositionOpeningBaselines(client = supabase) {
-  const db = client || supabase;
+export async function getPositionOpeningBaselines(client = privateSupabase) {
+  const db = client || privateSupabase;
   if (!db) {
-    throw new Error('Supabase credentials are not configured. Please set SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY in server/.env');
+    throw new Error('Private database access is not configured');
   }
 
   const profile = await getInvestorProfile(db);

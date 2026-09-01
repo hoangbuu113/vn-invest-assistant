@@ -7,12 +7,15 @@ import {
   ALLOWED_RISK_TOLERANCE,
   ALLOWED_INVESTMENT_HORIZON
 } from '../index.js';
+import { ownerFetch, TEST_OWNER_ACCESS_TOKEN } from './helpers/owner-auth.js';
 import {
   getHoldings,
   addHolding,
   updateHolding,
   deleteHolding
 } from '../src/supabase.js';
+
+process.env.OWNER_ACCESS_TOKEN = TEST_OWNER_ACCESS_TOKEN;
 
 describe('Patch B3 - Production-Path Profile & Holdings Integrity Hardening', () => {
   const SINGLETON_PROFILE_ID = '11111111-1111-1111-1111-111111111111';
@@ -419,7 +422,7 @@ describe('Patch B3 - Production-Path Profile & Holdings Integrity Hardening', ()
 
     // --- Financial Input Validation on Real Routes ---
     test('PUT /api/profile updates preferences while preserving ledger-managed cash', async () => {
-      const res = await fetch(baseUrl + '/api/profile', {
+      const res = await ownerFetch(baseUrl + '/api/profile', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -437,7 +440,7 @@ describe('Patch B3 - Production-Path Profile & Holdings Integrity Hardening', ()
     });
 
     test('PUT /api/profile rejects direct cash changes without changing stored cash', async () => {
-      const res = await fetch(baseUrl + '/api/profile', {
+      const res = await ownerFetch(baseUrl + '/api/profile', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -461,7 +464,7 @@ describe('Patch B3 - Production-Path Profile & Holdings Integrity Hardening', ()
       ];
 
       for (const body of invalidBodies) {
-        const res = await fetch(baseUrl + '/api/profile', {
+        const res = await ownerFetch(baseUrl + '/api/profile', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body)
@@ -471,7 +474,7 @@ describe('Patch B3 - Production-Path Profile & Holdings Integrity Hardening', ()
     });
 
     test('public generic holdings creation is retired', async () => {
-      const res = await fetch(baseUrl + '/api/holdings', {
+      const res = await ownerFetch(baseUrl + '/api/holdings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ asset_id: 'asset-fpt', quantity: 10, average_cost: 1000 })
@@ -480,7 +483,7 @@ describe('Patch B3 - Production-Path Profile & Holdings Integrity Hardening', ()
     });
 
     test('GET /api/holdings returns only singleton holdings through real route', async () => {
-      const res = await fetch(baseUrl + '/api/holdings');
+      const res = await ownerFetch(baseUrl + '/api/holdings');
       const data = await res.json();
       assert.equal(res.status, 200);
       assert.ok(data.data.some(h => h.id === 'holding-singleton-fpt'));
@@ -488,7 +491,7 @@ describe('Patch B3 - Production-Path Profile & Holdings Integrity Hardening', ()
     });
 
     test('public generic holdings update is retired', async () => {
-      const res = await fetch(baseUrl + '/api/holdings/holding-singleton-fpt', {
+      const res = await ownerFetch(baseUrl + '/api/holdings/holding-singleton-fpt', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ quantity: 999, average_cost: 1000 })
@@ -497,7 +500,7 @@ describe('Patch B3 - Production-Path Profile & Holdings Integrity Hardening', ()
     });
 
     test('public generic holdings delete is retired', async () => {
-      const res = await fetch(baseUrl + '/api/holdings/holding-singleton-fpt', {
+      const res = await ownerFetch(baseUrl + '/api/holdings/holding-singleton-fpt', {
         method: 'DELETE'
       });
       assert.equal(res.status, 404);

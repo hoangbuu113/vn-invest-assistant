@@ -17,6 +17,10 @@ services:
         sync: false
       - key: SUPABASE_PUBLISHABLE_KEY
         sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: OWNER_ACCESS_TOKEN
+        sync: false
       - key: TWELVE_DATA_API_KEY
         sync: false
       - key: ALPHA_VANTAGE_API_KEY

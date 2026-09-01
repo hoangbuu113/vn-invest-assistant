@@ -9,7 +9,7 @@ import {
   getCashActivation,
   getHoldings,
   getPositionOpeningBaselines,
-  supabase
+  privateSupabase
 } from './supabase.js';
 import { getCashLedger } from './cash.js';
 import { getPortfolioTransactions } from './transactions.js';
@@ -977,7 +977,7 @@ export function calculatePortfolioPerformance({
 export async function getPortfolioPerformance({
   range = '1M',
   now = new Date(),
-  client = supabase,
+  client = privateSupabase,
   getCashActivationFn = getCashActivation,
   getCashLedgerFn = getCashLedger,
   getPositionOpeningBaselinesFn = getPositionOpeningBaselines,

@@ -493,6 +493,113 @@ body {
   z-index: 1;
 }
 
+.owner-gate-shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background:
+    radial-gradient(circle at 20% 20%, rgba(37, 99, 235, 0.14), transparent 34%),
+    radial-gradient(circle at 82% 78%, rgba(124, 58, 237, 0.13), transparent 32%),
+    #f8fafc;
+}
+
+.owner-gate-card {
+  width: min(100%, 430px);
+  padding: clamp(26px, 6vw, 42px);
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.13);
+  text-align: center;
+}
+
+.owner-gate-mark {
+  width: 52px;
+  height: 52px;
+  display: grid;
+  place-items: center;
+  margin: 0 auto 18px;
+  border-radius: 16px;
+  color: white;
+  background: linear-gradient(135deg, #2563eb, #7c3aed);
+  box-shadow: 0 12px 28px rgba(79, 70, 229, 0.24);
+}
+
+.owner-gate-eyebrow {
+  margin: 0 0 8px;
+  color: #4f46e5;
+  font-size: 0.74rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.owner-gate-card h1 {
+  margin: 0;
+  color: #0f172a;
+  font-size: clamp(1.55rem, 5vw, 2.05rem);
+  line-height: 1.15;
+}
+
+.owner-gate-copy {
+  margin: 14px 0 24px;
+  color: #64748b;
+  line-height: 1.6;
+}
+
+.owner-gate-form {
+  display: grid;
+  gap: 12px;
+  text-align: left;
+}
+
+.owner-gate-form label {
+  color: #334155;
+  font-size: 0.86rem;
+  font-weight: 750;
+}
+
+.owner-gate-form input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 12px 14px;
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+  background: white;
+  color: #0f172a;
+  font: inherit;
+}
+
+.owner-gate-form input:focus {
+  border-color: #4f46e5;
+  outline: 3px solid rgba(79, 70, 229, 0.13);
+}
+
+.owner-gate-error {
+  margin: 0;
+  color: #b91c1c;
+  font-size: 0.84rem;
+}
+
+.owner-lock-button {
+  flex: 0 0 auto;
+  padding: 8px 12px;
+  border: 1px solid rgba(100, 116, 139, 0.28);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.82);
+  color: #475569;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.owner-lock-button:hover {
+  border-color: rgba(79, 70, 229, 0.42);
+  color: #4338ca;
+}
+
 .app-header {
   background: rgba(255, 255, 255, 0.86);
   backdrop-filter: blur(18px);

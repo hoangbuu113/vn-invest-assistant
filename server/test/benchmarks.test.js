@@ -38,6 +38,9 @@ import {
 import { parseVndirectResponse } from '../src/providers/vndirect.js';
 import { getPerformanceRangeStart } from '../src/performance.js';
 import { createApp } from '../index.js';
+import { ownerFetch, TEST_OWNER_ACCESS_TOKEN } from './helpers/owner-auth.js';
+
+process.env.OWNER_ACCESS_TOKEN = TEST_OWNER_ACCESS_TOKEN;
 
 // ---------------------------------------------------------------------------
 // Shared fixtures
@@ -62,7 +65,7 @@ async function requestApp(app, requestPath) {
   const server = http.createServer(app);
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   try {
-    const response = await fetch(`http://127.0.0.1:${server.address().port}${requestPath}`);
+    const response = await ownerFetch(`http://127.0.0.1:${server.address().port}${requestPath}`);
     return { status: response.status, body: await response.json() };
   } finally {
     await new Promise((resolve) => server.close(resolve));

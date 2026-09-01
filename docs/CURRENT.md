@@ -19,26 +19,29 @@
 - **Feature 28 Implementation Status**: COMPLETE. The deterministic Opportunity Engine uses separate asset-class cohorts, transparent evidence and ranking, isolated profile-fit assessment, and explicit candidate capability states.
 - **Feature 29 Implementation Status**: COMPLETE. The guarded AI Investment Brief uses a closed deterministic fact registry, evidence-linked prose validation, a deterministic fallback, and an opt-in OpenAI adapter that is disabled by default.
 - **Automated Test Suite**:
-  - Latest Local Full Backend Regression: 578/578 PASS (includes Feature 29)
+  - Latest Local Full Backend Regression: 590/590 PASS (includes Feature 30B1 security coverage)
   - Latest Verified Production Feature 26 Backend Regression: 521/521 PASS
   - Latest Focused Feature 26 Display/Authority Gate: 11/11 PASS
   - Focused Feature 27 Gate: 13/13 PASS
   - Focused Feature 28 Gate: 16/16 PASS
   - Focused Feature 29 Gate: 23/23 PASS
+  - Focused Feature 30B1 Security Gate: 11/11 PASS
+  - Focused Transaction/Cash/Opening-Position Gate: 57/57 PASS
   - Client Build: PASS
   - `git diff --check`: PASS
 - **Database**: `20260830000000_feature_26a_hybrid_crypto_authority.sql` applied successfully
 - **Financial Integrity**: Existing holdings, portfolio transactions, cash ledger, and cash balance unchanged
 - **Production Frontend**: `https://vn-invest-assistant.vn-invest-assistant.workers.dev` (Cloudflare, root HTTP 200 verified)
 - **Production Backend**: `https://vn-invest-assistant-api.onrender.com` (Render, health status `ok` verified)
-- **Git Working Tree**: CLEAN after the Feature 29 checkpoint commit
+- **Git Working Tree**: DIRTY with intended, uncommitted Feature 30B1 security-hardening changes only
 - **GitHub Remote**: `origin/main` remains at `39648da`; local `main` is ahead after the Feature 29 checkpoint commit
+- **Feature 30 Security Status**: IN PROGRESS. Local code now defines a single-owner bearer boundary, session-only frontend unlock, server-only privileged Supabase access, and a forward permission migration. Production is **not** secure under this contract until the migration is reviewed/applied, `OWNER_ACCESS_TOKEN` and `SUPABASE_SERVICE_ROLE_KEY` are configured server-side, and the verified code is deployed.
 
 ## CURRENT PHASE
-FEATURE 30 — RELEASE HARDENING (NEXT)
+FEATURE 30 — RELEASE HARDENING (IN PROGRESS)
 
 ## CURRENT NEXT PROJECT TASK
-Feature 30 release hardening. Do not push or deploy unless explicitly authorized.
+Complete Feature 30B1 verification and independent review. Do not apply the security migration remotely, push, or deploy unless explicitly authorized.
 
 ---
 

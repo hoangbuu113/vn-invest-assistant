@@ -5,6 +5,9 @@ import {
   getPortfolioComposition
 } from '../src/composition.js';
 import { createApp } from '../index.js';
+import { ownerFetch, TEST_OWNER_ACCESS_TOKEN } from './helpers/owner-auth.js';
+
+process.env.OWNER_ACCESS_TOKEN = TEST_OWNER_ACCESS_TOKEN;
 
 function makeOverview(cashAvailable, holdings = []) {
   return {
@@ -234,7 +237,7 @@ describe('Feature 10 — Portfolio Composition & Concentration', () => {
     const port = server.address().port;
 
     try {
-      const response = await fetch(`http://127.0.0.1:${port}/api/portfolio/composition`);
+      const response = await ownerFetch(`http://127.0.0.1:${port}/api/portfolio/composition`);
       const body = await response.json();
 
       assert.equal(response.status, 200);

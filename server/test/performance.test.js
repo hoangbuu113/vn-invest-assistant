@@ -12,6 +12,9 @@ import {
   PERFORMANCE_TIMEZONE
 } from '../src/performance.js';
 import { createApp } from '../index.js';
+import { ownerFetch, TEST_OWNER_ACCESS_TOKEN } from './helpers/owner-auth.js';
+
+process.env.OWNER_ACCESS_TOKEN = TEST_OWNER_ACCESS_TOKEN;
 
 describe('Feature 25B — VND Portfolio Performance Engine', () => {
   const assetFpt = {
@@ -738,7 +741,7 @@ describe('Feature 25B — VND Portfolio Performance Engine', () => {
     const port = server.address().port;
 
     try {
-      const response = await fetch(`http://127.0.0.1:${port}/api/portfolio/performance?range=1M`);
+      const response = await ownerFetch(`http://127.0.0.1:${port}/api/portfolio/performance?range=1M`);
       const body = await response.json();
 
       assert.equal(response.status, 200);
@@ -753,12 +756,16 @@ describe('Feature 25B — VND Portfolio Performance Engine', () => {
   });
 
   it('GET /api/portfolio/performance returns 400 for invalid range', async () => {
-    const mockApp = createApp();
+    const mockApp = createApp({
+      getPortfolioPerformanceFn: async ({ range }) => {
+        getPerformanceRangeStart('2026-08-28', range);
+      }
+    });
     const server = mockApp.listen(0);
     const port = server.address().port;
 
     try {
-      const response = await fetch(`http://127.0.0.1:${port}/api/portfolio/performance?range=2M`);
+      const response = await ownerFetch(`http://127.0.0.1:${port}/api/portfolio/performance?range=2M`);
       const body = await response.json();
 
       assert.equal(response.status, 400);

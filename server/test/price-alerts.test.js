@@ -8,9 +8,12 @@ import {
   formatAlertCondition
 } from '../src/alerts.js';
 import { createApp, isValidFinancialNumber } from '../index.js';
+import { ownerFetch, TEST_OWNER_ACCESS_TOKEN } from './helpers/owner-auth.js';
 import { getMarketSnapshot } from '../src/market.js';
 import { normalizeAlert } from '../src/supabase.js';
 import { twelvedataProvider } from '../src/providers/twelvedata.js';
+
+process.env.OWNER_ACCESS_TOKEN = TEST_OWNER_ACCESS_TOKEN;
 
 describe('Feature 12 — Price Alerts V1 / Cảnh báo giá (Isolated Automated Tests)', () => {
   const SINGLETON_PROFILE_ID = 'singleton-profile-uuid-12345';
@@ -490,7 +493,7 @@ describe('Feature 12 — Price Alerts V1 / Cảnh báo giá (Isolated Automated 
     });
 
     test('1. GET /api/alerts returns 200 with only singleton profile alerts', async () => {
-      const res = await fetch(baseUrl + '/api/alerts');
+      const res = await ownerFetch(baseUrl + '/api/alerts');
       const json = await res.json();
 
       assert.equal(res.status, 200);
@@ -501,7 +504,7 @@ describe('Feature 12 — Price Alerts V1 / Cảnh báo giá (Isolated Automated 
     });
 
     test('2. POST /api/alerts adds valid alert with 201', async () => {
-      const res = await fetch(baseUrl + '/api/alerts', {
+      const res = await ownerFetch(baseUrl + '/api/alerts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -521,7 +524,7 @@ describe('Feature 12 — Price Alerts V1 / Cảnh báo giá (Isolated Automated 
     });
 
     test('3. POST /api/alerts duplicate alert is conflict-safe and idempotent', async () => {
-      const res = await fetch(baseUrl + '/api/alerts', {
+      const res = await ownerFetch(baseUrl + '/api/alerts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -547,7 +550,7 @@ describe('Feature 12 — Price Alerts V1 / Cảnh báo giá (Isolated Automated 
       ];
 
       for (const body of invalidBodies) {
-        const res = await fetch(baseUrl + '/api/alerts', {
+        const res = await ownerFetch(baseUrl + '/api/alerts', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body)
@@ -561,7 +564,7 @@ describe('Feature 12 — Price Alerts V1 / Cảnh báo giá (Isolated Automated 
     });
 
     test('5. POST /api/alerts returns 400 for nonexistent asset', async () => {
-      const res = await fetch(baseUrl + '/api/alerts', {
+      const res = await ownerFetch(baseUrl + '/api/alerts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -578,7 +581,7 @@ describe('Feature 12 — Price Alerts V1 / Cảnh báo giá (Isolated Automated 
     });
 
     test('6. POST /api/alerts/evaluate evaluates active alerts', async () => {
-      const res = await fetch(baseUrl + '/api/alerts/evaluate', {
+      const res = await ownerFetch(baseUrl + '/api/alerts/evaluate', {
         method: 'POST'
       });
       const json = await res.json();
@@ -595,7 +598,7 @@ describe('Feature 12 — Price Alerts V1 / Cảnh báo giá (Isolated Automated 
       const fptAlert = alertStore.find((a) => a.asset?.symbol === 'FPT');
       assert.ok(fptAlert);
 
-      const res = await fetch(baseUrl + `/api/alerts/${fptAlert.id}/reactivate`, {
+      const res = await ownerFetch(baseUrl + `/api/alerts/${fptAlert.id}/reactivate`, {
         method: 'POST'
       });
       const json = await res.json();
@@ -610,7 +613,7 @@ describe('Feature 12 — Price Alerts V1 / Cảnh báo giá (Isolated Automated 
       const vcbAlert = alertStore.find((a) => a.asset?.symbol === 'VCB' && a.profile_id === SINGLETON_PROFILE_ID);
       assert.ok(vcbAlert);
 
-      const res = await fetch(baseUrl + `/api/alerts/${vcbAlert.id}`, {
+      const res = await ownerFetch(baseUrl + `/api/alerts/${vcbAlert.id}`, {
         method: 'DELETE'
       });
       const json = await res.json();
@@ -620,13 +623,13 @@ describe('Feature 12 — Price Alerts V1 / Cảnh báo giá (Isolated Automated 
       assert.equal(json.data.deleted, true);
 
       // Verify removed
-      const checkRes = await fetch(baseUrl + '/api/alerts');
+      const checkRes = await ownerFetch(baseUrl + '/api/alerts');
       const checkJson = await checkRes.json();
       assert.ok(!checkJson.data.some((a) => a.id === vcbAlert.id));
     });
 
     test('9. DELETE /api/alerts/:id for nonexistent item returns clean response', async () => {
-      const res = await fetch(baseUrl + '/api/alerts/NONEXISTENT_ID', {
+      const res = await ownerFetch(baseUrl + '/api/alerts/NONEXISTENT_ID', {
         method: 'DELETE'
       });
       const json = await res.json();

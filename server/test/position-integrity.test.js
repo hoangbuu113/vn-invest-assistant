@@ -13,6 +13,17 @@ const FPT_ID = '22222222-2222-4222-8222-222222222222';
 const VCB_ID = '33333333-3333-4333-8333-333333333333';
 const BTC_ID = '44444444-4444-4444-8444-444444444444';
 const INACTIVE_ID = '55555555-5555-4555-8555-555555555555';
+const OWNER_ACCESS_TOKEN = 'test-owner-token-with-high-entropy-placeholder';
+
+function ownerFetch(url, options = {}) {
+  return fetch(url, {
+    ...options,
+    headers: {
+      ...(options.headers || {}),
+      Authorization: `Bearer ${OWNER_ACCESS_TOKEN}`
+    }
+  });
+}
 
 function cloneRows(rows) {
   return rows.map(row => ({ ...row }));
@@ -321,6 +332,7 @@ async function withServer(fake, callback) {
   const app = createApp({
     positionClient: fake.client,
     transactionClient: fake.client,
+    ownerAccessToken: OWNER_ACCESS_TOKEN,
     getHoldingsFn: async () => fake.state.holdings
   });
   const server = http.createServer(app);
@@ -342,7 +354,7 @@ describe('Feature 17A — opening position and ledger authority', () => {
     const fake = createFakePositionDatabase();
     const startingCash = fake.state.cashAvailable;
     await withServer(fake, async baseUrl => {
-      const response = await fetch(`${baseUrl}/api/positions/opening`, {
+      const response = await ownerFetch(`${baseUrl}/api/positions/opening`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -397,7 +409,7 @@ describe('Feature 17A — opening position and ledger authority', () => {
     await withServer(fake, async baseUrl => {
       for (const body of invalid) {
         const before = fake.state.rpcCalls.length;
-        const response = await fetch(`${baseUrl}/api/positions/opening`, {
+        const response = await ownerFetch(`${baseUrl}/api/positions/opening`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body)
@@ -408,7 +420,7 @@ describe('Feature 17A — opening position and ledger authority', () => {
 
       const opening = await establishOpening(fake);
       const before = fake.state.rpcCalls.length;
-      const correction = await fetch(`${baseUrl}/api/positions/opening/${opening.openingPosition.id}`, {
+      const correction = await ownerFetch(`${baseUrl}/api/positions/opening/${opening.openingPosition.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ quantity: '2', averageCost: 10 })
@@ -442,7 +454,7 @@ describe('Feature 17A — opening position and ledger authority', () => {
     const opening = await establishOpening(fake);
     const cashBefore = fake.state.cashAvailable;
     await withServer(fake, async baseUrl => {
-      const response = await fetch(`${baseUrl}/api/positions/opening/${opening.openingPosition.id}`, {
+      const response = await ownerFetch(`${baseUrl}/api/positions/opening/${opening.openingPosition.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ quantity: 125.5, averageCost: 36000.125 })
@@ -463,7 +475,7 @@ describe('Feature 17A — opening position and ledger authority', () => {
     const opening = await establishOpening(fake);
     const cashBefore = fake.state.cashAvailable;
     await withServer(fake, async baseUrl => {
-      const response = await fetch(`${baseUrl}/api/positions/opening/${opening.openingPosition.id}/cancel`, {
+      const response = await ownerFetch(`${baseUrl}/api/positions/opening/${opening.openingPosition.id}/cancel`, {
         method: 'POST'
       });
       const body = await response.json();
@@ -530,12 +542,12 @@ describe('Feature 17A — opening position and ledger authority', () => {
       cashLedger: fake.state.cashLedger
     });
     await withServer(fake, async baseUrl => {
-      const correction = await fetch(`${baseUrl}/api/positions/opening/${opening.openingPosition.id}`, {
+      const correction = await ownerFetch(`${baseUrl}/api/positions/opening/${opening.openingPosition.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ quantity: 1, averageCost: 1 })
       });
-      const cancellation = await fetch(`${baseUrl}/api/positions/opening/${opening.openingPosition.id}/cancel`, {
+      const cancellation = await ownerFetch(`${baseUrl}/api/positions/opening/${opening.openingPosition.id}/cancel`, {
         method: 'POST'
       });
       assert.equal(correction.status, 409);
@@ -572,13 +584,13 @@ describe('Feature 17A — opening position and ledger authority', () => {
     const fake = createFakePositionDatabase();
     await withServer(fake, async baseUrl => {
       const responses = await Promise.all([
-        fetch(`${baseUrl}/api/holdings`, {
+        ownerFetch(`${baseUrl}/api/holdings`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}'
         }),
-        fetch(`${baseUrl}/api/holdings/holding-1`, {
+        ownerFetch(`${baseUrl}/api/holdings/holding-1`, {
           method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: '{}'
         }),
-        fetch(`${baseUrl}/api/holdings/holding-1`, { method: 'DELETE' })
+        ownerFetch(`${baseUrl}/api/holdings/holding-1`, { method: 'DELETE' })
       ]);
       assert.deepEqual(responses.map(response => response.status), [404, 404, 404]);
     });

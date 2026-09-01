@@ -1,4 +1,4 @@
-import { supabase } from './supabase.js';
+import { privateSupabase } from './supabase.js';
 import { normalizeCashLedgerEntry } from './cash.js';
 
 export const TRANSACTION_TYPES = Object.freeze(['BUY', 'SELL']);
@@ -114,7 +114,7 @@ function transactionDatabaseError(error, fallbackMessage) {
   return err;
 }
 
-export async function getPortfolioTransactions({ symbol } = {}, client = supabase) {
+export async function getPortfolioTransactions({ symbol } = {}, client = privateSupabase) {
   const db = requireDatabaseClient(client);
   const normalizedSymbol = typeof symbol === 'string' && symbol.trim()
     ? symbol.trim().toUpperCase()
@@ -142,7 +142,7 @@ export async function createPortfolioTransaction({
   quantity,
   price,
   executedAt
-}, client = supabase) {
+}, client = privateSupabase) {
   const db = requireDatabaseClient(client);
 
   const { data, error } = await db.rpc('create_portfolio_transaction', {

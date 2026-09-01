@@ -8,6 +8,9 @@ import {
   getPersonalizedNewsFeed
 } from '../src/news.js';
 import { createApp } from '../index.js';
+import { ownerFetch, TEST_OWNER_ACCESS_TOKEN } from './helpers/owner-auth.js';
+
+process.env.OWNER_ACCESS_TOKEN = TEST_OWNER_ACCESS_TOKEN;
 
 describe('Feature 13 — Personalized Relevant News / Tin của tôi', () => {
   const sampleUserAssets = [
@@ -360,7 +363,7 @@ describe('Feature 13 — Personalized Relevant News / Tin của tôi', () => {
         }
       ];
 
-      const res = await fetch(`${baseUrl}/api/news/personalized`);
+      const res = await ownerFetch(`${baseUrl}/api/news/personalized`);
       const body = await res.json();
 
       assert.equal(res.status, 200);
@@ -392,7 +395,7 @@ describe('Feature 13 — Personalized Relevant News / Tin của tôi', () => {
         }
       ];
 
-      const res = await fetch(`${baseUrl}/api/news/personalized`);
+      const res = await ownerFetch(`${baseUrl}/api/news/personalized`);
       const body = await res.json();
 
       assert.equal(res.status, 200);
@@ -428,7 +431,7 @@ describe('Feature 13 — Personalized Relevant News / Tin của tôi', () => {
         }
       ];
 
-      const res = await fetch(`${baseUrl}/api/news/personalized`);
+      const res = await ownerFetch(`${baseUrl}/api/news/personalized`);
       const body = await res.json();
 
       assert.equal(res.status, 200);
@@ -444,7 +447,7 @@ describe('Feature 13 — Personalized Relevant News / Tin của tôi', () => {
       mockWatchlist = [];
       mockNews = [{ id: '1', title: 'FPT tin' }];
 
-      const res = await fetch(`${baseUrl}/api/news/personalized`);
+      const res = await ownerFetch(`${baseUrl}/api/news/personalized`);
       const body = await res.json();
 
       assert.equal(res.status, 200);
@@ -457,7 +460,7 @@ describe('Feature 13 — Personalized Relevant News / Tin của tôi', () => {
     test('J3. route returns 500 when holdings query fails', async () => {
       simulateDbError = true;
 
-      const res = await fetch(`${baseUrl}/api/news/personalized`);
+      const res = await ownerFetch(`${baseUrl}/api/news/personalized`);
       const body = await res.json();
 
       assert.equal(res.status, 500);

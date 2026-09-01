@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 import { createApp } from '../index.js';
+import { ownerFetch, TEST_OWNER_ACCESS_TOKEN } from './helpers/owner-auth.js';
 import {
   AI_BRIEF_CACHE_TTL_MS,
   AI_BRIEF_METHODOLOGY_VERSION,
@@ -24,6 +25,8 @@ import {
   buildInvestmentBriefViewModel,
   reduceInvestmentBriefState
 } from '../../client/src/utils/investmentBriefDisplay.js';
+
+process.env.OWNER_ACCESS_TOKEN = TEST_OWNER_ACCESS_TOKEN;
 
 const NOW = new Date('2026-09-01T05:00:00.000Z');
 const INTERNAL_UUID = '11111111-2222-4333-8444-555555555555';
@@ -565,7 +568,7 @@ test('Feature 29B guarded AI investment brief', async (t) => {
       getPersonalizedNewsFeedFn: async () => newsFixture()
     });
     await withServer(app, async (baseUrl) => {
-      const response = await fetch(`${baseUrl}/api/investment-brief`, { method: 'POST' });
+      const response = await ownerFetch(`${baseUrl}/api/investment-brief`, { method: 'POST' });
       const body = await response.json();
       assert.equal(response.status, 200);
       assert.equal(body.methodologyVersion, AI_BRIEF_METHODOLOGY_VERSION);
@@ -584,7 +587,7 @@ test('Feature 29B guarded AI investment brief', async (t) => {
       })
     });
     await withServer(unavailableApp, async (baseUrl) => {
-      const response = await fetch(`${baseUrl}/api/investment-brief`, { method: 'POST' });
+      const response = await ownerFetch(`${baseUrl}/api/investment-brief`, { method: 'POST' });
       assert.equal(response.status, 503);
     });
 
@@ -594,7 +597,7 @@ test('Feature 29B guarded AI investment brief', async (t) => {
       }
     });
     await withServer(rateLimitedApp, async (baseUrl) => {
-      const response = await fetch(`${baseUrl}/api/investment-brief`, { method: 'POST' });
+      const response = await ownerFetch(`${baseUrl}/api/investment-brief`, { method: 'POST' });
       const body = await response.json();
       assert.equal(response.status, 429);
       assert.equal(body.code, 'AI_BRIEF_DAILY_LIMIT');

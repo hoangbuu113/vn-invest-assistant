@@ -19,6 +19,17 @@ const PROFILE_ID = '11111111-1111-4111-8111-111111111111';
 const FOREIGN_PROFILE_ID = '22222222-2222-4222-8222-222222222222';
 const ASSET_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const ACTIVATED_AT = '2026-08-28T12:00:00.000Z';
+const OWNER_ACCESS_TOKEN = 'test-owner-token-with-high-entropy-placeholder';
+
+function ownerFetch(url, options = {}) {
+  return fetch(url, {
+    ...options,
+    headers: {
+      ...(options.headers || {}),
+      Authorization: `Bearer ${OWNER_ACCESS_TOKEN}`
+    }
+  });
+}
 
 function cloneRows(rows) {
   return rows.map(row => ({
@@ -528,6 +539,7 @@ describe('Feature 15 — Production Cash Routes', () => {
       transactionClient: fake.client,
       getInvestorProfileFn: async () => ({ ...fake.state.profile }),
       updateInvestorProfileFn: input => updateInvestorProfile(input, fake.client),
+      ownerAccessToken: OWNER_ACCESS_TOKEN,
       getPortfolioOverviewFn: () => getPortfolioOverview({
         getCashOverviewFn: () => getCashOverview(fake.client),
         getHoldingsFn: async () => fake.state.holdings,
@@ -544,14 +556,14 @@ describe('Feature 15 — Production Cash Routes', () => {
   });
 
   test('R/N. actual routes use production RPC data access and never send client profile ownership', async () => {
-    const depositResponse = await fetch(`${baseUrl}/api/cash/deposit`, {
+    const depositResponse = await ownerFetch(`${baseUrl}/api/cash/deposit`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ amount: 20000000, profileId: FOREIGN_PROFILE_ID })
     });
     assert.equal(depositResponse.status, 201);
 
-    const buyResponse = await fetch(`${baseUrl}/api/transactions`, {
+    const buyResponse = await ownerFetch(`${baseUrl}/api/transactions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -561,12 +573,12 @@ describe('Feature 15 — Production Cash Routes', () => {
     });
     assert.equal(buyResponse.status, 201);
 
-    const overviewResponse = await fetch(`${baseUrl}/api/cash/overview`);
+    const overviewResponse = await ownerFetch(`${baseUrl}/api/cash/overview`);
     const overview = await overviewResponse.json();
     assert.equal(overviewResponse.status, 200);
     assert.equal(overview.data.currentCash, 110000000);
 
-    const ledgerResponse = await fetch(`${baseUrl}/api/cash/ledger`);
+    const ledgerResponse = await ownerFetch(`${baseUrl}/api/cash/ledger`);
     const ledger = await ledgerResponse.json();
     assert.equal(ledgerResponse.status, 200);
     assert.equal(ledger.count, 3);
@@ -581,7 +593,7 @@ describe('Feature 15 — Production Cash Routes', () => {
     const invalidAmounts = ['1000', null, true, [1000], { amount: 1000 }, 0, -1];
     for (const amount of invalidAmounts) {
       const callCount = fake.state.rpcCalls.length;
-      const response = await fetch(`${baseUrl}/api/cash/deposit`, {
+      const response = await ownerFetch(`${baseUrl}/api/cash/deposit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ amount })
@@ -592,7 +604,7 @@ describe('Feature 15 — Production Cash Routes', () => {
   });
 
   test('profile route cannot overwrite ledger cash but still updates preferences', async () => {
-    const rejected = await fetch(`${baseUrl}/api/profile`, {
+    const rejected = await ownerFetch(`${baseUrl}/api/profile`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -604,7 +616,7 @@ describe('Feature 15 — Production Cash Routes', () => {
     assert.equal(rejected.status, 409);
     assert.equal(fake.state.profile.cash_available, 110000000);
 
-    const accepted = await fetch(`${baseUrl}/api/profile`, {
+    const accepted = await ownerFetch(`${baseUrl}/api/profile`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -619,8 +631,8 @@ describe('Feature 15 — Production Cash Routes', () => {
   });
 
   test('V1 exposes no ledger edit or delete routes', async () => {
-    const putResponse = await fetch(`${baseUrl}/api/cash/ledger/cash-opening`, { method: 'PUT' });
-    const deleteResponse = await fetch(`${baseUrl}/api/cash/ledger/cash-opening`, { method: 'DELETE' });
+    const putResponse = await ownerFetch(`${baseUrl}/api/cash/ledger/cash-opening`, { method: 'PUT' });
+    const deleteResponse = await ownerFetch(`${baseUrl}/api/cash/ledger/cash-opening`, { method: 'DELETE' });
     assert.equal(putResponse.status, 404);
     assert.equal(deleteResponse.status, 404);
   });
