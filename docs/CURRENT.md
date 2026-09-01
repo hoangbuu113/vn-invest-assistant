@@ -1,46 +1,45 @@
 # Current Project Status
 
 ## LATEST VERIFIED CHECKPOINT
-- **Commits**:
-  - `dec06cd` — `feat: add portfolio performance engine` (Feature 25A)
-  - `34ec123` — `feat: add portfolio benchmark integration` (Feature 25B/C)
-  - `2c1be74` — `feat: add portfolio performance dashboard` (Feature 25D)
-  - `d081fe8` — `feat: improve crypto market data reliability` (Feature 26)
-  - `cf049da` — `fix: use Binance WebSocket API for history` (production backend)
-  - `6f76d02` — `fix: point public site frontend at production API in prod builds`
-  - `a22228b` — `deploy: add Cloudflare Pages/Workers static frontend + allow its CORS origin`
-  - `5059467` — `fix: align crypto watchlist realtime display` (Feature 26 production closeout)
-  - `e38dcba` — `feat: add vietnam market regime foundation` (Feature 27)
-  - `39648da` — `feat: add deterministic opportunity engine` (Feature 28)
-  - `bfc22dd` — `security: protect single-owner financial access` (Feature 30B1 checkpoint)
-- **Documentation Rebaseline Commit**: `e514b53` — `docs: rebaseline after feature 26 closeout`
+- **Release Status**: READY / FEATURE 30 COMPLETE (Features 01–30 COMPLETE)
 - **Branch**: `main`
-- **Feature 26 Implementation Status**: COMPLETE in production at backend commit `cf049da`; display-consistency closeout COMPLETE at local commit `5059467` (hybrid provider authority, resilience, migration, and current-price presentation)
-- **Feature 27 Implementation Status**: COMPLETE at commit `e38dcba`. Reduced Vietnam Market Regime foundation is committed. NSO CPI is the usable production domain; SBV money-market may return unavailable when official releases cannot be parsed; market breadth is explicitly `SOURCE_NOT_PROVISIONED`.
-- **Feature 28 Implementation Status**: COMPLETE. The deterministic Opportunity Engine uses separate asset-class cohorts, transparent evidence and ranking, isolated profile-fit assessment, and explicit candidate capability states.
-- **Feature 29 Implementation Status**: COMPLETE. The guarded AI Investment Brief uses a closed deterministic fact registry, evidence-linked prose validation, a deterministic fallback, and an opt-in OpenAI adapter that is disabled by default.
+- **Architecture**: Cloudflare Workers Static Assets frontend + Render Node.js Express backend + Supabase PostgreSQL database
+- **Security & Authorization**:
+  - Production security activated via PostgreSQL permissions (`20260901000000_feature_30b1_single_owner_security.sql`)
+  - Direct Supabase `anon` access denied for all private financial tables (`investor_profile`, `holdings`, `position_opening_baselines`, `portfolio_transactions`, `cash_ledger_entries`, `watchlist_items`, `price_alerts`) and sensitive RPCs
+  - Public canonical metadata (`assets`, `asset_provider_mappings`) remains accessible to `anon`
+  - Single-owner bearer authentication (`OWNER_ACCESS_TOKEN`) enforced on all private API endpoints; unauthenticated requests return 401, invalid tokens return 403
+  - Service-role key / database secret key (`SUPABASE_SECRET_KEY`) is strictly backend-only and never exposed to the client bundle
+- **Clean First-Use Financial Baseline**:
+  - Authoritative Holdings: 0 rows (clean initial state)
+  - Authoritative Transactions: 0 rows
+  - Authoritative Position Opening Baselines: 0 rows
+  - Authoritative Cash Ledger: 0 rows (0 VND cash available)
+  - Authoritative Watchlist: 0 rows
+  - Authoritative Price Alerts: 0 rows
+  - Singleton Investor Profile: 1 record (`cash_available = 0`, moderate risk tolerance, medium horizon)
+  - Remote Canonical Universe: 49 assets (40 crypto, 7 VN stocks/ETFs, 1 gold spot, 1 FX context) across 5 verified providers (89 provider mappings)
 - **Automated Test Suite**:
-  - Latest Local Full Backend Regression: 600/600 PASS (includes 9 dedicated Feature 30B2 release hardening tests)
-  - Latest Focused Feature 30B2 Gate: 9/9 PASS
-  - Latest Focused Feature 30B1 Security Gate: 11/11 PASS
-  - Latest Focused Feature 29 Gate: 23/23 PASS
-  - Latest Focused Feature 28 Gate: 16/16 PASS
-  - Latest Focused Feature 27 Gate: 13/13 PASS
-  - Client Build: PASS (~190ms, 0 vulnerabilities)
-  - `git diff --check`: PASS
-- **Database**: `20260830000000_feature_26a_hybrid_crypto_authority.sql` and `20260901000000_feature_30b1_single_owner_security.sql` applied successfully
-- **Financial Integrity**: Authoritative clean first-use baseline (0 holdings, 0 transactions, 0 opening baselines, 0 cash ledger rows, 0 VND current cash, 0 watchlist items, 0 alerts)
-- **Production Frontend**: `https://vn-invest-assistant.vn-invest-assistant.workers.dev` (Cloudflare, Owner Gate active, root HTTP 200 verified)
-- **Production Backend**: `https://vn-invest-assistant-api.onrender.com` (Render, live at commit `58a5c21`, health status `ok`, owner authentication active)
-- **Git Working Tree**: DIRTY with Feature 30B4 UI/UX polish (uncommitted; ready for review)
-- **GitHub Remote**: `origin/main` synchronized at commit `58a5c21`
-- **Feature 30 Security & Hardening Status**: IN PROGRESS. Feature 30B1 production security activation, Feature 30B2 release error & dependency hardening, Feature 30B3 controlled test-data reset, and Feature 30B4 final UI/UX polish are COMPLETE.
+  - Full Backend Regression: 600/600 PASS (88 test suites)
+  - Focused Feature 30B2 Hardening Gate: 9/9 PASS
+  - Focused Feature 30B1 Security Gate: 11/11 PASS
+  - Focused Feature 29 AI Brief Gate: 23/23 PASS
+  - Focused Feature 28 Opportunity Engine Gate: 16/16 PASS
+  - Focused Feature 27 Market Regime Gate: 13/13 PASS
+  - Dependencies: `npm audit` 0 vulnerabilities on both server and client
+  - Client Build: PASS (~190ms, 0 errors, 0 warnings)
+  - Git Diff & Formatting: `git diff --check` PASS
+- **Production Endpoints**:
+  - Frontend: `https://vn-invest-assistant.vn-invest-assistant.workers.dev` (Cloudflare Workers Static Assets, Owner Gate active)
+  - Backend: `https://vn-invest-assistant-api.onrender.com` (Render, single-owner auth active, health `ok`)
+- **Working Tree**: CLEAN
 
 ## CURRENT PHASE
-FEATURE 30 — RELEASE HARDENING (IN PROGRESS)
+FEATURE 30 — RELEASE HARDENING & FINAL GATE (COMPLETE)
 
-## CURRENT NEXT PROJECT TASK
-FEATURE 30 Final Checkpoint & Operational Verification
+## RELEASE STATUS
+READY / ALL 30 ROADMAP FEATURES DELIVERED
+
 
 ---
 

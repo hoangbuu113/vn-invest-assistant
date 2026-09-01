@@ -4,9 +4,9 @@ This document defines the canonical architectural and conceptual model for multi
 
 ---
 
-## 1. Current Implementation Status (Features 16–26)
+## 1. Current Implementation Status (Features 16–30)
 
-Features 16 through 26 establish the canonical schema, ledger authority, provider abstraction, FX valuation, full controlled multi-asset universe, normalized historical semantics, deterministic multi-asset analysis, multi-source news foundation, portfolio performance, comprehensive frontend integration, and hybrid Crypto provider authority:
+Features 16 through 30 establish the canonical schema, ledger authority, provider abstraction, FX valuation, full controlled multi-asset universe, normalized historical semantics, deterministic multi-asset analysis, multi-source news foundation, portfolio performance, comprehensive frontend integration, hybrid Crypto provider authority, market regime context, opportunity engine, guarded AI brief, and production single-owner security hardening:
 
 - **Verified Production Universe (49 Canonical Assets)**:
   - **Vietnamese Equities & ETFs** (`VN_EXCHANGE`, `Asia/Ho_Chi_Minh`, `VND`, `share`):
