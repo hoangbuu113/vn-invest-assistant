@@ -1,7 +1,7 @@
 # Current Project Status
 
 ## LATEST VERIFIED CHECKPOINT
-- **Release Status**: V1.1 BATCH 1 ACTIVE / VERIFIED IN PRODUCTION
+- **Release Status**: V1.1 BATCH 2 ACTIVE / VERIFIED IN PRODUCTION
 - **Branch**: `main`
 - **Architecture**: Cloudflare Workers Static Assets frontend + Render Node.js Express backend + Supabase PostgreSQL database
 - **Security & Authorization**:
@@ -11,17 +11,19 @@
   - Single-owner authentication enforced with trusted device sessions: 30-day first-party HttpOnly cookie (`vn_invest_owner_session`) + bearer auth fallback (`OWNER_ACCESS_TOKEN`); unauthenticated requests return 401, invalid tokens return 403
   - Background price-alert scheduler protected via `ALERT_SCHEDULER_TOKEN` (cron trigger `*/15 * * * *` on Cloudflare Worker)
   - Service-role key / database secret key (`SUPABASE_SECRET_KEY`) is strictly backend-only and never exposed to the client bundle
-- **Multi-Asset & Accounting Activation (V1.1 Batch 1)**:
+- **Multi-Asset, Onboarding & Navigation Activation (V1.1 Batch 2)**:
+  - Feature 27 SBV Money-Market Data Reliability: Adapter and parser hardened for diverse Vietnamese date patterns; upstream WAF blocking detected and mapped to truthful `OFFICIAL_DATA_UNAVAILABLE` degradation without fabricating rates
+  - State-Aware Portfolio Onboarding: Dynamic 3-state presentation machine (State A no capital, State B cash ready with 20M display, State C holdings active) with zero financial mutations and clear action routing
+  - Browser History & Asset Deep Linking: Canonical hash routing (`#{tab}`, `#assets/{symbol}` with `XAU/USD` $\leftrightarrow$ `#assets/XAU%2FUSD` encoding), browser Back/Forward, origin tab preservation, and safe error fallbacks
+  - Market Breadth: Retained as `status: 'unavailable'`, `reason: 'SOURCE_NOT_PROVISIONED'`
   - Feature 19 VND-basis dual-settlement cross-currency accounting foundation active in production DB
   - Feature 25 performance integration honors external settlements as external capital flows
-  - Feature 19 user-facing Crypto & Gold transaction/opening-position UI activated with truthful disclosures
-  - Live USD/VND rate conversion provides real-time VND market valuation and unrealized P&L for non-VND holdings
 - **Canonical Universe & Remote Baseline**:
   - Canonical Universe: 49 assets (40 crypto, 7 VN stocks/ETFs, 1 gold spot, 1 FX context) across 5 verified providers (89 provider mappings)
-  - Authoritative Cash Ledger: 0 entries (clean initial cash flow)
+  - Authoritative Cash Ledger: 1 legitimate DEPOSIT entry (`20,000,000 VND`)
   - Singleton Investor Profile: 1 record (`cash_available = 20,000,000 VND`, moderate risk tolerance, medium horizon)
 - **Automated Test Suite**:
-  - Full Backend Regression: 700/700 PASS (106 test suites)
+  - Full Backend Regression: 718/718 PASS (108 test suites)
   - Dependencies: `npm audit` 0 vulnerabilities on both server and client
   - Client Build: PASS (~190ms, 0 errors, 0 warnings)
   - Git Diff & Formatting: `git diff --check` PASS
@@ -31,10 +33,10 @@
 - **Working Tree**: CLEAN
 
 ## CURRENT PHASE
-V1.1 RELEASE ACTIVATION — BATCH 1 (COMPLETE)
+V1.1 RELEASE ACTIVATION — BATCH 2 (COMPLETE)
 
 ## RELEASE STATUS
-V1.1 BATCH 1 ACTIVE / VERIFIED IN PRODUCTION
+V1.1 BATCH 2 ACTIVE / VERIFIED IN PRODUCTION
 
 ---
 
