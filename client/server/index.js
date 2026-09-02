@@ -1,5 +1,16 @@
 export const ALERT_EVALUATION_CADENCE_MINUTES = 15;
 export const ALERT_EVALUATION_API_BASE_URL = 'https://vn-invest-assistant-api.onrender.com';
+export const APP_API_BASE_URL = 'https://vn-invest-assistant-api.onrender.com';
+
+export function isApiRequestPath(pathname) {
+  return pathname === '/api' || pathname.startsWith('/api/');
+}
+
+export function proxyApiRequest(request, fetchFn = fetch) {
+  const incomingUrl = new URL(request.url);
+  const upstreamUrl = new URL(`${incomingUrl.pathname}${incomingUrl.search}`, APP_API_BASE_URL);
+  return fetchFn(new Request(upstreamUrl, request));
+}
 
 function schedulerError(code, message) {
   const error = new Error(message);
@@ -48,6 +59,11 @@ export async function runScheduledAlertEvaluation(env, options = {}) {
 
 export default {
   async fetch(request, env) {
+    const url = new URL(request.url);
+    if (isApiRequestPath(url.pathname)) {
+      return proxyApiRequest(request);
+    }
+
     const response = await env.ASSETS.fetch(request);
 
     if (

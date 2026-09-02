@@ -2,9 +2,13 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import {
+  clearOwnerSessionCookie,
   createAlertSchedulerAuthMiddleware,
   createOwnerAuthMiddleware,
-  PRIVATE_API_PREFIXES
+  createOwnerSessionManager,
+  OWNER_SESSION_TTL_MS,
+  PRIVATE_API_PREFIXES,
+  serializeOwnerSessionCookie
 } from './src/auth.js';
 import {
   checkSupabaseConnection,
@@ -165,13 +169,72 @@ export function createApp(services = {}) {
     cashClient,
     positionClient,
     ownerAccessToken = process.env.OWNER_ACCESS_TOKEN,
+    ownerSessionManager: providedOwnerSessionManager,
+    ownerSessionTtlMs = OWNER_SESSION_TTL_MS,
+    ownerSessionSecure = process.env.NODE_ENV === 'production',
     alertSchedulerToken = process.env.ALERT_SCHEDULER_TOKEN
   } = services;
 
   const app = express();
+  const configuredOwnerSessionTtlMs = Number.isFinite(ownerSessionTtlMs) && ownerSessionTtlMs > 0
+    ? Math.floor(ownerSessionTtlMs)
+    : OWNER_SESSION_TTL_MS;
+  const ownerSessionManager = providedOwnerSessionManager || createOwnerSessionManager({
+    ownerAccessToken,
+    ttlMs: configuredOwnerSessionTtlMs
+  });
   app.use(cors(createCorsOptions(corsOrigins)));
   app.use(express.json());
-  app.use(createOwnerAuthMiddleware({ ownerAccessToken }));
+
+  app.post('/api/owner/session', (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    res.set('Vary', 'Cookie');
+    if (!ownerSessionManager.configured) {
+      return res.status(503).json({
+        status: 'error',
+        code: 'OWNER_AUTH_NOT_CONFIGURED',
+        message: 'Private API access is unavailable'
+      });
+    }
+
+    const ownerCredential = req.body?.ownerCredential;
+    if (typeof ownerCredential !== 'string' || !ownerCredential) {
+      return res.status(401).json({
+        status: 'error',
+        code: 'OWNER_AUTH_REQUIRED',
+        message: 'Owner authentication is required'
+      });
+    }
+    if (!ownerSessionManager.authenticateOwnerCredential(ownerCredential)) {
+      return res.status(403).json({
+        status: 'error',
+        code: 'OWNER_AUTH_INVALID',
+        message: 'Owner authentication failed'
+      });
+    }
+
+    const session = ownerSessionManager.issue();
+    if (!session) {
+      return res.status(503).json({
+        status: 'error',
+        code: 'OWNER_SESSION_UNAVAILABLE',
+        message: 'Owner session is unavailable'
+      });
+    }
+    res.set('Set-Cookie', serializeOwnerSessionCookie(session.token, {
+      maxAgeMs: configuredOwnerSessionTtlMs,
+      secure: ownerSessionSecure
+    }));
+    return res.json({
+      status: 'ok',
+      data: {
+        unlocked: true,
+        expiresAt: session.expiresAt
+      }
+    });
+  });
+
+  app.use(createOwnerAuthMiddleware({ ownerAccessToken, ownerSessionManager }));
   const requireAlertScheduler = createAlertSchedulerAuthMiddleware({ alertSchedulerToken });
 
   // Basic system health endpoint with provider status
@@ -205,9 +268,26 @@ export function createApp(services = {}) {
 
   app.get('/api/owner/session', (req, res) => {
     res.set('Cache-Control', 'no-store');
+    res.set('Vary', 'Cookie');
     return res.json({
       status: 'ok',
-      data: { unlocked: true }
+      data: {
+        unlocked: true,
+        expiresAt: req.ownerAuth?.session?.expiresAt || null
+      }
+    });
+  });
+
+  app.delete('/api/owner/session', (req, res) => {
+    if (req.ownerAuth?.method === 'session') {
+      ownerSessionManager.revoke(req.ownerAuth.sessionToken);
+    }
+    res.set('Cache-Control', 'no-store');
+    res.set('Vary', 'Cookie');
+    res.set('Set-Cookie', clearOwnerSessionCookie({ secure: ownerSessionSecure }));
+    return res.json({
+      status: 'ok',
+      data: { unlocked: false }
     });
   });
 

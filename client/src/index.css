@@ -507,6 +507,31 @@ body {
     #f8fafc;
 }
 
+.owner-session-loading {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: #f8fafc;
+  color: var(--color-slate-500);
+  font-size: 0.84rem;
+  font-weight: 600;
+}
+
+.owner-session-loading-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--color-brand-600);
+  animation: owner-session-pulse 1s ease-in-out infinite alternate;
+}
+
+@keyframes owner-session-pulse {
+  from { opacity: 0.35; transform: scale(0.85); }
+  to { opacity: 1; transform: scale(1); }
+}
+
 .owner-gate-card {
   width: min(100%, 420px);
   padding: clamp(28px, 6vw, 40px);
@@ -662,6 +687,9 @@ body {
     grid-column: 2;
     justify-self: end;
     margin: 0;
+    max-width: 132px;
+    line-height: 1.2;
+    text-align: center;
   }
 
   .nav-pill-wrapper {

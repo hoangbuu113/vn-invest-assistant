@@ -1,12 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import {
-  apiFetch,
-  clearOwnerAccessToken,
-  getOwnerAccessToken,
-  setOwnerAccessToken
-} from '../utils/api.js';
+import { apiFetch, OWNER_SESSION_INVALID_EVENT } from '../utils/api.js';
 
-async function verifyOwnerToken() {
+async function hasValidOwnerSession() {
   const response = await apiFetch('/api/owner/session', { cache: 'no-store' });
   if (!response.ok) return false;
   const payload = await response.json().catch(() => null);
@@ -14,75 +9,107 @@ async function verifyOwnerToken() {
 }
 
 export function OwnerGate({ children }) {
-  const [state, setState] = useState(() => getOwnerAccessToken() ? 'checkingStored' : 'locked');
-  const [tokenInput, setTokenInput] = useState('');
+  const [state, setState] = useState('checking');
+  const [credentialInput, setCredentialInput] = useState('');
   const [error, setError] = useState('');
 
   const lock = useCallback(() => {
-    clearOwnerAccessToken();
-    setTokenInput('');
+    setCredentialInput('');
     setError('');
     setState('locked');
   }, []);
 
   useEffect(() => {
-    if (state !== 'checkingStored') return undefined;
+    const handleInvalidSession = () => lock();
+    window.addEventListener(OWNER_SESSION_INVALID_EVENT, handleInvalidSession);
+    return () => window.removeEventListener(OWNER_SESSION_INVALID_EVENT, handleInvalidSession);
+  }, [lock]);
+
+  useEffect(() => {
     let active = true;
-    verifyOwnerToken()
+    hasValidOwnerSession()
       .then((valid) => {
         if (!active) return;
-        if (valid) setState('unlocked');
-        else lock();
+        setState(valid ? 'unlocked' : 'locked');
       })
       .catch(() => {
-        if (active) lock();
+        if (active) setState('locked');
       });
     return () => {
       active = false;
     };
-  }, [lock, state]);
+  }, []);
 
   const unlock = async (event) => {
     event.preventDefault();
-    const candidate = tokenInput.trim();
+    const candidate = credentialInput.trim();
     if (!candidate) {
       setError('Vui lòng nhập khóa truy cập của chủ sở hữu.');
       return;
     }
 
     setError('');
-    setState('checking');
-    setOwnerAccessToken(candidate);
+    setState('authorizing');
     try {
-      if (await verifyOwnerToken()) {
-        setTokenInput('');
-        setState('unlocked');
+      const response = await apiFetch('/api/owner/session', {
+        method: 'POST',
+        cache: 'no-store',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ownerCredential: candidate })
+      });
+      if (!response.ok) {
+        setCredentialInput('');
+        setState('locked');
+        setError(response.status === 403
+          ? 'Khóa truy cập không hợp lệ.'
+          : 'Không thể xác minh quyền truy cập lúc này.');
         return;
       }
-      clearOwnerAccessToken();
-      setState('locked');
-      setError('Khóa truy cập không hợp lệ.');
+      setCredentialInput('');
+      setState('unlocked');
     } catch {
-      clearOwnerAccessToken();
+      setCredentialInput('');
       setState('locked');
       setError('Không thể xác minh quyền truy cập lúc này.');
     }
   };
 
+  const logout = useCallback(async () => {
+    try {
+      const response = await apiFetch('/api/owner/session', {
+        method: 'DELETE',
+        cache: 'no-store'
+      });
+      if (!response.ok) return;
+      lock();
+    } catch {
+      // Keep the current view when the server could not invalidate the HttpOnly session.
+    }
+  }, [lock]);
+
   if (state === 'unlocked') {
-    return typeof children === 'function' ? children({ lock }) : children;
+    return typeof children === 'function' ? children({ logout }) : children;
   }
 
-  const isChecking = state === 'checking' || state === 'checkingStored';
+  if (state === 'checking') {
+    return (
+      <main className="owner-session-loading" aria-live="polite">
+        <span className="owner-session-loading-dot" aria-hidden="true" />
+        <span>Đang kiểm tra phiên bảo mật…</span>
+      </main>
+    );
+  }
+
+  const isAuthorizing = state === 'authorizing';
 
   return (
     <main className="owner-gate-shell">
       <section className="owner-gate-card" aria-labelledby="owner-gate-title">
         <div className="owner-gate-mark" aria-hidden="true">◆</div>
         <p className="owner-gate-eyebrow">VN Invest Assistant</p>
-        <h1 id="owner-gate-title">Mở khóa không gian đầu tư cá nhân</h1>
+        <h1 id="owner-gate-title">Xác thực thiết bị</h1>
         <p className="owner-gate-copy">
-          Dữ liệu danh mục được bảo vệ. Khóa chỉ được giữ trong phiên trình duyệt hiện tại.
+          Nhập khóa chủ sở hữu một lần. Thiết bị này sẽ được ghi nhớ trong 30 ngày.
         </p>
         <form onSubmit={unlock} className="owner-gate-form">
           <label htmlFor="owner-access-token">Khóa truy cập chủ sở hữu</label>
@@ -91,13 +118,13 @@ export function OwnerGate({ children }) {
             name="owner-access-token"
             type="password"
             autoComplete="current-password"
-            value={tokenInput}
-            onChange={(event) => setTokenInput(event.target.value)}
-            disabled={isChecking}
+            value={credentialInput}
+            onChange={(event) => setCredentialInput(event.target.value)}
+            disabled={isAuthorizing}
           />
           {error ? <p className="owner-gate-error" role="alert">{error}</p> : null}
-          <button className="fintech-btn btn-primary" type="submit" disabled={isChecking}>
-            {isChecking ? 'Đang xác minh…' : 'Mở khóa'}
+          <button className="fintech-btn btn-primary" type="submit" disabled={isAuthorizing}>
+            {isAuthorizing ? 'Đang xác minh…' : 'Xác thực thiết bị'}
           </button>
         </form>
       </section>

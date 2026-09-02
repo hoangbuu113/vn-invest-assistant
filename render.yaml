@@ -11,6 +11,8 @@ services:
     envVars:
       - key: NODE_VERSION
         value: 24.19.0
+      - key: NODE_ENV
+        value: production
       - key: CORS_ORIGINS
         value: https://vn-invest-assistant.vn-invest-assistant.workers.dev
       - key: SUPABASE_URL

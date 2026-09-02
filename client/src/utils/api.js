@@ -1,14 +1,5 @@
-const configuredApiBaseUrl = import.meta.env?.VITE_API_BASE_URL?.trim() || '';
-
-const PRODUCTION_API_BASE_URL = 'https://vn-invest-assistant-api.onrender.com';
-
-const resolvedApiBaseUrl =
-  configuredApiBaseUrl ||
-  (import.meta.env?.PROD ? PRODUCTION_API_BASE_URL : '');
-
-export const API_BASE_URL = resolvedApiBaseUrl.replace(/\/+$/, '');
-
-export const OWNER_TOKEN_SESSION_KEY = 'vn-invest-owner-access-token';
+export const API_BASE_URL = '';
+export const OWNER_SESSION_INVALID_EVENT = 'vn-invest-owner-session-invalid';
 
 export const PRIVATE_API_PREFIXES = Object.freeze([
   '/api/owner',
@@ -25,36 +16,6 @@ export const PRIVATE_API_PREFIXES = Object.freeze([
   '/api/alerts'
 ]);
 
-let ownerAccessToken = null;
-
-function sessionStore() {
-  try {
-    return typeof window !== 'undefined' ? window.sessionStorage : null;
-  } catch {
-    return null;
-  }
-}
-
-export function getOwnerAccessToken() {
-  if (ownerAccessToken) return ownerAccessToken;
-  const stored = sessionStore()?.getItem(OWNER_TOKEN_SESSION_KEY);
-  ownerAccessToken = typeof stored === 'string' && stored ? stored : null;
-  return ownerAccessToken;
-}
-
-export function setOwnerAccessToken(token) {
-  if (typeof token !== 'string' || !token) {
-    throw new TypeError('Owner access token must be a non-empty string');
-  }
-  ownerAccessToken = token;
-  sessionStore()?.setItem(OWNER_TOKEN_SESSION_KEY, token);
-}
-
-export function clearOwnerAccessToken() {
-  ownerAccessToken = null;
-  sessionStore()?.removeItem(OWNER_TOKEN_SESSION_KEY);
-}
-
 export function isPrivateApiPath(path) {
   if (typeof path !== 'string') return false;
   let pathname = path;
@@ -70,22 +31,26 @@ export function isPrivateApiPath(path) {
 }
 
 export function apiUrl(path) {
-  if (typeof path !== 'string') return path;
-  if (!path.startsWith('/api')) return path;
-  return `${API_BASE_URL}${path}`;
+  return path;
 }
 
-export function apiFetch(path, options = {}) {
+function notifyInvalidOwnerSession() {
+  if (typeof window === 'undefined' || typeof window.dispatchEvent !== 'function' || typeof Event !== 'function') return;
+  window.dispatchEvent(new Event(OWNER_SESSION_INVALID_EVENT));
+}
+
+export async function apiFetch(path, options = {}) {
   const headers = new Headers(options.headers || {});
   headers.delete('Authorization');
 
-  if (isPrivateApiPath(path)) {
-    const token = getOwnerAccessToken();
-    if (token) headers.set('Authorization', `Bearer ${token}`);
-  }
-
-  return fetch(apiUrl(path), {
+  const response = await fetch(apiUrl(path), {
     ...options,
+    credentials: options.credentials || 'same-origin',
     headers
   });
+
+  if (isPrivateApiPath(path) && (response.status === 401 || response.status === 403)) {
+    notifyInvalidOwnerSession();
+  }
+  return response;
 }

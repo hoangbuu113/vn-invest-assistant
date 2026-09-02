@@ -7,7 +7,7 @@ import './index.css';
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <OwnerGate>
-      {({ lock }) => <App onLock={lock} />}
+      {({ logout }) => <App onLogout={logout} />}
     </OwnerGate>
   </React.StrictMode>
 );

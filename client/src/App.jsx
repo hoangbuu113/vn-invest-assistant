@@ -224,7 +224,7 @@ const sectionItemVariants = {
   animate: { opacity: 1, y: 0, transition: { duration: 0.25, ease: [0.16, 1, 0.3, 1] } }
 };
 
-function App({ onLock }) {
+function App({ onLogout }) {
   const [activeTab, setActiveTab] = useState('dashboard');
 
   // Profile state
@@ -1389,10 +1389,10 @@ function App({ onLock }) {
           <button
             type="button"
             className="owner-lock-button"
-            onClick={onLock}
-            aria-label="Khóa dữ liệu cá nhân"
+            onClick={onLogout}
+            aria-label="Đăng xuất thiết bị đã xác thực"
           >
-            Khóa
+            Đăng xuất thiết bị
           </button>
         </div>
       </header>
