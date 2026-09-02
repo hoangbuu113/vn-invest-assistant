@@ -1218,10 +1218,20 @@ export async function evaluateAndPersistAlerts({ getMarketSnapshotFn = getMarket
   // 4. Persist state changes only while the row is still active. PostgreSQL
   // re-checks this predicate after row locking, so overlapping scheduler/manual
   // evaluations cannot claim the same one-shot trigger twice.
+  // For triggers, use atomic trigger + outbox enqueue. For active/evaluated, update last evaluated.
   let persistedTriggeredCount = 0;
   for (const updated of updatedAlerts) {
-    const persisted = await persistActiveAlertEvaluation(updated, profile.id, db);
-    if (updated.status === 'triggered' && persisted) persistedTriggeredCount++;
+    if (updated.status === 'triggered') {
+      const triggerRes = await triggerPriceAlertAtomic({
+        alertId: updated.id,
+        profileId: profile.id,
+        observedPrice: updated.last_evaluated_price,
+        now
+      }, db);
+      if (triggerRes?.triggered) persistedTriggeredCount++;
+    } else {
+      await persistActiveAlertEvaluation(updated, profile.id, db);
+    }
   }
 
   // 5. Re-fetch all alerts to return up-to-date list
@@ -1234,6 +1244,385 @@ export async function evaluateAndPersistAlerts({ getMarketSnapshotFn = getMarket
     staleCount,
     alerts: refreshedAlerts
   };
+}
+
+/**
+ * Normalizes a raw push_subscriptions row into canonical JavaScript object.
+ */
+export function normalizePushSubscription(row) {
+  if (!row || typeof row !== 'object') return null;
+  return {
+    id: row.id,
+    profileId: row.profile_id,
+    endpoint: row.endpoint,
+    p256dh: row.p256dh,
+    auth: row.auth,
+    userAgent: row.user_agent,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+/**
+ * Normalizes a raw alert_notification_deliveries row into canonical JavaScript object.
+ */
+export function normalizeAlertDelivery(row) {
+  if (!row || typeof row !== 'object') return null;
+  return {
+    id: row.id,
+    alertId: row.alert_id,
+    profileId: row.profile_id,
+    subscriptionId: row.subscription_id,
+    triggerEventId: row.trigger_event_id,
+    assetId: row.asset_id,
+    direction: row.direction,
+    targetPrice: row.target_price !== null && row.target_price !== undefined ? Number(row.target_price) : null,
+    observedPrice: row.observed_price !== null && row.observed_price !== undefined ? Number(row.observed_price) : null,
+    triggerEventAt: row.trigger_event_at,
+    status: row.status,
+    attemptCount: row.attempt_count !== null && row.attempt_count !== undefined ? Number(row.attempt_count) : 0,
+    lastAttemptAt: row.last_attempt_at,
+    leaseExpiresAt: row.lease_expires_at,
+    nextAttemptAt: row.next_attempt_at,
+    deliveredAt: row.delivered_at,
+    lastError: row.last_error,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+/**
+ * Feature 12B: Creates or upserts a device Web Push subscription for an investor profile.
+ */
+export async function createPushSubscription({
+  profileId,
+  endpoint,
+  p256dh,
+  auth,
+  userAgent = null
+} = {}, client = privateSupabase) {
+  const db = client || privateSupabase;
+  if (!db) throw new Error('Private database access is not configured');
+
+  if (!profileId || !endpoint || !p256dh || !auth) {
+    throw new Error('profileId, endpoint, p256dh, and auth are required');
+  }
+
+  const { data, error } = await db
+    .from('push_subscriptions')
+    .upsert({
+      profile_id: profileId,
+      endpoint,
+      p256dh,
+      auth,
+      user_agent: userAgent,
+      updated_at: new Date().toISOString()
+    }, { onConflict: 'endpoint' })
+    .select('*')
+    .single();
+
+  if (error) throw new Error(`Database subscription upsert error: ${error.message}`);
+  return normalizePushSubscription(data);
+}
+
+/**
+ * Feature 12B: Fetches active push subscriptions for a profile.
+ */
+export async function getPushSubscriptions(profileId, client = privateSupabase) {
+  const db = client || privateSupabase;
+  if (!db) throw new Error('Private database access is not configured');
+
+  const { data, error } = await db
+    .from('push_subscriptions')
+    .select('*')
+    .eq('profile_id', profileId)
+    .order('created_at', { ascending: true });
+
+  if (error) throw new Error(`Database subscription query error: ${error.message}`);
+  return (data || []).map(normalizePushSubscription);
+}
+
+/**
+ * Feature 12B: Deletes a push subscription (e.g. user unsubscribes or endpoint expired).
+ */
+export async function deletePushSubscription(subscriptionId, client = privateSupabase) {
+  const db = client || privateSupabase;
+  if (!db) throw new Error('Private database access is not configured');
+
+  const { data, error } = await db
+    .from('push_subscriptions')
+    .delete()
+    .eq('id', subscriptionId)
+    .select('*')
+    .maybeSingle();
+
+  if (error) throw new Error(`Database subscription delete error: ${error.message}`);
+  return data ? normalizePushSubscription(data) : null;
+}
+
+/**
+ * Feature 12B: Atomically triggers an active price alert and fans out delivery jobs
+ * to all active push subscriptions for the profile.
+ */
+export async function triggerPriceAlertAtomic({
+  alertId,
+  profileId,
+  observedPrice,
+  now = new Date()
+} = {}, client = privateSupabase) {
+  const db = client || privateSupabase;
+  if (!db) throw new Error('Private database access is not configured');
+
+  if (!alertId || !profileId || observedPrice === undefined || observedPrice === null) {
+    throw new Error('alertId, profileId, and observedPrice are required');
+  }
+
+  const nowIso = now instanceof Date ? now.toISOString() : new Date(now).toISOString();
+
+  if (typeof db.rpc === 'function') {
+    const { data, error } = await db.rpc('trigger_price_alert_atomic', {
+      p_alert_id: alertId,
+      p_profile_id: profileId,
+      p_observed_price: observedPrice,
+      p_now: nowIso
+    });
+
+    if (error) {
+      throw new Error(`Database trigger error: ${error.message} (code: ${error.code || 'UNKNOWN'})`);
+    }
+
+    if (!data || typeof data !== 'object') {
+      return { triggered: false, triggerEventId: null, deliveryCount: 0, alert: null };
+    }
+
+    return {
+      triggered: Boolean(data.triggered),
+      triggerEventId: data.trigger_event_id || null,
+      deliveryCount: typeof data.delivery_count === 'number' ? data.delivery_count : 0,
+      alert: data.alert ? normalizeAlert(data.alert) : null
+    };
+  }
+
+  // Fallback for test environments without RPC engine
+  const { data: updatedAlert, error: alertErr } = await db
+    .from('price_alerts')
+    .update({
+      status: 'triggered',
+      triggered_at: nowIso,
+      last_evaluated_price: observedPrice,
+      last_evaluated_at: nowIso,
+      updated_at: nowIso
+    })
+    .eq('id', alertId)
+    .eq('profile_id', profileId)
+    .eq('status', 'active')
+    .select(ALERT_SELECT)
+    .maybeSingle();
+
+  if (alertErr) throw new Error(`Database update error: ${alertErr.message}`);
+  if (!updatedAlert) {
+    return { triggered: false, triggerEventId: null, deliveryCount: 0, alert: null };
+  }
+
+  const triggerEventId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : 'event-' + Date.now();
+  let deliveryCount = 0;
+
+  // Query subscriptions for fanout
+  const { data: subs } = await db
+    .from('push_subscriptions')
+    .select('*')
+    .eq('profile_id', profileId);
+
+  if (subs && subs.length > 0) {
+    const rowsToInsert = subs.map(sub => ({
+      alert_id: alertId,
+      profile_id: profileId,
+      subscription_id: sub.id,
+      trigger_event_id: triggerEventId,
+      asset_id: updatedAlert.asset_id || updatedAlert.asset?.id,
+      direction: updatedAlert.direction,
+      target_price: updatedAlert.target_price,
+      observed_price: observedPrice,
+      trigger_event_at: nowIso,
+      status: 'pending',
+      attempt_count: 0,
+      created_at: nowIso,
+      updated_at: nowIso
+    }));
+
+    const { data: inserted, error: delivErr } = await db
+      .from('alert_notification_deliveries')
+      .insert(rowsToInsert)
+      .select('*');
+
+    if (delivErr) throw new Error(`Database outbox insert error: ${delivErr.message}`);
+    deliveryCount = (inserted || []).length;
+  }
+
+  return {
+    triggered: true,
+    triggerEventId,
+    deliveryCount,
+    alert: normalizeAlert(updatedAlert)
+  };
+}
+
+/**
+ * Feature 12B: Atomically claims eligible delivery jobs, advancing attempt count and granting lease.
+ */
+export async function claimPendingAlertDeliveries({
+  batchSize = 5,
+  leaseSeconds = 120,
+  now = new Date()
+} = {}, client = privateSupabase) {
+  const db = client || privateSupabase;
+  if (!db) throw new Error('Private database access is not configured');
+
+  const nowIso = now instanceof Date ? now.toISOString() : new Date(now).toISOString();
+
+  if (typeof db.rpc === 'function') {
+    const { data, error } = await db.rpc('claim_pending_alert_deliveries', {
+      p_batch_size: batchSize,
+      p_lease_seconds: leaseSeconds,
+      p_now: nowIso
+    });
+
+    if (error) {
+      throw new Error(`Database claim error: ${error.message} (code: ${error.code || 'UNKNOWN'})`);
+    }
+
+    return (data || []).map(normalizeAlertDelivery);
+  }
+
+  return [];
+}
+
+/**
+ * Feature 12B: Marks a claimed delivery row as SENT.
+ */
+export async function markAlertDeliverySent({
+  deliveryId,
+  now = new Date()
+} = {}, client = privateSupabase) {
+  const db = client || privateSupabase;
+  if (!db) throw new Error('Private database access is not configured');
+
+  if (!deliveryId) throw new Error('deliveryId is required');
+
+  const nowIso = now instanceof Date ? now.toISOString() : new Date(now).toISOString();
+
+  const { data, error } = await db
+    .from('alert_notification_deliveries')
+    .update({
+      status: 'sent',
+      delivered_at: nowIso,
+      lease_expires_at: null,
+      updated_at: nowIso
+    })
+    .eq('id', deliveryId)
+    .eq('status', 'sending')
+    .select('*')
+    .maybeSingle();
+
+  if (error) throw new Error(`Database update error: ${error.message}`);
+  return data ? normalizeAlertDelivery(data) : null;
+}
+
+/**
+ * Feature 12B: Marks a claimed delivery row as FAILED_RETRYABLE (or FAILED_PERMANENT if attempt_count >= 3).
+ */
+export async function markAlertDeliveryFailedRetryable({
+  deliveryId,
+  error,
+  nextAttemptAt,
+  now = new Date()
+} = {}, client = privateSupabase) {
+  const db = client || privateSupabase;
+  if (!db) throw new Error('Private database access is not configured');
+
+  if (!deliveryId) throw new Error('deliveryId is required');
+
+  const nowIso = now instanceof Date ? now.toISOString() : new Date(now).toISOString();
+  const nextAttemptIso = nextAttemptAt instanceof Date ? nextAttemptAt.toISOString() : (nextAttemptAt || null);
+
+  const { data: current, error: readErr } = await db
+    .from('alert_notification_deliveries')
+    .select('id, attempt_count, status')
+    .eq('id', deliveryId)
+    .maybeSingle();
+
+  if (readErr) throw new Error(`Database read error: ${readErr.message}`);
+  if (!current) return null;
+
+  const isExhausted = (current.attempt_count || 0) >= 3;
+  const newStatus = isExhausted ? 'failed_permanent' : 'failed_retryable';
+  const newError = isExhausted ? 'MAX_ATTEMPTS_EXHAUSTED' : (error || 'RETRYABLE_DELIVERY_FAILURE');
+
+  const { data, error: updateErr } = await db
+    .from('alert_notification_deliveries')
+    .update({
+      status: newStatus,
+      last_error: newError,
+      next_attempt_at: isExhausted ? null : nextAttemptIso,
+      lease_expires_at: null,
+      updated_at: nowIso
+    })
+    .eq('id', deliveryId)
+    .eq('status', 'sending')
+    .select('*')
+    .maybeSingle();
+
+  if (updateErr) throw new Error(`Database update error: ${updateErr.message}`);
+  return data ? normalizeAlertDelivery(data) : null;
+}
+
+/**
+ * Feature 12B: Marks a claimed delivery row as FAILED_PERMANENT.
+ */
+export async function markAlertDeliveryFailedPermanent({
+  deliveryId,
+  error,
+  now = new Date()
+} = {}, client = privateSupabase) {
+  const db = client || privateSupabase;
+  if (!db) throw new Error('Private database access is not configured');
+
+  if (!deliveryId) throw new Error('deliveryId is required');
+
+  const nowIso = now instanceof Date ? now.toISOString() : new Date(now).toISOString();
+
+  const { data, error: updateErr } = await db
+    .from('alert_notification_deliveries')
+    .update({
+      status: 'failed_permanent',
+      last_error: error || 'PERMANENT_DELIVERY_FAILURE',
+      lease_expires_at: null,
+      updated_at: nowIso
+    })
+    .eq('id', deliveryId)
+    .eq('status', 'sending')
+    .select('*')
+    .maybeSingle();
+
+  if (updateErr) throw new Error(`Database update error: ${updateErr.message}`);
+  return data ? normalizeAlertDelivery(data) : null;
+}
+
+/**
+ * Feature 12B: Queries alert notification deliveries for an alert (ordered chronologically).
+ */
+export async function getAlertDeliveriesByAlertId(alertId, client = privateSupabase) {
+  const db = client || privateSupabase;
+  if (!db) throw new Error('Private database access is not configured');
+
+  const { data, error } = await db
+    .from('alert_notification_deliveries')
+    .select('*')
+    .eq('alert_id', alertId)
+    .order('created_at', { ascending: true });
+
+  if (error) throw new Error(`Database query error: ${error.message}`);
+  return (data || []).map(normalizeAlertDelivery);
 }
 
 /**

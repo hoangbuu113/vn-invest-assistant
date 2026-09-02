@@ -18,12 +18,20 @@
   - Market Breadth: Retained as `status: 'unavailable'`, `reason: 'SOURCE_NOT_PROVISIONED'`
   - Feature 19 VND-basis dual-settlement cross-currency accounting foundation active in production DB
   - Feature 25 performance integration honors external settlements as external capital flows
+- **Feature 12B Web Push Alert Notification Foundation (LOCAL ONLY — NOT PRODUCTION-ACTIVE)**:
+  - Outbound notification architecture: First-party Web Push delivery foundation
+  - Multi-device delivery model: `BOUNDED_RETRY_BEST_EFFORT` with per-subscription delivery jobs in `public.alert_notification_deliveries` and device subscriptions in `public.push_subscriptions`
+  - Atomic trigger & fanout RPC: `trigger_price_alert_atomic` updates alert status and fans out one pending delivery per registered push subscription of the profile in a single ACID transaction
+  - Zero-device semantics: Triggering an alert when profile has zero push devices records the trigger authoritatively with zero outbox rows; no retroactive delivery upon later device registration
+  - Atomic claim RPC: `claim_pending_alert_deliveries` claims eligible jobs with 120-second leases, `SKIP LOCKED`, and zombie recovery for expired attempts (auto-terminalizing to `failed_permanent` when `attempt_count >= 3`)
+  - Hardened limits: max 3 attempts per device delivery; rare duplicate push delivery accepted/documented; zero guaranteed delivery claims
+  - Status: Database & outbox foundation complete locally; migration is NOT applied to production; VAPID push sender, Service Worker, and client UI are NOT implemented yet; push notifications not production-active
 - **Canonical Universe & Remote Baseline**:
   - Canonical Universe: 49 assets (40 crypto, 7 VN stocks/ETFs, 1 gold spot, 1 FX context) across 5 verified providers (89 provider mappings)
   - Authoritative Cash Ledger: 1 legitimate DEPOSIT entry (`20,000,000 VND`)
   - Singleton Investor Profile: 1 record (`cash_available = 20,000,000 VND`, moderate risk tolerance, medium horizon)
 - **Automated Test Suite**:
-  - Full Backend Regression: 718/718 PASS (108 test suites)
+  - Full Backend Regression: 765/765 PASS (121 test suites)
   - Dependencies: `npm audit` 0 vulnerabilities on both server and client
   - Client Build: PASS (~190ms, 0 errors, 0 warnings)
   - Git Diff & Formatting: `git diff --check` PASS
