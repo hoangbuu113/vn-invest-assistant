@@ -162,7 +162,10 @@ describe('Feature 30B1 — single-owner HTTP boundary', () => {
       ['POST', '/api/alerts'],
       ['DELETE', '/api/alerts/alert-1'],
       ['POST', '/api/alerts/evaluate'],
-      ['POST', '/api/alerts/alert-1/reactivate']
+      ['POST', '/api/alerts/alert-1/reactivate'],
+      ['GET', '/api/push/config'],
+      ['POST', '/api/push/subscriptions'],
+      ['DELETE', '/api/push/subscriptions']
     ];
 
     for (const [method, path] of privateRoutes) {

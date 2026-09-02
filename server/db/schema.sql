@@ -3082,7 +3082,14 @@ RETURNS TABLE (
 LANGUAGE plpgsql
 SECURITY DEFINER
 AS $$
+DECLARE
+    v_batch_size INT;
+    v_lease_seconds INT;
 BEGIN
+    -- Strict sanity bounds: batch size [1, 25], lease seconds [30, 600]
+    v_batch_size := LEAST(GREATEST(COALESCE(p_batch_size, 5), 1), 25);
+    v_lease_seconds := LEAST(GREATEST(COALESCE(p_lease_seconds, 120), 30), 600);
+
     -- 1. Terminalize expired sending jobs with attempt_count >= 3 (Third-attempt crash & zombie elimination)
     UPDATE public.alert_notification_deliveries
     SET
@@ -3110,7 +3117,7 @@ BEGIN
             (d.status = 'failed_retryable' AND d.next_attempt_at <= p_now AND d.attempt_count < 3)
         )
         ORDER BY d.created_at ASC
-        LIMIT GREATEST(p_batch_size, 1)
+        LIMIT v_batch_size
         FOR UPDATE SKIP LOCKED
     )
     UPDATE public.alert_notification_deliveries d
@@ -3118,7 +3125,7 @@ BEGIN
         status = 'sending',
         attempt_count = d.attempt_count + 1,
         last_attempt_at = p_now,
-        lease_expires_at = p_now + (p_lease_seconds || ' seconds')::INTERVAL,
+        lease_expires_at = p_now + (v_lease_seconds || ' seconds')::INTERVAL,
         updated_at = p_now
     FROM eligible
     WHERE d.id = eligible.id

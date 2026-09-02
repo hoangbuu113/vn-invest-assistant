@@ -1361,6 +1361,45 @@ export async function deletePushSubscription(subscriptionId, client = privateSup
 }
 
 /**
+ * Feature 12C: Fetches a push subscription by its unique id.
+ */
+export async function getPushSubscriptionById(subscriptionId, client = privateSupabase) {
+  const db = client || privateSupabase;
+  if (!db) throw new Error('Private database access is not configured');
+
+  const { data, error } = await db
+    .from('push_subscriptions')
+    .select('*')
+    .eq('id', subscriptionId)
+    .maybeSingle();
+
+  if (error) throw new Error(`Database subscription query error: ${error.message}`);
+  return data ? normalizePushSubscription(data) : null;
+}
+
+/**
+ * Feature 12C: Deletes a push subscription by its unique endpoint and owner profileId.
+ */
+export async function deletePushSubscriptionByEndpoint(endpoint, profileId, client = privateSupabase) {
+  const db = client || privateSupabase;
+  if (!db) throw new Error('Private database access is not configured');
+  if (!endpoint || !profileId) throw new Error('endpoint and profileId are required');
+
+  const { data, error } = await db
+    .from('push_subscriptions')
+    .delete()
+    .eq('endpoint', endpoint)
+    .eq('profile_id', profileId)
+    .select('*')
+    .maybeSingle();
+
+  if (error) throw new Error(`Database subscription delete error: ${error.message}`);
+  return data ? normalizePushSubscription(data) : null;
+}
+
+export const upsertPushSubscription = createPushSubscription;
+
+/**
  * Feature 12B: Atomically triggers an active price alert and fans out delivery jobs
  * to all active push subscriptions for the profile.
  */
@@ -1478,12 +1517,14 @@ export async function claimPendingAlertDeliveries({
   const db = client || privateSupabase;
   if (!db) throw new Error('Private database access is not configured');
 
+  const boundedBatchSize = Math.min(Math.max(Number.isFinite(Number(batchSize)) ? Math.floor(Number(batchSize)) : 5, 1), 25);
+  const boundedLeaseSeconds = Math.min(Math.max(Number.isFinite(Number(leaseSeconds)) ? Math.floor(Number(leaseSeconds)) : 120, 30), 600);
   const nowIso = now instanceof Date ? now.toISOString() : new Date(now).toISOString();
 
   if (typeof db.rpc === 'function') {
     const { data, error } = await db.rpc('claim_pending_alert_deliveries', {
-      p_batch_size: batchSize,
-      p_lease_seconds: leaseSeconds,
+      p_batch_size: boundedBatchSize,
+      p_lease_seconds: boundedLeaseSeconds,
       p_now: nowIso
     });
 

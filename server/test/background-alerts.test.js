@@ -301,7 +301,12 @@ describe('V1.1 Improvement 04 — reliable background price alerts', () => {
       evaluatedCount: 3,
       triggeredCount: 1,
       unavailableCount: 1,
-      staleCount: 1
+      staleCount: 1,
+      deliveryClaimedCount: 0,
+      deliverySentCount: 0,
+      deliveryRetryableFailureCount: 0,
+      deliveryPermanentFailureCount: 0,
+      deliveryExpiredSubscriptionCount: 0
     });
     assert.equal(JSON.stringify(payload).includes('private'), false);
   });

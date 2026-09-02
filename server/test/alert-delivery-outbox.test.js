@@ -508,11 +508,13 @@ describe('Feature 12B — Web Push Alert Notification Outbox Foundation', () => 
       const deliveries = initialDeliveries.map(d => ({ ...d }));
       return {
         deliveries,
+        lastRpcArgs: null,
         rpc(name, args) {
           if (name === 'claim_pending_alert_deliveries') {
+            this.lastRpcArgs = args;
             const now = new Date(args.p_now);
-            const batchSize = args.p_batch_size || 5;
-            const leaseSeconds = args.p_lease_seconds || 120;
+            const batchSize = Math.min(Math.max(args.p_batch_size || 5, 1), 25);
+            const leaseSeconds = Math.min(Math.max(args.p_lease_seconds || 120, 30), 600);
 
             // Step 1: Terminalize attempt_count >= 3
             for (const d of deliveries) {
@@ -761,6 +763,30 @@ describe('Feature 12B — Web Push Alert Notification Outbox Foundation', () => 
       }, mockDb);
 
       assert.equal(claimed.length, 0, 'Permanent failure row can never be reclaimed');
+    });
+
+    test('claimPendingAlertDeliveries clamps pathological batchSize to [1, 25] and leaseSeconds to [30, 600]', async () => {
+      const mockDb = createDeliveryMockDb([]);
+
+      // Test extreme / negative values
+      await claimPendingAlertDeliveries({
+        batchSize: -50,
+        leaseSeconds: 10,
+        now: new Date('2026-09-03T01:00:00Z')
+      }, mockDb);
+
+      assert.equal(mockDb.lastRpcArgs.p_batch_size, 1);
+      assert.equal(mockDb.lastRpcArgs.p_lease_seconds, 30);
+
+      // Test extreme upper values
+      await claimPendingAlertDeliveries({
+        batchSize: 500,
+        leaseSeconds: 9999,
+        now: new Date('2026-09-03T01:00:00Z')
+      }, mockDb);
+
+      assert.equal(mockDb.lastRpcArgs.p_batch_size, 25);
+      assert.equal(mockDb.lastRpcArgs.p_lease_seconds, 600);
     });
   });
 });

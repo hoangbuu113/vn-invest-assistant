@@ -59,6 +59,15 @@ import {
   correctOpeningPosition,
   createOpeningPosition
 } from './src/positions.js';
+import {
+  getVapidConfig,
+  validatePushSubscriptionInput,
+  dispatchPendingWebPushDeliveries
+} from './src/web-push-alerts.js';
+import {
+  upsertPushSubscription,
+  deletePushSubscriptionByEndpoint
+} from './src/supabase.js';
 
 dotenv.config();
 
@@ -164,6 +173,10 @@ export function createApp(services = {}) {
     createOpeningPositionFn = createOpeningPosition,
     correctOpeningPositionFn = correctOpeningPosition,
     cancelOpeningPositionFn = cancelOpeningPosition,
+    getVapidConfigFn = getVapidConfig,
+    upsertPushSubscriptionFn = upsertPushSubscription,
+    deletePushSubscriptionByEndpointFn = deletePushSubscriptionByEndpoint,
+    dispatchPendingWebPushDeliveriesFn = dispatchPendingWebPushDeliveries,
     corsOrigins = process.env.CORS_ORIGINS,
     transactionClient,
     cashClient,
@@ -1348,19 +1361,115 @@ export function createApp(services = {}) {
         getMarketSnapshotFn,
         now: new Date()
       });
+
+      let deliverySummary = {
+        deliveryClaimedCount: 0,
+        deliverySentCount: 0,
+        deliveryRetryableFailureCount: 0,
+        deliveryPermanentFailureCount: 0,
+        deliveryExpiredSubscriptionCount: 0
+      };
+
+      try {
+        deliverySummary = await dispatchPendingWebPushDeliveriesFn();
+      } catch (_dispatchErr) {
+        // Failure isolation: preserve alert evaluation outcome without rollback
+      }
+
       return res.json({
         status: 'ok',
         data: {
           evaluatedCount: summary.evaluatedCount,
           triggeredCount: summary.triggeredCount,
           unavailableCount: summary.unavailableCount,
-          staleCount: summary.staleCount
+          staleCount: summary.staleCount,
+          deliveryClaimedCount: deliverySummary?.deliveryClaimedCount ?? 0,
+          deliverySentCount: deliverySummary?.deliverySentCount ?? 0,
+          deliveryRetryableFailureCount: deliverySummary?.deliveryRetryableFailureCount ?? 0,
+          deliveryPermanentFailureCount: deliverySummary?.deliveryPermanentFailureCount ?? 0,
+          deliveryExpiredSubscriptionCount: deliverySummary?.deliveryExpiredSubscriptionCount ?? 0
         }
       });
     } catch (_error) {
       return res.status(500).json({
         status: 'error',
         message: 'Failed to evaluate price alerts'
+      });
+    }
+  });
+
+  // --- Feature 12C: Web Push Subscription Endpoints ---
+
+  app.get('/api/push/config', (req, res) => {
+    const vapidConfig = getVapidConfigFn();
+    return res.json({
+      status: 'ok',
+      data: {
+        supported: true,
+        configured: vapidConfig.isConfigured,
+        vapidPublicKey: vapidConfig.publicKey
+      }
+    });
+  });
+
+  app.post('/api/push/subscriptions', async (req, res) => {
+    try {
+      const validated = validatePushSubscriptionInput(req.body);
+      const profile = await getInvestorProfileFn();
+      const userAgent = req.headers['user-agent'] ? String(req.headers['user-agent']).slice(0, 256) : null;
+
+      const sub = await upsertPushSubscriptionFn({
+        profileId: profile.id,
+        endpoint: validated.endpoint,
+        p256dh: validated.p256dh,
+        auth: validated.auth,
+        userAgent
+      });
+
+      return res.status(201).json({
+        status: 'ok',
+        data: {
+          id: sub.id,
+          created: Boolean(sub)
+        }
+      });
+    } catch (err) {
+      if (err.name === 'WebPushDeliveryError') {
+        return res.status(400).json({
+          status: 'error',
+          message: err.message
+        });
+      }
+      return res.status(500).json({
+        status: 'error',
+        message: 'Failed to save push subscription'
+      });
+    }
+  });
+
+  app.delete('/api/push/subscriptions', async (req, res) => {
+    try {
+      const { endpoint } = req.body || {};
+      if (!endpoint || typeof endpoint !== 'string' || endpoint.trim() === '') {
+        return res.status(400).json({
+          status: 'error',
+          message: 'Valid subscription endpoint is required'
+        });
+      }
+
+      const profile = await getInvestorProfileFn();
+      const deleted = await deletePushSubscriptionByEndpointFn(endpoint.trim(), profile.id);
+
+      return res.json({
+        status: 'ok',
+        data: {
+          removed: Boolean(deleted)
+        }
+      });
+    } catch (err) {
+      return res.status(500).json({
+        status: 'error',
+        message: 'Failed to remove push subscription'
       });
     }
   });

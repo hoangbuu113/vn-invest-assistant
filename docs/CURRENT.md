@@ -18,20 +18,24 @@
   - Market Breadth: Retained as `status: 'unavailable'`, `reason: 'SOURCE_NOT_PROVISIONED'`
   - Feature 19 VND-basis dual-settlement cross-currency accounting foundation active in production DB
   - Feature 25 performance integration honors external settlements as external capital flows
-- **Feature 12B Web Push Alert Notification Foundation (LOCAL ONLY — NOT PRODUCTION-ACTIVE)**:
-  - Outbound notification architecture: First-party Web Push delivery foundation
+- **Feature 12B/12C Web Push Alert Delivery Backend (LOCAL ONLY — NOT PRODUCTION-ACTIVE)**:
+  - Outbound notification architecture: First-party Web Push delivery engine (`web-push`, RFC 8291 / RFC 8292)
+  - Protected subscription API: `GET /api/push/config` (exposes public key only), `POST /api/push/subscriptions` (endpoint-unique device registration), `DELETE /api/push/subscriptions` (endpoint-targeted removal with ON DELETE CASCADE)
   - Multi-device delivery model: `BOUNDED_RETRY_BEST_EFFORT` with per-subscription delivery jobs in `public.alert_notification_deliveries` and device subscriptions in `public.push_subscriptions`
   - Atomic trigger & fanout RPC: `trigger_price_alert_atomic` updates alert status and fans out one pending delivery per registered push subscription of the profile in a single ACID transaction
   - Zero-device semantics: Triggering an alert when profile has zero push devices records the trigger authoritatively with zero outbox rows; no retroactive delivery upon later device registration
-  - Atomic claim RPC: `claim_pending_alert_deliveries` claims eligible jobs with 120-second leases, `SKIP LOCKED`, and zombie recovery for expired attempts (auto-terminalizing to `failed_permanent` when `attempt_count >= 3`)
+  - Atomic claim RPC: `claim_pending_alert_deliveries` claims eligible jobs with 120-second leases, `SKIP LOCKED`, defensive bounds clamping (`batchSize` in `[1, 25]`, `leaseSeconds` in `[30, 600]`), and zombie recovery for expired attempts (auto-terminalizing to `failed_permanent` when `attempt_count >= 3`)
+  - Web Push dispatcher: Bounded sequential dispatcher (`dispatchPendingWebPushDeliveries`, batch size 5, 120s lease, explicit 10s request timeout per send leaving 70s lease margin) claiming and dispatching factual alert notifications with canonical deep links (`/#assets/{symbol}`, `/#assets/XAU%2FUSD`)
+  - Error classification & cleanup: HTTP 404/410 permanently expired subscriptions deleted immediately (cascading all delivery history); HTTP 429 rate limit parses `Retry-After` header safely into future `next_attempt_at`; HTTP 5xx and network errors retry up to 3 attempts with 15-minute backoff; terminal failures safely marked `failed_permanent`
+  - Scheduler integration: Integrated directly into `POST /api/internal/alerts/evaluate` without extra crons or mutating alert states; failure-isolated
   - Hardened limits: max 3 attempts per device delivery; rare duplicate push delivery accepted/documented; zero guaranteed delivery claims
-  - Status: Database & outbox foundation complete locally; migration is NOT applied to production; VAPID push sender, Service Worker, and client UI are NOT implemented yet; push notifications not production-active
+  - Status: Backend API, VAPID engine, and outbox foundation complete locally; migration is NOT applied to production; VAPID secrets NOT configured in production; Service Worker and frontend permission UX NOT implemented yet; push notifications NOT production-active
 - **Canonical Universe & Remote Baseline**:
   - Canonical Universe: 49 assets (40 crypto, 7 VN stocks/ETFs, 1 gold spot, 1 FX context) across 5 verified providers (89 provider mappings)
   - Authoritative Cash Ledger: 1 legitimate DEPOSIT entry (`20,000,000 VND`)
   - Singleton Investor Profile: 1 record (`cash_available = 20,000,000 VND`, moderate risk tolerance, medium horizon)
 - **Automated Test Suite**:
-  - Full Backend Regression: 765/765 PASS (121 test suites)
+  - Full Backend Regression: 775/775 PASS (123 test suites)
   - Dependencies: `npm audit` 0 vulnerabilities on both server and client
   - Client Build: PASS (~190ms, 0 errors, 0 warnings)
   - Git Diff & Formatting: `git diff --check` PASS
