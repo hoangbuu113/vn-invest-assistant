@@ -134,19 +134,67 @@ describe('Feature 27B — Vietnam market regime foundation', () => {
     assert.equal(domain.provenance.chartUrl, NSO_CPI_CHART_URL);
   });
 
-  test('parses a verified SBV weekly overnight-rate observation', () => {
-    const observation = parseSbvWeeklyRelease(
+  test('parses verified SBV weekly overnight-rate observations across diverse official date formats', () => {
+    // Pattern 1: Two months date format (e.g. 29/6 - 03/7/2026)
+    const obs1 = parseSbvWeeklyRelease(
       'Diễn biến thị trường tuần từ 29/6 - 03/7/2026. Lãi suất giao dịch bình quân kỳ hạn qua đêm là 7,23%/năm.',
       'https://www.sbv.gov.vn/vi/w/dien-bien-thi-truong-lien-ngan-hang',
       'https://www.sbv.gov.vn/documents/20117/29.6-03.7.2026.pdf'
     );
-    assert.deepEqual(observation, {
+    assert.deepEqual(obs1, {
       referenceWeekStart: '2026-06-29',
       referenceWeekEnd: '2026-07-03',
       vndOvernightRatePct: 7.23,
       releaseUrl: 'https://www.sbv.gov.vn/vi/w/dien-bien-thi-truong-lien-ngan-hang',
       pdfUrl: 'https://www.sbv.gov.vn/documents/20117/29.6-03.7.2026.pdf'
     });
+
+    // Pattern 2: Single-month hyphen date format (e.g. tuần từ 06-10.7.2026)
+    const obs2 = parseSbvWeeklyRelease(
+      'Diễn biến thị trường ngoại tệ và thị trường liên ngân hàng tuần từ 06-10.7.2026. Lãi suất bình quân qua đêm: 4,50%',
+      'https://www.sbv.gov.vn/vi/w/dien-bien-thi-truong-06-10'
+    );
+    assert.deepEqual(obs2, {
+      referenceWeekStart: '2026-07-06',
+      referenceWeekEnd: '2026-07-10',
+      vndOvernightRatePct: 4.5,
+      releaseUrl: 'https://www.sbv.gov.vn/vi/w/dien-bien-thi-truong-06-10',
+      pdfUrl: null
+    });
+
+    // Pattern 3: Single-month slash date format (e.g. tuần từ 04-08/5/2026)
+    const obs3 = parseSbvWeeklyRelease(
+      'Diễn biến thị trường ngoại tệ và thị trường liên ngân hàng tuần từ 04-08/5/2026. Lãi suất kỳ hạn qua đêm là 3,85%/năm.',
+      'https://www.sbv.gov.vn/vi/w/dien-bien-thi-truong-04-08'
+    );
+    assert.deepEqual(obs3, {
+      referenceWeekStart: '2026-05-04',
+      referenceWeekEnd: '2026-05-08',
+      vndOvernightRatePct: 3.85,
+      releaseUrl: 'https://www.sbv.gov.vn/vi/w/dien-bien-thi-truong-04-08',
+      pdfUrl: null
+    });
+  });
+
+  test('fetchSbvMoneyMarket gracefully returns unavailable on WAF block response without throwing', async () => {
+    const domain = await fetchSbvMoneyMarket({
+      fetchFn: async () => response('<html><head><title>Request Rejected</title></head><body>The requested URL was rejected.</body></html>', { status: 200 })
+    });
+    assert.equal(domain.status, 'unavailable');
+    assert.equal(domain.reason, 'OFFICIAL_DATA_UNAVAILABLE');
+    assert.equal(domain.vndOvernightRatePct, null);
+  });
+
+  test('fetchSbvMoneyMarket gracefully returns unavailable on timeout', async () => {
+    const domain = await fetchSbvMoneyMarket({
+      fetchFn: async () => {
+        const error = new Error('AbortError');
+        error.name = 'AbortError';
+        throw error;
+      }
+    });
+    assert.equal(domain.status, 'unavailable');
+    assert.equal(domain.reason, 'OFFICIAL_SOURCE_TIMEOUT');
   });
 
   test('preserves the latest SBV rate but withholds derived fields below eight observations', () => {

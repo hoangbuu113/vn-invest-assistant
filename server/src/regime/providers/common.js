@@ -71,7 +71,16 @@ export async function fetchOfficialResource(url, {
       error.code = response?.status === 429 ? 'PROVIDER_RATE_LIMITED' : 'PROVIDER_ERROR';
       throw error;
     }
-    return responseType === 'arrayBuffer' ? response.arrayBuffer() : response.text();
+    if (responseType === 'arrayBuffer') {
+      return response.arrayBuffer();
+    }
+    const text = await response.text();
+    if (typeof text === 'string' && text.includes('<title>Request Rejected</title>')) {
+      const error = new Error('OFFICIAL_SOURCE_UNAVAILABLE');
+      error.code = 'PROVIDER_ACCESS_DENIED';
+      throw error;
+    }
+    return text;
   } catch (error) {
     if (error?.name === 'AbortError') {
       const timeoutError = new Error('OFFICIAL_SOURCE_TIMEOUT');

@@ -25,19 +25,39 @@ function toDateKey(day, month, year) {
 }
 
 function parseReferenceWeek(text) {
-  const match = /(?:tuần\s+)?từ(?:\s+ngày)?\s*(\d{1,2})[\/.-](\d{1,2})(?:[\/.-](\d{4}))?\s*(?:đến|tới|[-–—])\s*(?:ngày\s*)?(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})/iu.exec(text);
-  if (!match) return null;
+  if (typeof text !== 'string') return null;
 
-  const endYear = Number(match[6]);
-  const startMonth = Number(match[2]);
-  const endMonth = Number(match[5]);
-  const startYear = match[3]
-    ? Number(match[3])
-    : (startMonth > endMonth ? endYear - 1 : endYear);
-  const start = toDateKey(match[1], match[2], startYear);
-  const end = toDateKey(match[4], match[5], endYear);
-  if (!start || !end || start > end) return null;
-  return { referenceWeekStart: start, referenceWeekEnd: end };
+  // Pattern 1: Single month with hyphen/dash (e.g., "tuần từ 06-10.7.2026" or "từ 04-08/5/2026")
+  const patternSingleMonth = /(?:tuần\s+)?từ(?:\s+ngày)?\s*(\d{1,2})\s*(?:đến|tới|[-–—])\s*(?:ngày\s*)?(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})/iu.exec(text);
+  if (patternSingleMonth) {
+    const day1 = patternSingleMonth[1];
+    const day2 = patternSingleMonth[2];
+    const month = patternSingleMonth[3];
+    const year = patternSingleMonth[4];
+    const start = toDateKey(day1, month, year);
+    const end = toDateKey(day2, month, year);
+    if (start && end && start <= end) {
+      return { referenceWeekStart: start, referenceWeekEnd: end };
+    }
+  }
+
+  // Pattern 2: Two months or explicit full dates (e.g., "tuần từ 29.6-03.7.2026" or "từ 29/6/2026 đến 03/7/2026")
+  const patternTwoMonths = /(?:tuần\s+)?từ(?:\s+ngày)?\s*(\d{1,2})[\/.-](\d{1,2})(?:[\/.-](\d{4}))?\s*(?:đến|tới|[-–—])\s*(?:ngày\s*)?(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})/iu.exec(text);
+  if (patternTwoMonths) {
+    const endYear = Number(patternTwoMonths[6]);
+    const startMonth = Number(patternTwoMonths[2]);
+    const endMonth = Number(patternTwoMonths[5]);
+    const startYear = patternTwoMonths[3]
+      ? Number(patternTwoMonths[3])
+      : (startMonth > endMonth ? endYear - 1 : endYear);
+    const start = toDateKey(patternTwoMonths[1], patternTwoMonths[2], startYear);
+    const end = toDateKey(patternTwoMonths[4], patternTwoMonths[5], endYear);
+    if (start && end && start <= end) {
+      return { referenceWeekStart: start, referenceWeekEnd: end };
+    }
+  }
+
+  return null;
 }
 
 function parseOvernightRate(text) {
@@ -226,7 +246,8 @@ export async function fetchSbvMoneyMarket({
       .filter((result) => result.status === 'fulfilled' && result.value)
       .map((result) => result.value);
     return buildMoneyMarketDomain(observations);
-  } catch {
-    return unavailableMoneyMarket();
+  } catch (error) {
+    if (error?.message === 'OFFICIAL_SOURCE_TIMEOUT') return unavailableMoneyMarket('OFFICIAL_SOURCE_TIMEOUT');
+    return unavailableMoneyMarket('OFFICIAL_DATA_UNAVAILABLE');
   }
 }
