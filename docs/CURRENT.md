@@ -1,45 +1,40 @@
 # Current Project Status
 
 ## LATEST VERIFIED CHECKPOINT
-- **Release Status**: READY / FEATURE 30 COMPLETE (Features 01–30 COMPLETE)
+- **Release Status**: V1.1 BATCH 1 ACTIVE / VERIFIED IN PRODUCTION
 - **Branch**: `main`
 - **Architecture**: Cloudflare Workers Static Assets frontend + Render Node.js Express backend + Supabase PostgreSQL database
 - **Security & Authorization**:
-  - Production security activated via PostgreSQL permissions (`20260901000000_feature_30b1_single_owner_security.sql`)
+  - Production security activated via PostgreSQL permissions (`20260901000000_feature_30b1_single_owner_security.sql` & `20260901010000_v1_1_cross_currency_accounting_foundation.sql`)
   - Direct Supabase `anon` access denied for all private financial tables (`investor_profile`, `holdings`, `position_opening_baselines`, `portfolio_transactions`, `cash_ledger_entries`, `watchlist_items`, `price_alerts`) and sensitive RPCs
   - Public canonical metadata (`assets`, `asset_provider_mappings`) remains accessible to `anon`
-  - Single-owner bearer authentication (`OWNER_ACCESS_TOKEN`) enforced on all private API endpoints; unauthenticated requests return 401, invalid tokens return 403
+  - Single-owner authentication enforced with trusted device sessions: 30-day first-party HttpOnly cookie (`vn_invest_owner_session`) + bearer auth fallback (`OWNER_ACCESS_TOKEN`); unauthenticated requests return 401, invalid tokens return 403
+  - Background price-alert scheduler protected via `ALERT_SCHEDULER_TOKEN` (cron trigger `*/15 * * * *` on Cloudflare Worker)
   - Service-role key / database secret key (`SUPABASE_SECRET_KEY`) is strictly backend-only and never exposed to the client bundle
-- **Clean First-Use Financial Baseline**:
-  - Authoritative Holdings: 0 rows (clean initial state)
-  - Authoritative Transactions: 0 rows
-  - Authoritative Position Opening Baselines: 0 rows
-  - Authoritative Cash Ledger: 0 rows (0 VND cash available)
-  - Authoritative Watchlist: 0 rows
-  - Authoritative Price Alerts: 0 rows
-  - Singleton Investor Profile: 1 record (`cash_available = 0`, moderate risk tolerance, medium horizon)
-  - Remote Canonical Universe: 49 assets (40 crypto, 7 VN stocks/ETFs, 1 gold spot, 1 FX context) across 5 verified providers (89 provider mappings)
+- **Multi-Asset & Accounting Activation (V1.1 Batch 1)**:
+  - Feature 19 VND-basis dual-settlement cross-currency accounting foundation active in production DB
+  - Feature 25 performance integration honors external settlements as external capital flows
+  - Feature 19 user-facing Crypto & Gold transaction/opening-position UI activated with truthful disclosures
+  - Live USD/VND rate conversion provides real-time VND market valuation and unrealized P&L for non-VND holdings
+- **Canonical Universe & Remote Baseline**:
+  - Canonical Universe: 49 assets (40 crypto, 7 VN stocks/ETFs, 1 gold spot, 1 FX context) across 5 verified providers (89 provider mappings)
+  - Authoritative Cash Ledger: 0 entries (clean initial cash flow)
+  - Singleton Investor Profile: 1 record (`cash_available = 20,000,000 VND`, moderate risk tolerance, medium horizon)
 - **Automated Test Suite**:
-  - Full Backend Regression: 607/607 PASS (89 test suites)
-  - Focused Feature 30B2 Hardening Gate: 9/9 PASS
-  - Focused Feature 30B1 Security Gate: 11/11 PASS
-  - Focused Feature 29 AI Brief Gate: 23/23 PASS
-  - Focused Feature 28 Opportunity Engine Gate: 16/16 PASS
-  - Focused Feature 27 Market Regime Gate: 20/20 PASS
+  - Full Backend Regression: 700/700 PASS (106 test suites)
   - Dependencies: `npm audit` 0 vulnerabilities on both server and client
   - Client Build: PASS (~190ms, 0 errors, 0 warnings)
   - Git Diff & Formatting: `git diff --check` PASS
 - **Production Endpoints**:
-  - Frontend: `https://vn-invest-assistant.vn-invest-assistant.workers.dev` (Cloudflare Workers Static Assets, Owner Gate active)
-  - Backend: `https://vn-invest-assistant-api.onrender.com` (Render, single-owner auth active, health `ok`)
+  - Frontend: `https://vn-invest-assistant.vn-invest-assistant.workers.dev` (Cloudflare Workers Static Assets + API Proxy + 15m Cron)
+  - Backend: `https://vn-invest-assistant-api.onrender.com` (Render Node.js Express, health `ok`, db-health `ok`)
 - **Working Tree**: CLEAN
 
 ## CURRENT PHASE
-FEATURE 30 — RELEASE HARDENING & FINAL GATE (COMPLETE)
+V1.1 RELEASE ACTIVATION — BATCH 1 (COMPLETE)
 
 ## RELEASE STATUS
-READY / ALL 30 ROADMAP FEATURES DELIVERED
-
+V1.1 BATCH 1 ACTIVE / VERIFIED IN PRODUCTION
 
 ---
 
