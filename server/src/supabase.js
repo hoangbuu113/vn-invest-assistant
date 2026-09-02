@@ -375,6 +375,19 @@ function normalizeHolding(row) {
           opening_average_cost: typeof openingPosition.opening_average_cost === 'number'
             ? openingPosition.opening_average_cost
             : Number(openingPosition.opening_average_cost),
+          execution_unit_price: openingPosition.execution_unit_price === null
+            ? null
+            : (typeof openingPosition.execution_unit_price === 'number'
+                ? openingPosition.execution_unit_price
+                : Number(openingPosition.execution_unit_price)),
+          price_currency: openingPosition.price_currency || 'VND',
+          fx_rate_to_vnd: openingPosition.fx_rate_to_vnd === null
+            ? null
+            : (typeof openingPosition.fx_rate_to_vnd === 'number'
+                ? openingPosition.fx_rate_to_vnd
+                : Number(openingPosition.fx_rate_to_vnd)),
+          fx_provenance: openingPosition.fx_provenance || null,
+          fx_observed_at: openingPosition.fx_observed_at || null,
           accounting_cutoff_at: openingPosition.accounting_cutoff_at,
           provenance_type: openingPosition.provenance_type,
           locked_at: openingPosition.locked_at || null,
@@ -414,6 +427,11 @@ export async function getHoldings(client = privateSupabase) {
         id,
         opening_quantity,
         opening_average_cost,
+        execution_unit_price,
+        price_currency,
+        fx_rate_to_vnd,
+        fx_provenance,
+        fx_observed_at,
         accounting_cutoff_at,
         provenance_type,
         locked_at,
@@ -1266,6 +1284,11 @@ export async function getPositionOpeningBaselines(client = privateSupabase) {
       asset_id,
       opening_quantity,
       opening_average_cost,
+      execution_unit_price,
+      price_currency,
+      fx_rate_to_vnd,
+      fx_provenance,
+      fx_observed_at,
       accounting_cutoff_at,
       provenance_type,
       locked_at,
@@ -1287,6 +1310,15 @@ export async function getPositionOpeningBaselines(client = privateSupabase) {
     assetId: row.asset_id,
     openingQuantity: typeof row.opening_quantity === 'number' ? row.opening_quantity : Number(row.opening_quantity),
     openingAverageCost: typeof row.opening_average_cost === 'number' ? row.opening_average_cost : Number(row.opening_average_cost),
+    executionUnitPrice: row.execution_unit_price === null
+      ? null
+      : (typeof row.execution_unit_price === 'number' ? row.execution_unit_price : Number(row.execution_unit_price)),
+    priceCurrency: row.price_currency || 'VND',
+    fxRateToVnd: row.fx_rate_to_vnd === null
+      ? null
+      : (typeof row.fx_rate_to_vnd === 'number' ? row.fx_rate_to_vnd : Number(row.fx_rate_to_vnd)),
+    fxProvenance: row.fx_provenance || null,
+    fxObservedAt: row.fx_observed_at || null,
     accountingCutoffAt: row.accounting_cutoff_at,
     provenanceType: row.provenance_type,
     lockedAt: row.locked_at || null,

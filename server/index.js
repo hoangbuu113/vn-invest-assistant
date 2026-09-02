@@ -36,8 +36,10 @@ import { getOpportunities } from './src/opportunities.js';
 import { getInvestmentBrief } from './src/investmentBrief.js';
 import {
   createPortfolioTransaction,
+  FX_PROVENANCE_METHODS,
   getPortfolioTransactions,
   normalizeExplicitTimestamp,
+  SETTLEMENT_MODES,
   TRANSACTION_METHODOLOGY,
   TRANSACTION_TYPES
 } from './src/transactions.js';
@@ -95,6 +97,28 @@ export function createCorsOptions(configuredOrigins) {
  */
 export function isValidFinancialNumber(val, { allowZero = false } = {}) {
   return typeof val === 'number' && Number.isFinite(val) && (allowZero ? val >= 0 : val > 0);
+}
+
+function isPlainObject(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function validateFxProvenance(value, errors) {
+  if (value === undefined || value === null) return;
+  if (!isPlainObject(value)) {
+    errors.push('fxProvenance must be an object when provided');
+    return;
+  }
+  if (typeof value.method !== 'string' || !FX_PROVENANCE_METHODS.includes(value.method.trim().toUpperCase())) {
+    errors.push(`fxProvenance.method must be one of: ${FX_PROVENANCE_METHODS.join(', ')}`);
+  }
+  if (
+    value.provider !== undefined
+    && value.provider !== null
+    && (typeof value.provider !== 'string' || !value.provider.trim())
+  ) {
+    errors.push('fxProvenance.provider must be a non-empty string when provided');
+  }
 }
 
 export function createApp(services = {}) {
@@ -285,7 +309,16 @@ export function createApp(services = {}) {
   // Explicit cash-neutral baseline for assets already owned before ledger tracking.
   app.post('/api/positions/opening', async (req, res) => {
     try {
-      const { assetId, quantity, averageCost } = req.body || {};
+      const {
+        assetId,
+        quantity,
+        averageCost,
+        executionUnitPrice,
+        priceCurrency,
+        fxRateToVnd,
+        fxProvenance,
+        fxObservedAt
+      } = req.body || {};
       const errors = [];
 
       if (!assetId || typeof assetId !== 'string' || assetId.trim() === '') {
@@ -296,8 +329,30 @@ export function createApp(services = {}) {
         errors.push('quantity must be a finite number greater than 0');
       }
 
-      if (!isValidFinancialNumber(averageCost, { allowZero: true })) {
+      if (averageCost !== undefined && !isValidFinancialNumber(averageCost, { allowZero: true })) {
         errors.push('averageCost must be a non-negative finite number');
+      }
+
+      if (executionUnitPrice !== undefined && !isValidFinancialNumber(executionUnitPrice, { allowZero: true })) {
+        errors.push('executionUnitPrice must be a non-negative finite number');
+      }
+
+      if (priceCurrency !== undefined && (typeof priceCurrency !== 'string' || !priceCurrency.trim())) {
+        errors.push('priceCurrency must be a non-empty string when provided');
+      }
+
+      if (fxRateToVnd !== undefined && !isValidFinancialNumber(fxRateToVnd, { allowZero: false })) {
+        errors.push('fxRateToVnd must be a finite number greater than 0');
+      }
+
+      validateFxProvenance(fxProvenance, errors);
+
+      let normalizedFxObservedAt;
+      if (fxObservedAt !== undefined && fxObservedAt !== null) {
+        normalizedFxObservedAt = normalizeExplicitTimestamp(fxObservedAt);
+        if (!normalizedFxObservedAt) {
+          errors.push('fxObservedAt must be a valid timestamp with an explicit Z or UTC offset');
+        }
       }
 
       if (errors.length > 0) {
@@ -308,11 +363,20 @@ export function createApp(services = {}) {
         });
       }
 
-      const result = await createOpeningPositionFn({
+      const openingPayload = {
         assetId: assetId.trim(),
         quantity,
         averageCost
-      }, positionClient);
+      };
+      if (executionUnitPrice !== undefined) openingPayload.executionUnitPrice = executionUnitPrice;
+      if (priceCurrency !== undefined && typeof priceCurrency === 'string' && priceCurrency.trim()) {
+        openingPayload.priceCurrency = priceCurrency.trim().toUpperCase();
+      }
+      if (fxRateToVnd !== undefined) openingPayload.fxRateToVnd = fxRateToVnd;
+      if (fxProvenance !== undefined) openingPayload.fxProvenance = fxProvenance;
+      if (normalizedFxObservedAt !== undefined) openingPayload.fxObservedAt = normalizedFxObservedAt;
+
+      const result = await createOpeningPositionFn(openingPayload, positionClient);
 
       return res.status(201).json({
         status: 'ok',
@@ -431,7 +495,21 @@ export function createApp(services = {}) {
   app.post('/api/transactions', async (req, res) => {
     try {
       const body = req.body || {};
-      const { symbol, assetId, transactionType, quantity, price, executedAt } = body;
+      const {
+        symbol,
+        assetId,
+        transactionType,
+        quantity,
+        price,
+        executedAt,
+        executionUnitPrice,
+        priceCurrency,
+        settlementMode,
+        settlementCurrency,
+        fxRateToVnd,
+        fxProvenance,
+        fxObservedAt
+      } = body;
       const errors = [];
 
       const hasSymbol = typeof symbol === 'string' && symbol.trim() !== '';
@@ -461,11 +539,41 @@ export function createApp(services = {}) {
         errors.push('price must be a finite number greater than 0');
       }
 
+      if (executionUnitPrice !== undefined && !isValidFinancialNumber(executionUnitPrice, { allowZero: false })) {
+        errors.push('executionUnitPrice must be a finite number greater than 0');
+      }
+
+      if (priceCurrency !== undefined && (typeof priceCurrency !== 'string' || !priceCurrency.trim())) {
+        errors.push('priceCurrency must be a non-empty string when provided');
+      }
+
+      if (settlementMode !== undefined && (typeof settlementMode !== 'string' || !SETTLEMENT_MODES.includes(settlementMode.trim().toUpperCase()))) {
+        errors.push('settlementMode must be INTERNAL_VND_CASH or EXTERNAL_SETTLEMENT');
+      }
+
+      if (settlementCurrency !== undefined && settlementCurrency !== null && (typeof settlementCurrency !== 'string' || !settlementCurrency.trim())) {
+        errors.push('settlementCurrency must be a non-empty string when provided');
+      }
+
+      if (fxRateToVnd !== undefined && !isValidFinancialNumber(fxRateToVnd, { allowZero: false })) {
+        errors.push('fxRateToVnd must be a finite number greater than 0');
+      }
+
+      validateFxProvenance(fxProvenance, errors);
+
       let normalizedExecutedAt;
       if (Object.prototype.hasOwnProperty.call(body, 'executedAt')) {
         normalizedExecutedAt = normalizeExplicitTimestamp(executedAt);
         if (!normalizedExecutedAt) {
           errors.push('executedAt must be a valid timestamp with an explicit Z or UTC offset');
+        }
+      }
+
+      let normalizedFxObservedAt;
+      if (fxObservedAt !== undefined && fxObservedAt !== null) {
+        normalizedFxObservedAt = normalizeExplicitTimestamp(fxObservedAt);
+        if (!normalizedFxObservedAt) {
+          errors.push('fxObservedAt must be a valid timestamp with an explicit Z or UTC offset');
         }
       }
 
@@ -477,14 +585,29 @@ export function createApp(services = {}) {
         });
       }
 
-      const result = await createPortfolioTransactionFn({
+      const transactionPayload = {
         symbol: hasSymbol ? symbol.trim() : undefined,
         assetId: hasAssetId ? assetId.trim() : undefined,
         transactionType: normalizedTransactionType,
         quantity,
         price,
         executedAt: normalizedExecutedAt
-      }, transactionClient);
+      };
+      if (executionUnitPrice !== undefined) transactionPayload.executionUnitPrice = executionUnitPrice;
+      if (priceCurrency !== undefined && typeof priceCurrency === 'string' && priceCurrency.trim()) {
+        transactionPayload.priceCurrency = priceCurrency.trim().toUpperCase();
+      }
+      if (settlementMode !== undefined && typeof settlementMode === 'string' && settlementMode.trim()) {
+        transactionPayload.settlementMode = settlementMode.trim().toUpperCase();
+      }
+      if (settlementCurrency !== undefined && typeof settlementCurrency === 'string' && settlementCurrency.trim()) {
+        transactionPayload.settlementCurrency = settlementCurrency.trim().toUpperCase();
+      }
+      if (fxRateToVnd !== undefined) transactionPayload.fxRateToVnd = fxRateToVnd;
+      if (fxProvenance !== undefined) transactionPayload.fxProvenance = fxProvenance;
+      if (normalizedFxObservedAt !== undefined) transactionPayload.fxObservedAt = normalizedFxObservedAt;
+
+      const result = await createPortfolioTransactionFn(transactionPayload, transactionClient);
 
       return res.status(201).json({
         status: 'ok',
