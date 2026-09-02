@@ -30,6 +30,7 @@ import CashManagementSection from './components/CashManagementSection.jsx';
 import OpeningPositionModal from './components/OpeningPositionModal.jsx';
 import { PortfolioOnboardingGuide } from './components/PortfolioOnboardingGuide.jsx';
 import { PortfolioPerformanceSection } from './components/PortfolioPerformanceSection.jsx';
+import { useAppNavigation } from './hooks/useAppNavigation.js';
 import { OpportunitySection } from './components/OpportunitySection.jsx';
 import { InvestmentBriefPanel } from './components/InvestmentBriefPanel.jsx';
 import {
@@ -226,7 +227,21 @@ const sectionItemVariants = {
 };
 
 function App({ onLogout }) {
-  const [activeTab, setActiveTab] = useState('dashboard');
+  const loadAssetDetailRef = useRef(null);
+  const clearAssetDetailRef = useRef(null);
+
+  const {
+    activeTab,
+    setActiveTab,
+    selectedSymbol,
+    setSelectedSymbol,
+    navigateTab,
+    navigateToAsset,
+    navigateBackFromAsset
+  } = useAppNavigation({
+    onSelectAsset: (sym) => loadAssetDetailRef.current?.(sym),
+    onClearAsset: () => clearAssetDetailRef.current?.()
+  });
 
   // Profile state
   const [profile, setProfile] = useState(null);
@@ -259,7 +274,6 @@ function App({ onLogout }) {
   const [cryptoExpanded, setCryptoExpanded] = useState(false);
 
   // Selected asset detail state
-  const [selectedSymbol, setSelectedSymbol] = useState(null);
   const [assetDetail, setAssetDetail] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState(null);
@@ -1265,8 +1279,7 @@ function App({ onLogout }) {
     }
   };
 
-  const handleSelectAsset = (symbol) => {
-    setActiveTab('assets');
+  const loadAssetDetail = useCallback((symbol) => {
     setIsComparingAssets(false);
     if (activeAssetDetailReqRef.current) activeAssetDetailReqRef.current.abort();
     if (activeMarketReqRef.current) activeMarketReqRef.current.abort();
@@ -1277,7 +1290,6 @@ function App({ onLogout }) {
     const controller = new AbortController();
     activeAssetDetailReqRef.current = controller;
 
-    setSelectedSymbol(symbol);
     setDetailLoading(true);
     setDetailError(null);
     setAssetDetail(null);
@@ -1311,9 +1323,9 @@ function App({ onLogout }) {
     fetchMarketData(symbol, true);
     fetchHistoryData(symbol, '1M');
     fetchAnalysisData(symbol, true);
-  };
+  }, [fetchMarketData, fetchHistoryData, fetchAnalysisData]);
 
-  const handleBackToList = () => {
+  const clearAssetDetail = useCallback(() => {
     setIsComparingAssets(false);
     if (activeAssetDetailReqRef.current) activeAssetDetailReqRef.current.abort();
     if (activeMarketReqRef.current) activeMarketReqRef.current.abort();
@@ -1321,7 +1333,6 @@ function App({ onLogout }) {
     if (activeHistoryReqRef.current) activeHistoryReqRef.current.abort();
     if (activeAnalysisReqRef.current) activeAnalysisReqRef.current.abort();
 
-    setSelectedSymbol(null);
     setAssetDetail(null);
     setDetailError(null);
     setMarketData(null);
@@ -1335,6 +1346,17 @@ function App({ onLogout }) {
     setAnalysisData(null);
     setAnalysisError(null);
     setAnalysisLoading(false);
+  }, []);
+
+  loadAssetDetailRef.current = loadAssetDetail;
+  clearAssetDetailRef.current = clearAssetDetail;
+
+  const handleSelectAsset = (symbol) => {
+    navigateToAsset(symbol);
+  };
+
+  const handleBackToList = () => {
+    navigateBackFromAsset();
   };
 
   // Abort all active requests on component unmount
@@ -1384,7 +1406,7 @@ function App({ onLogout }) {
             onChange={(tabId) => {
               setIsViewingAlerts(false);
               setIsComparingAssets(false);
-              setActiveTab(tabId);
+              navigateTab(tabId);
             }}
           />
           <button
