@@ -41,6 +41,26 @@ export function isHoldableVndAsset(asset) {
 }
 
 /**
+ * Returns true if an asset is supported for portfolio trading (BUY / SELL transactions)
+ * and opening positions under the VND-basis dual-settlement accounting architecture.
+ * Supports VN Stocks, VN ETFs, Crypto, and Gold (XAU/USD).
+ * Strictly excludes pure reference FX pairs (USD/VND).
+ */
+export function isPortfolioTradeableAsset(asset) {
+  const norm = normalizeAsset(asset);
+  if (!norm || !norm.symbol) return false;
+  return norm.assetType !== 'fx' && norm.symbol !== 'USD/VND';
+}
+
+export function isOpeningPositionSupported(asset) {
+  return isPortfolioTradeableAsset(asset);
+}
+
+export function isTransactionSupported(asset) {
+  return isPortfolioTradeableAsset(asset);
+}
+
+/**
  * Returns true if an asset has completed daily historical bars for Base-100 comparison.
  * Supports VN Equities/ETFs, Gold (XAU/USD), and Cryptos (40 Binance spot mappings).
  * Excludes Twelve Data FX pairs (USD/VND) where history is intentionally unsupported.
@@ -80,9 +100,13 @@ export function filterAssetsForCapability(assets, capability = 'all') {
 
   return assets.filter((asset) => {
     switch (capability) {
+      case 'opening_position':
+        return isOpeningPositionSupported(asset);
+      case 'transactions':
+      case 'trading':
+        return isTransactionSupported(asset);
       case 'holdable_vnd':
       case 'trading_vnd':
-      case 'opening_position':
         return isHoldableVndAsset(asset);
       case 'comparison':
         return isHistoricalComparisonSupported(asset);

@@ -367,22 +367,21 @@ describe('Feature 20A — Real Multi-Asset Providers & Representative Assets', (
     }
   });
 
-  // L. non-VND BUY/SELL remains rejected
-  it('L. non-VND asset transactions remain blocked by valuation and ledger rules', () => {
+  // L. non-VND valuation and unrealized P&L uses authoritative VND basis and live FX
+  it('L. non-VND holdings calculate exact VND cost basis and current unrealized P/L', () => {
     const nonVndHoldings = [
       {
         asset: { symbol: 'BTC', quote_currency: 'USD' },
         quantity: 1,
-        average_cost: 60000
+        average_cost: 1500000000
       },
       {
         asset: { symbol: 'XAU/USD', quote_currency: 'USD' },
         quantity: 10,
-        average_cost: 2500
+        average_cost: 60000000
       }
     ];
 
-    // Non-VND holdings have unavailable VND cost basis and P/L (as per Feature 19)
     const valuation = calculatePortfolioValuation(
       { cash_available: 50000000 },
       nonVndHoldings,
@@ -404,12 +403,16 @@ describe('Feature 20A — Real Multi-Asset Providers & Representative Assets', (
       }
     );
 
-    for (const h of valuation.holdings) {
-      assert.equal(h.costBasis, null, 'Non-VND cost basis must be null');
-      assert.equal(h.unrealizedPnL, null, 'Non-VND P/L must be null');
-      assert.equal(h.unrealizedPnLPercent, null, 'Non-VND P/L % must be null');
-      assert.equal(h.pnlStatus, 'unavailable', 'Non-VND pnlStatus must be unavailable');
-    }
+    const [btcHolding, xauHolding] = valuation.holdings;
+    assert.equal(btcHolding.costBasis, 1500000000);
+    assert.equal(btcHolding.reportingMarketValue, 1 * 65000 * 25400);
+    assert.equal(btcHolding.unrealizedPnL, (1 * 65000 * 25400) - 1500000000);
+    assert.equal(btcHolding.pnlStatus, 'available');
+
+    assert.equal(xauHolding.costBasis, 600000000);
+    assert.equal(xauHolding.reportingMarketValue, 10 * 2520 * 25400);
+    assert.equal(xauHolding.unrealizedPnL, (10 * 2520 * 25400) - 600000000);
+    assert.equal(xauHolding.pnlStatus, 'available');
   });
 
   // M. provider failures remain unavailable, never zero

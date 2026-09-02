@@ -3,6 +3,9 @@ import assert from 'node:assert/strict';
 import {
   normalizeAsset,
   isHoldableVndAsset,
+  isPortfolioTradeableAsset,
+  isOpeningPositionSupported,
+  isTransactionSupported,
   isHistoricalComparisonSupported,
   isAnalysisSupported,
   isMarketSnapshotSupported,
@@ -118,6 +121,38 @@ describe('V1.1 Improvement 06 — Asset Selector Capability Contracts', () => {
       assert.deepEqual(
         holdable.map((a) => a.symbol),
         ['FPT', 'E1VFVN30']
+      );
+    });
+  });
+
+  describe('2b. Cross-Currency Portfolio Entry Capability (Opening Position & Transactions)', () => {
+    it('supports VN Stocks (FPT), VN ETFs (E1VFVN30), Gold (XAU/USD), and Crypto (BTC, ETH)', () => {
+      assert.equal(isPortfolioTradeableAsset(fpt), true);
+      assert.equal(isPortfolioTradeableAsset(e1vfvn30), true);
+      assert.equal(isPortfolioTradeableAsset(xauUsd), true);
+      assert.equal(isPortfolioTradeableAsset(btc), true);
+      assert.equal(isPortfolioTradeableAsset(eth), true);
+      assert.equal(isOpeningPositionSupported(btc), true);
+      assert.equal(isTransactionSupported(xauUsd), true);
+    });
+
+    it('strictly excludes pure reference FX (USD/VND) from portfolio trading and opening positions', () => {
+      assert.equal(isPortfolioTradeableAsset(usdVnd), false);
+      assert.equal(isOpeningPositionSupported(usdVnd), false);
+      assert.equal(isTransactionSupported(usdVnd), false);
+    });
+
+    it('filters representative assets down to 5 tradeable / opening-position assets', () => {
+      const openable = filterAssetsForCapability(canonicalAssets, 'opening_position');
+      assert.deepEqual(
+        openable.map((a) => a.symbol),
+        ['FPT', 'E1VFVN30', 'XAU/USD', 'BTC', 'ETH']
+      );
+
+      const tradeable = filterAssetsForCapability(canonicalAssets, 'transactions');
+      assert.deepEqual(
+        tradeable.map((a) => a.symbol),
+        ['FPT', 'E1VFVN30', 'XAU/USD', 'BTC', 'ETH']
       );
     });
   });

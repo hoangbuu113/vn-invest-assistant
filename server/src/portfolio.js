@@ -51,8 +51,10 @@ function fxRateForCurrency(fxRatesMap, currency) {
  * 2. VND assets bypass FX; non-VND assets require one valid direct quote-to-VND rate.
  * 3. Legacy marketValue is the authoritative VND reporting value and remains null
  *    when price, currency integrity, or FX provenance is unavailable.
- * 4. Non-VND cost basis and P/L remain unavailable until acquisition-time FX
- *    accounting exists; VND cost basis and P/L retain their established formulas.
+ * 4. Holdings cost basis is stored in VND (authoritative acquisition cost); non-VND
+ *    current unrealized P/L evaluates against current reporting market value (native
+ *    price converted via current authoritative FX). Missing current price or FX rate
+ *    marks valuation and P/L unavailable without mutating historical basis.
  * 5. Aggregates use full precision, include only valid reporting market values,
  *    and expose valuation and P/L coverage independently.
  */
@@ -116,7 +118,7 @@ export function calculatePortfolioValuation(profile, holdings, snapshotsMap = {}
     } else if (!hasValidPrice) {
       valuationReason = 'MISSING_NATIVE_PRICE';
       pnlReason = averageCost === null ? 'MALFORMED_HOLDING_COST' : 'MISSING_NATIVE_PRICE';
-      if (nativeCurrency === REPORTING_CURRENCY) {
+      if (averageCost !== null) {
         costBasis = nativeCostBasis;
       }
     } else if (providerCurrencyMismatch(snapshot, nativeCurrency)) {
@@ -125,7 +127,7 @@ export function calculatePortfolioValuation(profile, holdings, snapshotsMap = {}
       marketUpdatedAt = null;
       valuationReason = 'PROVIDER_CURRENCY_MISMATCH';
       pnlReason = averageCost === null ? 'MALFORMED_HOLDING_COST' : 'PROVIDER_CURRENCY_MISMATCH';
-      if (nativeCurrency === REPORTING_CURRENCY) {
+      if (averageCost !== null) {
         costBasis = nativeCostBasis;
       }
     } else {
@@ -159,7 +161,6 @@ export function calculatePortfolioValuation(profile, holdings, snapshotsMap = {}
         fxRateTimestamp = fxRate.sourceTimestamp;
         fxProvider = fxRate.provider;
         fxFreshness = fxRate.freshness;
-        pnlReason = averageCost === null ? 'MALFORMED_HOLDING_COST' : 'NON_VND_PNL_UNAVAILABLE';
 
         if (fxRate.availability === 'available') {
           reportingMarketValue = nativeMarketValue * fxRate.rate;
@@ -167,8 +168,27 @@ export function calculatePortfolioValuation(profile, holdings, snapshotsMap = {}
           pricingStatus = 'available';
           valuationStatus = 'available';
           valuationReason = null;
+
+          if (averageCost === null) {
+            costBasis = null;
+            pnlStatus = 'unavailable';
+            pnlReason = 'MALFORMED_HOLDING_COST';
+          } else {
+            costBasis = nativeCostBasis;
+            unrealizedPnL = reportingMarketValue - costBasis;
+            unrealizedPnLPercent = costBasis > 0 ? (unrealizedPnL / costBasis) * 100 : null;
+            pnlStatus = 'available';
+            pnlReason = null;
+          }
         } else {
+          reportingMarketValue = null;
+          marketValue = null;
+          pricingStatus = 'available';
+          valuationStatus = 'unavailable';
           valuationReason = fxRate.reason || 'FX_UNAVAILABLE';
+          costBasis = averageCost !== null ? nativeCostBasis : null;
+          pnlStatus = 'unavailable';
+          pnlReason = averageCost === null ? 'MALFORMED_HOLDING_COST' : (fxRate.reason || 'FX_UNAVAILABLE');
         }
       }
     }

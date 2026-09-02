@@ -215,7 +215,8 @@ describe('Feature 19 — FX and VND portfolio valuation foundation', () => {
     assert.equal(valued.valuationReason, 'FX_PAIR_MISMATCH');
   });
 
-  test('I/J. non-VND P&L stays unavailable while mixed aggregate P&L remains VND-comparable', () => {
+  test('I/J. non-VND P&L uses authoritative VND cost basis and live FX; stays unavailable if FX missing', () => {
+    // 1. Available FX case: exact VND unrealized P&L
     const result = calculatePortfolioValuation(
       { cash_available: 1_000_000 },
       [
@@ -227,7 +228,13 @@ describe('Feature 19 — FX and VND portfolio valuation foundation', () => {
           averageCost: 100,
           assetType: 'stock'
         }),
-        holding({ id: 'btc', symbol: 'BTC/USD', currency: 'USD' })
+        holding({
+          id: 'btc',
+          symbol: 'BTC/USD',
+          currency: 'USD',
+          quantity: 2,
+          averageCost: 80
+        })
       ],
       {
         FPT: { price: 120, currency: 'VND' },
@@ -237,17 +244,60 @@ describe('Feature 19 — FX and VND portfolio valuation foundation', () => {
     );
 
     const usdHolding = result.holdings.find((item) => item.symbol === 'BTC/USD');
-    assert.equal(usdHolding.costBasis, null);
-    assert.equal(usdHolding.unrealizedPnL, null);
-    assert.equal(usdHolding.unrealizedPnLPercent, null);
-    assert.equal(usdHolding.pnlStatus, 'unavailable');
-    assert.equal(usdHolding.pnlReason, 'NON_VND_PNL_UNAVAILABLE');
-    assert.equal(result.summary.totalCostBasis, 1000);
-    assert.equal(result.summary.pricedCostBasis, 1000);
-    assert.equal(result.summary.totalUnrealizedPnL, 200);
-    assert.equal(result.summary.totalUnrealizedPnLPercent, 20);
-    assert.equal(result.summary.pnlCoverageStatus, 'partial');
+    assert.equal(usdHolding.costBasis, 160);
+    assert.equal(usdHolding.reportingMarketValue, 5_200_000);
+    assert.equal(usdHolding.unrealizedPnL, 5_200_000 - 160);
+    assert.equal(usdHolding.unrealizedPnLPercent, ((5_200_000 - 160) / 160) * 100);
+    assert.equal(usdHolding.pnlStatus, 'available');
+    assert.equal(usdHolding.pnlReason, null);
+    assert.equal(result.summary.totalCostBasis, 1000 + 160);
+    assert.equal(result.summary.pricedCostBasis, 1000 + 160);
+    assert.equal(result.summary.totalUnrealizedPnL, 200 + (5_200_000 - 160));
+    assert.equal(result.summary.pnlCoverageStatus, 'complete');
     assert.equal(result.summary.totalMarketValue, 1_200 + 5_200_000);
+
+    // 2. Unavailable FX case: P&L is unavailable, does not fabricate zero
+    const resultNoFx = calculatePortfolioValuation(
+      { cash_available: 1_000_000 },
+      [
+        holding({
+          id: 'fpt',
+          symbol: 'FPT',
+          currency: 'VND',
+          quantity: 10,
+          averageCost: 100,
+          assetType: 'stock'
+        }),
+        holding({
+          id: 'btc',
+          symbol: 'BTC/USD',
+          currency: 'USD',
+          quantity: 2,
+          averageCost: 80
+        })
+      ],
+      {
+        FPT: { price: 120, currency: 'VND' },
+        'BTC/USD': { price: 100, currency: 'USD' }
+      },
+      {
+        USD: createUnavailableFxRate('USD', 'VND', 'FX_PROVIDER_RATE_LIMITED')
+      }
+    );
+
+    const usdHoldingNoFx = resultNoFx.holdings.find((item) => item.symbol === 'BTC/USD');
+    assert.equal(usdHoldingNoFx.costBasis, 160);
+    assert.equal(usdHoldingNoFx.reportingMarketValue, null);
+    assert.equal(usdHoldingNoFx.unrealizedPnL, null);
+    assert.equal(usdHoldingNoFx.unrealizedPnLPercent, null);
+    assert.equal(usdHoldingNoFx.pnlStatus, 'unavailable');
+    assert.equal(usdHoldingNoFx.pnlReason, 'FX_PROVIDER_RATE_LIMITED');
+    assert.equal(resultNoFx.summary.totalCostBasis, 1000 + 160);
+    assert.equal(resultNoFx.summary.pricedCostBasis, 1000);
+    assert.equal(resultNoFx.summary.totalUnrealizedPnL, 200);
+    assert.equal(resultNoFx.summary.pnlCoverageStatus, 'partial');
+    assert.equal(resultNoFx.summary.valuationStatus, 'partial');
+    assert.equal(resultNoFx.summary.totalMarketValue, 1_200);
   });
 
   test('K. composition consumes authoritative reporting values without FX calculation', async () => {

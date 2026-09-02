@@ -1,9 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { MagneticButton } from './MotionHelpers.jsx';
 import { apiFetch } from '../utils/api.js';
 import { formatAssetType } from '../utils/formatting.js';
-import { isHoldableVndAsset } from '../utils/assetCapabilities.js';
+import { isPortfolioTradeableAsset } from '../utils/assetCapabilities.js';
 
 const overlayVariants = {
   hidden: { opacity: 0 },
@@ -37,7 +37,7 @@ function translateOpeningError(error) {
     return 'Tài sản này hiện đang tạm dừng giao dịch.';
   }
   if (msg.includes('OP003') || msg.includes('non-VND')) {
-    return 'Hệ thống hiện chỉ hỗ trợ ghi nhận vị thế ban đầu cho tài sản định giá bằng VNĐ.';
+    return 'Hệ thống hiện không hỗ trợ loại tài sản này.';
   }
   if (msg.includes('OP004')) {
     return 'Thông tin không hợp lệ: Số lượng phải > 0 và giá vốn trung bình phải ≥ 0.';
@@ -67,6 +67,8 @@ export default function OpeningPositionModal({
   const [assetId, setAssetId] = useState('');
   const [quantity, setQuantity] = useState('');
   const [averageCost, setAverageCost] = useState('');
+  const [executionUnitPrice, setExecutionUnitPrice] = useState('');
+  const [priceCurrency, setPriceCurrency] = useState('VND');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
@@ -76,6 +78,8 @@ export default function OpeningPositionModal({
       setAssetId('');
       setQuantity('');
       setAverageCost('');
+      setExecutionUnitPrice('');
+      setPriceCurrency('VND');
       setError(null);
       setLoading(false);
       return;
@@ -89,28 +93,57 @@ export default function OpeningPositionModal({
       setAssetId(targetHolding.asset_id || '');
       setQuantity(opening?.opening_quantity !== undefined ? String(opening.opening_quantity) : String(targetHolding.quantity || ''));
       setAverageCost(opening?.opening_average_cost !== undefined ? String(opening.opening_average_cost) : String(targetHolding.average_cost || ''));
+      setExecutionUnitPrice(opening?.execution_unit_price !== undefined && opening?.execution_unit_price !== null ? String(opening.execution_unit_price) : '');
+      setPriceCurrency(opening?.price_currency || 'VND');
     } else if (mode === 'CANCEL' && targetHolding) {
       setAssetId(targetHolding.asset_id || '');
       setQuantity(String(targetHolding.quantity || ''));
       setAverageCost(String(targetHolding.average_cost || ''));
+      setExecutionUnitPrice('');
+      setPriceCurrency('VND');
     } else {
       setAssetId('');
       setQuantity('');
       setAverageCost('');
+      setExecutionUnitPrice('');
+      setPriceCurrency('VND');
     }
   }, [isOpen, mode, targetHolding]);
 
+  // Selected asset object
+  const selectedAsset = useMemo(() => {
+    return (assets || []).find((a) => a.id === assetId) || targetHolding?.asset || null;
+  }, [assets, assetId, targetHolding]);
+
+  // Categorize selected asset
+  const isCrypto = selectedAsset?.asset_type === 'crypto' || selectedAsset?.assetType === 'crypto';
+  const isGold = selectedAsset?.asset_type === 'gold' || selectedAsset?.assetType === 'gold' || selectedAsset?.symbol === 'XAU/USD';
+  const isVndAsset = selectedAsset
+    ? (selectedAsset.quote_currency === 'VND' || selectedAsset.quoteCurrency === 'VND') && !isCrypto && !isGold
+    : true;
+  const isNonVnd = !isVndAsset;
+
+  // Set default currency when asset selected
+  useEffect(() => {
+    if (mode === 'CREATE' && selectedAsset) {
+      if (isCrypto) {
+        setPriceCurrency('USDT');
+      } else if (isGold) {
+        setPriceCurrency('USD');
+      } else {
+        setPriceCurrency('VND');
+      }
+    }
+  }, [selectedAsset, isCrypto, isGold, mode]);
+
   if (!isOpen) return null;
 
-  // Filter available assets (excluding already held assets in CREATE mode, restricted to holdable VND assets)
+  // Filter available assets (excluding already held assets in CREATE mode, restricted to tradeable portfolio assets)
   const availableAssets = (assets || []).filter((a) => {
-    if (!isHoldableVndAsset(a)) return false;
+    if (!isPortfolioTradeableAsset(a)) return false;
     if (mode !== 'CREATE') return true;
     return !(holdings || []).some((h) => h.asset_id === a.id);
   });
-
-  const selectedAsset = (assets || []).find((a) => a.id === assetId) || targetHolding?.asset || null;
-  const isVndAsset = selectedAsset ? isHoldableVndAsset(selectedAsset) : true;
 
   const handleSubmit = async (e) => {
     if (e) e.preventDefault();
@@ -164,22 +197,41 @@ export default function OpeningPositionModal({
 
     const numAverageCost = Number(averageCost);
     if (averageCost === '' || isNaN(numAverageCost) || !Number.isFinite(numAverageCost) || numAverageCost < 0) {
-      setError('Giá vốn trung bình phải là số không âm.');
+      setError('Giá vốn trung bình quy đổi VND phải là số không âm.');
       return;
+    }
+
+    let numExecPrice = null;
+    if (isNonVnd && executionUnitPrice.trim()) {
+      numExecPrice = Number(executionUnitPrice.trim());
+      if (isNaN(numExecPrice) || !Number.isFinite(numExecPrice) || numExecPrice <= 0) {
+        setError(`Giá mua ban đầu (${priceCurrency}) phải là số dương lớn hơn 0.`);
+        return;
+      }
     }
 
     setLoading(true);
 
     try {
       if (mode === 'CREATE') {
+        const payload = {
+          assetId,
+          quantity: numQuantity,
+          averageCost: numAverageCost
+        };
+
+        if (isNonVnd) {
+          payload.priceCurrency = priceCurrency || (isCrypto ? 'USDT' : (isGold ? 'USD' : 'VND'));
+          if (numExecPrice !== null) {
+            payload.executionUnitPrice = numExecPrice;
+          }
+          payload.fxProvenance = 'USER_SUPPLIED_OPENING_VND_BASIS';
+        }
+
         const res = await apiFetch('/api/positions/opening', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            assetId,
-            quantity: numQuantity,
-            averageCost: numAverageCost
-          })
+          body: JSON.stringify(payload)
         });
         const json = await res.json();
         if (!res.ok || json.status !== 'ok') {
@@ -326,7 +378,7 @@ export default function OpeningPositionModal({
                 <>
                   <div>📌 <strong>Thông tin này dùng để ghi nhận tài sản bạn đã sở hữu trước khi theo dõi bằng ứng dụng.</strong></div>
                   <div style={{ marginTop: '4px', color: 'var(--color-slate-500)' }}>
-                    Thao tác này tạo vị thế khởi điểm trong danh mục, <strong>không tạo giao dịch mua</strong> và <strong>không làm thay đổi số tiền mặt hiện tại</strong>. Hiện chỉ hỗ trợ ghi nhận vị thế ban đầu cho tài sản định giá bằng VND.
+                    Vị thế này có từ trước khi bạn bắt đầu theo dõi trên ứng dụng, <strong>không tạo giao dịch mua</strong> và <strong>không làm thay đổi số dư tiền mặt</strong>.
                   </div>
                 </>
               )}
@@ -348,9 +400,21 @@ export default function OpeningPositionModal({
               )}
             </div>
 
-            {!isVndAsset && (
-              <div className="fintech-banner banner-warning" style={{ marginBottom: '1.25rem' }}>
-                <span>Hiện chỉ hỗ trợ ghi nhận vị thế ban đầu cho tài sản định giá bằng VND.</span>
+            {/* Gold Troy Ounce Explanatory Banner */}
+            {isGold && (
+              <div
+                style={{
+                  fontSize: '0.8rem',
+                  color: '#92400e',
+                  backgroundColor: '#fef3c7',
+                  padding: '0.65rem 0.85rem',
+                  borderRadius: '8px',
+                  border: '1px solid #fde68a',
+                  marginBottom: '1.15rem',
+                  lineHeight: 1.45
+                }}
+              >
+                🪙 <strong>Vàng quốc tế XAU/USD:</strong> Đơn vị: ounce troy. Đây là giá vàng giao ngay quốc tế, không phải vàng SJC/PNJ.
               </div>
             )}
 
@@ -383,7 +447,7 @@ export default function OpeningPositionModal({
                       <option value="">-- Chọn tài sản đã sở hữu --</option>
                       {availableAssets.map((asset) => (
                         <option key={asset.id} value={asset.id}>
-                          {asset.symbol} - {asset.name} ({formatAssetType(asset.asset_type)})
+                          {asset.symbol} - {asset.name} ({formatAssetType(asset.asset_type || asset.assetType)})
                         </option>
                       ))}
                     </select>
@@ -398,7 +462,7 @@ export default function OpeningPositionModal({
                         color: 'var(--color-slate-900)'
                       }}
                     >
-                      {selectedAsset?.symbol} — {selectedAsset?.name} ({formatAssetType(selectedAsset?.asset_type)})
+                      {selectedAsset?.symbol} — {selectedAsset?.name} ({formatAssetType(selectedAsset?.asset_type || selectedAsset?.assetType)})
                     </div>
                   )}
                   {mode === 'CREATE' && availableAssets.length === 0 && (
@@ -417,7 +481,7 @@ export default function OpeningPositionModal({
                     type="number"
                     min="0.00000001"
                     step="any"
-                    placeholder="Ví dụ: 1000"
+                    placeholder={isGold ? 'Ví dụ: 1 (troy ounce)' : (isCrypto ? 'Ví dụ: 0.5' : 'Ví dụ: 1000')}
                     value={quantity}
                     onChange={(e) => {
                       setQuantity(e.target.value);
@@ -429,20 +493,75 @@ export default function OpeningPositionModal({
                     style={{ width: '100%' }}
                   />
                   <div style={{ fontSize: '0.75rem', color: 'var(--color-slate-400)', marginTop: '3px' }}>
-                    Hỗ trợ số lượng thập phân (ví dụ cho quỹ hoặc tài sản phân đoạn).
+                    {isGold ? 'Số lượng tính bằng ounce troy.' : 'Hỗ trợ số lượng thập phân (ví dụ cho Crypto hoặc quỹ).'}
                   </div>
                 </div>
 
-                {/* 3. Average Purchase Cost */}
+                {/* Optional Original Execution Price for Non-VND */}
+                {isNonVnd && mode === 'CREATE' && (
+                  <div
+                    style={{
+                      backgroundColor: 'var(--color-slate-50, #f8fafc)',
+                      padding: '0.85rem',
+                      borderRadius: '10px',
+                      border: '1px solid var(--color-slate-200, #e2e8f0)'
+                    }}
+                  >
+                    <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '10px' }}>
+                      <div>
+                        <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 600, color: 'var(--color-slate-600)', marginBottom: '0.3rem' }}>
+                          Giá mua ban đầu (tùy chọn)
+                        </label>
+                        <input
+                          type="number"
+                          step="any"
+                          min="0.00000001"
+                          placeholder={`Ví dụ: ${isGold ? '2500' : '90000'}`}
+                          value={executionUnitPrice}
+                          onChange={(e) => setExecutionUnitPrice(e.target.value)}
+                          disabled={loading}
+                          className="fintech-input"
+                          style={{ width: '100%', fontSize: '0.85rem' }}
+                        />
+                      </div>
+                      <div>
+                        <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 600, color: 'var(--color-slate-600)', marginBottom: '0.3rem' }}>
+                          Đồng tiền
+                        </label>
+                        <select
+                          value={priceCurrency}
+                          onChange={(e) => setPriceCurrency(e.target.value)}
+                          disabled={loading}
+                          className="fintech-select"
+                          style={{ width: '100%', fontSize: '0.85rem', fontWeight: 700 }}
+                        >
+                          {isCrypto ? (
+                            <>
+                              <option value="USDT">USDT</option>
+                              <option value="USD">USD</option>
+                            </>
+                          ) : (
+                            <>
+                              <option value="USD">USD</option>
+                              <option value="USDT">USDT</option>
+                            </>
+                          )}
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* 3. Authoritative Average Cost in VND */}
                 <div>
                   <label style={{ display: 'block', fontSize: '0.84rem', fontWeight: 700, color: 'var(--color-slate-700)', marginBottom: '0.35rem' }}>
-                    Giá vốn trung bình (VNĐ) *
+                    {isNonVnd ? 'Giá vốn trung bình quy đổi VND (₫/đơn vị) *' : 'Giá vốn trung bình (VNĐ) *'}
                   </label>
                   <input
                     type="number"
                     min="0"
                     step="any"
-                    placeholder="Ví dụ: 35000"
+                    placeholder={isGold ? 'Ví dụ: 65000000' : 'Ví dụ: 35000'}
                     value={averageCost}
                     onChange={(e) => {
                       setAverageCost(e.target.value);
@@ -454,7 +573,9 @@ export default function OpeningPositionModal({
                     style={{ width: '100%' }}
                   />
                   <div style={{ fontSize: '0.75rem', color: 'var(--color-slate-400)', marginTop: '3px' }}>
-                    Giá vốn trung bình khi bạn mua tài sản này từ trước.
+                    {isNonVnd
+                      ? 'Giá vốn tiền đồng bình quân làm cơ sở tính giá trị danh mục và lãi/lỗ.'
+                      : 'Giá vốn trung bình khi bạn mua tài sản này từ trước.'}
                   </div>
                 </div>
 
