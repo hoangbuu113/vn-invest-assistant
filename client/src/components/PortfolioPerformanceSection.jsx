@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { formatPercentVN, formatVNDReporting } from '../utils/formatting.js';
 import { apiFetch } from '../utils/api.js';
+import { getPerformanceEmptyStateGuidance } from '../utils/portfolioOnboarding.js';
 
 const PERFORMANCE_RANGES = ['1W', '1M', '3M', '6M', '1Y'];
 
@@ -360,7 +361,11 @@ function LoadingSkeleton() {
   );
 }
 
-export function PortfolioPerformanceSection() {
+export function PortfolioPerformanceSection({
+  cashAvailable = 0,
+  holdingsCount = 0,
+  onNavigateToPortfolio
+} = {}) {
   const [range, setRange] = useState('1M');
   const [benchmarkId, setBenchmarkId] = useState('VN_INDEX');
   const [performance, setPerformance] = useState(null);
@@ -486,7 +491,23 @@ export function PortfolioPerformanceSection() {
           {isPerformanceUnavailable && (
             <div className="performance-semantic-state">
               <strong>{performance.status === 'insufficient_data' ? 'Chưa đủ dữ liệu cho kỳ đã chọn' : 'Hiệu suất chưa khả dụng'}</strong>
-              <span>{getReasonMessage(primaryCoverageReason)}</span>
+              <span>
+                {holdingsCount === 0
+                  ? getPerformanceEmptyStateGuidance({ cashAvailable, holdingsCount })
+                  : getReasonMessage(primaryCoverageReason)}
+              </span>
+              {holdingsCount === 0 && onNavigateToPortfolio && (
+                <div style={{ marginTop: '0.75rem' }}>
+                  <button
+                    type="button"
+                    onClick={onNavigateToPortfolio}
+                    className="fintech-btn btn-secondary btn-sm"
+                    style={{ fontSize: '0.8rem', padding: '4px 10px' }}
+                  >
+                    Đi đến Thiết lập danh mục →
+                  </button>
+                </div>
+              )}
             </div>
           )}
 

@@ -28,6 +28,7 @@ import TransactionHistorySection from './components/TransactionHistorySection.js
 import CashMovementModal from './components/CashMovementModal.jsx';
 import CashManagementSection from './components/CashManagementSection.jsx';
 import OpeningPositionModal from './components/OpeningPositionModal.jsx';
+import { PortfolioOnboardingGuide } from './components/PortfolioOnboardingGuide.jsx';
 import { PortfolioPerformanceSection } from './components/PortfolioPerformanceSection.jsx';
 import { OpportunitySection } from './components/OpportunitySection.jsx';
 import { InvestmentBriefPanel } from './components/InvestmentBriefPanel.jsx';
@@ -1957,7 +1958,11 @@ function App({ onLogout }) {
 
               {/* Feature 25D: Portfolio performance and benchmark comparison */}
               {!portfolioLoading && (
-                <PortfolioPerformanceSection />
+                <PortfolioPerformanceSection
+                  cashAvailable={portfolioOverview?.summary?.cashAvailable || cashOverview?.currentCash || 0}
+                  holdingsCount={portfolioOverview?.holdings?.length || 0}
+                  onNavigateToPortfolio={() => setActiveTab('portfolio')}
+                />
               )}
 
               {/* Content when loaded */}
@@ -2096,30 +2101,21 @@ function App({ onLogout }) {
                     </div>
 
                     {portfolioOverview.holdings.length === 0 ? (
-                      <div className="state-box" style={{ border: 'none', boxShadow: 'none' }}>
-                        <div className="state-icon float-icon">💼</div>
-                        <h3 className="state-title">Chưa có tài sản nào trong danh mục</h3>
-                        <p className="state-desc" style={{ marginBottom: '1.25rem' }}>
-                          Ghi nhận tài sản bạn đã sở hữu từ trước hoặc ghi nhận giao dịch mua mới để bắt đầu theo dõi danh mục.
-                        </p>
-                        <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', flexWrap: 'wrap' }}>
-                          <MagneticButton
-                            onClick={() => handleOpenOpeningPositionModal('CREATE')}
-                            className="fintech-btn btn-primary btn-sm"
-                          >
-                            + Thêm tài sản đã sở hữu từ trước
-                          </MagneticButton>
-                          <MagneticButton
-                            onClick={() => {
-                              setTransactionModalDefaultType('BUY');
-                              setTransactionModalDefaultAsset(null);
-                              setIsTransactionModalOpen(true);
-                            }}
-                            className="fintech-btn btn-secondary btn-sm"
-                          >
-                            + Ghi nhận giao dịch mua
-                          </MagneticButton>
-                        </div>
+                      <div style={{ padding: '0 1rem 1rem 1rem' }}>
+                        <PortfolioOnboardingGuide
+                          cashAvailable={portfolioOverview.summary?.cashAvailable || cashOverview?.currentCash || 0}
+                          holdingsCount={portfolioOverview.holdings.length}
+                          onOpenCashModal={() => {
+                            setCashMovementType('DEPOSIT');
+                            setIsCashMovementModalOpen(true);
+                          }}
+                          onOpenOpeningPositionModal={() => handleOpenOpeningPositionModal('CREATE')}
+                          onOpenTransactionModal={() => {
+                            setTransactionModalDefaultType('BUY');
+                            setTransactionModalDefaultAsset(null);
+                            setIsTransactionModalOpen(true);
+                          }}
+                        />
                       </div>
                     ) : (
                       <div className="table-container">
