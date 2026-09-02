@@ -402,6 +402,30 @@ describe('V1.1 trusted owner session cryptographic contract', () => {
     assert.equal(manager.verify(issued.token), null);
   });
 
+  test('independent OWNER_SESSION_SECRET signs session and rotating secret revokes sessions', () => {
+    const sessionSecretA = 'session-signing-secret-alpha-12345678901234567890';
+    const sessionSecretB = 'session-signing-secret-bravo-12345678901234567890';
+
+    const managerA = createOwnerSessionManager({
+      ownerAccessToken: OWNER_TOKEN,
+      ownerSessionSecret: sessionSecretA,
+      randomId: () => 'independent-secret-session'
+    });
+    const issued = managerA.issue();
+    assert.ok(issued.token);
+    assert.equal(managerA.verify(issued.token)?.id, 'independent-secret-session');
+    assert.equal(managerA.authenticateOwnerCredential(OWNER_TOKEN), true);
+
+    const managerB = createOwnerSessionManager({
+      ownerAccessToken: OWNER_TOKEN,
+      ownerSessionSecret: sessionSecretB
+    });
+    // Secret rotation invalidates token signed with Secret A even though ownerAccessToken is identical
+    assert.equal(managerB.verify(issued.token), null);
+    // But credential authentication continues to accept ownerAccessToken
+    assert.equal(managerB.authenticateOwnerCredential(OWNER_TOKEN), true);
+  });
+
   test('production session cookies are first-party, HttpOnly, SameSite, and Secure', () => {
     const cookie = serializeOwnerSessionCookie('opaque-session-value');
     assert.match(cookie, /^vn_invest_owner_session=opaque-session-value;/);

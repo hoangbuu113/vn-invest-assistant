@@ -104,6 +104,7 @@ function parseSessionPayload(token, signingKey) {
 
 export function createOwnerSessionManager({
   ownerAccessToken,
+  ownerSessionSecret,
   ttlMs = OWNER_SESSION_TTL_MS,
   now = () => Date.now(),
   randomId = () => randomBytes(18).toString('base64url')
@@ -111,8 +112,11 @@ export function createOwnerSessionManager({
   const configuredToken = typeof ownerAccessToken === 'string' && ownerAccessToken.length >= MIN_OWNER_ACCESS_TOKEN_LENGTH
     ? ownerAccessToken
     : null;
+  const configuredSecret = typeof ownerSessionSecret === 'string' && ownerSessionSecret.length >= MIN_OWNER_ACCESS_TOKEN_LENGTH
+    ? ownerSessionSecret
+    : configuredToken;
   const configuredTtlMs = Number.isFinite(ttlMs) && ttlMs > 0 ? Math.floor(ttlMs) : OWNER_SESSION_TTL_MS;
-  const signingKey = configuredToken ? sessionSigningKey(configuredToken) : null;
+  const signingKey = configuredSecret ? sessionSigningKey(configuredSecret) : null;
   const revokedSessions = new Map();
 
   function currentTimeMs() {

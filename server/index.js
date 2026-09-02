@@ -169,6 +169,7 @@ export function createApp(services = {}) {
     cashClient,
     positionClient,
     ownerAccessToken = process.env.OWNER_ACCESS_TOKEN,
+    ownerSessionSecret = process.env.OWNER_SESSION_SECRET,
     ownerSessionManager: providedOwnerSessionManager,
     ownerSessionTtlMs = OWNER_SESSION_TTL_MS,
     ownerSessionSecure = process.env.NODE_ENV === 'production',
@@ -181,6 +182,7 @@ export function createApp(services = {}) {
     : OWNER_SESSION_TTL_MS;
   const ownerSessionManager = providedOwnerSessionManager || createOwnerSessionManager({
     ownerAccessToken,
+    ownerSessionSecret,
     ttlMs: configuredOwnerSessionTtlMs
   });
   app.use(cors(createCorsOptions(corsOrigins)));
