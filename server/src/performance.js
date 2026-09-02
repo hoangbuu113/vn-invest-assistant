@@ -522,6 +522,36 @@ export function solveXirr(cashFlows) {
   };
 }
 
+export function getExternalSettlementFlowForDate(dateKey, transactions = []) {
+  let contributions = 0;
+  let withdrawals = 0;
+
+  for (const tx of transactions) {
+    const mode = tx.settlementMode || tx.settlement_mode || 'INTERNAL_VND_CASH';
+    if (mode !== 'EXTERNAL_SETTLEMENT') continue;
+
+    const txDate = normalizeTimestampToDateKey(tx.executedAt || tx.executed_at);
+    if (txDate !== dateKey) continue;
+
+    const type = tx.transactionType || tx.transaction_type;
+    const qty = typeof tx.quantity === 'number' ? tx.quantity : Number(tx.quantity || 0);
+    const price = typeof tx.price === 'number' ? tx.price : Number(tx.price || 0);
+    const amount = qty * price;
+
+    if (type === 'BUY') {
+      contributions += amount;
+    } else if (type === 'SELL') {
+      withdrawals += amount;
+    }
+  }
+
+  return {
+    contributions,
+    withdrawals,
+    netExternalSettlementFlow: contributions - withdrawals
+  };
+}
+
 /**
  * Pure calculation engine for Feature 25B portfolio performance.
  */
@@ -559,12 +589,12 @@ export function calculatePortfolioPerformance({
         valuationMarks: 0,
         carriedForwardMarks: 0,
         missingValuationMarks: 0,
-        reasons: ['PORTFOLIO_NOT_ACTIVATED']
+        reasons: ['NO_AUTHORITY_START']
       },
-      twr: { status: 'unavailable', returnPct: null, methodology: PERFORMANCE_METHODOLOGY.twrMethodology, exact: false, reason: 'PORTFOLIO_NOT_ACTIVATED' },
-      mwr: { status: 'unavailable', annualizedReturnPct: null, methodology: PERFORMANCE_METHODOLOGY.mwrMethodology, dayCountConvention: PERFORMANCE_METHODOLOGY.dayCountConvention, reason: 'PORTFOLIO_NOT_ACTIVATED' },
-      pnl: { status: 'unavailable', currency: REPORTING_CURRENCY, asOfDate: completedEndDate, realizedPnlDuringPeriod: null, cumulativeRealizedPnlToEnd: null, unrealizedPnlAtEnd: null, totalAccountingPnlAtEnd: null, reason: 'PORTFOLIO_NOT_ACTIVATED' },
-      drawdown: { status: 'unavailable', currentDrawdownPct: null, maxDrawdownPct: null, peakDate: null, troughDate: null, reason: 'PORTFOLIO_NOT_ACTIVATED' },
+      twr: { status: 'unavailable', returnPct: null, methodology: PERFORMANCE_METHODOLOGY.twrMethodology, exact: false, reason: 'NO_AUTHORITY_START' },
+      mwr: { status: 'unavailable', annualizedReturnPct: null, methodology: PERFORMANCE_METHODOLOGY.mwrMethodology, dayCountConvention: PERFORMANCE_METHODOLOGY.dayCountConvention, reason: 'NO_AUTHORITY_START' },
+      pnl: { status: 'unavailable', currency: REPORTING_CURRENCY, asOfDate: completedEndDate, realizedPnlDuringPeriod: null, cumulativeRealizedPnlToEnd: null, unrealizedPnlAtEnd: null, totalAccountingPnlAtEnd: null, reason: 'NO_AUTHORITY_START' },
+      drawdown: { status: 'unavailable', currentDrawdownPct: null, maxDrawdownPct: null, peakDate: null, troughDate: null, reason: 'NO_AUTHORITY_START' },
       methodology: PERFORMANCE_METHODOLOGY,
       series: []
     };
@@ -669,7 +699,10 @@ export function calculatePortfolioPerformance({
         if (type === 'WITHDRAWAL') withdrawals += amount;
       }
     }
-    const netExternalFlow = deposits - withdrawals;
+    const cashCapitalFlow = deposits - withdrawals;
+    const externalSettlement = getExternalSettlementFlowForDate(dateKey, transactions);
+    const externalSettlementFlow = externalSettlement.netExternalSettlementFlow;
+    const netExternalFlow = cashCapitalFlow + externalSettlementFlow;
 
     let holdingsValue = 0;
     let dateHasMissing = false;
@@ -720,6 +753,10 @@ export function calculatePortfolioPerformance({
       cash,
       holdingsValue,
       netExternalFlow,
+      cashCapitalFlow,
+      externalSettlementFlow,
+      externalSettlementContributions: externalSettlement.contributions,
+      externalSettlementWithdrawals: externalSettlement.withdrawals,
       deposits,
       withdrawals,
       isComplete
@@ -756,6 +793,8 @@ export function calculatePortfolioPerformance({
         date: firstPoint.dateKey,
         portfolioValueVnd: firstPoint.portfolioValue,
         netExternalFlowVnd: firstPoint.netExternalFlow,
+        cashCapitalFlowVnd: firstPoint.cashCapitalFlow,
+        externalSettlementFlowVnd: firstPoint.externalSettlementFlow,
         twrIndex: 100.0,
         drawdownPct: 0.0
       });
@@ -788,6 +827,8 @@ export function calculatePortfolioPerformance({
           date: curr.dateKey,
           portfolioValueVnd: curr.portfolioValue,
           netExternalFlowVnd: curr.netExternalFlow,
+          cashCapitalFlowVnd: curr.cashCapitalFlow,
+          externalSettlementFlowVnd: curr.externalSettlementFlow,
           twrIndex: Number.isFinite(twrIndex) ? twrIndex : null,
           drawdownPct: Number.isFinite(currentDrawdown) ? currentDrawdown : null
         });
@@ -804,6 +845,8 @@ export function calculatePortfolioPerformance({
     date: v.dateKey,
     portfolioValueVnd: v.portfolioValue,
     netExternalFlowVnd: v.netExternalFlow,
+    cashCapitalFlowVnd: v.cashCapitalFlow,
+    externalSettlementFlowVnd: v.externalSettlementFlow,
     twrIndex: null,
     drawdownPct: null
   }));
