@@ -4,15 +4,16 @@ import { normalizeCashLedgerEntry } from './cash.js';
 export const TRANSACTION_TYPES = Object.freeze(['BUY', 'SELL']);
 export const SETTLEMENT_MODES = Object.freeze(['INTERNAL_VND_CASH', 'EXTERNAL_SETTLEMENT']);
 export const FX_PROVENANCE_METHODS = Object.freeze([
+  'TWELVE_DATA_USD_VND',
+  'BINANCE_P2P_USDT_VND',
   'USER_SUPPLIED_VND_BASIS',
-  'USER_SUPPLIED_FX_RATE',
-  'PROVIDER_CONFIRMED_FX_RATE'
+  'USD_VND_DIRECT'
 ]);
 
 export const TRANSACTION_METHODOLOGY = Object.freeze({
   costBasisMethod: 'weighted_average',
   realizedPnLMethod: '(sellPrice - preSellAverageCost) * sellQuantity',
-  cashAmountMethod: 'quantity * effectiveVndUnitPrice',
+  cashAmountMethod: 'quantity * price',
   cashReconciliation: 'transactions recorded after Feature 15 activation affect current cash atomically at accounting time',
   legacyTransactionsCashReconciled: false,
   feesIncluded: false,
@@ -20,8 +21,7 @@ export const TRANSACTION_METHODOLOGY = Object.freeze({
   legacyHoldingsMayPredateLedger: true,
   duplicateRequestSemantics: 'separate_transactions',
   reportingCurrency: 'VND',
-  settlementModes: ['INTERNAL_VND_CASH', 'EXTERNAL_SETTLEMENT'],
-  externalFlowMethod: 'EXTERNAL BUY = contribution; EXTERNAL SELL = withdrawal; amount = quantity * effectiveVndUnitPrice'
+  settlementModes: ['INTERNAL_VND_CASH', 'EXTERNAL_SETTLEMENT']
 });
 
 const EXPLICIT_TIMESTAMP_PATTERN = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,9}))?)?(Z|([+-])(\d{2}):(\d{2}))$/;
@@ -85,7 +85,13 @@ export function normalizeTransaction(row) {
   const asset = row.assets || row.asset || {};
   const settlementMode = row.settlement_mode || row.settlementMode || 'INTERNAL_VND_CASH';
   const rawSettlementCurrency = row.settlement_currency ?? row.settlementCurrency;
+  const settlementCurrency = typeof rawSettlementCurrency === 'string' && rawSettlementCurrency.trim()
+    ? rawSettlementCurrency.trim().toUpperCase()
+    : (settlementMode === 'INTERNAL_VND_CASH' ? 'VND' : null);
   const fxProvenance = row.fx_provenance ?? row.fxProvenance;
+  const normalizedFxProvenance = typeof fxProvenance === 'string' && fxProvenance.trim()
+    ? fxProvenance.trim()
+    : (fxProvenance && typeof fxProvenance === 'object' && !Array.isArray(fxProvenance) ? { ...fxProvenance } : null);
 
   return {
     id: row.id,
@@ -105,17 +111,13 @@ export function normalizeTransaction(row) {
     ),
     priceCurrency: row.price_currency || row.priceCurrency || 'VND',
     settlementMode,
-    settlementCurrency: typeof rawSettlementCurrency === 'string' && rawSettlementCurrency.trim()
-      ? rawSettlementCurrency.trim().toUpperCase()
-      : (settlementMode === 'INTERNAL_VND_CASH' ? 'VND' : null),
+    settlementCurrency,
     fxRateToVnd: normalizeDatabaseNumber(
       row.fx_rate_to_vnd ?? row.fxRateToVnd,
       'fx rate to vnd',
       { nullable: true }
     ),
-    fxProvenance: typeof fxProvenance === 'string' && fxProvenance.trim()
-      ? fxProvenance.trim()
-      : (fxProvenance && typeof fxProvenance === 'object' && !Array.isArray(fxProvenance) ? { ...fxProvenance } : null),
+    fxProvenance: normalizedFxProvenance,
     fxObservedAt: row.fx_observed_at || row.fxObservedAt || null,
     executedAt: row.executed_at || row.executedAt,
     createdAt: row.created_at || row.createdAt
@@ -207,7 +209,7 @@ export async function createPortfolioTransaction({
     rpcArgs.p_fx_rate_to_vnd = fxRateToVnd;
   }
   if (fxProvenance !== undefined && fxProvenance !== null) {
-    rpcArgs.p_fx_provenance = fxProvenance;
+    rpcArgs.p_fx_provenance = typeof fxProvenance === 'string' ? fxProvenance.trim() : fxProvenance;
   }
   if (fxObservedAt !== undefined && fxObservedAt !== null) {
     rpcArgs.p_fx_observed_at = fxObservedAt;

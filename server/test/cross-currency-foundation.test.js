@@ -1,17 +1,13 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import http from 'node:http';
-import { after, before, describe, test } from 'node:test';
+import { describe, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { createApp } from '../index.js';
 import {
   createPortfolioTransaction,
-  getPortfolioTransactions,
   normalizeTransaction,
   SETTLEMENT_MODES,
-  TRANSACTION_METHODOLOGY,
-  TRANSACTION_TYPES
+  TRANSACTION_METHODOLOGY
 } from '../src/transactions.js';
 import {
   createOpeningPosition,
@@ -19,22 +15,11 @@ import {
 } from '../src/positions.js';
 
 const SINGLETON_PROFILE_ID = '11111111-1111-4111-8111-111111111111';
-const OWNER_ACCESS_TOKEN = 'test-owner-token-with-high-entropy-placeholder';
 
 const FPT_ASSET_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const BTC_ASSET_ID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 const USDT_ASSET_ID = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
 const XAU_ASSET_ID = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
-
-function ownerFetch(url, options = {}) {
-  return fetch(url, {
-    ...options,
-    headers: {
-      ...(options.headers || {}),
-      Authorization: `Bearer ${OWNER_ACCESS_TOKEN}`
-    }
-  });
-}
 
 function cloneRows(rows) {
   return rows.map((row) => ({ ...row }));
@@ -98,7 +83,7 @@ function createFakeCrossCurrencyDatabase({
         p_execution_unit_price: executionUnitPrice,
         p_price_currency: priceCurrency = 'VND',
         p_settlement_mode: settlementMode = 'INTERNAL_VND_CASH',
-        p_settlement_currency: settlementCurrency = 'VND',
+        p_settlement_currency: settlementCurrency,
         p_fx_rate_to_vnd: fxRateToVnd,
         p_fx_provenance: fxProvenance,
         p_fx_observed_at: fxObservedAt
@@ -121,14 +106,23 @@ function createFakeCrossCurrencyDatabase({
 
       const normalizedPriceCurrency = (priceCurrency || 'VND').toUpperCase();
       const normalizedSettlementMode = (settlementMode || 'INTERNAL_VND_CASH').toUpperCase();
-      const normalizedSettlementCurrency = (settlementCurrency || 'VND').toUpperCase();
 
       if (!['INTERNAL_VND_CASH', 'EXTERNAL_SETTLEMENT'].includes(normalizedSettlementMode)) {
         return rpcError('PT004', 'settlement_mode must be INTERNAL_VND_CASH or EXTERNAL_SETTLEMENT');
       }
 
-      if (normalizedSettlementMode === 'INTERNAL_VND_CASH' && normalizedSettlementCurrency !== 'VND') {
-        return rpcError('PT004', 'INTERNAL_VND_CASH settlement requires settlement_currency VND');
+      let normalizedSettlementCurrency = null;
+      if (normalizedSettlementMode === 'INTERNAL_VND_CASH') {
+        if (settlementCurrency && settlementCurrency.trim() && settlementCurrency.trim().toUpperCase() !== 'VND') {
+          return rpcError('PT004', 'INTERNAL_VND_CASH settlement requires settlement_currency VND');
+        }
+        normalizedSettlementCurrency = 'VND';
+      } else {
+        if (settlementCurrency && settlementCurrency.trim()) {
+          normalizedSettlementCurrency = settlementCurrency.trim().toUpperCase();
+        } else {
+          normalizedSettlementCurrency = null; // Omitted external settlement currency must be NULL
+        }
       }
 
       // Currency & FX Validation
@@ -395,7 +389,8 @@ describe('V1.1 Improvement 07C — Cross-Currency Accounting Foundation', () => 
     assert.equal(TRANSACTION_METHODOLOGY.settlementModes.includes('EXTERNAL_SETTLEMENT'), true);
   });
 
-  test('normalizeTransaction accurately extracts execution metadata and defaults to VND/INTERNAL_VND_CASH', () => {
+  test('normalizeTransaction accurately extracts execution metadata and handles settlement currency per mode', () => {
+    // 1. Internal VND transaction with omitted settlement currency => defaults to VND
     const rawVnd = {
       id: 'tx-1',
       profile_id: SINGLETON_PROFILE_ID,
@@ -414,8 +409,32 @@ describe('V1.1 Improvement 07C — Cross-Currency Accounting Foundation', () => 
     assert.equal(normalizedVnd.executionUnitPrice, null);
     assert.equal(normalizedVnd.fxRateToVnd, null);
 
-    const rawCrypto = {
+    // 2. External crypto transaction with omitted settlement currency => NULL (never defaults to VND or priceCurrency)
+    const rawExternalOmitted = {
       id: 'tx-2',
+      profile_id: SINGLETON_PROFILE_ID,
+      asset_id: BTC_ASSET_ID,
+      transaction_type: 'BUY',
+      quantity: 0.5,
+      price: 1500000000,
+      realized_pnl: null,
+      execution_unit_price: 60000,
+      price_currency: 'USD',
+      settlement_mode: 'EXTERNAL_SETTLEMENT',
+      settlement_currency: null,
+      fx_rate_to_vnd: 25000,
+      fx_provenance: 'TWELVE_DATA_USD_VND',
+      executed_at: '2026-09-01T10:00:00.000Z',
+      created_at: '2026-09-01T10:00:00.000Z'
+    };
+    const normalizedExternalOmitted = normalizeTransaction(rawExternalOmitted);
+    assert.equal(normalizedExternalOmitted.settlementMode, 'EXTERNAL_SETTLEMENT');
+    assert.equal(normalizedExternalOmitted.settlementCurrency, null);
+    assert.equal(normalizedExternalOmitted.priceCurrency, 'USD');
+
+    // 3. External crypto transaction with explicit settlement currency => preserved exactly
+    const rawExternalExplicit = {
+      id: 'tx-3',
       profile_id: SINGLETON_PROFILE_ID,
       asset_id: BTC_ASSET_ID,
       transaction_type: 'BUY',
@@ -428,20 +447,35 @@ describe('V1.1 Improvement 07C — Cross-Currency Accounting Foundation', () => 
       settlement_currency: 'USD',
       fx_rate_to_vnd: 25000,
       fx_provenance: 'TWELVE_DATA_USD_VND',
-      fx_observed_at: '2026-09-01T10:00:00.000Z',
       executed_at: '2026-09-01T10:00:00.000Z',
       created_at: '2026-09-01T10:00:00.000Z'
     };
-    const normalizedCrypto = normalizeTransaction(rawCrypto);
-    assert.equal(normalizedCrypto.priceCurrency, 'USD');
-    assert.equal(normalizedCrypto.settlementMode, 'EXTERNAL_SETTLEMENT');
-    assert.equal(normalizedCrypto.settlementCurrency, 'USD');
-    assert.equal(normalizedCrypto.executionUnitPrice, 60000);
-    assert.equal(normalizedCrypto.fxRateToVnd, 25000);
-    assert.equal(normalizedCrypto.fxProvenance, 'TWELVE_DATA_USD_VND');
+    const normalizedExternalExplicit = normalizeTransaction(rawExternalExplicit);
+    assert.equal(normalizedExternalExplicit.settlementMode, 'EXTERNAL_SETTLEMENT');
+    assert.equal(normalizedExternalExplicit.settlementCurrency, 'USD');
+    assert.equal(normalizedExternalExplicit.priceCurrency, 'USD');
   });
 
-  test('EXTERNAL BTC BUY: VND basis supplied, holdings increase, cash ledger and profile cash unchanged', async () => {
+  test('INTERNAL_VND_CASH: rejects non-VND settlement currency', async () => {
+    const fake = createFakeCrossCurrencyDatabase();
+    await assert.rejects(
+      createPortfolioTransaction({
+        assetId: FPT_ASSET_ID,
+        transactionType: 'BUY',
+        quantity: 10,
+        price: 135000,
+        settlementMode: 'INTERNAL_VND_CASH',
+        settlementCurrency: 'USD'
+      }, fake),
+      (err) => {
+        assert.equal(err.code, 'PT004');
+        assert.match(err.message, /INTERNAL_VND_CASH settlement requires settlement_currency VND/);
+        return true;
+      }
+    );
+  });
+
+  test('EXTERNAL BTC BUY: omitted settlement currency persists NULL, holdings increase, cash ledger and profile cash unchanged', async () => {
     const fake = createFakeCrossCurrencyDatabase({ cashAvailable: 50000000 });
     const result = await createPortfolioTransaction({
       assetId: BTC_ASSET_ID,
@@ -451,12 +485,12 @@ describe('V1.1 Improvement 07C — Cross-Currency Accounting Foundation', () => 
       executionUnitPrice: 65000,
       priceCurrency: 'USD',
       settlementMode: 'EXTERNAL_SETTLEMENT',
-      settlementCurrency: 'USD',
       fxRateToVnd: 25000,
       fxProvenance: 'TWELVE_DATA_USD_VND'
     }, fake);
 
     assert.equal(result.transaction.settlementMode, 'EXTERNAL_SETTLEMENT');
+    assert.equal(result.transaction.settlementCurrency, null); // omitted external settlement currency is NULL
     assert.equal(result.transaction.priceCurrency, 'USD');
     assert.equal(result.transaction.price, 1625000000);
     assert.equal(result.transaction.executionUnitPrice, 65000);
@@ -488,7 +522,7 @@ describe('V1.1 Improvement 07C — Cross-Currency Accounting Foundation', () => 
       cashAvailable: 20000000
     });
 
-    // Sell 0.4 BTC at 70k USD * 25.5k FX = 1,785,000,000 VND / BTC
+    // Sell 0.4 BTC at 70k USD * 25.5k FX = 1,785,000,000 VND / BTC with explicit settlementCurrency = 'USD'
     const result = await createPortfolioTransaction({
       assetId: BTC_ASSET_ID,
       transactionType: 'SELL',
@@ -502,6 +536,7 @@ describe('V1.1 Improvement 07C — Cross-Currency Accounting Foundation', () => 
       fxProvenance: 'TWELVE_DATA_USD_VND'
     }, fake);
 
+    assert.equal(result.transaction.settlementCurrency, 'USD');
     assert.equal(result.holding.quantity, 0.6);
     assert.equal(result.holding.averageCost, 1500000000); // average cost preserved on SELL
 
@@ -560,7 +595,7 @@ describe('V1.1 Improvement 07C — Cross-Currency Accounting Foundation', () => 
         assetId: USDT_ASSET_ID,
         transactionType: 'BUY',
         quantity: 1000,
-        price: 25450000,
+        price: 25450,
         executionUnitPrice: 1,
         priceCurrency: 'USDT',
         settlementMode: 'EXTERNAL_SETTLEMENT',
@@ -598,10 +633,12 @@ describe('V1.1 Improvement 07C — Cross-Currency Accounting Foundation', () => 
       executionUnitPrice: 1,
       priceCurrency: 'USDT',
       settlementMode: 'EXTERNAL_SETTLEMENT',
+      settlementCurrency: 'USDT',
       fxRateToVnd: 25500,
       fxProvenance: 'BINANCE_P2P_USDT_VND'
     }, fake);
     assert.equal(acceptedExplicit.transaction.fxProvenance, 'BINANCE_P2P_USDT_VND');
+    assert.equal(acceptedExplicit.transaction.settlementCurrency, 'USDT');
   });
 
   test('Gold XAU/USD: cross-currency accounting contract handles asset identity safely without domestic bullion confusion', async () => {
