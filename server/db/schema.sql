@@ -6558,4 +6558,7 @@ ALTER TABLE public.investor_profile
 COMMENT ON COLUMN public.investor_profile.user_id IS
     'Authoritative 1:1 link to Supabase auth.users(id). Mandatory for all profiles.';
 
+ALTER TABLE public.price_alerts
+    ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
+
 COMMIT;
