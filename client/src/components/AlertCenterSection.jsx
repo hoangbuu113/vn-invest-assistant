@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { TiltCard } from './MotionHelpers.jsx';
 import { formatNativeAmount } from '../utils/formatting.js';
 import { apiFetch } from '../utils/api.js';
+import DeviceAlertNotificationControl from './DeviceAlertNotificationControl.jsx';
 
 export default function AlertCenterSection({
   onSelectAsset,
@@ -168,24 +169,27 @@ export default function AlertCenterSection({
         </div>
       </div>
 
-      {/* Honest V1 Limitation Banner */}
+      {/* Device Notification Control (Feature 12D) */}
+      <DeviceAlertNotificationControl />
+
+      {/* Cadence & In-App Fallback Note */}
       <div
         style={{
-          padding: '0.75rem 1rem',
+          padding: '0.65rem 0.95rem',
           backgroundColor: 'rgba(30, 41, 59, 0.03)',
-          borderRadius: '12px',
+          borderRadius: '10px',
           border: '1px solid var(--color-slate-200, #e2e8f0)',
           marginBottom: '1.5rem',
           display: 'flex',
           alignItems: 'flex-start',
-          gap: '0.65rem',
-          fontSize: '0.8rem',
+          gap: '0.6rem',
+          fontSize: '0.78rem',
           color: 'var(--color-slate-600)'
         }}
       >
-        <span style={{ fontSize: '1rem', lineHeight: 1 }}>ⓘ</span>
+        <span style={{ fontSize: '0.95rem', lineHeight: 1 }}>ⓘ</span>
         <div>
-          Cảnh báo chỉ kích hoạt một lần và được kiểm tra tự động khoảng 15 phút một lần khi nguồn giá sẵn sàng. Bạn vẫn có thể kiểm tra thủ công; phiên bản này không gửi push, email hoặc SMS.
+          Cảnh báo chỉ kích hoạt một lần và được kiểm tra tự động khoảng 15 phút một lần khi nguồn giá sẵn sàng. Cảnh báo trong ứng dụng luôn hiển thị tại đây; hệ thống không gửi push, email hoặc SMS trừ khi bạn bật thông báo thiết bị phía trên.
         </div>
       </div>
 

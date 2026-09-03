@@ -631,7 +631,7 @@ export function PortfolioPerformanceSection({
             )}
 
             {benchmarkLoading && !benchmark && (
-              <div className="performance-benchmark-loading skeleton-shimmer" aria-label="Đang tải chỉ số tham chiếu" />
+              <div className="performance-benchmark-loading skeleton-shimmer" aria-hidden="true" />
             )}
 
             {benchmarkError && (

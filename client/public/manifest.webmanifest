@@ -1,0 +1,7 @@
+{
+  "name": "VN Invest Assistant",
+  "short_name": "VN Invest",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone"
+}

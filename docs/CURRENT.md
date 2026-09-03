@@ -18,7 +18,7 @@
   - Market Breadth: Retained as `status: 'unavailable'`, `reason: 'SOURCE_NOT_PROVISIONED'`
   - Feature 19 VND-basis dual-settlement cross-currency accounting foundation active in production DB
   - Feature 25 performance integration honors external settlements as external capital flows
-- **Feature 12B/12C Web Push Alert Delivery Backend (LOCAL ONLY — NOT PRODUCTION-ACTIVE)**:
+- **Feature 12B/12C/12D Web Push Alert Delivery Backend & Client (LOCAL ONLY — NOT PRODUCTION-ACTIVE)**:
   - Outbound notification architecture: First-party Web Push delivery engine (`web-push`, RFC 8291 / RFC 8292)
   - Protected subscription API: `GET /api/push/config` (exposes public key only), `POST /api/push/subscriptions` (endpoint-unique device registration), `DELETE /api/push/subscriptions` (endpoint-targeted removal with ON DELETE CASCADE)
   - Multi-device delivery model: `BOUNDED_RETRY_BEST_EFFORT` with per-subscription delivery jobs in `public.alert_notification_deliveries` and device subscriptions in `public.push_subscriptions`
@@ -28,16 +28,20 @@
   - Web Push dispatcher: Bounded sequential dispatcher (`dispatchPendingWebPushDeliveries`, batch size 5, 120s lease, explicit 10s request timeout per send leaving 70s lease margin) claiming and dispatching factual alert notifications with canonical deep links (`/#assets/{symbol}`, `/#assets/XAU%2FUSD`)
   - Error classification & cleanup: HTTP 404/410 permanently expired subscriptions deleted immediately (cascading all delivery history); HTTP 429 rate limit parses `Retry-After` header safely into future `next_attempt_at`; HTTP 5xx and network errors retry up to 3 attempts with 15-minute backoff; terminal failures safely marked `failed_permanent`
   - Scheduler integration: Integrated directly into `POST /api/internal/alerts/evaluate` without extra crons or mutating alert states; failure-isolated
+  - Service Worker: `client/public/sw.js` (dedicated strictly to push event notification display and same-origin window focus/navigation; preserves canonical deep links including `/#assets/BTC` and `/#assets/XAU%2FUSD`; no caching/offline/financial logic)
+  - Web App Manifest: `client/public/manifest.webmanifest` (standalone display, root scope/start_url, linked in `client/index.html` with apple-mobile-web-app metadata for iOS Home Screen compatibility)
+  - Client Push Engine: `client/src/utils/webPush.js` (native capability detection, VAPID key conversion, PushManager subscription enable/disable flow with backend synchronization and cleanup rollback on failure)
+  - Explicit Vietnamese UX: `DeviceAlertNotificationControl` embedded in Alert Center (`client/src/components/AlertCenterSection.jsx`); read-only inspection on mount with zero permission prompt on load; non-guaranteed wording on initial state (`"Thông báo đang được bật trên trình duyệt này."`) and session-verified state (`"Thông báo đã bật trên thiết bị này."`); explicit "Bật thông báo" / "Tắt thông báo" controls; iOS Home Screen guidance; in-app alert fallback remains truthful and unaffected
   - Hardened limits: max 3 attempts per device delivery; rare duplicate push delivery accepted/documented; zero guaranteed delivery claims
-  - Status: Backend API, VAPID engine, and outbox foundation complete locally; migration is NOT applied to production; VAPID secrets NOT configured in production; Service Worker and frontend permission UX NOT implemented yet; push notifications NOT production-active
+  - Status: Backend API, VAPID engine, outbox foundation, Service Worker, Web App Manifest, and frontend controls complete locally; migration is NOT applied to production; VAPID secrets NOT configured in production; zero real push notifications sent
 - **Canonical Universe & Remote Baseline**:
   - Canonical Universe: 49 assets (40 crypto, 7 VN stocks/ETFs, 1 gold spot, 1 FX context) across 5 verified providers (89 provider mappings)
   - Authoritative Cash Ledger: 1 legitimate DEPOSIT entry (`20,000,000 VND`)
   - Singleton Investor Profile: 1 record (`cash_available = 20,000,000 VND`, moderate risk tolerance, medium horizon)
 - **Automated Test Suite**:
-  - Full Backend Regression: 775/775 PASS (123 test suites)
+  - Full Backend & Client Contract Regression: 801/801 PASS (131 test suites)
   - Dependencies: `npm audit` 0 vulnerabilities on both server and client
-  - Client Build: PASS (~190ms, 0 errors, 0 warnings)
+  - Client Build: PASS (~184ms, 0 errors, 0 warnings; `dist/sw.js` and `dist/manifest.webmanifest` verified at root)
   - Git Diff & Formatting: `git diff --check` PASS
 - **Production Endpoints**:
   - Frontend: `https://vn-invest-assistant.vn-invest-assistant.workers.dev` (Cloudflare Workers Static Assets + API Proxy + 15m Cron)
