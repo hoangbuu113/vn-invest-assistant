@@ -1018,6 +1018,7 @@ export function calculatePortfolioPerformance({
  * Service function to retrieve and compute portfolio performance from database & market adapters.
  */
 export async function getPortfolioPerformance({
+  profileId,
   range = '1M',
   now = new Date(),
   client = privateSupabase,
@@ -1028,6 +1029,8 @@ export async function getPortfolioPerformance({
   getAssetsFn = getAssets,
   getMarketHistoryFn = getMarketHistory
 } = {}) {
+  const profileOptions = profileId ? { profileId } : {};
+
   // 1. Fetch immutable data concurrently
   const [
     cashActivation,
@@ -1036,10 +1039,10 @@ export async function getPortfolioPerformance({
     transactions,
     assets
   ] = await Promise.all([
-    getCashActivationFn(client),
-    getCashLedgerFn(client),
-    getPositionOpeningBaselinesFn(client),
-    getPortfolioTransactionsFn({}, client),
+    getCashActivationFn(client, profileOptions),
+    getCashLedgerFn(client, profileOptions),
+    getPositionOpeningBaselinesFn(client, profileOptions),
+    getPortfolioTransactionsFn(profileOptions, client, profileOptions),
     getAssetsFn(client)
   ]);
 

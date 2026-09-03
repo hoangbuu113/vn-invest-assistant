@@ -4,8 +4,10 @@ import dotenv from 'dotenv';
 import {
   clearOwnerSessionCookie,
   createAlertSchedulerAuthMiddleware,
+  createAuthMiddleware,
   createOwnerAuthMiddleware,
   createOwnerSessionManager,
+  ownerTokensMatch,
   OWNER_SESSION_TTL_MS,
   PRIVATE_API_PREFIXES,
   serializeOwnerSessionCookie
@@ -15,6 +17,12 @@ import {
   getAssets,
   getAssetBySymbol,
   getInvestorProfile,
+  getProfileById,
+  getProfileByUserId,
+  getLegacyOwnerProfile,
+  createProfileForUser,
+  claimLegacyProfile,
+  hasUnclaimedLegacyProfile,
   updateInvestorProfile,
   getHoldings,
   getWatchlist,
@@ -24,7 +32,8 @@ import {
   createAlert,
   deleteAlert,
   reactivateAlert,
-  evaluateAndPersistAlerts
+  evaluateAndPersistAlerts,
+  privateSupabase
 } from './src/supabase.js';
 import { getMarketSnapshot, getMarketHistory, getMarketRealtime } from './src/market.js';
 import { getNewsFeed, getPersonalizedNewsFeed } from './src/news.js';
@@ -137,6 +146,12 @@ function validateFxProvenance(value, errors) {
 export function createApp(services = {}) {
   const {
     getInvestorProfileFn = getInvestorProfile,
+    getProfileByIdFn = getProfileById,
+    getProfileByUserIdFn = getProfileByUserId,
+    getLegacyOwnerProfileFn = getLegacyOwnerProfile,
+    createProfileForUserFn = createProfileForUser,
+    claimLegacyProfileFn = claimLegacyProfile,
+    hasUnclaimedLegacyProfileFn = hasUnclaimedLegacyProfile,
     updateInvestorProfileFn = updateInvestorProfile,
     getHoldingsFn = getHoldings,
     getAssetsFn = getAssets,
@@ -181,6 +196,7 @@ export function createApp(services = {}) {
     transactionClient,
     cashClient,
     positionClient,
+    supabaseAuthClient = privateSupabase,
     ownerAccessToken = process.env.OWNER_ACCESS_TOKEN,
     ownerSessionSecret = process.env.OWNER_SESSION_SECRET,
     ownerSessionManager: providedOwnerSessionManager,
@@ -200,6 +216,42 @@ export function createApp(services = {}) {
   });
   app.use(cors(createCorsOptions(corsOrigins)));
   app.use(express.json());
+
+  const resolveLegacyProfile = async () => {
+    if (getLegacyOwnerProfileFn !== getLegacyOwnerProfile) return getLegacyOwnerProfileFn();
+    if (getInvestorProfileFn !== getInvestorProfile) return getInvestorProfileFn();
+    return getLegacyOwnerProfile();
+  };
+
+  const resolveProfileById = async (id) => {
+    if (id === 'legacy-owner') {
+      return resolveLegacyProfile();
+    }
+    if (getProfileByIdFn !== getProfileById) return getProfileByIdFn(id);
+    if (getInvestorProfileFn !== getInvestorProfile) return getInvestorProfileFn(id);
+    return getProfileById(id);
+  };
+
+  function requireProfile(req, res) {
+    if (req.user?.isLegacyOwner) {
+      return req.user.profileId || 'legacy-owner';
+    }
+    const profileId = req.user?.profileId;
+    if (!profileId) {
+      res.status(403).json({
+        status: 'error',
+        code: 'PROFILE_REQUIRED',
+        message: 'Investor profile is required'
+      });
+      return null;
+    }
+    return profileId;
+  }
+
+  function getProfileOptions(req, profileId) {
+    if (req.user?.isLegacyOwner) return {};
+    return profileId ? { profileId } : {};
+  }
 
   app.post('/api/owner/session', (req, res) => {
     res.set('Cache-Control', 'no-store');
@@ -249,7 +301,13 @@ export function createApp(services = {}) {
     });
   });
 
-  app.use(createOwnerAuthMiddleware({ ownerAccessToken, ownerSessionManager }));
+  app.use(createAuthMiddleware({
+    ownerAccessToken,
+    ownerSessionManager,
+    supabaseAuthClient,
+    getProfileByUserIdFn,
+    getLegacyOwnerProfileFn: resolveLegacyProfile
+  }));
   const requireAlertScheduler = createAlertSchedulerAuthMiddleware({ alertSchedulerToken });
 
   // Basic system health endpoint with provider status
@@ -306,10 +364,92 @@ export function createApp(services = {}) {
     });
   });
 
+  // Feature 13C: Legacy profile claim and status discovery endpoints
+  app.post('/api/auth/claim-legacy-profile', async (req, res) => {
+    try {
+      if (req.authMode !== 'supabase' || !req.user?.id) {
+        return res.status(401).json({
+          status: 'error',
+          code: 'AUTH_REQUIRED',
+          message: 'Supabase authentication is required'
+        });
+      }
+
+      if (req.user.profileId) {
+        return res.status(409).json({
+          status: 'error',
+          code: 'USER_ALREADY_HAS_PROFILE',
+          message: 'User already has an assigned profile'
+        });
+      }
+
+      const proof = req.body?.legacyOwnerToken || req.body?.ownerAccessToken || req.body?.ownerCredential || req.body?.token;
+      if (typeof proof !== 'string' || !proof || !ownerTokensMatch(proof, ownerAccessToken)) {
+        return res.status(403).json({
+          status: 'error',
+          code: 'OWNER_AUTH_INVALID',
+          message: 'Invalid legacy owner credentials'
+        });
+      }
+
+      const claimed = await claimLegacyProfileFn(req.user.id);
+      return res.json({
+        status: 'ok',
+        data: {
+          claimed: true,
+          profile: {
+            id: claimed.id,
+            cashAvailable: claimed.cash_available ?? claimed.cashAvailable,
+            riskTolerance: claimed.risk_tolerance ?? claimed.riskTolerance,
+            investmentHorizon: claimed.investment_horizon ?? claimed.investmentHorizon
+          }
+        }
+      });
+    } catch (error) {
+      const isAlreadyClaimed = error.code === 'IP006' || error.code === 'LEGACY_PROFILE_UNAVAILABLE';
+      const isAlreadyHasProfile = error.code === 'IP005' || error.code === 'USER_ALREADY_HAS_PROFILE';
+      const statusCode = error.statusCode || (isAlreadyHasProfile ? 409 : (isAlreadyClaimed ? 410 : 500));
+      const code = isAlreadyHasProfile
+        ? 'USER_ALREADY_HAS_PROFILE'
+        : (isAlreadyClaimed ? 'LEGACY_PROFILE_UNAVAILABLE' : (error.code || 'LEGACY_CLAIM_FAILED'));
+      return res.status(statusCode).json({
+        status: 'error',
+        code,
+        message: error.message || 'Failed to claim legacy profile'
+      });
+    }
+  });
+
+  app.get('/api/auth/legacy-claim-status', async (req, res) => {
+    try {
+      const userHasProfile = Boolean(req.user?.profileId);
+      let legacyClaimAvailable = false;
+
+      if (!userHasProfile) {
+        legacyClaimAvailable = await hasUnclaimedLegacyProfileFn();
+      }
+
+      return res.json({
+        status: 'ok',
+        data: {
+          legacyClaimAvailable
+        }
+      });
+    } catch (error) {
+      return res.status(500).json({
+        status: 'error',
+        message: 'Failed to check legacy claim status'
+      });
+    }
+  });
+
   // Investor profile endpoints
   app.get('/api/profile', async (req, res) => {
     try {
-      const profile = await getInvestorProfileFn();
+      const profileId = requireProfile(req, res);
+      if (!profileId) return;
+
+      const profile = await resolveProfileById(profileId);
       return res.json({
         status: 'ok',
         data: profile
@@ -322,8 +462,42 @@ export function createApp(services = {}) {
     }
   });
 
+  app.post('/api/profile', async (req, res) => {
+    try {
+      if (!req.user?.id || req.user.id === 'legacy-owner') {
+        return res.status(403).json({
+          status: 'error',
+          code: 'PROFILE_CREATION_FORBIDDEN',
+          message: 'Profile creation requires authenticated user account'
+        });
+      }
+
+      if (req.user.profileId) {
+        const existing = await resolveProfileById(req.user.profileId);
+        return res.json({
+          status: 'ok',
+          data: existing
+        });
+      }
+
+      const created = await createProfileForUserFn({ userId: req.user.id });
+      return res.status(201).json({
+        status: 'ok',
+        data: created
+      });
+    } catch (error) {
+      return res.status(500).json({
+        status: 'error',
+        message: 'Failed to create investor profile'
+      });
+    }
+  });
+
   app.put('/api/profile', async (req, res) => {
     try {
+      const profileId = requireProfile(req, res);
+      if (!profileId) return;
+
       const { cash_available, risk_tolerance, investment_horizon } = req.body || {};
 
       const errors = [];
@@ -359,8 +533,8 @@ export function createApp(services = {}) {
         });
       }
 
-      const currentProfile = await getInvestorProfileFn();
-      if (hasCashAvailable && cash_available !== currentProfile.cash_available) {
+      const currentProfile = await resolveProfileById(profileId);
+      if (hasCashAvailable && cash_available !== currentProfile?.cash_available) {
         return res.status(409).json({
           status: 'error',
           message: 'cash_available is ledger-managed; use the cash deposit or withdrawal endpoints'
@@ -368,6 +542,7 @@ export function createApp(services = {}) {
       }
 
       const updated = await updateInvestorProfileFn({
+        profileId,
         risk_tolerance: risk_tolerance.trim().toLowerCase(),
         investment_horizon: investment_horizon.trim().toLowerCase()
       });
@@ -387,7 +562,10 @@ export function createApp(services = {}) {
   // Holdings endpoints
   app.get('/api/holdings', async (req, res) => {
     try {
-      const holdings = await getHoldingsFn();
+      const profileId = requireProfile(req, res);
+      if (!profileId) return;
+
+      const holdings = await getHoldingsFn(undefined, getProfileOptions(req, profileId));
       return res.json({
         status: 'ok',
         count: holdings.length,
@@ -404,6 +582,9 @@ export function createApp(services = {}) {
   // Explicit cash-neutral baseline for assets already owned before ledger tracking.
   app.post('/api/positions/opening', async (req, res) => {
     try {
+      const profileId = requireProfile(req, res);
+      if (!profileId) return;
+
       const {
         assetId,
         quantity,
@@ -471,7 +652,7 @@ export function createApp(services = {}) {
       if (fxProvenance !== undefined) openingPayload.fxProvenance = fxProvenance;
       if (normalizedFxObservedAt !== undefined) openingPayload.fxObservedAt = normalizedFxObservedAt;
 
-      const result = await createOpeningPositionFn(openingPayload, positionClient);
+      const result = await createOpeningPositionFn(openingPayload, positionClient, getProfileOptions(req, profileId));
 
       return res.status(201).json({
         status: 'ok',
@@ -489,6 +670,9 @@ export function createApp(services = {}) {
   app.patch('/api/positions/opening/:id', async (req, res) => {
     const { id } = req.params;
     try {
+      const profileId = requireProfile(req, res);
+      if (!profileId) return;
+
       const { quantity, averageCost } = req.body || {};
       const errors = [];
 
@@ -516,7 +700,7 @@ export function createApp(services = {}) {
         id: id.trim(),
         quantity,
         averageCost
-      }, positionClient);
+      }, positionClient, getProfileOptions(req, profileId));
 
       return res.json({
         status: 'ok',
@@ -534,6 +718,9 @@ export function createApp(services = {}) {
   app.post('/api/positions/opening/:id/cancel', async (req, res) => {
     const { id } = req.params;
     try {
+      const profileId = requireProfile(req, res);
+      if (!profileId) return;
+
       if (!id || typeof id !== 'string' || id.trim() === '') {
         return res.status(400).json({
           status: 'error',
@@ -541,7 +728,7 @@ export function createApp(services = {}) {
         });
       }
 
-      const result = await cancelOpeningPositionFn({ id: id.trim() }, positionClient);
+      const result = await cancelOpeningPositionFn({ id: id.trim() }, positionClient, getProfileOptions(req, profileId));
       return res.json({
         status: 'ok',
         message: 'Opening position cancelled',
@@ -560,6 +747,9 @@ export function createApp(services = {}) {
   // the database RPC so the ledger row and position update share one transaction.
   app.get('/api/transactions', async (req, res) => {
     try {
+      const profileId = requireProfile(req, res);
+      if (!profileId) return;
+
       const { symbol } = req.query;
       if (symbol !== undefined && (typeof symbol !== 'string' || symbol.trim() === '')) {
         return res.status(400).json({
@@ -568,9 +758,11 @@ export function createApp(services = {}) {
         });
       }
 
+      const profileOptions = getProfileOptions(req, profileId);
       const transactions = await getPortfolioTransactionsFn({
+        profileId: profileOptions.profileId,
         symbol: typeof symbol === 'string' ? symbol.trim() : undefined
-      }, transactionClient);
+      }, transactionClient, profileOptions);
 
       return res.json({
         status: 'ok',
@@ -589,6 +781,9 @@ export function createApp(services = {}) {
 
   app.post('/api/transactions', async (req, res) => {
     try {
+      const profileId = requireProfile(req, res);
+      if (!profileId) return;
+
       const body = req.body || {};
       const {
         symbol,
@@ -702,7 +897,7 @@ export function createApp(services = {}) {
       if (fxProvenance !== undefined) transactionPayload.fxProvenance = fxProvenance;
       if (normalizedFxObservedAt !== undefined) transactionPayload.fxObservedAt = normalizedFxObservedAt;
 
-      const result = await createPortfolioTransactionFn(transactionPayload, transactionClient);
+      const result = await createPortfolioTransactionFn(transactionPayload, transactionClient, getProfileOptions(req, profileId));
 
       return res.status(201).json({
         status: 'ok',
@@ -722,7 +917,10 @@ export function createApp(services = {}) {
   // PostgreSQL RPCs that update the compatibility cash cache atomically.
   app.get('/api/cash/overview', async (req, res) => {
     try {
-      const overview = await getCashOverviewFn(cashClient);
+      const profileId = requireProfile(req, res);
+      if (!profileId) return;
+
+      const overview = await getCashOverviewFn(cashClient, getProfileOptions(req, profileId));
       return res.json({
         status: 'ok',
         data: overview,
@@ -738,7 +936,10 @@ export function createApp(services = {}) {
 
   app.get('/api/cash/ledger', async (req, res) => {
     try {
-      const entries = await getCashLedgerFn(cashClient);
+      const profileId = requireProfile(req, res);
+      if (!profileId) return;
+
+      const entries = await getCashLedgerFn(cashClient, getProfileOptions(req, profileId));
       return res.json({
         status: 'ok',
         count: entries.length,
@@ -754,6 +955,9 @@ export function createApp(services = {}) {
   });
 
   async function handleCashMovement(req, res, entryType) {
+    const profileId = requireProfile(req, res);
+    if (!profileId) return;
+
     const { amount } = req.body || {};
     if (!isValidFinancialNumber(amount, { allowZero: false })) {
       return res.status(400).json({
@@ -763,7 +967,7 @@ export function createApp(services = {}) {
     }
 
     try {
-      const result = await createCashMovementFn({ entryType, amount }, cashClient);
+      const result = await createCashMovementFn({ entryType, amount }, cashClient, getProfileOptions(req, profileId));
       return res.status(201).json({
         status: 'ok',
         data: result,
@@ -919,10 +1123,13 @@ export function createApp(services = {}) {
   // Personalized news feed endpoint (Feature 13 & Feature 23 — deterministic relevance to user holdings and watchlist)
   app.get('/api/news/personalized', async (req, res) => {
     try {
+      const profileId = requireProfile(req, res);
+      if (!profileId) return;
+
       const result = await getPersonalizedNewsFeedFn({
         getNewsFeedFn,
-        getHoldingsFn,
-        getWatchlistFn
+        getHoldingsFn: () => getHoldingsFn(undefined, { profileId }),
+        getWatchlistFn: () => getWatchlistFn(undefined, { profileId })
       });
       if (result.news) {
         return res.json({
@@ -974,14 +1181,19 @@ export function createApp(services = {}) {
   // Deterministic opportunity screen (Feature 28 — descriptive within-class ranking only)
   app.get('/api/opportunities', async (req, res) => {
     const now = new Date();
+    const profileId = requireProfile(req, res);
+    if (!profileId) return;
+
     try {
       const result = await getOpportunitiesFn({
         now,
         getAssetsFn,
-        getInvestorProfileFn,
-        getHoldingsFn,
-        getWatchlistFn,
-        getPortfolioCompositionFn: () => getPortfolioCompositionFn({ getPortfolioOverviewFn }),
+        getInvestorProfileFn: () => resolveProfileById(profileId),
+        getHoldingsFn: () => getHoldingsFn(undefined, { profileId }),
+        getWatchlistFn: () => getWatchlistFn(undefined, { profileId }),
+        getPortfolioCompositionFn: () => getPortfolioCompositionFn({
+          getPortfolioOverviewFn: () => getPortfolioOverviewFn({ profileId })
+        }),
         getAssetAnalysisFn: (symbol, options) => getAssetAnalysisFn(symbol, {
           ...options,
           getMarketHistoryFn
@@ -1006,19 +1218,24 @@ export function createApp(services = {}) {
   // Guarded AI investment brief (Feature 29 — deterministic facts remain authoritative)
   app.post('/api/investment-brief', async (req, res) => {
     const now = new Date();
+    const profileId = requireProfile(req, res);
+    if (!profileId) return;
+
+    const profileOptions = getProfileOptions(req, profileId);
+
     try {
       const result = await getInvestmentBriefFn({
         now,
-        getPortfolioOverviewFn,
-        getPortfolioPerformanceFn,
+        getPortfolioOverviewFn: (opts) => getPortfolioOverviewFn({ ...opts, ...profileOptions }),
+        getPortfolioPerformanceFn: (opts) => getPortfolioPerformanceFn({ ...opts, ...profileOptions }),
         getVietnamRegimeFn,
         getOpportunitiesFn,
         getPersonalizedNewsFeedFn,
         getNewsFeedFn,
         getAssetsFn,
-        getInvestorProfileFn,
-        getHoldingsFn,
-        getWatchlistFn,
+        getInvestorProfileFn: () => resolveProfileById(profileId),
+        getHoldingsFn: (client, opts) => getHoldingsFn(client, { ...opts, ...profileOptions }),
+        getWatchlistFn: (client, opts) => getWatchlistFn(client, { ...opts, ...profileOptions }),
         getAssetAnalysisFn,
         getMarketHistoryFn
       });
@@ -1040,7 +1257,10 @@ export function createApp(services = {}) {
   // Portfolio overview endpoint (combines profile, holdings, and delayed market prices)
   app.get('/api/portfolio/overview', async (req, res) => {
     try {
-      const overview = await getPortfolioOverviewFn();
+      const profileId = requireProfile(req, res);
+      if (!profileId) return;
+
+      const overview = await getPortfolioOverviewFn(getProfileOptions(req, profileId));
       return res.json({
         status: 'ok',
         data: overview
@@ -1056,7 +1276,12 @@ export function createApp(services = {}) {
   // Portfolio composition endpoint (derived exclusively from portfolio overview valuation)
   app.get('/api/portfolio/composition', async (req, res) => {
     try {
-      const composition = await getPortfolioCompositionFn({ getPortfolioOverviewFn });
+      const profileId = requireProfile(req, res);
+      if (!profileId) return;
+
+      const composition = await getPortfolioCompositionFn({
+        getPortfolioOverviewFn: () => getPortfolioOverviewFn(getProfileOptions(req, profileId))
+      });
       return res.json({
         status: 'ok',
         data: composition
@@ -1073,7 +1298,10 @@ export function createApp(services = {}) {
   app.get('/api/portfolio/performance', async (req, res) => {
     const { range = '1M' } = req.query;
     try {
-      const performance = await getPortfolioPerformanceFn({ range });
+      const profileId = requireProfile(req, res);
+      if (!profileId) return;
+
+      const performance = await getPortfolioPerformanceFn({ range, ...getProfileOptions(req, profileId) });
       return res.json({
         status: 'ok',
         data: performance
@@ -1093,10 +1321,13 @@ export function createApp(services = {}) {
   app.get('/api/portfolio/performance/benchmark', async (req, res) => {
     const { range = '1M', benchmark } = req.query;
     try {
+      const profileId = requireProfile(req, res);
+      if (!profileId) return;
+
       const result = await getPortfolioBenchmarkFn({
         benchmarkId: benchmark,
         range,
-        getPortfolioPerformanceFn
+        getPortfolioPerformanceFn: (opts) => getPortfolioPerformanceFn({ ...opts, ...getProfileOptions(req, profileId) })
       });
       return res.json({
         status: 'ok',
@@ -1171,7 +1402,10 @@ export function createApp(services = {}) {
   // Watchlist endpoints (Feature 08)
   app.get('/api/watchlist', async (req, res) => {
     try {
-      const items = await getWatchlistFn();
+      const profileId = requireProfile(req, res);
+      if (!profileId) return;
+
+      const items = await getWatchlistFn(undefined, { profileId });
       return res.json({
         status: 'ok',
         count: items.length,
@@ -1187,6 +1421,9 @@ export function createApp(services = {}) {
 
   app.post('/api/watchlist', async (req, res) => {
     try {
+      const profileId = requireProfile(req, res);
+      if (!profileId) return;
+
       const { asset_id, symbol } = req.body || {};
       const errors = [];
 
@@ -1206,6 +1443,7 @@ export function createApp(services = {}) {
       }
 
       const item = await addToWatchlistFn({
+        profileId,
         asset_id: typeof asset_id === 'string' ? asset_id.trim() : undefined,
         symbol: typeof symbol === 'string' ? symbol.trim() : undefined
       });
@@ -1226,6 +1464,9 @@ export function createApp(services = {}) {
   app.delete('/api/watchlist/:assetId', async (req, res) => {
     const { assetId } = req.params;
     try {
+      const profileId = requireProfile(req, res);
+      if (!profileId) return;
+
       if (!assetId || typeof assetId !== 'string' || assetId.trim() === '') {
         return res.status(400).json({
           status: 'error',
@@ -1233,7 +1474,7 @@ export function createApp(services = {}) {
         });
       }
 
-      const result = await removeFromWatchlistFn(assetId.trim());
+      const result = await removeFromWatchlistFn(assetId.trim(), { profileId });
       return res.json({
         status: 'ok',
         message: 'Asset removed from watchlist',
@@ -1251,7 +1492,10 @@ export function createApp(services = {}) {
   // Price Alerts endpoints (Feature 12)
   app.get('/api/alerts', async (req, res) => {
     try {
-      const alerts = await getAlertsFn();
+      const profileId = requireProfile(req, res);
+      if (!profileId) return;
+
+      const alerts = await getAlertsFn(undefined, { profileId });
       return res.json({
         status: 'ok',
         count: alerts.length,
@@ -1267,6 +1511,9 @@ export function createApp(services = {}) {
 
   app.post('/api/alerts', async (req, res) => {
     try {
+      const profileId = requireProfile(req, res);
+      if (!profileId) return;
+
       const { asset_id, symbol, direction, target_price } = req.body || {};
       const errors = [];
 
@@ -1294,6 +1541,7 @@ export function createApp(services = {}) {
       }
 
       const alert = await createAlertFn({
+        profileId,
         asset_id: typeof asset_id === 'string' ? asset_id.trim() : undefined,
         symbol: typeof symbol === 'string' ? symbol.trim() : undefined,
         direction: direction.trim().toLowerCase(),
@@ -1316,6 +1564,9 @@ export function createApp(services = {}) {
   app.delete('/api/alerts/:id', async (req, res) => {
     const { id } = req.params;
     try {
+      const profileId = requireProfile(req, res);
+      if (!profileId) return;
+
       if (!id || typeof id !== 'string' || id.trim() === '') {
         return res.status(400).json({
           status: 'error',
@@ -1323,7 +1574,7 @@ export function createApp(services = {}) {
         });
       }
 
-      const result = await deleteAlertFn(id.trim());
+      const result = await deleteAlertFn(id.trim(), { profileId });
       return res.json({
         status: 'ok',
         message: 'Price alert deleted',
@@ -1414,12 +1665,14 @@ export function createApp(services = {}) {
 
   app.post('/api/push/subscriptions', async (req, res) => {
     try {
+      const profileId = requireProfile(req, res);
+      if (!profileId) return;
+
       const validated = validatePushSubscriptionInput(req.body);
-      const profile = await getInvestorProfileFn();
       const userAgent = req.headers['user-agent'] ? String(req.headers['user-agent']).slice(0, 256) : null;
 
       const sub = await upsertPushSubscriptionFn({
-        profileId: profile.id,
+        profileId,
         endpoint: validated.endpoint,
         p256dh: validated.p256dh,
         auth: validated.auth,
@@ -1449,6 +1702,9 @@ export function createApp(services = {}) {
 
   app.delete('/api/push/subscriptions', async (req, res) => {
     try {
+      const profileId = requireProfile(req, res);
+      if (!profileId) return;
+
       const { endpoint } = req.body || {};
       if (!endpoint || typeof endpoint !== 'string' || endpoint.trim() === '') {
         return res.status(400).json({
@@ -1457,8 +1713,7 @@ export function createApp(services = {}) {
         });
       }
 
-      const profile = await getInvestorProfileFn();
-      const deleted = await deletePushSubscriptionByEndpointFn(endpoint.trim(), profile.id);
+      const deleted = await deletePushSubscriptionByEndpointFn(endpoint.trim(), profileId);
 
       return res.json({
         status: 'ok',
@@ -1477,6 +1732,9 @@ export function createApp(services = {}) {
   app.post('/api/alerts/:id/reactivate', async (req, res) => {
     const { id } = req.params;
     try {
+      const profileId = requireProfile(req, res);
+      if (!profileId) return;
+
       if (!id || typeof id !== 'string' || id.trim() === '') {
         return res.status(400).json({
           status: 'error',
@@ -1484,7 +1742,7 @@ export function createApp(services = {}) {
         });
       }
 
-      const alert = await reactivateAlertFn(id.trim());
+      const alert = await reactivateAlertFn(id.trim(), { profileId });
       return res.json({
         status: 'ok',
         message: 'Price alert reactivated',

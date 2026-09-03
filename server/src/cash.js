@@ -131,8 +131,9 @@ export async function getCashLedger(client = privateSupabase, options = {}) {
   return data.map(normalizeCashLedgerEntry);
 }
 
-export async function createCashMovement({ profileId, entryType, amount }, client = privateSupabase) {
+export async function createCashMovement({ profileId: payloadProfileId, entryType, amount } = {}, client = privateSupabase, options = {}) {
   const db = requireDatabaseClient(client);
+  const profileId = options?.profileId || payloadProfileId || null;
 
   const rpcArgs = {
     p_entry_type: entryType,

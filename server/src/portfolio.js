@@ -287,14 +287,15 @@ export function calculatePortfolioValuation(profile, holdings, snapshotsMap = {}
  * mutating or persisting derived metrics.
  */
 export async function getPortfolioOverview({
+  profileId,
   getCashOverviewFn = getCashOverview,
   getHoldingsFn = getHoldings,
   getMarketSnapshotFn = getMarketSnapshot,
   getFxRateFn = getFxRate
 } = {}) {
   const [cashOverview, holdings] = await Promise.all([
-    getCashOverviewFn(),
-    getHoldingsFn()
+    getCashOverviewFn(undefined, profileId ? { profileId } : {}),
+    getHoldingsFn(undefined, profileId ? { profileId } : {})
   ]);
 
   // Collect unique symbols

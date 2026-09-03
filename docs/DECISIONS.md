@@ -368,3 +368,16 @@ $$\text{Source Adapter} \longrightarrow \text{Canonical Validation / Sanitizatio
 - **Database Authority**: Private tables and financial RPCs are callable only by the backend's server-only Supabase `service_role` client. Browser code never receives this key. Public/publishable Supabase access is retained only for intentionally public canonical asset and provider-mapping metadata.
 - **Direct Access Prohibition**: `anon` and `authenticated` roles have no direct access to private tables and no execution authority over private financial RPCs. RLS remains enabled and existing financial validation, atomicity, VND, immutability, and projection guards are not weakened.
 - **Deployment State**: The Feature 30 private-table permission migration and owner-authenticated production API boundary are active. Later trusted-device session changes require the existing frontend and backend targets to be redeployed together because the browser proxy and backend cookie contract are coupled.
+
+---
+
+## 13. Multi-User Ownership & Supabase Auth Backend Foundation (Features 13B & 13C)
+
+- **Identity & Authority**: Supabase Auth user JWT (`auth.users.id`) is the authoritative identity for multi-user browser requests.
+- **Financial Data Safety Invariant**: The foreign key `investor_profile.user_id REFERENCES auth.users(id)` uses `ON DELETE RESTRICT`. Auth user deletion cannot cascade delete financial portfolios, holdings, cash ledgers, opening positions, or delivery history.
+- **Transitional Auth Coexistence**: Legacy `OWNER_ACCESS_TOKEN` bearer authentication and trusted owner device sessions (`vn_invest_owner_session` cookie) continue to function unchanged until complete client transition in Feature 13D/13E.
+- **Profile Resolution & Scoping**: Requests authenticated with Supabase user JWT resolve the profile strictly via `WHERE user_id = req.user.id`. Arbitrary client `profileId` in body or query params is ignored and forbidden from spoofing other profiles.
+- **Profile Creation**: Authenticated users without a profile can initialize an empty investor profile (`cash_available = 0`, moderate risk, medium horizon) via `POST /api/profile`. Duplicate creation is idempotent via `UNIQUE(user_id)`.
+- **Atomic One-Time Legacy Profile Claim**: Unowned production legacy profile (`user_id IS NULL`, `id = e4ae09df-3a4a-48eb-b08d-5334687207b1`, `cash_available = 20,000,000 VND`) can only be claimed once via `POST /api/auth/claim-legacy-profile`. The claimant must provide a valid Supabase user JWT (with no existing profile) and prove legacy ownership by presenting `OWNER_ACCESS_TOKEN` (verified in constant time). The claim is executed atomically via the `claim_legacy_profile(UUID)` RPC granted strictly to `service_role`.
+- **Legacy Profile Discovery**: Capability endpoint `GET /api/auth/legacy-claim-status` indicates whether an unclaimed legacy profile exists (`legacyClaimAvailable: boolean`) without leaking any financial numbers, balances, profile IDs, or user data.
+- **Alert Scheduler Isolation**: Background evaluation via `POST /api/internal/alerts/evaluate` remains independently authenticated via `ALERT_SCHEDULER_TOKEN`.

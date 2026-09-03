@@ -44,9 +44,9 @@ describe('Feature 13B: Multi-User Profile Ownership Foundation', () => {
     const migrationPath = path.resolve(__dirname, '../../supabase/migrations/20260904000000_feature_13b_multi_user_ownership_foundation.sql');
     const migrationSql = fs.readFileSync(migrationPath, 'utf8');
 
-    test('migration file exists and contains user_id column definition', () => {
+    test('migration file exists and contains user_id column definition with ON DELETE RESTRICT', () => {
       assert.ok(migrationSql.includes('ADD COLUMN IF NOT EXISTS user_id UUID NULL UNIQUE'));
-      assert.ok(migrationSql.includes('REFERENCES auth.users(id) ON DELETE CASCADE'));
+      assert.ok(migrationSql.includes('REFERENCES auth.users(id) ON DELETE RESTRICT'));
     });
 
     test('migration drops legacy singleton constraints and column', () => {
@@ -84,7 +84,7 @@ describe('Feature 13B: Multi-User Profile Ownership Foundation', () => {
       assert.equal(nullCheckCount, 9, 'Expected exactly 9 RPCs to validate p_profile_id IS NOT NULL with IP004');
     });
 
-    test('all financial RPCs revoke public/anon access and grant strictly to service_role', () => {
+    test('all financial and claim RPCs revoke public/anon access and grant strictly to service_role', () => {
       const rpcNames = [
         'get_cash_overview(UUID)',
         'list_cash_ledger_entries(UUID)',
@@ -94,7 +94,8 @@ describe('Feature 13B: Multi-User Profile Ownership Foundation', () => {
         'list_portfolio_transactions(UUID, TEXT)',
         'create_opening_position(UUID, TEXT, NUMERIC, NUMERIC, NUMERIC, TEXT, NUMERIC, TEXT, TIMESTAMPTZ)',
         'correct_opening_position(UUID, TEXT, NUMERIC, NUMERIC)',
-        'cancel_opening_position(UUID, TEXT)'
+        'cancel_opening_position(UUID, TEXT)',
+        'claim_legacy_profile(UUID)'
       ];
 
       for (const rpc of rpcNames) {

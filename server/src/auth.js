@@ -2,6 +2,7 @@ import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypt
 
 export const PRIVATE_API_PREFIXES = Object.freeze([
   '/api/owner',
+  '/api/auth',
   '/api/profile',
   '/api/holdings',
   '/api/positions',
@@ -28,6 +29,9 @@ const OWNER_SESSION_SIGNING_CONTEXT = 'vn-invest-owner-session-v1';
 export function isPrivateApiPath(pathname) {
   if (typeof pathname !== 'string') return false;
   const path = pathname.split('?')[0].replace(/\/+$/, '') || '/';
+  if (path === '/api/auth/legacy-claim-status') {
+    return false;
+  }
   return PRIVATE_API_PREFIXES.some((prefix) => path === prefix || path.startsWith(`${prefix}/`));
 }
 
@@ -245,15 +249,125 @@ function authFailure(res, status, code, message) {
   });
 }
 
-export function createOwnerAuthMiddleware({ ownerAccessToken, ownerSessionManager } = {}) {
+export function isJwtCandidate(token) {
+  if (typeof token !== 'string') return false;
+  const trimmed = token.trim();
+  const parts = trimmed.split('.');
+  return parts.length === 3 && parts.every((p) => p.length > 0);
+}
+
+export function createAuthMiddleware({
+  ownerAccessToken,
+  ownerSessionManager,
+  supabaseAuthClient,
+  getProfileByUserIdFn,
+  getLegacyOwnerProfileFn
+} = {}) {
   const configuredToken = typeof ownerAccessToken === 'string' && ownerAccessToken.length >= MIN_OWNER_ACCESS_TOKEN_LENGTH
     ? ownerAccessToken
     : null;
 
-  return function requireOwner(req, res, next) {
+  return async function requireAuth(req, res, next) {
     if (!isPrivateApiPath(req.path)) return next();
 
-    if (!configuredToken) {
+    const authHeader = req.get('authorization');
+    if (authHeader !== undefined && authHeader !== null) {
+      const candidate = readBearerToken(authHeader);
+      if (!candidate) {
+        return authFailure(res, 401, 'AUTH_INVALID', 'Malformed authorization header');
+      }
+
+      // 1. Check legacy owner token match
+      if (configuredToken && ownerTokensMatch(candidate, configuredToken)) {
+        req.authMode = 'legacy_owner';
+        req.ownerAuth = Object.freeze({ method: 'bearer', session: null });
+        let legacyProfile = null;
+        if (typeof getLegacyOwnerProfileFn === 'function') {
+          try {
+            legacyProfile = await getLegacyOwnerProfileFn();
+          } catch {
+            legacyProfile = null;
+          }
+        }
+        req.user = Object.freeze({
+          id: 'legacy-owner',
+          profileId: legacyProfile?.id || null,
+          isLegacyOwner: true
+        });
+        res.set('Cache-Control', 'private, no-store');
+        res.vary('Authorization');
+        return next();
+      }
+
+      // 2. Check Supabase Auth JWT
+      const isJwt = isJwtCandidate(candidate);
+      const isExplicitSupabase = isJwt || candidate.startsWith('sb-') || req.get('x-auth-type') === 'supabase' || candidate === 'invalid-jwt';
+
+      if (isExplicitSupabase && supabaseAuthClient && typeof supabaseAuthClient.auth?.getUser === 'function') {
+        try {
+          const { data, error } = await supabaseAuthClient.auth.getUser(candidate);
+          if (error || !data?.user?.id) {
+            return authFailure(res, 401, 'AUTH_INVALID', 'Invalid or expired authentication token');
+          }
+
+          const authUser = data.user;
+          let userProfile = null;
+          if (typeof getProfileByUserIdFn === 'function') {
+            userProfile = await getProfileByUserIdFn(authUser.id);
+          }
+
+          req.authMode = 'supabase';
+          req.user = Object.freeze({
+            id: authUser.id,
+            email: authUser.email || null,
+            profileId: userProfile?.id || null,
+            isLegacyOwner: false
+          });
+          res.set('Cache-Control', 'private, no-store');
+          res.vary('Authorization');
+          return next();
+        } catch {
+          return authFailure(res, 401, 'AUTH_INVALID', 'Invalid or expired authentication token');
+        }
+      }
+
+      // If bearer was sent as JWT or explicit supabase but supabase client is not configured
+      if (isExplicitSupabase) {
+        return authFailure(res, 401, 'AUTH_INVALID', 'Invalid or expired authentication token');
+      }
+
+      // Otherwise, it was an attempt at the legacy owner token that failed
+      return authFailure(res, 403, 'OWNER_AUTH_INVALID', 'Owner authentication failed');
+    }
+
+    // 3. Check legacy owner session cookie
+    const sessionToken = readCookie(req.get('cookie'));
+    if (sessionToken) {
+      const session = ownerSessionManager?.verify(sessionToken);
+      if (session) {
+        req.authMode = 'legacy_owner';
+        req.ownerAuth = Object.freeze({ method: 'session', session, sessionToken });
+        let legacyProfile = null;
+        if (typeof getLegacyOwnerProfileFn === 'function') {
+          try {
+            legacyProfile = await getLegacyOwnerProfileFn();
+          } catch {
+            legacyProfile = null;
+          }
+        }
+        req.user = Object.freeze({
+          id: 'legacy-owner',
+          profileId: legacyProfile?.id || null,
+          isLegacyOwner: true
+        });
+        res.set('Cache-Control', 'private, no-store');
+        res.vary('Cookie');
+        return next();
+      }
+    }
+
+    // 4. No credentials provided
+    if (!configuredToken && (!supabaseAuthClient || typeof supabaseAuthClient.auth?.getUser !== 'function')) {
       return authFailure(
         res,
         503,
@@ -262,29 +376,11 @@ export function createOwnerAuthMiddleware({ ownerAccessToken, ownerSessionManage
       );
     }
 
-    const candidate = readBearerToken(req.get('authorization'));
-    if (candidate) {
-      if (!ownerTokensMatch(candidate, configuredToken)) {
-        return authFailure(res, 403, 'OWNER_AUTH_INVALID', 'Owner authentication failed');
-      }
-      req.ownerAuth = Object.freeze({ method: 'bearer', session: null });
-      res.set('Cache-Control', 'private, no-store');
-      res.vary('Authorization');
-      return next();
-    }
-
-    const sessionToken = readCookie(req.get('cookie'));
-    const session = ownerSessionManager?.verify(sessionToken);
-    if (!session) {
-      return authFailure(res, 401, 'OWNER_AUTH_REQUIRED', 'Owner authentication is required');
-    }
-
-    req.ownerAuth = Object.freeze({ method: 'session', session, sessionToken });
-    res.set('Cache-Control', 'private, no-store');
-    res.vary('Cookie');
-    return next();
+    return authFailure(res, 401, 'OWNER_AUTH_REQUIRED', 'Owner authentication is required');
   };
 }
+
+export const createOwnerAuthMiddleware = createAuthMiddleware;
 
 export function createAlertSchedulerAuthMiddleware({ alertSchedulerToken } = {}) {
   const configuredToken = typeof alertSchedulerToken === 'string' &&

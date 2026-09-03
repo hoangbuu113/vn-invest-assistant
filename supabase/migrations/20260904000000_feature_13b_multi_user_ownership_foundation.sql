@@ -13,7 +13,7 @@ BEGIN;
 -- Existing production profile remains in place with user_id = NULL until claimed.
 ALTER TABLE public.investor_profile
     ADD COLUMN IF NOT EXISTS user_id UUID NULL UNIQUE
-    REFERENCES auth.users(id) ON DELETE CASCADE;
+    REFERENCES auth.users(id) ON DELETE RESTRICT;
 
 -- Drop legacy singleton constraints
 ALTER TABLE public.investor_profile
@@ -1076,6 +1076,50 @@ END;
 $$;
 
 
+DROP FUNCTION IF EXISTS public.claim_legacy_profile(UUID);
+
+CREATE OR REPLACE FUNCTION public.claim_legacy_profile(p_user_id UUID)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+DECLARE
+    v_profile public.investor_profile%ROWTYPE;
+BEGIN
+    IF p_user_id IS NULL THEN
+        RAISE EXCEPTION USING ERRCODE = 'IP004', MESSAGE = 'user_id is required';
+    END IF;
+
+    -- Check if user already owns a profile
+    IF EXISTS (SELECT 1 FROM public.investor_profile WHERE user_id = p_user_id) THEN
+        RAISE EXCEPTION USING ERRCODE = 'IP005', MESSAGE = 'User already has an assigned profile';
+    END IF;
+
+    -- Atomically update the single unowned legacy profile
+    UPDATE public.investor_profile
+    SET user_id = p_user_id,
+        updated_at = NOW()
+    WHERE user_id IS NULL
+    RETURNING * INTO v_profile;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION USING ERRCODE = 'IP006', MESSAGE = 'No unclaimed legacy profile available';
+    END IF;
+
+    RETURN jsonb_build_object(
+        'id', v_profile.id,
+        'user_id', v_profile.user_id,
+        'cash_available', v_profile.cash_available,
+        'risk_tolerance', v_profile.risk_tolerance,
+        'investment_horizon', v_profile.investment_horizon,
+        'created_at', v_profile.created_at,
+        'updated_at', v_profile.updated_at
+    );
+END;
+$$;
+
+
 -- ============================================================================
 -- 5. PERMISSIONS & SECURITY BOUNDARY
 -- ============================================================================
@@ -1090,6 +1134,7 @@ REVOKE ALL ON FUNCTION public.list_portfolio_transactions(UUID, TEXT) FROM PUBLI
 REVOKE ALL ON FUNCTION public.create_opening_position(UUID, TEXT, NUMERIC, NUMERIC, NUMERIC, TEXT, NUMERIC, TEXT, TIMESTAMPTZ) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.correct_opening_position(UUID, TEXT, NUMERIC, NUMERIC) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.cancel_opening_position(UUID, TEXT) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.claim_legacy_profile(UUID) FROM PUBLIC, anon, authenticated;
 
 -- Grant execution exclusively to backend service_role
 GRANT EXECUTE ON FUNCTION public.get_cash_overview(UUID) TO service_role;
@@ -1101,5 +1146,6 @@ GRANT EXECUTE ON FUNCTION public.list_portfolio_transactions(UUID, TEXT) TO serv
 GRANT EXECUTE ON FUNCTION public.create_opening_position(UUID, TEXT, NUMERIC, NUMERIC, NUMERIC, TEXT, NUMERIC, TEXT, TIMESTAMPTZ) TO service_role;
 GRANT EXECUTE ON FUNCTION public.correct_opening_position(UUID, TEXT, NUMERIC, NUMERIC) TO service_role;
 GRANT EXECUTE ON FUNCTION public.cancel_opening_position(UUID, TEXT) TO service_role;
+GRANT EXECUTE ON FUNCTION public.claim_legacy_profile(UUID) TO service_role;
 
 COMMIT;

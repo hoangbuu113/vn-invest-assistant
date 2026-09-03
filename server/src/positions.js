@@ -99,7 +99,7 @@ function normalizeOpeningResult(data) {
 }
 
 export async function createOpeningPosition({
-  profileId,
+  profileId: payloadProfileId,
   assetId,
   quantity,
   averageCost,
@@ -108,8 +108,9 @@ export async function createOpeningPosition({
   fxRateToVnd,
   fxProvenance,
   fxObservedAt
-}, client = privateSupabase) {
+} = {}, client = privateSupabase, options = {}) {
   const db = requireDatabaseClient(client);
+  const profileId = options?.profileId || payloadProfileId || null;
 
   const rpcArgs = {
     p_asset_id: assetId,
@@ -144,8 +145,9 @@ export async function createOpeningPosition({
   return normalizeOpeningResult(data);
 }
 
-export async function correctOpeningPosition({ profileId, id, quantity, averageCost }, client = privateSupabase) {
+export async function correctOpeningPosition({ profileId: payloadProfileId, id, quantity, averageCost } = {}, client = privateSupabase, options = {}) {
   const db = requireDatabaseClient(client);
+  const profileId = options?.profileId || payloadProfileId || null;
 
   const rpcArgs = {
     p_opening_position_id: id,
@@ -165,8 +167,9 @@ export async function correctOpeningPosition({ profileId, id, quantity, averageC
   return normalizeOpeningResult(data);
 }
 
-export async function cancelOpeningPosition({ profileId, id }, client = privateSupabase) {
+export async function cancelOpeningPosition({ profileId: payloadProfileId, id } = {}, client = privateSupabase, options = {}) {
   const db = requireDatabaseClient(client);
+  const profileId = options?.profileId || payloadProfileId || null;
 
   const rpcArgs = {
     p_opening_position_id: id
