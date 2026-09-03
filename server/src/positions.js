@@ -1,4 +1,4 @@
-import { privateSupabase } from './supabase.js';
+import { getInvestorProfile, privateSupabase } from './supabase.js';
 
 function requireDatabaseClient(client) {
   if (!client) {
@@ -99,6 +99,7 @@ function normalizeOpeningResult(data) {
 }
 
 export async function createOpeningPosition({
+  profileId,
   assetId,
   quantity,
   averageCost,
@@ -109,11 +110,15 @@ export async function createOpeningPosition({
   fxObservedAt
 }, client = privateSupabase) {
   const db = requireDatabaseClient(client);
+
   const rpcArgs = {
     p_asset_id: assetId,
     p_quantity: quantity,
     p_average_cost: averageCost
   };
+  if (profileId) {
+    rpcArgs.p_profile_id = profileId;
+  }
   if (executionUnitPrice !== undefined && executionUnitPrice !== null) {
     rpcArgs.p_execution_unit_price = executionUnitPrice;
   }
@@ -139,13 +144,19 @@ export async function createOpeningPosition({
   return normalizeOpeningResult(data);
 }
 
-export async function correctOpeningPosition({ id, quantity, averageCost }, client = privateSupabase) {
+export async function correctOpeningPosition({ profileId, id, quantity, averageCost }, client = privateSupabase) {
   const db = requireDatabaseClient(client);
-  const { data, error } = await db.rpc('correct_opening_position', {
+
+  const rpcArgs = {
     p_opening_position_id: id,
     p_quantity: quantity,
     p_average_cost: averageCost
-  });
+  };
+  if (profileId) {
+    rpcArgs.p_profile_id = profileId;
+  }
+
+  const { data, error } = await db.rpc('correct_opening_position', rpcArgs);
 
   if (error) {
     throw openingPositionDatabaseError(error, 'Failed to correct opening position');
@@ -154,11 +165,17 @@ export async function correctOpeningPosition({ id, quantity, averageCost }, clie
   return normalizeOpeningResult(data);
 }
 
-export async function cancelOpeningPosition({ id }, client = privateSupabase) {
+export async function cancelOpeningPosition({ profileId, id }, client = privateSupabase) {
   const db = requireDatabaseClient(client);
-  const { data, error } = await db.rpc('cancel_opening_position', {
+
+  const rpcArgs = {
     p_opening_position_id: id
-  });
+  };
+  if (profileId) {
+    rpcArgs.p_profile_id = profileId;
+  }
+
+  const { data, error } = await db.rpc('cancel_opening_position', rpcArgs);
 
   if (error) {
     throw openingPositionDatabaseError(error, 'Failed to cancel opening position');

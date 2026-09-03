@@ -247,6 +247,7 @@ function normalizeProfile(row) {
   if (!row) return null;
   return {
     id: row.id,
+    user_id: row.user_id || null,
     cash_available: typeof row.cash_available === 'number' ? row.cash_available : Number(row.cash_available),
     risk_tolerance: row.risk_tolerance,
     investment_horizon: row.investment_horizon,
@@ -256,28 +257,58 @@ function normalizeProfile(row) {
 }
 
 /**
- * Fetches the single investor profile from Supabase.
- * Reads the authoritative singleton profile row.
+ * Fetches an investor profile from Supabase.
+ * If identifier is provided, resolves by user_id or id.
+ * Otherwise resolves the first active profile (legacy unowned or earliest created).
  */
 export async function getInvestorProfile(client = privateSupabase) {
-  const db = client || privateSupabase;
+  const options = arguments[1] || {};
+  let db = privateSupabase;
+  let identifier = null;
+
+  if (typeof client === 'string') {
+    identifier = { id: client };
+    db = options?.client || privateSupabase;
+  } else if (client && typeof client.from === 'function') {
+    db = client;
+    identifier = options && typeof options === 'object' ? options : null;
+  } else if (client && typeof client === 'object' && (client.userId || client.id || client.profileId)) {
+    identifier = client;
+    db = options?.client || client.client || privateSupabase;
+  }
+
   if (!db) {
     throw new Error('Private database access is not configured');
   }
 
-  const { data, error } = await db
+  const selectFields = identifier?.userId
+    ? 'id, user_id, cash_available, risk_tolerance, investment_horizon, created_at, updated_at'
+    : 'id, cash_available, risk_tolerance, investment_horizon, created_at, updated_at';
+
+  let query = db
     .from('investor_profile')
-    .select('id, cash_available, risk_tolerance, investment_horizon, created_at, updated_at')
-    .limit(1)
-    .maybeSingle();
+    .select(selectFields);
+
+  if (identifier?.userId) {
+    query = query.eq('user_id', identifier.userId);
+  } else if (identifier?.id || identifier?.profileId) {
+    query = query.eq('id', identifier.id || identifier.profileId);
+  } else {
+    query = query.order('created_at', { ascending: true }).limit(1);
+  }
+
+  const { data, error } = await query.maybeSingle();
 
   if (error) {
     throw new Error(`Database query error: ${error.message} (code: ${error.code || 'UNKNOWN'})`);
   }
 
   if (!data) {
+    if (identifier?.userId || identifier?.id || identifier?.profileId) {
+      return null;
+    }
+
     const defaultProfile = {
-      singleton_key: 1,
       cash_available: 0,
       risk_tolerance: 'moderate',
       investment_horizon: 'medium'
@@ -286,15 +317,16 @@ export async function getInvestorProfile(client = privateSupabase) {
     const { data: inserted, error: insertError } = await db
       .from('investor_profile')
       .insert([defaultProfile])
-      .select('id, cash_available, risk_tolerance, investment_horizon, created_at, updated_at')
+      .select(selectFields)
       .single();
 
     if (insertError) {
-      // If concurrent insert occurred, fetch the existing singleton row
+      // If concurrent insert occurred, fetch the existing row
       if (insertError.code === '23505') {
         const { data: refetched, error: refetchErr } = await db
           .from('investor_profile')
-          .select('id, cash_available, risk_tolerance, investment_horizon, created_at, updated_at')
+          .select(selectFields)
+          .order('created_at', { ascending: true })
           .limit(1)
           .maybeSingle();
         if (!refetchErr && refetched) {
@@ -310,8 +342,46 @@ export async function getInvestorProfile(client = privateSupabase) {
   return normalizeProfile(data);
 }
 
+export async function getProfileByUserId(userId, client = privateSupabase) {
+  return getInvestorProfile(client, { userId });
+}
+
+export async function getProfileById(profileId, client = privateSupabase) {
+  return getInvestorProfile(client, { id: profileId });
+}
+
+export async function createProfileForUser({
+  userId,
+  cashAvailable = 0,
+  riskTolerance = 'moderate',
+  investmentHorizon = 'medium'
+}, client = privateSupabase) {
+  const db = client || privateSupabase;
+  if (!db) throw new Error('Private database access is not configured');
+  if (!userId) throw new Error('userId is required');
+
+  const { data, error } = await db
+    .from('investor_profile')
+    .insert([{
+      user_id: userId,
+      cash_available: cashAvailable,
+      risk_tolerance: riskTolerance,
+      investment_horizon: investmentHorizon
+    }])
+    .select('id, user_id, cash_available, risk_tolerance, investment_horizon, created_at, updated_at')
+    .single();
+
+  if (error) {
+    if (error.code === '23505') {
+      return getProfileByUserId(userId, db);
+    }
+    throw new Error(`Failed to create investor profile: ${error.message}`);
+  }
+  return normalizeProfile(data);
+}
+
 /**
- * Updates non-cash preferences for the single investor profile.
+ * Updates non-cash preferences for an investor profile.
  * Feature 15 cash is ledger-managed and cannot be written through this path.
  */
 export async function updateInvestorProfile(input, client = privateSupabase) {
@@ -326,16 +396,20 @@ export async function updateInvestorProfile(input, client = privateSupabase) {
     throw err;
   }
 
-  const { risk_tolerance, investment_horizon } = input || {};
-
-  const { data, error } = await db.rpc('update_investor_profile_preferences', {
+  const { profileId, risk_tolerance, investment_horizon } = input || {};
+  const rpcArgs = {
     p_risk_tolerance: risk_tolerance,
     p_investment_horizon: investment_horizon
-  });
+  };
+  if (profileId) {
+    rpcArgs.p_profile_id = profileId;
+  }
+
+  const { data, error } = await db.rpc('update_investor_profile_preferences', rpcArgs);
 
   if (error) {
     const err = new Error(`Database update error: ${error.message} (code: ${error.code || 'UNKNOWN'})`);
-    if (error.code === 'IP001') err.statusCode = 400;
+    if (error.code === 'IP001' || error.code === 'IP002' || error.code === 'IP004') err.statusCode = 400;
     throw err;
   }
 
@@ -404,12 +478,29 @@ function normalizeHolding(row) {
  * Fetches all holdings for the single investor profile with joined asset information.
  */
 export async function getHoldings(client = privateSupabase) {
-  const db = client || privateSupabase;
+  const options = arguments[1] || {};
+  let db = privateSupabase;
+  let profileId = null;
+
+  if (typeof client === 'string') {
+    profileId = client;
+    db = options?.client || privateSupabase;
+  } else if (client && typeof client.from === 'function') {
+    db = client;
+    profileId = options?.profileId || null;
+  } else if (client && typeof client === 'object' && client.profileId) {
+    profileId = client.profileId;
+    db = options?.client || client.client || privateSupabase;
+  }
+
   if (!db) {
     throw new Error('Private database access is not configured');
   }
 
-  const profile = await getInvestorProfile(db);
+  if (!profileId) {
+    const profile = await getInvestorProfile(db);
+    profileId = profile.id;
+  }
 
   const { data, error } = await db
     .from('holdings')
@@ -440,7 +531,7 @@ export async function getHoldings(client = privateSupabase) {
         updated_at
       )
     `)
-    .eq('profile_id', profile.id)
+    .eq('profile_id', profileId)
     .order('created_at', { ascending: true });
 
   if (error) {
@@ -451,15 +542,19 @@ export async function getHoldings(client = privateSupabase) {
 }
 
 /**
- * Adds a new holding for the singleton investor profile.
+ * Adds a new holding for an investor profile.
  */
-export async function addHolding({ asset_id, quantity, average_cost }, client = privateSupabase) {
+export async function addHolding({ profileId, asset_id, quantity, average_cost }, client = privateSupabase) {
   const db = client || privateSupabase;
   if (!db) {
     throw new Error('Private database access is not configured');
   }
 
-  const profile = await getInvestorProfile(db);
+  let targetProfileId = profileId;
+  if (!targetProfileId) {
+    const profile = await getInvestorProfile(db);
+    targetProfileId = profile.id;
+  }
 
   // Check if asset exists
   const { data: asset, error: assetErr } = await db
@@ -482,7 +577,7 @@ export async function addHolding({ asset_id, quantity, average_cost }, client = 
   const { data: existing, error: existingErr } = await db
     .from('holdings')
     .select('id')
-    .eq('profile_id', profile.id)
+    .eq('profile_id', targetProfileId)
     .eq('asset_id', asset_id)
     .maybeSingle();
 
@@ -500,7 +595,7 @@ export async function addHolding({ asset_id, quantity, average_cost }, client = 
     .from('holdings')
     .insert([
       {
-        profile_id: profile.id,
+        profile_id: targetProfileId,
         asset_id,
         quantity,
         average_cost
@@ -522,9 +617,9 @@ export async function addHolding({ asset_id, quantity, average_cost }, client = 
 }
 
 /**
- * Updates an existing holding by ID, strictly scoped to the singleton profile.
+ * Updates an existing holding by ID, strictly scoped to an investor profile.
  */
-export async function updateHolding(id, { quantity, average_cost }, client = privateSupabase) {
+export async function updateHolding(id, { profileId, quantity, average_cost }, client = privateSupabase) {
   const db = client || privateSupabase;
   if (!db) {
     throw new Error('Private database access is not configured');
@@ -536,7 +631,11 @@ export async function updateHolding(id, { quantity, average_cost }, client = pri
     throw err;
   }
 
-  const profile = await getInvestorProfile(db);
+  let targetProfileId = profileId;
+  if (!targetProfileId) {
+    const profile = await getInvestorProfile(db);
+    targetProfileId = profile.id;
+  }
 
   const { data, error } = await db
     .from('holdings')
@@ -546,7 +645,7 @@ export async function updateHolding(id, { quantity, average_cost }, client = pri
       updated_at: new Date().toISOString()
     })
     .eq('id', id)
-    .eq('profile_id', profile.id)
+    .eq('profile_id', targetProfileId)
     .select('id, profile_id, asset_id, quantity, average_cost, created_at, updated_at, assets (id, symbol, name, asset_type, exchange)')
     .maybeSingle();
 
@@ -570,10 +669,19 @@ export async function updateHolding(id, { quantity, average_cost }, client = pri
 }
 
 /**
- * Deletes a holding by ID, strictly scoped to the singleton profile.
+ * Deletes a holding by ID, strictly scoped to an investor profile.
  */
-export async function deleteHolding(id, client = privateSupabase) {
-  const db = client || privateSupabase;
+export async function deleteHolding(id, profileIdOrClient = privateSupabase, client = privateSupabase) {
+  let db = privateSupabase;
+  let profileId = null;
+
+  if (typeof profileIdOrClient === 'string') {
+    profileId = profileIdOrClient;
+    db = client || privateSupabase;
+  } else if (profileIdOrClient && typeof profileIdOrClient.from === 'function') {
+    db = profileIdOrClient;
+  }
+
   if (!db) {
     throw new Error('Private database access is not configured');
   }
@@ -584,14 +692,17 @@ export async function deleteHolding(id, client = privateSupabase) {
     throw err;
   }
 
-  const profile = await getInvestorProfile(db);
+  if (!profileId) {
+    const profile = await getInvestorProfile(db);
+    profileId = profile.id;
+  }
 
   // Check if holding exists for this profile first
   const { data: existing, error: findErr } = await db
     .from('holdings')
     .select('id')
     .eq('id', id)
-    .eq('profile_id', profile.id)
+    .eq('profile_id', profileId)
     .maybeSingle();
 
   if (findErr) {
@@ -613,7 +724,7 @@ export async function deleteHolding(id, client = privateSupabase) {
     .from('holdings')
     .delete()
     .eq('id', id)
-    .eq('profile_id', profile.id);
+    .eq('profile_id', profileId);
 
   if (error) {
     throw new Error(`Database delete error: ${error.message} (code: ${error.code || 'UNKNOWN'})`);
@@ -679,17 +790,34 @@ function normalizeWatchlistItem(row) {
  * Fetches all watchlist items for the single investor profile with joined asset metadata.
  */
 export async function getWatchlist(client = privateSupabase) {
-  const db = client || privateSupabase;
+  const options = arguments[1] || {};
+  let db = privateSupabase;
+  let profileId = null;
+
+  if (typeof client === 'string') {
+    profileId = client;
+    db = options?.client || privateSupabase;
+  } else if (client && typeof client.from === 'function') {
+    db = client;
+    profileId = options?.profileId || null;
+  } else if (client && typeof client === 'object' && client.profileId) {
+    profileId = client.profileId;
+    db = options?.client || client.client || privateSupabase;
+  }
+
   if (!db) {
     throw new Error('Private database access is not configured');
   }
 
-  const profile = await getInvestorProfile(db);
+  if (!profileId) {
+    const profile = await getInvestorProfile(db);
+    profileId = profile.id;
+  }
 
   const { data, error } = await db
     .from('watchlist_items')
     .select(WATCHLIST_SELECT)
-    .eq('profile_id', profile.id)
+    .eq('profile_id', profileId)
     .order('created_at', { ascending: true });
 
   if (error) {
@@ -700,10 +828,10 @@ export async function getWatchlist(client = privateSupabase) {
 }
 
 /**
- * Adds an asset to the singleton investor profile's watchlist.
+ * Adds an asset to an investor profile's watchlist.
  * Deterministic and idempotent.
  */
-export async function addToWatchlist({ asset_id, symbol }, client = privateSupabase) {
+export async function addToWatchlist({ profileId, asset_id, symbol }, client = privateSupabase) {
   const db = client || privateSupabase;
   if (!db) {
     throw new Error('Private database access is not configured');
@@ -715,7 +843,11 @@ export async function addToWatchlist({ asset_id, symbol }, client = privateSupab
     throw err;
   }
 
-  const profile = await getInvestorProfile(db);
+  let targetProfileId = profileId;
+  if (!targetProfileId) {
+    const profile = await getInvestorProfile(db);
+    targetProfileId = profile.id;
+  }
 
   // Look up asset by asset_id or symbol
   let assetQuery = db.from('assets').select(CANONICAL_ASSET_PROJECTION);
@@ -741,7 +873,7 @@ export async function addToWatchlist({ asset_id, symbol }, client = privateSupab
   const { data: existing, error: existingErr } = await db
     .from('watchlist_items')
     .select(WATCHLIST_SELECT)
-    .eq('profile_id', profile.id)
+    .eq('profile_id', targetProfileId)
     .eq('asset_id', asset.id)
     .maybeSingle();
 
@@ -758,7 +890,7 @@ export async function addToWatchlist({ asset_id, symbol }, client = privateSupab
     .from('watchlist_items')
     .insert([
       {
-        profile_id: profile.id,
+        profile_id: targetProfileId,
         asset_id: asset.id
       }
     ])
@@ -771,7 +903,7 @@ export async function addToWatchlist({ asset_id, symbol }, client = privateSupab
       const { data: refetched, error: refetchErr } = await db
         .from('watchlist_items')
         .select(WATCHLIST_SELECT)
-        .eq('profile_id', profile.id)
+        .eq('profile_id', targetProfileId)
         .eq('asset_id', asset.id)
         .maybeSingle();
       if (!refetchErr && refetched) {
@@ -785,12 +917,21 @@ export async function addToWatchlist({ asset_id, symbol }, client = privateSupab
 }
 
 /**
- * Removes an asset from the singleton investor profile's watchlist.
+ * Removes an asset from an investor profile's watchlist.
  * assetIdentifier can be an asset UUID, symbol, or watchlist item ID.
  * Returns deterministic sensible result even if item not in watchlist.
  */
-export async function removeFromWatchlist(assetIdentifier, client = privateSupabase) {
-  const db = client || privateSupabase;
+export async function removeFromWatchlist(assetIdentifier, profileIdOrClient = privateSupabase, client = privateSupabase) {
+  let db = privateSupabase;
+  let profileId = null;
+
+  if (typeof profileIdOrClient === 'string') {
+    profileId = profileIdOrClient;
+    db = client || privateSupabase;
+  } else if (profileIdOrClient && typeof profileIdOrClient.from === 'function') {
+    db = profileIdOrClient;
+  }
+
   if (!db) {
     throw new Error('Private database access is not configured');
   }
@@ -801,14 +942,18 @@ export async function removeFromWatchlist(assetIdentifier, client = privateSupab
     throw err;
   }
 
+  if (!profileId) {
+    const profile = await getInvestorProfile(db);
+    profileId = profile.id;
+  }
+
   const targetId = assetIdentifier.trim();
-  const profile = await getInvestorProfile(db);
 
   // 1. First check if targetId matches a watchlist_item directly by asset_id or id
   let { data: existing, error: findErr } = await db
     .from('watchlist_items')
     .select('id, profile_id, asset_id')
-    .eq('profile_id', profile.id)
+    .eq('profile_id', profileId)
     .or(`id.eq.${targetId},asset_id.eq.${targetId}`)
     .maybeSingle();
 
@@ -824,7 +969,7 @@ export async function removeFromWatchlist(assetIdentifier, client = privateSupab
       const { data: byAssetId, error: byAssetErr } = await db
         .from('watchlist_items')
         .select('id, profile_id, asset_id')
-        .eq('profile_id', profile.id)
+        .eq('profile_id', profileId)
         .eq('asset_id', assetBySymbol.id)
         .maybeSingle();
 
@@ -851,7 +996,7 @@ export async function removeFromWatchlist(assetIdentifier, client = privateSupab
     .from('watchlist_items')
     .delete()
     .eq('id', existing.id)
-    .eq('profile_id', profile.id);
+    .eq('profile_id', profileId);
 
   if (deleteErr) {
     throw new Error(`Database delete error: ${deleteErr.message} (code: ${deleteErr.code || 'UNKNOWN'})`);
@@ -900,17 +1045,34 @@ export function normalizeAlert(row) {
  * Fetches all price alerts for the singleton investor profile.
  */
 export async function getAlerts(client = privateSupabase) {
-  const db = client || privateSupabase;
+  const options = arguments[1] || {};
+  let db = privateSupabase;
+  let profileId = null;
+
+  if (typeof client === 'string') {
+    profileId = client;
+    db = options?.client || privateSupabase;
+  } else if (client && typeof client.from === 'function') {
+    db = client;
+    profileId = options?.profileId || null;
+  } else if (client && typeof client === 'object' && client.profileId) {
+    profileId = client.profileId;
+    db = options?.client || client.client || privateSupabase;
+  }
+
   if (!db) {
     throw new Error('Private database access is not configured');
   }
 
-  const profile = await getInvestorProfile(db);
+  if (!profileId) {
+    const profile = await getInvestorProfile(db);
+    profileId = profile.id;
+  }
 
   const { data, error } = await db
     .from('price_alerts')
     .select(ALERT_SELECT)
-    .eq('profile_id', profile.id)
+    .eq('profile_id', profileId)
     .order('created_at', { ascending: false });
 
   if (error) {
@@ -921,10 +1083,10 @@ export async function getAlerts(client = privateSupabase) {
 }
 
 /**
- * Creates a new one-shot price alert for the singleton investor profile.
+ * Creates a new one-shot price alert for an investor profile.
  * Prevents exact duplicates deterministically (returns existing alert without error).
  */
-export async function createAlert({ symbol, asset_id, direction, target_price }, client = privateSupabase) {
+export async function createAlert({ profileId, symbol, asset_id, direction, target_price }, client = privateSupabase) {
   const db = client || privateSupabase;
   if (!db) {
     throw new Error('Private database access is not configured');
@@ -949,7 +1111,11 @@ export async function createAlert({ symbol, asset_id, direction, target_price },
     throw err;
   }
 
-  const profile = await getInvestorProfile(db);
+  let targetProfileId = profileId;
+  if (!targetProfileId) {
+    const profile = await getInvestorProfile(db);
+    targetProfileId = profile.id;
+  }
 
   // Look up asset
   let assetQuery = db.from('assets').select(CANONICAL_ASSET_PROJECTION);
@@ -975,7 +1141,7 @@ export async function createAlert({ symbol, asset_id, direction, target_price },
   const { data: existing, error: existingErr } = await db
     .from('price_alerts')
     .select(ALERT_SELECT)
-    .eq('profile_id', profile.id)
+    .eq('profile_id', targetProfileId)
     .eq('asset_id', asset.id)
     .eq('direction', cleanDir)
     .eq('target_price', target_price)
@@ -994,7 +1160,7 @@ export async function createAlert({ symbol, asset_id, direction, target_price },
     .from('price_alerts')
     .insert([
       {
-        profile_id: profile.id,
+        profile_id: targetProfileId,
         asset_id: asset.id,
         direction: cleanDir,
         target_price,
@@ -1009,7 +1175,7 @@ export async function createAlert({ symbol, asset_id, direction, target_price },
       const { data: refetched } = await db
         .from('price_alerts')
         .select(ALERT_SELECT)
-        .eq('profile_id', profile.id)
+        .eq('profile_id', targetProfileId)
         .eq('asset_id', asset.id)
         .eq('direction', cleanDir)
         .eq('target_price', target_price)
@@ -1023,10 +1189,19 @@ export async function createAlert({ symbol, asset_id, direction, target_price },
 }
 
 /**
- * Deletes a price alert by ID scoped to the singleton investor profile.
+ * Deletes a price alert by ID scoped to an investor profile.
  */
-export async function deleteAlert(alertId, client = privateSupabase) {
-  const db = client || privateSupabase;
+export async function deleteAlert(alertId, profileIdOrClient = privateSupabase, client = privateSupabase) {
+  let db = privateSupabase;
+  let profileId = null;
+
+  if (typeof profileIdOrClient === 'string') {
+    profileId = profileIdOrClient;
+    db = client || privateSupabase;
+  } else if (profileIdOrClient && typeof profileIdOrClient.from === 'function') {
+    db = profileIdOrClient;
+  }
+
   if (!db) {
     throw new Error('Private database access is not configured');
   }
@@ -1037,13 +1212,16 @@ export async function deleteAlert(alertId, client = privateSupabase) {
     throw err;
   }
 
-  const profile = await getInvestorProfile(db);
+  if (!profileId) {
+    const profile = await getInvestorProfile(db);
+    profileId = profile.id;
+  }
 
   const { data: existing, error: findErr } = await db
     .from('price_alerts')
     .select('id, profile_id, asset_id')
     .eq('id', alertId.trim())
-    .eq('profile_id', profile.id)
+    .eq('profile_id', profileId)
     .maybeSingle();
 
   if (findErr) {
@@ -1062,7 +1240,7 @@ export async function deleteAlert(alertId, client = privateSupabase) {
     .from('price_alerts')
     .delete()
     .eq('id', existing.id)
-    .eq('profile_id', profile.id);
+    .eq('profile_id', profileId);
 
   if (deleteErr) {
     throw new Error(`Database delete error: ${deleteErr.message} (code: ${deleteErr.code || 'UNKNOWN'})`);
@@ -1077,8 +1255,17 @@ export async function deleteAlert(alertId, client = privateSupabase) {
 /**
  * Reactivates a triggered alert back to active status.
  */
-export async function reactivateAlert(alertId, client = privateSupabase) {
-  const db = client || privateSupabase;
+export async function reactivateAlert(alertId, profileIdOrClient = privateSupabase, client = privateSupabase) {
+  let db = privateSupabase;
+  let profileId = null;
+
+  if (typeof profileIdOrClient === 'string') {
+    profileId = profileIdOrClient;
+    db = client || privateSupabase;
+  } else if (profileIdOrClient && typeof profileIdOrClient.from === 'function') {
+    db = profileIdOrClient;
+  }
+
   if (!db) {
     throw new Error('Private database access is not configured');
   }
@@ -1089,7 +1276,10 @@ export async function reactivateAlert(alertId, client = privateSupabase) {
     throw err;
   }
 
-  const profile = await getInvestorProfile(db);
+  if (!profileId) {
+    const profile = await getInvestorProfile(db);
+    profileId = profile.id;
+  }
 
   const { data, error } = await db
     .from('price_alerts')
@@ -1100,7 +1290,7 @@ export async function reactivateAlert(alertId, client = privateSupabase) {
       last_evaluated_at: null
     })
     .eq('id', alertId.trim())
-    .eq('profile_id', profile.id)
+    .eq('profile_id', profileId)
     .select(ALERT_SELECT)
     .maybeSingle();
 
@@ -1157,22 +1347,29 @@ export async function persistActiveAlertEvaluation(updated, profileId, client = 
 }
 
 /**
- * Evaluates all active alerts for the singleton profile against market snapshots and persists any state changes.
+ * Evaluates active alerts against market snapshots and persists state changes.
+ * When profileId is specified, scopes to that profile; otherwise evaluates all active alerts.
  */
-export async function evaluateAndPersistAlerts({ getMarketSnapshotFn = getMarketSnapshot, now = new Date() } = {}, client = privateSupabase) {
+export async function evaluateAndPersistAlerts({
+  getMarketSnapshotFn = getMarketSnapshot,
+  now = new Date(),
+  profileId = null
+} = {}, client = privateSupabase) {
   const db = client || privateSupabase;
   if (!db) {
     throw new Error('Private database access is not configured');
   }
 
-  const profile = await getInvestorProfile(db);
-
-  // 1. Fetch all alerts for singleton profile
-  const { data: alertsData, error: alertsErr } = await db
+  let alertsQuery = db
     .from('price_alerts')
     .select(ALERT_SELECT)
-    .eq('profile_id', profile.id)
     .order('created_at', { ascending: false });
+
+  if (profileId) {
+    alertsQuery = alertsQuery.eq('profile_id', profileId);
+  }
+
+  const { data: alertsData, error: alertsErr } = await alertsQuery;
 
   if (alertsErr) {
     throw new Error(`Database query error: ${alertsErr.message}`);
@@ -1224,18 +1421,18 @@ export async function evaluateAndPersistAlerts({ getMarketSnapshotFn = getMarket
     if (updated.status === 'triggered') {
       const triggerRes = await triggerPriceAlertAtomic({
         alertId: updated.id,
-        profileId: profile.id,
+        profileId: updated.profile_id,
         observedPrice: updated.last_evaluated_price,
         now
       }, db);
       if (triggerRes?.triggered) persistedTriggeredCount++;
     } else {
-      await persistActiveAlertEvaluation(updated, profile.id, db);
+      await persistActiveAlertEvaluation(updated, updated.profile_id, db);
     }
   }
 
-  // 5. Re-fetch all alerts to return up-to-date list
-  const refreshedAlerts = await getAlerts(db);
+  // 5. Re-fetch alerts to return up-to-date list
+  const refreshedAlerts = await getAlerts(profileId || db, profileId ? db : undefined);
 
   return {
     evaluatedCount,
@@ -1666,20 +1863,30 @@ export async function getAlertDeliveriesByAlertId(alertId, client = privateSupab
   return (data || []).map(normalizeAlertDelivery);
 }
 
-/**
- * Fetches the cash ledger activation record for the singleton profile.
- */
-export async function getCashActivation(client = privateSupabase) {
-  const db = client || privateSupabase;
+export async function getCashActivation(profileIdOrClient = privateSupabase, client = privateSupabase) {
+  let db = privateSupabase;
+  let profileId = null;
+
+  if (typeof profileIdOrClient === 'string') {
+    profileId = profileIdOrClient;
+    db = client || privateSupabase;
+  } else if (profileIdOrClient && typeof profileIdOrClient.from === 'function') {
+    db = profileIdOrClient;
+  }
+
   if (!db) {
     throw new Error('Private database access is not configured');
   }
 
-  const profile = await getInvestorProfile(db);
+  if (!profileId) {
+    const profile = await getInvestorProfile(db);
+    profileId = profile.id;
+  }
+
   const { data, error } = await db
     .from('cash_ledger_activation')
     .select('profile_id, opening_balance_amount, activated_at')
-    .eq('profile_id', profile.id)
+    .eq('profile_id', profileId)
     .maybeSingle();
 
   if (error) {
@@ -1697,15 +1904,28 @@ export async function getCashActivation(client = privateSupabase) {
 }
 
 /**
- * Fetches all position opening baselines for the singleton profile.
+ * Fetches all position opening baselines for an investor profile.
  */
-export async function getPositionOpeningBaselines(client = privateSupabase) {
-  const db = client || privateSupabase;
+export async function getPositionOpeningBaselines(profileIdOrClient = privateSupabase, client = privateSupabase) {
+  let db = privateSupabase;
+  let profileId = null;
+
+  if (typeof profileIdOrClient === 'string') {
+    profileId = profileIdOrClient;
+    db = client || privateSupabase;
+  } else if (profileIdOrClient && typeof profileIdOrClient.from === 'function') {
+    db = profileIdOrClient;
+  }
+
   if (!db) {
     throw new Error('Private database access is not configured');
   }
 
-  const profile = await getInvestorProfile(db);
+  if (!profileId) {
+    const profile = await getInvestorProfile(db);
+    profileId = profile.id;
+  }
+
   const { data, error } = await db
     .from('position_opening_baselines')
     .select(`
@@ -1727,7 +1947,7 @@ export async function getPositionOpeningBaselines(client = privateSupabase) {
       updated_at,
       assets (id, symbol, name, asset_type, exchange, quote_currency)
     `)
-    .eq('profile_id', profile.id)
+    .eq('profile_id', profileId)
     .order('created_at', { ascending: true });
 
   if (error) {

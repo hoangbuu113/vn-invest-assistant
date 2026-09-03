@@ -1,4 +1,4 @@
-import { privateSupabase } from './supabase.js';
+import { getInvestorProfile, privateSupabase } from './supabase.js';
 import { normalizeCashLedgerEntry } from './cash.js';
 
 export const TRANSACTION_TYPES = Object.freeze(['BUY', 'SELL']);
@@ -147,15 +147,21 @@ function transactionDatabaseError(error, fallbackMessage) {
   return err;
 }
 
-export async function getPortfolioTransactions({ symbol } = {}, client = privateSupabase) {
+export async function getPortfolioTransactions({ profileId, symbol } = {}, client = privateSupabase, options = {}) {
   const db = requireDatabaseClient(client);
+  const targetProfileId = options?.profileId || profileId || null;
   const normalizedSymbol = typeof symbol === 'string' && symbol.trim()
     ? symbol.trim().toUpperCase()
     : null;
 
-  const { data, error } = await db.rpc('list_portfolio_transactions', {
+  const rpcArgs = {
     p_symbol: normalizedSymbol
-  });
+  };
+  if (targetProfileId) {
+    rpcArgs.p_profile_id = targetProfileId;
+  }
+
+  const { data, error } = await db.rpc('list_portfolio_transactions', rpcArgs);
 
   if (error) {
     throw transactionDatabaseError(error, 'Failed to fetch portfolio transactions');
@@ -182,8 +188,9 @@ export async function createPortfolioTransaction({
   fxRateToVnd,
   fxProvenance,
   fxObservedAt
-}, client = privateSupabase) {
+}, client = privateSupabase, options = {}) {
   const db = requireDatabaseClient(client);
+  const targetProfileId = options?.profileId || null;
 
   const rpcArgs = {
     p_symbol: typeof symbol === 'string' && symbol.trim() ? symbol.trim().toUpperCase() : null,
@@ -193,6 +200,9 @@ export async function createPortfolioTransaction({
     p_price: price,
     p_executed_at: executedAt || null
   };
+  if (targetProfileId) {
+    rpcArgs.p_profile_id = targetProfileId;
+  }
   if (executionUnitPrice !== undefined && executionUnitPrice !== null) {
     rpcArgs.p_execution_unit_price = executionUnitPrice;
   }

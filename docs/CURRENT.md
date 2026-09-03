@@ -33,15 +33,38 @@
   - Client Push Engine: `client/src/utils/webPush.js` (native capability detection, VAPID key conversion, PushManager subscription enable/disable flow with backend synchronization and cleanup rollback on failure)
   - Explicit Vietnamese UX: `DeviceAlertNotificationControl` embedded in Alert Center (`client/src/components/AlertCenterSection.jsx`); read-only inspection on mount with zero permission prompt on load; non-guaranteed wording on initial state (`"Thông báo đang được bật trên trình duyệt này."`) and session-verified state (`"Thông báo đã bật trên thiết bị này."`); explicit "Bật thông báo" / "Tắt thông báo" controls; iOS Home Screen guidance; in-app alert fallback remains truthful and unaffected
   - Hardened limits: max 3 attempts per device delivery; rare duplicate push delivery accepted/documented; zero guaranteed delivery claims
-  - Status: Backend API, VAPID engine, outbox foundation, Service Worker, Web App Manifest, and frontend controls complete locally; migration is NOT applied to production; VAPID secrets NOT configured in production; zero real push notifications sent
+- **Feature 13B Multi-User Profile Ownership Foundation (LOCAL ONLY — NOT PRODUCTION-ACTIVE)**:
+  - Database multi-user ownership foundation prepared via migration `supabase/migrations/20260904000000_feature_13b_multi_user_ownership_foundation.sql` (UNAPPLIED):
+    - Replaces singleton architecture with strict multi-user profile model linked to Supabase Auth (`auth.users.id`).
+    - Added `user_id UUID NULL UNIQUE REFERENCES auth.users(id) ON DELETE CASCADE` to `public.investor_profile`.
+    - Dropped legacy singleton constraints (`investor_profile_singleton_check`, `investor_profile_singleton_unique`, and column `singleton_key`).
+    - Added partial unique index `uq_investor_profile_legacy_unowned ON public.investor_profile ((user_id IS NULL)) WHERE user_id IS NULL` guaranteeing at most one unowned legacy profile can exist.
+    - Preserves existing production profile (`e4ae09df-3a4a-48eb-b08d-5334687207b1`, `cash_available = 20,000,000 VND`) in place with `user_id = NULL` without row copy, ID changes, or synthetic records.
+    - Rewrote all 9 financial RPCs to accept authoritative `p_profile_id UUID` parameter, strictly enforcing `IF p_profile_id IS NULL THEN RAISE EXCEPTION USING ERRCODE = 'IP004', MESSAGE = 'profile_id is required';`:
+      1. `get_cash_overview(p_profile_id UUID)`
+      2. `list_cash_ledger_entries(p_profile_id UUID)`
+      3. `create_cash_movement(p_profile_id UUID, p_entry_type TEXT, p_amount NUMERIC)`
+      4. `update_investor_profile_preferences(p_profile_id UUID, p_risk_tolerance TEXT, p_investment_horizon TEXT)`
+      5. `create_portfolio_transaction(p_profile_id UUID, ...)`
+      6. `list_portfolio_transactions(p_profile_id UUID, p_symbol TEXT)`
+      7. `create_opening_position(p_profile_id UUID, ...)`
+      8. `correct_opening_position(p_profile_id UUID, p_opening_position_id TEXT, ...)`
+      9. `cancel_opening_position(p_profile_id UUID, p_opening_position_id TEXT)`
+    - Revoked all execution permissions on new financial RPCs from `PUBLIC, anon, authenticated` and granted exclusively to backend `service_role`.
+  - Application Layer Compatibility & Safe Defaults:
+    - Updated `server/src/supabase.js`, `server/src/cash.js`, `server/src/transactions.js`, and `server/src/positions.js` to accept `profileId` optionally.
+    - When `profileId` is provided, `p_profile_id` is propagated to database RPCs and data isolation is enforced across all 10 dependent tables.
+    - When `profileId` is omitted (legacy single-owner mode), operations seamlessly query without `p_profile_id` or default to the active profile, maintaining 100% backward compatibility with unmigrated environments.
+    - Transaction creation prevents client request body `profileId` spoofing by sourcing `profileId` strictly from authenticated backend options.
+  - Status: Multi-user database migration and data access methods complete locally; migration is NOT applied to production; legacy production profile is NOT claimed; single-owner authentication remains fully active.
 - **Canonical Universe & Remote Baseline**:
   - Canonical Universe: 49 assets (40 crypto, 7 VN stocks/ETFs, 1 gold spot, 1 FX context) across 5 verified providers (89 provider mappings)
   - Authoritative Cash Ledger: 1 legitimate DEPOSIT entry (`20,000,000 VND`)
   - Singleton Investor Profile: 1 record (`cash_available = 20,000,000 VND`, moderate risk tolerance, medium horizon)
 - **Automated Test Suite**:
-  - Full Backend & Client Contract Regression: 801/801 PASS (131 test suites)
+  - Full Backend & Client Contract Regression: 820/820 PASS (136 test suites, including 19/19 in `multi-user-ownership.test.js`)
   - Dependencies: `npm audit` 0 vulnerabilities on both server and client
-  - Client Build: PASS (~184ms, 0 errors, 0 warnings; `dist/sw.js` and `dist/manifest.webmanifest` verified at root)
+  - Client Build: PASS (~222ms, 0 errors, 0 warnings; `dist/sw.js` and `dist/manifest.webmanifest` verified at root)
   - Git Diff & Formatting: `git diff --check` PASS
 - **Production Endpoints**:
   - Frontend: `https://vn-invest-assistant.vn-invest-assistant.workers.dev` (Cloudflare Workers Static Assets + API Proxy + 15m Cron)

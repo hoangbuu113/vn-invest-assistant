@@ -285,6 +285,6 @@ ON CONFLICT (asset_id, provider) DO NOTHING;
 -- Idempotent: Only insert if no profile row exists
 -- ==========================================================
 
-INSERT INTO public.investor_profile (singleton_key, cash_available, risk_tolerance, investment_horizon)
-VALUES (1, 0, 'moderate', 'medium')
-ON CONFLICT (singleton_key) DO NOTHING;
+INSERT INTO public.investor_profile (cash_available, risk_tolerance, investment_horizon)
+SELECT 0, 'moderate', 'medium'
+WHERE NOT EXISTS (SELECT 1 FROM public.investor_profile LIMIT 1);

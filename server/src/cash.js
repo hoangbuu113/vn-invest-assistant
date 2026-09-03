@@ -1,4 +1,4 @@
-import { privateSupabase } from './supabase.js';
+import { getInvestorProfile, privateSupabase } from './supabase.js';
 
 export const CASH_MOVEMENT_TYPES = Object.freeze(['DEPOSIT', 'WITHDRAWAL']);
 
@@ -68,9 +68,28 @@ export function normalizeCashOverview(data) {
   };
 }
 
-export async function getCashOverview(client = privateSupabase) {
-  const db = requireDatabaseClient(client);
-  const { data, error } = await db.rpc('get_cash_overview');
+export async function getCashOverview(client = privateSupabase, options = {}) {
+  let db = privateSupabase;
+  let profileId = null;
+
+  if (typeof client === 'string') {
+    profileId = client;
+    db = options && (typeof options.rpc === 'function' || typeof options.from === 'function')
+      ? options
+      : (options?.client || privateSupabase);
+  } else if (client && (typeof client.rpc === 'function' || typeof client.from === 'function')) {
+    db = client;
+    profileId = options?.profileId || null;
+  } else if (client && typeof client === 'object') {
+    profileId = client.profileId || null;
+    db = options && (typeof options.rpc === 'function' || typeof options.from === 'function')
+      ? options
+      : (options?.client || client.client || privateSupabase);
+  }
+  db = requireDatabaseClient(db);
+
+  const rpcArgs = profileId ? { p_profile_id: profileId } : {};
+  const { data, error } = await db.rpc('get_cash_overview', rpcArgs);
 
   if (error) {
     throw cashDatabaseError(error, 'Failed to fetch cash overview');
@@ -79,9 +98,28 @@ export async function getCashOverview(client = privateSupabase) {
   return normalizeCashOverview(data);
 }
 
-export async function getCashLedger(client = privateSupabase) {
-  const db = requireDatabaseClient(client);
-  const { data, error } = await db.rpc('list_cash_ledger_entries');
+export async function getCashLedger(client = privateSupabase, options = {}) {
+  let db = privateSupabase;
+  let profileId = null;
+
+  if (typeof client === 'string') {
+    profileId = client;
+    db = options && (typeof options.rpc === 'function' || typeof options.from === 'function')
+      ? options
+      : (options?.client || privateSupabase);
+  } else if (client && (typeof client.rpc === 'function' || typeof client.from === 'function')) {
+    db = client;
+    profileId = options?.profileId || null;
+  } else if (client && typeof client === 'object') {
+    profileId = client.profileId || null;
+    db = options && (typeof options.rpc === 'function' || typeof options.from === 'function')
+      ? options
+      : (options?.client || client.client || privateSupabase);
+  }
+  db = requireDatabaseClient(db);
+
+  const rpcArgs = profileId ? { p_profile_id: profileId } : {};
+  const { data, error } = await db.rpc('list_cash_ledger_entries', rpcArgs);
 
   if (error) {
     throw cashDatabaseError(error, 'Failed to fetch cash ledger');
@@ -93,12 +131,18 @@ export async function getCashLedger(client = privateSupabase) {
   return data.map(normalizeCashLedgerEntry);
 }
 
-export async function createCashMovement({ entryType, amount }, client = privateSupabase) {
+export async function createCashMovement({ profileId, entryType, amount }, client = privateSupabase) {
   const db = requireDatabaseClient(client);
-  const { data, error } = await db.rpc('create_cash_movement', {
+
+  const rpcArgs = {
     p_entry_type: entryType,
     p_amount: amount
-  });
+  };
+  if (profileId) {
+    rpcArgs.p_profile_id = profileId;
+  }
+
+  const { data, error } = await db.rpc('create_cash_movement', rpcArgs);
 
   if (error) {
     throw cashDatabaseError(error, 'Failed to create cash movement');
