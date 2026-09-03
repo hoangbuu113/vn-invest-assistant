@@ -16,7 +16,7 @@ export const PRIVATE_API_PREFIXES = Object.freeze([
   '/api/watchlist',
   '/api/alerts',
   '/api/push',
-  '/api/auth/claim-legacy-profile'
+  '/api/auth'
 ]);
 
 export function isPrivateApiPath(path) {
@@ -28,9 +28,6 @@ export function isPrivateApiPath(path) {
     pathname = path.split('?')[0];
   }
   const normalizedPath = pathname.replace(/\/+$/, '') || '/';
-  if (normalizedPath === '/api/auth/legacy-claim-status') {
-    return false;
-  }
   return PRIVATE_API_PREFIXES.some(
     (prefix) => normalizedPath === prefix || normalizedPath.startsWith(`${prefix}/`)
   );

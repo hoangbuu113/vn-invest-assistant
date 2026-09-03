@@ -29,9 +29,6 @@ const OWNER_SESSION_SIGNING_CONTEXT = 'vn-invest-owner-session-v1';
 export function isPrivateApiPath(pathname) {
   if (typeof pathname !== 'string') return false;
   const path = pathname.split('?')[0].replace(/\/+$/, '') || '/';
-  if (path === '/api/auth/legacy-claim-status') {
-    return false;
-  }
   return PRIVATE_API_PREFIXES.some((prefix) => path === prefix || path.startsWith(`${prefix}/`));
 }
 

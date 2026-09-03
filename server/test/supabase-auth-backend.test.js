@@ -536,8 +536,14 @@ describe('Feature 13C — Supabase User Auth Backend & Legacy Profile Claim', ()
   // 4. LEGACY PROFILE CLAIM CONTRACT
   // =========================================================================
   describe('4. Legacy Profile Claim Contract', () => {
-    test('legacy claim status discovery returns available without leaking profile data', async () => {
-      const res = await request(baseUrl, 'GET', '/api/auth/legacy-claim-status');
+    test('legacy claim status discovery requires authentication', async () => {
+      const unauthRes = await request(baseUrl, 'GET', '/api/auth/legacy-claim-status');
+      assert.equal(unauthRes.response.status, 401);
+    });
+
+    test('legacy claim status discovery returns available for authenticated user without leaking profile data', async () => {
+      const jwt = makeMockJwt('user-claim-status-check', 'claimstatus@example.com');
+      const res = await request(baseUrl, 'GET', '/api/auth/legacy-claim-status', { token: jwt });
       assert.equal(res.response.status, 200);
       assert.equal(res.body.status, 'ok');
       assert.equal(res.body.data.legacyClaimAvailable, true);
@@ -612,8 +618,9 @@ describe('Feature 13C — Supabase User Auth Backend & Legacy Profile Claim', ()
       assert.equal(claimRes.response.status, 410);
       assert.equal(claimRes.body.code, 'LEGACY_PROFILE_UNAVAILABLE');
 
-      // Status discovery now reports false
-      const statusRes = await request(baseUrl, 'GET', '/api/auth/legacy-claim-status');
+      // Status discovery now reports false for authenticated user
+      const statusRes = await request(baseUrl, 'GET', '/api/auth/legacy-claim-status', { token: secondClaimantJwt });
+      assert.equal(statusRes.response.status, 200);
       assert.equal(statusRes.body.data.legacyClaimAvailable, false);
     });
   });

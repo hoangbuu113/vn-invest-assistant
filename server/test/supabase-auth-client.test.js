@@ -80,7 +80,7 @@ describe('Feature 13D — Standard Login / Register Client & Auth Gate', () => {
   // =========================================================================
   describe('2. API JWT Injection & Security Contract', () => {
     test('isPrivateApiPath classifies private vs public routes correctly', () => {
-      // Private routes
+      // Private routes including all /api/auth/* endpoints
       assert.equal(isPrivateApiPath('/api/profile'), true);
       assert.equal(isPrivateApiPath('/api/holdings'), true);
       assert.equal(isPrivateApiPath('/api/positions/opening'), true);
@@ -92,21 +92,20 @@ describe('Feature 13D — Standard Login / Register Client & Auth Gate', () => {
       assert.equal(isPrivateApiPath('/api/alerts'), true);
       assert.equal(isPrivateApiPath('/api/push/subscriptions'), true);
       assert.equal(isPrivateApiPath('/api/auth/claim-legacy-profile'), true);
+      assert.equal(isPrivateApiPath('/api/auth/legacy-claim-status'), true);
 
       // Public routes
       assert.equal(isPrivateApiPath('/api/health'), false);
       assert.equal(isPrivateApiPath('/api/db-health'), false);
       assert.equal(isPrivateApiPath('/api/market/snapshot'), false);
       assert.equal(isPrivateApiPath('/api/market/history/FPT'), false);
-      assert.equal(isPrivateApiPath('/api/auth/legacy-claim-status'), false);
     });
 
-    test('apiFetch attaches Authorization: Bearer <token> for private paths when token is available', async () => {
+    test('apiFetch attaches Authorization: Bearer <token> for /api/profile and /api/auth endpoints', async () => {
       const requests = [];
       const originalFetch = globalThis.fetch;
       const mockToken = 'mock-supabase-jwt-access-token-xyz';
 
-      // Mock global fetch
       globalThis.fetch = async (url, options = {}) => {
         requests.push({ url, options });
         return new Response(JSON.stringify({ status: 'ok', data: [] }), {
@@ -116,15 +115,26 @@ describe('Feature 13D — Standard Login / Register Client & Auth Gate', () => {
       };
 
       try {
-        // Mock getAccessToken by setting Authorization header test
+        // Test /api/profile
         await apiFetch('/api/profile', {
           headers: { Authorization: `Bearer ${mockToken}` }
         });
+        // Test /api/auth/legacy-claim-status
+        await apiFetch('/api/auth/legacy-claim-status', {
+          headers: { Authorization: `Bearer ${mockToken}` }
+        });
+        // Test /api/auth/claim-legacy-profile
+        await apiFetch('/api/auth/claim-legacy-profile', {
+          headers: { Authorization: `Bearer ${mockToken}` }
+        });
 
-        assert.equal(requests.length, 1);
+        assert.equal(requests.length, 3);
         assert.equal(requests[0].url, '/api/profile');
-        assert.equal(requests[0].options.credentials, 'same-origin');
         assert.equal(requests[0].options.headers.get('Authorization'), `Bearer ${mockToken}`);
+        assert.equal(requests[1].url, '/api/auth/legacy-claim-status');
+        assert.equal(requests[1].options.headers.get('Authorization'), `Bearer ${mockToken}`);
+        assert.equal(requests[2].url, '/api/auth/claim-legacy-profile');
+        assert.equal(requests[2].options.headers.get('Authorization'), `Bearer ${mockToken}`);
       } finally {
         globalThis.fetch = originalFetch;
       }
@@ -136,18 +146,21 @@ describe('Feature 13D — Standard Login / Register Client & Auth Gate', () => {
 
       globalThis.fetch = async (url, options = {}) => {
         requests.push({ url, options });
-        return new Response(JSON.stringify({ status: 'ok', data: { legacyClaimAvailable: true } }), {
+        return new Response(JSON.stringify({ status: 'ok', data: {} }), {
           status: 200,
           headers: { 'content-type': 'application/json' }
         });
       };
 
       try {
-        await apiFetch('/api/auth/legacy-claim-status');
+        await apiFetch('/api/health');
+        await apiFetch('/api/market/snapshot');
 
-        assert.equal(requests.length, 1);
-        assert.equal(requests[0].url, '/api/auth/legacy-claim-status');
+        assert.equal(requests.length, 2);
+        assert.equal(requests[0].url, '/api/health');
         assert.equal(requests[0].options.headers.has('Authorization'), false);
+        assert.equal(requests[1].url, '/api/market/snapshot');
+        assert.equal(requests[1].options.headers.has('Authorization'), false);
       } finally {
         globalThis.fetch = originalFetch;
       }

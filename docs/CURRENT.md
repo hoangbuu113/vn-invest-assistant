@@ -78,7 +78,7 @@
   - Authoritative Cash Ledger: 1 legitimate DEPOSIT entry (`20,000,000 VND`)
   - Singleton Investor Profile: 1 record (`cash_available = 20,000,000 VND`, moderate risk tolerance, medium horizon)
 - **Automated Test Suite**:
-  - Full Backend & Client Contract Regression: 863/863 PASS (149 test suites, including 20/20 in `supabase-auth-client.test.js`, 23/23 in `supabase-auth-backend.test.js`, 19/19 in `multi-user-ownership.test.js`, 19/19 in `single-owner-security.test.js`)
+  - Full Backend & Client Contract Regression: 864/864 PASS (149 test suites, including 20/20 in `supabase-auth-client.test.js`, 24/24 in `supabase-auth-backend.test.js`, 19/19 in `multi-user-ownership.test.js`, 19/19 in `single-owner-security.test.js`)
   - Dependencies: `npm audit` 0 vulnerabilities on both server and client
   - Client Build: PASS (~222ms, 0 errors, 0 warnings; `dist/sw.js` and `dist/manifest.webmanifest` verified at root)
   - Git Diff & Formatting: `git diff --check` PASS
