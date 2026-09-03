@@ -1,8 +1,9 @@
+import { getAccessToken } from './supabase.js';
+
 export const API_BASE_URL = '';
-export const OWNER_SESSION_INVALID_EVENT = 'vn-invest-owner-session-invalid';
+export const AUTH_INVALID_EVENT = 'vn-invest-auth-invalid';
 
 export const PRIVATE_API_PREFIXES = Object.freeze([
-  '/api/owner',
   '/api/profile',
   '/api/holdings',
   '/api/positions',
@@ -14,7 +15,8 @@ export const PRIVATE_API_PREFIXES = Object.freeze([
   '/api/portfolio',
   '/api/watchlist',
   '/api/alerts',
-  '/api/push'
+  '/api/push',
+  '/api/auth/claim-legacy-profile'
 ]);
 
 export function isPrivateApiPath(path) {
@@ -26,6 +28,9 @@ export function isPrivateApiPath(path) {
     pathname = path.split('?')[0];
   }
   const normalizedPath = pathname.replace(/\/+$/, '') || '/';
+  if (normalizedPath === '/api/auth/legacy-claim-status') {
+    return false;
+  }
   return PRIVATE_API_PREFIXES.some(
     (prefix) => normalizedPath === prefix || normalizedPath.startsWith(`${prefix}/`)
   );
@@ -35,14 +40,20 @@ export function apiUrl(path) {
   return path;
 }
 
-function notifyInvalidOwnerSession() {
+function notifyAuthInvalid() {
   if (typeof window === 'undefined' || typeof window.dispatchEvent !== 'function' || typeof Event !== 'function') return;
-  window.dispatchEvent(new Event(OWNER_SESSION_INVALID_EVENT));
+  window.dispatchEvent(new Event(AUTH_INVALID_EVENT));
 }
 
 export async function apiFetch(path, options = {}) {
   const headers = new Headers(options.headers || {});
-  headers.delete('Authorization');
+
+  if (isPrivateApiPath(path)) {
+    const token = await getAccessToken();
+    if (token && !headers.has('Authorization')) {
+      headers.set('Authorization', `Bearer ${token}`);
+    }
+  }
 
   const response = await fetch(apiUrl(path), {
     ...options,
@@ -50,8 +61,11 @@ export async function apiFetch(path, options = {}) {
     headers
   });
 
-  if (isPrivateApiPath(path) && (response.status === 401 || response.status === 403)) {
-    notifyInvalidOwnerSession();
+  // 401 AUTH_INVALID triggers session cleanup and return to login
+  if (isPrivateApiPath(path) && response.status === 401) {
+    notifyAuthInvalid();
   }
+  // Note: 403 (PROFILE_REQUIRED) is specifically NOT treated as logout!
+
   return response;
 }

@@ -61,12 +61,24 @@
     - `GET /api/auth/legacy-claim-status`: Capability discovery returning `legacyClaimAvailable: boolean` without leaking financial numbers or profile details.
     - Scheduler authentication via `ALERT_SCHEDULER_TOKEN` remains independent and unchanged.
   - Status: 13C Backend local complete; migration UNAPPLIED in production; no legacy claim executed; production legacy owner auth still active.
+- **Feature 13D Standard Login / Register Client & Auth Gate (LOCAL ONLY — NOT PRODUCTION-ACTIVE)**:
+  - Replaced single-owner `OwnerGate` with standard Supabase Auth client (`@supabase/supabase-js`):
+    - `client/src/utils/supabase.js`: Canonical client module with browser session persistence, auto refresh, URL session detection, and `getAccessToken()` helper.
+    - `client/.env.example`: Created template with public placeholders (`VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`) and zero secret keys.
+    - `client/src/utils/api.js`: `apiFetch` dynamically injects `Authorization: Bearer <token>` on private routes; dispatches `AUTH_INVALID_EVENT` on 401; specifically treats 403 `PROFILE_REQUIRED` without logging out.
+    - `client/src/components/AuthGate.jsx`: Multi-state auth orchestrator (`LOADING`, `UNAUTHENTICATED`, `AUTHENTICATED_NEEDS_PROFILE`, `AUTHENTICATED_READY`).
+    - `client/src/components/LoginView.jsx`: Standard Vietnamese login form (Email, Mật khẩu, action "Đăng nhập") with safe error mapping (`client/src/utils/authErrors.js`).
+    - `client/src/components/RegisterView.jsx`: Registration with email/password validation (min 8 chars, matching confirmation), email confirmation notice ("Đã tạo tài khoản. Hãy kiểm tra email để xác nhận trước khi đăng nhập."), and restricted signup handling.
+    - `client/src/components/LegacyClaimModal.jsx`: One-time legacy profile claim modal ("Khôi phục dữ liệu hiện tại", requests "Khóa truy cập cũ", zero storage persistence).
+    - `OwnerGate.jsx` permanently retired and deleted; zero active references to `OwnerGate`, `OWNER_ACCESS_TOKEN`, `OWNER_SESSION_INVALID_EVENT`, `vn_invest_owner_session`, "Xác thực thiết bị", or "Khóa truy cập chủ sở hữu" in client source.
+    - Header logout button updated to standard "Đăng xuất" with `auth-logout-button` styling.
+  - Status: 13D Frontend local complete; OwnerGate retired locally; production still uses old owner auth until 13E; migration UNAPPLIED; no production user created; no legacy data claimed.
 - **Canonical Universe & Remote Baseline**:
   - Canonical Universe: 49 assets (40 crypto, 7 VN stocks/ETFs, 1 gold spot, 1 FX context) across 5 verified providers (89 provider mappings)
   - Authoritative Cash Ledger: 1 legitimate DEPOSIT entry (`20,000,000 VND`)
   - Singleton Investor Profile: 1 record (`cash_available = 20,000,000 VND`, moderate risk tolerance, medium horizon)
 - **Automated Test Suite**:
-  - Full Backend & Client Contract Regression: 843/843 PASS (142 test suites, including 23/23 in `supabase-auth-backend.test.js`, 19/19 in `multi-user-ownership.test.js`, 19/19 in `single-owner-security.test.js`)
+  - Full Backend & Client Contract Regression: 863/863 PASS (149 test suites, including 20/20 in `supabase-auth-client.test.js`, 23/23 in `supabase-auth-backend.test.js`, 19/19 in `multi-user-ownership.test.js`, 19/19 in `single-owner-security.test.js`)
   - Dependencies: `npm audit` 0 vulnerabilities on both server and client
   - Client Build: PASS (~222ms, 0 errors, 0 warnings; `dist/sw.js` and `dist/manifest.webmanifest` verified at root)
   - Git Diff & Formatting: `git diff --check` PASS

@@ -1411,11 +1411,11 @@ function App({ onLogout }) {
           />
           <button
             type="button"
-            className="owner-lock-button"
+            className="auth-logout-button"
             onClick={onLogout}
-            aria-label="Đăng xuất thiết bị đã xác thực"
+            aria-label="Đăng xuất"
           >
-            Đăng xuất thiết bị
+            Đăng xuất
           </button>
         </div>
       </header>

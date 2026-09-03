@@ -97,7 +97,7 @@ export async function getExistingPushSubscription() {
 
 /**
  * Feature 12D: Fetches public VAPID configuration from backend.
- * Protected owner endpoint; returns { supported, configured, vapidPublicKey }.
+ * Protected endpoint; returns { supported, configured, vapidPublicKey }.
  */
 export async function getPushConfig() {
   const res = await apiFetch('/api/push/config');

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { access, readFile } from 'node:fs/promises';
 import http from 'node:http';
 import { after, before, describe, test } from 'node:test';
 import { createApp } from '../index.js';
@@ -440,7 +440,7 @@ describe('V1.1 trusted owner session cryptographic contract', () => {
 });
 
 describe('V1.1 trusted owner session frontend boundary', () => {
-  test('browser requests use same-origin cookies and never inject a persisted bearer credential', async () => {
+  test('browser requests use same-origin credentials and dispatch AUTH_INVALID_EVENT on 401', async () => {
     const dispatchedEvents = [];
     globalThis.window = {
       dispatchEvent: (event) => dispatchedEvents.push(event.type)
@@ -461,26 +461,22 @@ describe('V1.1 trusted owner session frontend boundary', () => {
       await api.apiFetch('/api/market/FPT');
       assert.equal(requests[0].url, '/api/profile');
       assert.equal(requests[0].options.credentials, 'same-origin');
-      assert.equal(requests[0].options.headers.has('Authorization'), false);
-      assert.equal(requests[1].options.headers.has('Authorization'), false);
-      assert.deepEqual(dispatchedEvents, [api.OWNER_SESSION_INVALID_EVENT]);
+      assert.deepEqual(dispatchedEvents, [api.AUTH_INVALID_EVENT]);
     } finally {
       globalThis.fetch = originalFetch;
       delete globalThis.window;
     }
   });
 
-  test('unlock UI exchanges the credential without browser storage and supports server logout', async () => {
-    const gate = await readFile(new URL('../../client/src/components/OwnerGate.jsx', import.meta.url), 'utf8');
+  test('legacy OwnerGate UI is completely retired from client repository', async () => {
+    const ownerGateExists = await access(
+      new URL('../../client/src/components/OwnerGate.jsx', import.meta.url)
+    ).then(() => true).catch(() => false);
+    assert.equal(ownerGateExists, false, 'OwnerGate.jsx must be deleted and retired');
+
     const api = await readFile(new URL('../../client/src/utils/api.js', import.meta.url), 'utf8');
-    assert.match(gate, /type="password"/);
-    assert.match(gate, /method: 'POST'/);
-    assert.match(gate, /method: 'DELETE'/);
-    assert.match(gate, /Đang kiểm tra phiên bảo mật/);
-    assert.match(api, /credentials: options\.credentials \|\| 'same-origin'/);
-    assert.doesNotMatch(`${gate}\n${api}`, /sessionStorage/);
-    assert.doesNotMatch(`${gate}\n${api}`, /localStorage/);
-    assert.doesNotMatch(api, /OWNER_ACCESS_TOKEN|ownerAccessToken|Bearer/);
+    assert.doesNotMatch(api, /OWNER_SESSION_INVALID_EVENT/);
+    assert.doesNotMatch(api, /OWNER_ACCESS_TOKEN/);
   });
 
   test('Cloudflare worker proxies API requests and preserves opaque cookies without becoming an open proxy', async () => {

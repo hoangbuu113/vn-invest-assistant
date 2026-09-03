@@ -18,6 +18,7 @@ export default defineConfig({
         manualChunks(id) {
           if (id.includes('/node_modules/three/')) return 'three';
           if (id.includes('/node_modules/framer-motion/')) return 'framer';
+          if (id.includes('/node_modules/@supabase/')) return 'supabase';
           return undefined;
         }
       }

@@ -1,13 +1,13 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App.jsx';
-import { OwnerGate } from './components/OwnerGate.jsx';
+import { AuthGate } from './components/AuthGate.jsx';
 import './index.css';
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
-    <OwnerGate>
-      {({ logout }) => <App onLogout={logout} />}
-    </OwnerGate>
+    <AuthGate>
+      {({ logout, user, profile }) => <App onLogout={logout} user={user} profile={profile} />}
+    </AuthGate>
   </React.StrictMode>
 );
