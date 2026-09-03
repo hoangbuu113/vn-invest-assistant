@@ -4,20 +4,17 @@ import http from 'node:http';
 import { after, before, describe, test } from 'node:test';
 import { createApp } from '../index.js';
 import {
-  createOwnerSessionManager,
   isPrivateApiPath,
-  MIN_OWNER_ACCESS_TOKEN_LENGTH,
-  OWNER_SESSION_COOKIE_NAME,
   ownerTokensMatch,
   PRIVATE_API_PREFIXES,
   readBearerToken,
-  readCookie,
-  serializeOwnerSessionCookie
+  timingSafeTokenMatch
 } from '../src/auth.js';
 import { APP_API_BASE_URL, proxyApiRequest } from '../../client/server/index.js';
 import { resolvePrivilegedSupabaseKey } from '../src/supabase.js';
 
-const OWNER_TOKEN = 'test-owner-token-with-high-entropy-placeholder';
+const VALID_USER_JWT = 'header.payload.signature_valid_jwt';
+const RETIRED_OWNER_TOKEN = 'test-owner-token-with-high-entropy-placeholder';
 
 async function request(baseUrl, method, path, { token, cookie, body } = {}) {
   const headers = {};
@@ -35,21 +32,45 @@ async function request(baseUrl, method, path, { token, cookie, body } = {}) {
   };
 }
 
-function cookiePair(response) {
-  return response.headers.get('set-cookie')?.split(';', 1)[0] || null;
-}
-
-describe('Feature 30B1 — single-owner HTTP boundary', () => {
+describe('Public Multi-User HTTP & Security Boundary', () => {
   let server;
   let baseUrl;
   const calls = [];
 
+  const mockSupabaseAuthClient = {
+    auth: {
+      getUser: async (token) => {
+        if (token === VALID_USER_JWT) {
+          return {
+            data: { user: { id: 'user-1', email: 'user1@example.com' } },
+            error: null
+          };
+        }
+        return { data: { user: null }, error: new Error('Invalid token') };
+      }
+    }
+  };
+
   before(async () => {
     const app = createApp({
-      ownerAccessToken: OWNER_TOKEN,
-      ownerSessionSecure: false,
+      supabaseAuthClient: mockSupabaseAuthClient,
+      getProfileByUserIdFn: async (userId) => ({
+        id: `profile-${userId}`,
+        user_id: userId,
+        cash_available: 100,
+        risk_tolerance: 'moderate',
+        investment_horizon: 'medium'
+      }),
+      getProfileByIdFn: async (id) => ({
+        id,
+        user_id: 'user-1',
+        cash_available: 100,
+        risk_tolerance: 'moderate',
+        investment_horizon: 'medium'
+      }),
       getInvestorProfileFn: async () => ({
-        id: 'profile-1',
+        id: 'profile-user-1',
+        user_id: 'user-1',
         cash_available: 100,
         risk_tolerance: 'moderate',
         investment_horizon: 'medium'
@@ -100,13 +121,11 @@ describe('Feature 30B1 — single-owner HTTP boundary', () => {
     assert.equal(readBearerToken(undefined), null);
     assert.equal(readBearerToken('Basic value'), null);
     assert.equal(readBearerToken('Bearer value with spaces'), null);
-    assert.equal(readBearerToken('Bearer owner-token'), 'owner-token');
+    assert.equal(readBearerToken('Bearer some-token'), 'some-token');
+    assert.equal(timingSafeTokenMatch('same', 'same'), true);
+    assert.equal(timingSafeTokenMatch('wrong', 'same'), false);
+    assert.equal(timingSafeTokenMatch('', 'same'), false);
     assert.equal(ownerTokensMatch('same', 'same'), true);
-    assert.equal(ownerTokensMatch('wrong', 'same'), false);
-    assert.equal(ownerTokensMatch('', 'same'), false);
-    assert.equal(OWNER_TOKEN.length >= MIN_OWNER_ACCESS_TOKEN_LENGTH, true);
-    assert.equal(readCookie(`other=value; ${OWNER_SESSION_COOKIE_NAME}=session.value`), 'session.value');
-    assert.equal(readCookie(`${OWNER_SESSION_COOKIE_NAME}=`), null);
   });
 
   test('route classifier covers the locked private surface without absorbing public routes', () => {
@@ -131,11 +150,8 @@ describe('Feature 30B1 — single-owner HTTP boundary', () => {
     }
   });
 
-  test('every actual personal route denies a missing owner token before validation or service access', async () => {
+  test('every actual personal route denies missing credentials with 401 AUTH_REQUIRED', async () => {
     const privateRoutes = [
-      ['GET', '/api/owner/session'],
-      ['POST', '/api/owner/session'],
-      ['DELETE', '/api/owner/session'],
       ['GET', '/api/profile'],
       ['PUT', '/api/profile'],
       ['GET', '/api/holdings'],
@@ -171,80 +187,35 @@ describe('Feature 30B1 — single-owner HTTP boundary', () => {
     for (const [method, path] of privateRoutes) {
       const { response, body } = await request(baseUrl, method, path);
       assert.equal(response.status, 401, `${method} ${path}`);
-      assert.equal(body.code, 'OWNER_AUTH_REQUIRED', `${method} ${path}`);
+      assert.equal(body.code, 'AUTH_REQUIRED', `${method} ${path}`);
     }
     assert.equal(calls.length, 0);
   });
 
-  test('wrong token is denied generically and never appears in the response', async () => {
-    const wrongToken = 'definitely-not-the-owner-token';
-    const { response, body } = await request(baseUrl, 'GET', '/api/profile', { token: wrongToken });
-    assert.equal(response.status, 403);
-    assert.equal(body.code, 'OWNER_AUTH_INVALID');
-    assert.doesNotMatch(JSON.stringify(body), new RegExp(wrongToken));
-    assert.doesNotMatch(JSON.stringify(body), new RegExp(OWNER_TOKEN));
+  test('retired legacy owner credentials return 401 AUTH_INVALID', async () => {
+    const { response, body } = await request(baseUrl, 'GET', '/api/profile', { token: RETIRED_OWNER_TOKEN });
+    assert.equal(response.status, 401);
+    assert.equal(body.code, 'AUTH_INVALID');
   });
 
-  test('first authorization issues a non-secret HttpOnly session that restores and logs out', async () => {
-    const login = await request(baseUrl, 'POST', '/api/owner/session', {
-      body: { ownerCredential: OWNER_TOKEN }
-    });
-    assert.equal(login.response.status, 200);
-    assert.equal(login.body.data.unlocked, true);
-    assert.match(login.body.data.expiresAt, /^\d{4}-\d{2}-\d{2}T/);
+  test('retired owner session endpoints return 404', async () => {
+    const postRes = await request(baseUrl, 'POST', '/api/owner/session', { body: { ownerCredential: RETIRED_OWNER_TOKEN } });
+    assert.equal(postRes.response.status, 404);
 
-    const setCookie = login.response.headers.get('set-cookie');
-    const persistedCookie = cookiePair(login.response);
-    assert.match(setCookie, /HttpOnly/i);
-    assert.match(setCookie, /SameSite=Lax/i);
-    assert.match(setCookie, /Max-Age=2592000/i);
-    assert.doesNotMatch(setCookie, /; Secure/i);
-    assert.doesNotMatch(setCookie, new RegExp(OWNER_TOKEN));
-    assert.match(persistedCookie, new RegExp(`^${OWNER_SESSION_COOKIE_NAME}=`));
+    const getRes = await request(baseUrl, 'GET', '/api/owner/session');
+    assert.equal(getRes.response.status, 404);
 
-    const restored = await request(baseUrl, 'GET', '/api/owner/session', { cookie: persistedCookie });
-    assert.equal(restored.response.status, 200);
-    assert.equal(restored.body.data.unlocked, true);
-    assert.equal(restored.body.data.expiresAt, login.body.data.expiresAt);
-
-    const privateRead = await request(baseUrl, 'GET', '/api/profile', { cookie: persistedCookie });
-    assert.equal(privateRead.response.status, 200);
-    assert.equal(privateRead.body.data.id, 'profile-1');
-    assert.match(privateRead.response.headers.get('cache-control'), /private, no-store/i);
-
-    const logout = await request(baseUrl, 'DELETE', '/api/owner/session', { cookie: persistedCookie });
-    assert.equal(logout.response.status, 200);
-    assert.equal(logout.body.data.unlocked, false);
-    assert.match(logout.response.headers.get('set-cookie'), /Max-Age=0/i);
-
-    const replayAfterLogout = await request(baseUrl, 'GET', '/api/profile', { cookie: persistedCookie });
-    assert.equal(replayAfterLogout.response.status, 401);
-    assert.equal(replayAfterLogout.body.code, 'OWNER_AUTH_REQUIRED');
+    const deleteRes = await request(baseUrl, 'DELETE', '/api/owner/session');
+    assert.equal(deleteRes.response.status, 404);
   });
 
-  test('wrong first-use credential is rejected without issuing a device session', async () => {
-    const wrongCredential = 'wrong-owner-credential-with-enough-length';
-    const result = await request(baseUrl, 'POST', '/api/owner/session', {
-      body: { ownerCredential: wrongCredential }
-    });
-    assert.equal(result.response.status, 403);
-    assert.equal(result.body.code, 'OWNER_AUTH_INVALID');
-    assert.equal(result.response.headers.get('set-cookie'), null);
-    assert.doesNotMatch(JSON.stringify(result.body), new RegExp(wrongCredential));
-    assert.doesNotMatch(JSON.stringify(result.body), new RegExp(OWNER_TOKEN));
-  });
-
-  test('correct token permits private reads and preserves financial mutation inputs', async () => {
-    const session = await request(baseUrl, 'GET', '/api/owner/session', { token: OWNER_TOKEN });
-    assert.equal(session.response.status, 200);
-    assert.equal(session.body.data.unlocked, true);
-
-    const profile = await request(baseUrl, 'GET', '/api/profile', { token: OWNER_TOKEN });
+  test('valid Supabase JWT permits private reads and preserves mutation inputs', async () => {
+    const profile = await request(baseUrl, 'GET', '/api/profile', { token: VALID_USER_JWT });
     assert.equal(profile.response.status, 200);
-    assert.equal(profile.body.data.id, 'profile-1');
+    assert.equal(profile.body.data.id, 'profile-user-1');
 
     const transaction = await request(baseUrl, 'POST', '/api/transactions', {
-      token: OWNER_TOKEN,
+      token: VALID_USER_JWT,
       body: { symbol: 'FPT', transactionType: 'BUY', quantity: 2.5, price: 123.45 }
     });
     assert.equal(transaction.response.status, 201);
@@ -258,18 +229,11 @@ describe('Feature 30B1 — single-owner HTTP boundary', () => {
     }]);
 
     const cash = await request(baseUrl, 'POST', '/api/cash/deposit', {
-      token: OWNER_TOKEN,
+      token: VALID_USER_JWT,
       body: { amount: 10.25 }
     });
     assert.equal(cash.response.status, 201);
     assert.deepEqual(calls[1], ['cash', { entryType: 'DEPOSIT', amount: 10.25 }]);
-
-    const opening = await request(baseUrl, 'POST', '/api/positions/opening', {
-      token: OWNER_TOKEN,
-      body: { assetId: 'asset-1', quantity: 4.5, averageCost: 20.25 }
-    });
-    assert.equal(opening.response.status, 201);
-    assert.deepEqual(calls[2], ['opening', { assetId: 'asset-1', quantity: 4.5, averageCost: 20.25 }]);
   });
 
   test('public market and information routes remain reachable without credentials', async () => {
@@ -293,7 +257,7 @@ describe('Feature 30B1 — single-owner HTTP boundary', () => {
   });
 });
 
-describe('Feature 30B1 — database permission and client separation contract', () => {
+describe('Database permission and client separation contract', () => {
   test('modern Supabase secret keys take precedence while legacy keys remain a fail-closed fallback', () => {
     const modernKey = 'sb_secret_modern-server-key';
     const legacyKey = 'legacy-service-role-key';
@@ -369,78 +333,8 @@ describe('Feature 30B1 — database permission and client separation contract', 
   });
 });
 
-describe('V1.1 trusted owner session cryptographic contract', () => {
-  test('sessions expire deterministically and owner-key rotation invalidates old credentials', () => {
-    let clock = Date.parse('2026-09-02T00:00:00.000Z');
-    const manager = createOwnerSessionManager({
-      ownerAccessToken: OWNER_TOKEN,
-      ttlMs: 60_000,
-      now: () => clock,
-      randomId: () => 'deterministic-session-id'
-    });
-    const issued = manager.issue();
-    assert.ok(issued.token);
-    assert.doesNotMatch(issued.token, new RegExp(OWNER_TOKEN));
-    assert.equal(manager.verify(issued.token)?.id, 'deterministic-session-id');
-
-    const rotatedManager = createOwnerSessionManager({
-      ownerAccessToken: `${OWNER_TOKEN}-rotated`,
-      ttlMs: 60_000,
-      now: () => clock
-    });
-    assert.equal(rotatedManager.verify(issued.token), null);
-
-    clock += 60_001;
-    assert.equal(manager.verify(issued.token), null);
-  });
-
-  test('tampering and explicit logout revocation invalidate a session', () => {
-    const manager = createOwnerSessionManager({
-      ownerAccessToken: OWNER_TOKEN,
-      randomId: () => 'revocable-session-id'
-    });
-    const issued = manager.issue();
-    assert.equal(manager.verify(`${issued.token}tampered`), null);
-    assert.equal(manager.revoke(issued.token), true);
-    assert.equal(manager.verify(issued.token), null);
-  });
-
-  test('independent OWNER_SESSION_SECRET signs session and rotating secret revokes sessions', () => {
-    const sessionSecretA = 'session-signing-secret-alpha-12345678901234567890';
-    const sessionSecretB = 'session-signing-secret-bravo-12345678901234567890';
-
-    const managerA = createOwnerSessionManager({
-      ownerAccessToken: OWNER_TOKEN,
-      ownerSessionSecret: sessionSecretA,
-      randomId: () => 'independent-secret-session'
-    });
-    const issued = managerA.issue();
-    assert.ok(issued.token);
-    assert.equal(managerA.verify(issued.token)?.id, 'independent-secret-session');
-    assert.equal(managerA.authenticateOwnerCredential(OWNER_TOKEN), true);
-
-    const managerB = createOwnerSessionManager({
-      ownerAccessToken: OWNER_TOKEN,
-      ownerSessionSecret: sessionSecretB
-    });
-    // Secret rotation invalidates token signed with Secret A even though ownerAccessToken is identical
-    assert.equal(managerB.verify(issued.token), null);
-    // But credential authentication continues to accept ownerAccessToken
-    assert.equal(managerB.authenticateOwnerCredential(OWNER_TOKEN), true);
-  });
-
-  test('production session cookies are first-party, HttpOnly, SameSite, and Secure', () => {
-    const cookie = serializeOwnerSessionCookie('opaque-session-value');
-    assert.match(cookie, /^vn_invest_owner_session=opaque-session-value;/);
-    assert.match(cookie, /HttpOnly/);
-    assert.match(cookie, /SameSite=Lax/);
-    assert.match(cookie, /Secure/);
-    assert.doesNotMatch(cookie, /Domain=/i);
-  });
-});
-
-describe('V1.1 trusted owner session frontend boundary', () => {
-  test('browser requests use same-origin credentials and dispatch AUTH_INVALID_EVENT on 401', async () => {
+describe('Public auth frontend boundary & retired UI', () => {
+  test('browser requests attach JWT and dispatch AUTH_INVALID_EVENT on 401', async () => {
     const dispatchedEvents = [];
     globalThis.window = {
       dispatchEvent: (event) => dispatchedEvents.push(event.type)
@@ -460,7 +354,6 @@ describe('V1.1 trusted owner session frontend boundary', () => {
       await api.apiFetch('/api/profile');
       await api.apiFetch('/api/market/FPT');
       assert.equal(requests[0].url, '/api/profile');
-      assert.equal(requests[0].options.credentials, 'same-origin');
       assert.deepEqual(dispatchedEvents, [api.AUTH_INVALID_EVENT]);
     } finally {
       globalThis.fetch = originalFetch;
@@ -468,32 +361,37 @@ describe('V1.1 trusted owner session frontend boundary', () => {
     }
   });
 
-  test('legacy OwnerGate UI is completely retired from client repository', async () => {
+  test('legacy OwnerGate and LegacyClaimModal UI are completely retired', async () => {
     const ownerGateExists = await access(
       new URL('../../client/src/components/OwnerGate.jsx', import.meta.url)
     ).then(() => true).catch(() => false);
     assert.equal(ownerGateExists, false, 'OwnerGate.jsx must be deleted and retired');
+
+    const legacyClaimExists = await access(
+      new URL('../../client/src/components/LegacyClaimModal.jsx', import.meta.url)
+    ).then(() => true).catch(() => false);
+    assert.equal(legacyClaimExists, false, 'LegacyClaimModal.jsx must be deleted and retired');
 
     const api = await readFile(new URL('../../client/src/utils/api.js', import.meta.url), 'utf8');
     assert.doesNotMatch(api, /OWNER_SESSION_INVALID_EVENT/);
     assert.doesNotMatch(api, /OWNER_ACCESS_TOKEN/);
   });
 
-  test('Cloudflare worker proxies API requests and preserves opaque cookies without becoming an open proxy', async () => {
+  test('Cloudflare worker proxies API requests correctly', async () => {
     let proxiedRequest;
     const response = await proxyApiRequest(new Request(
       'https://vn-invest-assistant.vn-invest-assistant.workers.dev/api/profile?view=compact',
-      { headers: { Cookie: `${OWNER_SESSION_COOKIE_NAME}=opaque-session` } }
+      { headers: { Authorization: `Bearer ${VALID_USER_JWT}` } }
     ), async (request) => {
       proxiedRequest = request;
       return new Response('{"status":"ok"}', {
         status: 200,
-        headers: { 'Set-Cookie': `${OWNER_SESSION_COOKIE_NAME}=rotated; HttpOnly; Secure` }
+        headers: { 'Content-Type': 'application/json' }
       });
     });
 
     assert.equal(proxiedRequest.url, `${APP_API_BASE_URL}/api/profile?view=compact`);
-    assert.equal(proxiedRequest.headers.get('cookie'), `${OWNER_SESSION_COOKIE_NAME}=opaque-session`);
-    assert.match(response.headers.get('set-cookie'), /HttpOnly/);
+    assert.equal(proxiedRequest.headers.get('authorization'), `Bearer ${VALID_USER_JWT}`);
+    assert.equal(response.status, 200);
   });
 });

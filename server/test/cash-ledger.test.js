@@ -19,17 +19,7 @@ const PROFILE_ID = '11111111-1111-4111-8111-111111111111';
 const FOREIGN_PROFILE_ID = '22222222-2222-4222-8222-222222222222';
 const ASSET_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const ACTIVATED_AT = '2026-08-28T12:00:00.000Z';
-const OWNER_ACCESS_TOKEN = 'test-owner-token-with-high-entropy-placeholder';
-
-function ownerFetch(url, options = {}) {
-  return fetch(url, {
-    ...options,
-    headers: {
-      ...(options.headers || {}),
-      Authorization: `Bearer ${OWNER_ACCESS_TOKEN}`
-    }
-  });
-}
+import { ownerFetch, TEST_OWNER_ACCESS_TOKEN as OWNER_ACCESS_TOKEN } from './helpers/owner-auth.js';
 
 function cloneRows(rows) {
   return rows.map(row => ({
@@ -586,7 +576,7 @@ describe('Feature 15 — Production Cash Routes', () => {
     const mutationCalls = fake.state.rpcCalls.filter(call => (
       call.name === 'create_cash_movement' || call.name === 'create_portfolio_transaction'
     ));
-    assert.equal(mutationCalls.every(call => !Object.hasOwn(call.args, 'p_profile_id')), true);
+    assert.equal(mutationCalls.every(call => typeof call.args.p_profile_id === 'string'), true);
   });
 
   test('M. deposit/withdraw reject numeric strings and other non-number JSON before RPC', async () => {

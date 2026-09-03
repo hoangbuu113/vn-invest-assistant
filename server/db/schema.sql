@@ -6504,3 +6504,58 @@ GRANT EXECUTE ON FUNCTION public.cancel_opening_position(UUID, TEXT) TO service_
 GRANT EXECUTE ON FUNCTION public.claim_legacy_profile(UUID) TO service_role;
 
 COMMIT;
+
+-- ============================================================================
+-- Schema Migration: 20260904010000_finalize_public_multi_user_auth.sql
+-- Purpose: Final cutover to public multi-user authentication.
+-- Purges disposable unowned legacy test profile and private child data,
+-- drops legacy claim database function and partial index, and enforces
+-- NOT NULL on investor_profile.user_id.
+-- ============================================================================
+
+BEGIN;
+
+DELETE FROM public.alert_notification_deliveries
+WHERE profile_id IN (SELECT id FROM public.investor_profile WHERE user_id IS NULL);
+
+DELETE FROM public.push_subscriptions
+WHERE profile_id IN (SELECT id FROM public.investor_profile WHERE user_id IS NULL);
+
+DELETE FROM public.price_alerts
+WHERE profile_id IN (SELECT id FROM public.investor_profile WHERE user_id IS NULL);
+
+DELETE FROM public.watchlist_items
+WHERE profile_id IN (SELECT id FROM public.investor_profile WHERE user_id IS NULL);
+
+DELETE FROM public.cash_ledger_entries
+WHERE profile_id IN (SELECT id FROM public.investor_profile WHERE user_id IS NULL);
+
+DELETE FROM public.cash_ledger_activation
+WHERE profile_id IN (SELECT id FROM public.investor_profile WHERE user_id IS NULL);
+
+DELETE FROM public.holdings
+WHERE profile_id IN (SELECT id FROM public.investor_profile WHERE user_id IS NULL);
+
+DELETE FROM public.position_opening_baselines
+WHERE profile_id IN (SELECT id FROM public.investor_profile WHERE user_id IS NULL);
+
+DELETE FROM public.position_ledger_activation
+WHERE profile_id IN (SELECT id FROM public.investor_profile WHERE user_id IS NULL);
+
+DELETE FROM public.portfolio_transactions
+WHERE profile_id IN (SELECT id FROM public.investor_profile WHERE user_id IS NULL);
+
+DELETE FROM public.investor_profile
+WHERE user_id IS NULL;
+
+DROP FUNCTION IF EXISTS public.claim_legacy_profile(UUID);
+
+DROP INDEX IF EXISTS public.uq_investor_profile_legacy_unowned;
+
+ALTER TABLE public.investor_profile
+    ALTER COLUMN user_id SET NOT NULL;
+
+COMMENT ON COLUMN public.investor_profile.user_id IS
+    'Authoritative 1:1 link to Supabase auth.users(id). Mandatory for all profiles.';
+
+COMMIT;

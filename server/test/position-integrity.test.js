@@ -13,17 +13,7 @@ const FPT_ID = '22222222-2222-4222-8222-222222222222';
 const VCB_ID = '33333333-3333-4333-8333-333333333333';
 const BTC_ID = '44444444-4444-4444-8444-444444444444';
 const INACTIVE_ID = '55555555-5555-4555-8555-555555555555';
-const OWNER_ACCESS_TOKEN = 'test-owner-token-with-high-entropy-placeholder';
-
-function ownerFetch(url, options = {}) {
-  return fetch(url, {
-    ...options,
-    headers: {
-      ...(options.headers || {}),
-      Authorization: `Bearer ${OWNER_ACCESS_TOKEN}`
-    }
-  });
-}
+import { ownerFetch, TEST_OWNER_ACCESS_TOKEN as OWNER_ACCESS_TOKEN } from './helpers/owner-auth.js';
 
 function cloneRows(rows) {
   return rows.map(row => ({ ...row }));
@@ -375,7 +365,7 @@ describe('Feature 17A — opening position and ledger authority', () => {
     assert.equal(fake.state.cashLedger.length, 0);
     assert.equal(fake.state.cashAvailable, startingCash);
     assert.deepEqual(Object.keys(fake.state.rpcCalls[0].args).sort(), [
-      'p_asset_id', 'p_average_cost', 'p_quantity'
+      'p_asset_id', 'p_average_cost', 'p_profile_id', 'p_quantity'
     ]);
   });
 

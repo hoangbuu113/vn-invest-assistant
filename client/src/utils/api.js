@@ -15,8 +15,7 @@ export const PRIVATE_API_PREFIXES = Object.freeze([
   '/api/portfolio',
   '/api/watchlist',
   '/api/alerts',
-  '/api/push',
-  '/api/auth'
+  '/api/push'
 ]);
 
 export function isPrivateApiPath(path) {

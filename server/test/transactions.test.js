@@ -13,17 +13,7 @@ import {
 } from '../src/transactions.js';
 
 const SINGLETON_PROFILE_ID = '11111111-1111-4111-8111-111111111111';
-const OWNER_ACCESS_TOKEN = 'test-owner-token-with-high-entropy-placeholder';
-
-function ownerFetch(url, options = {}) {
-  return fetch(url, {
-    ...options,
-    headers: {
-      ...(options.headers || {}),
-      Authorization: `Bearer ${OWNER_ACCESS_TOKEN}`
-    }
-  });
-}
+import { ownerFetch, TEST_OWNER_ACCESS_TOKEN as OWNER_ACCESS_TOKEN } from './helpers/owner-auth.js';
 const FOREIGN_PROFILE_ID = '22222222-2222-4222-8222-222222222222';
 const FPT_ASSET_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const VCB_ASSET_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';

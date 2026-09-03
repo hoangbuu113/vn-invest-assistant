@@ -21,7 +21,7 @@ const VALID_VAPID = {
   VAPID_SUBJECT: 'mailto:admin@example.com'
 };
 
-const OWNER_TOKEN = 'test-owner-token-min-32-chars-length-1234567890';
+const OWNER_TOKEN = 'header.eyJzdWIiOiJ1c2VyLXdlYi1wdXNoIn0.mock_signature';
 const SCHEDULER_TOKEN = 'test-scheduler-token-min-32-chars-length-1234567890';
 
 async function listen(app) {

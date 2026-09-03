@@ -76,11 +76,11 @@ describe('Feature 13D — Standard Login / Register Client & Auth Gate', () => {
   });
 
   // =========================================================================
-  // 2. API JWT INJECTION & ROUTE CLASSIFICATION
+  // 2. API JWT Injection & Security Contract
   // =========================================================================
   describe('2. API JWT Injection & Security Contract', () => {
     test('isPrivateApiPath classifies private vs public routes correctly', () => {
-      // Private routes including all /api/auth/* endpoints
+      // Private routes
       assert.equal(isPrivateApiPath('/api/profile'), true);
       assert.equal(isPrivateApiPath('/api/holdings'), true);
       assert.equal(isPrivateApiPath('/api/positions/opening'), true);
@@ -91,8 +91,6 @@ describe('Feature 13D — Standard Login / Register Client & Auth Gate', () => {
       assert.equal(isPrivateApiPath('/api/watchlist'), true);
       assert.equal(isPrivateApiPath('/api/alerts'), true);
       assert.equal(isPrivateApiPath('/api/push/subscriptions'), true);
-      assert.equal(isPrivateApiPath('/api/auth/claim-legacy-profile'), true);
-      assert.equal(isPrivateApiPath('/api/auth/legacy-claim-status'), true);
 
       // Public routes
       assert.equal(isPrivateApiPath('/api/health'), false);
@@ -101,7 +99,7 @@ describe('Feature 13D — Standard Login / Register Client & Auth Gate', () => {
       assert.equal(isPrivateApiPath('/api/market/history/FPT'), false);
     });
 
-    test('apiFetch attaches Authorization: Bearer <token> for /api/profile and /api/auth endpoints', async () => {
+    test('apiFetch attaches Authorization: Bearer <token> for /api/profile and private endpoints', async () => {
       const requests = [];
       const originalFetch = globalThis.fetch;
       const mockToken = 'mock-supabase-jwt-access-token-xyz';
@@ -119,22 +117,16 @@ describe('Feature 13D — Standard Login / Register Client & Auth Gate', () => {
         await apiFetch('/api/profile', {
           headers: { Authorization: `Bearer ${mockToken}` }
         });
-        // Test /api/auth/legacy-claim-status
-        await apiFetch('/api/auth/legacy-claim-status', {
-          headers: { Authorization: `Bearer ${mockToken}` }
-        });
-        // Test /api/auth/claim-legacy-profile
-        await apiFetch('/api/auth/claim-legacy-profile', {
+        // Test /api/holdings
+        await apiFetch('/api/holdings', {
           headers: { Authorization: `Bearer ${mockToken}` }
         });
 
-        assert.equal(requests.length, 3);
+        assert.equal(requests.length, 2);
         assert.equal(requests[0].url, '/api/profile');
         assert.equal(requests[0].options.headers.get('Authorization'), `Bearer ${mockToken}`);
-        assert.equal(requests[1].url, '/api/auth/legacy-claim-status');
+        assert.equal(requests[1].url, '/api/holdings');
         assert.equal(requests[1].options.headers.get('Authorization'), `Bearer ${mockToken}`);
-        assert.equal(requests[2].url, '/api/auth/claim-legacy-profile');
-        assert.equal(requests[2].options.headers.get('Authorization'), `Bearer ${mockToken}`);
       } finally {
         globalThis.fetch = originalFetch;
       }
@@ -212,10 +204,10 @@ describe('Feature 13D — Standard Login / Register Client & Auth Gate', () => {
   });
 
   // =========================================================================
-  // 3. PROFILE BOOTSTRAP & LEGACY CLAIM DECISION STATE MACHINE
+  // 3. PROFILE BOOTSTRAP STATE MACHINE
   // =========================================================================
-  describe('3. Profile Bootstrap & Legacy Claim Decision State Machine', () => {
-    test('profile bootstrap: 200 response transitions directly to ready without claim modal', async () => {
+  describe('3. Profile Bootstrap State Machine', () => {
+    test('profile bootstrap: 200 response transitions directly to ready', async () => {
       const originalFetch = globalThis.fetch;
       const apiCalls = [];
 
@@ -235,14 +227,12 @@ describe('Feature 13D — Standard Login / Register Client & Auth Gate', () => {
         assert.equal(res.status, 200);
         const data = await res.json();
         assert.equal(data.data.id, 'prof-123');
-        // Legacy claim discovery was NOT called because profile exists
-        assert.equal(apiCalls.includes('/api/auth/legacy-claim-status'), false);
       } finally {
         globalThis.fetch = originalFetch;
       }
     });
 
-    test('profile bootstrap: 403 PROFILE_REQUIRED + legacyClaimAvailable=true enters claim modal without calling POST /api/profile', async () => {
+    test('profile bootstrap: 403 PROFILE_REQUIRED initializes new empty isolated profile (cash = 0)', async () => {
       const originalFetch = globalThis.fetch;
       const apiCalls = [];
 
@@ -251,54 +241,6 @@ describe('Feature 13D — Standard Login / Register Client & Auth Gate', () => {
         if (url === '/api/profile' && (!options.method || options.method === 'GET')) {
           return new Response(JSON.stringify({ status: 'error', code: 'PROFILE_REQUIRED' }), {
             status: 403,
-            headers: { 'content-type': 'application/json' }
-          });
-        }
-        if (url === '/api/auth/legacy-claim-status') {
-          return new Response(JSON.stringify({ status: 'ok', data: { legacyClaimAvailable: true } }), {
-            status: 200,
-            headers: { 'content-type': 'application/json' }
-          });
-        }
-        if (url === '/api/profile' && options.method === 'POST') {
-          assert.fail('POST /api/profile must NOT be called when legacyClaimAvailable is true!');
-        }
-        return new Response('{}', { status: 404 });
-      };
-
-      try {
-        // Step 1: GET /api/profile -> 403
-        const profileRes = await apiFetch('/api/profile');
-        assert.equal(profileRes.status, 403);
-
-        // Step 2: GET /api/auth/legacy-claim-status -> true
-        const claimStatusRes = await apiFetch('/api/auth/legacy-claim-status');
-        const claimStatusData = await claimStatusRes.json();
-        assert.equal(claimStatusData.data.legacyClaimAvailable, true);
-
-        // Verify POST /api/profile was NOT called
-        const postCalls = apiCalls.filter(c => c.url === '/api/profile' && c.method === 'POST');
-        assert.equal(postCalls.length, 0);
-      } finally {
-        globalThis.fetch = originalFetch;
-      }
-    });
-
-    test('profile bootstrap: 403 PROFILE_REQUIRED + legacyClaimAvailable=false initializes new empty profile', async () => {
-      const originalFetch = globalThis.fetch;
-      const apiCalls = [];
-
-      globalThis.fetch = async (url, options = {}) => {
-        apiCalls.push({ url, method: options.method || 'GET' });
-        if (url === '/api/profile' && (!options.method || options.method === 'GET')) {
-          return new Response(JSON.stringify({ status: 'error', code: 'PROFILE_REQUIRED' }), {
-            status: 403,
-            headers: { 'content-type': 'application/json' }
-          });
-        }
-        if (url === '/api/auth/legacy-claim-status') {
-          return new Response(JSON.stringify({ status: 'ok', data: { legacyClaimAvailable: false } }), {
-            status: 200,
             headers: { 'content-type': 'application/json' }
           });
         }
@@ -316,12 +258,7 @@ describe('Feature 13D — Standard Login / Register Client & Auth Gate', () => {
         const profileRes = await apiFetch('/api/profile');
         assert.equal(profileRes.status, 403);
 
-        // Step 2: GET /api/auth/legacy-claim-status -> false
-        const claimStatusRes = await apiFetch('/api/auth/legacy-claim-status');
-        const claimStatusData = await claimStatusRes.json();
-        assert.equal(claimStatusData.data.legacyClaimAvailable, false);
-
-        // Step 3: POST /api/profile -> 201
+        // Step 2: Directly calls POST /api/profile -> 201
         const createRes = await apiFetch('/api/profile', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -334,67 +271,25 @@ describe('Feature 13D — Standard Login / Register Client & Auth Gate', () => {
         globalThis.fetch = originalFetch;
       }
     });
-
-    test('legacy claim submission transmits legacyOwnerToken and handles success and rejection', async () => {
-      const originalFetch = globalThis.fetch;
-      let submittedBody = null;
-
-      globalThis.fetch = async (url, options = {}) => {
-        if (url === '/api/auth/claim-legacy-profile') {
-          submittedBody = JSON.parse(options.body);
-          if (submittedBody.legacyOwnerToken === 'correct-secret-key') {
-            return new Response(JSON.stringify({
-              status: 'ok',
-              data: { claimed: true, profile: { id: 'legacy-prof', cashAvailable: 20000000 } }
-            }), { status: 200, headers: { 'content-type': 'application/json' } });
-          }
-          return new Response(JSON.stringify({
-            status: 'error',
-            code: 'OWNER_AUTH_INVALID',
-            message: 'Invalid legacy owner credentials'
-          }), { status: 403, headers: { 'content-type': 'application/json' } });
-        }
-        return new Response('{}', { status: 404 });
-      };
-
-      try {
-        // Wrong token test
-        const failRes = await apiFetch('/api/auth/claim-legacy-profile', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ legacyOwnerToken: 'wrong-key' })
-        });
-        assert.equal(failRes.status, 403);
-
-        // Correct token test
-        const successRes = await apiFetch('/api/auth/claim-legacy-profile', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ legacyOwnerToken: 'correct-secret-key' })
-        });
-        assert.equal(successRes.status, 200);
-        const successData = await successRes.json();
-        assert.equal(successData.data.claimed, true);
-        assert.equal(successData.data.profile.cashAvailable, 20000000);
-        assert.equal(submittedBody.legacyOwnerToken, 'correct-secret-key');
-      } finally {
-        globalThis.fetch = originalFetch;
-      }
-    });
   });
 
   // =========================================================================
-  // 4. RETIREMENT VERIFICATION & ZERO OWNER LEAKAGE AUDIT
+  // 4. RETIREMENT VERIFICATION & ZERO RETIRED AUTH LEAKAGE AUDIT
   // =========================================================================
-  describe('4. Complete Retirement of OwnerGate & Legacy Credentials Audit', () => {
-    test('OwnerGate.jsx is permanently deleted from client components', async () => {
+  describe('4. Complete Retirement of OwnerGate & Legacy Claim Constructs Audit', () => {
+    test('OwnerGate.jsx and LegacyClaimModal.jsx are permanently deleted from client components', async () => {
       const ownerGateExists = await access(
         path.join(CLIENT_SRC_DIR, 'components/OwnerGate.jsx')
       ).then(() => true).catch(() => false);
       assert.equal(ownerGateExists, false, 'client/src/components/OwnerGate.jsx must not exist');
+
+      const legacyClaimModalExists = await access(
+        path.join(CLIENT_SRC_DIR, 'components/LegacyClaimModal.jsx')
+      ).then(() => true).catch(() => false);
+      assert.equal(legacyClaimModalExists, false, 'client/src/components/LegacyClaimModal.jsx must not exist');
     });
 
-    test('client source contains ZERO active references to retired owner gate constructs', async () => {
+    test('client source contains ZERO active references to retired auth or legacy claim constructs', async () => {
       async function scanFiles(dir) {
         let results = [];
         const entries = await readdir(dir, { withFileTypes: true });
@@ -418,7 +313,13 @@ describe('Feature 13D — Standard Login / Register Client & Auth Gate', () => {
         /\bOWNER_SESSION_INVALID_EVENT\b/,
         /\bvn_invest_owner_session\b/,
         /Xác thực thiết bị/,
-        /Khóa truy cập chủ sở hữu/
+        /Khóa truy cập chủ sở hữu/,
+        /\bLegacyClaimModal\b/,
+        /\blegacyClaimAvailable\b/,
+        /\blegacyOwnerToken\b/,
+        /Khôi phục dữ liệu hiện tại/,
+        /Khóa truy cập cũ/,
+        /Nhập khóa chủ sở hữu cũ/
       ];
 
       for (const file of files) {

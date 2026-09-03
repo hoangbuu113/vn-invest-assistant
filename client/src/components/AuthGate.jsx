@@ -1,16 +1,14 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch, AUTH_INVALID_EVENT } from '../utils/api.js';
 import { clearCachedAccessToken, supabase } from '../utils/supabase.js';
-import { LegacyClaimModal } from './LegacyClaimModal.jsx';
 import { LoginView } from './LoginView.jsx';
 import { RegisterView } from './RegisterView.jsx';
 
 export function AuthGate({ children }) {
-  const [authState, setAuthState] = useState('LOADING'); // 'LOADING' | 'UNAUTHENTICATED' | 'AUTHENTICATED_NEEDS_PROFILE' | 'AUTHENTICATED_READY'
+  const [authState, setAuthState] = useState('LOADING'); // 'LOADING' | 'UNAUTHENTICATED' | 'AUTHENTICATED_READY'
   const [authView, setAuthView] = useState('LOGIN'); // 'LOGIN' | 'REGISTER'
   const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null);
-  const [legacyClaimAvailable, setLegacyClaimAvailable] = useState(false);
 
   const bootstrapSequenceRef = useRef(0);
 
@@ -39,21 +37,7 @@ export function AuthGate({ children }) {
       }
 
       if (profileResponse.status === 403) {
-        // CASE B: Authenticated user has no profile -> check legacy claim status
-        const statusResponse = await apiFetch('/api/auth/legacy-claim-status');
-        if (currentSequence !== bootstrapSequenceRef.current) return;
-
-        const statusPayload = await statusResponse.json().catch(() => null);
-        const claimAvailable = Boolean(statusPayload?.data?.legacyClaimAvailable);
-
-        if (claimAvailable) {
-          // Unclaimed legacy profile exists -> present one-time claim modal
-          setLegacyClaimAvailable(true);
-          setAuthState('AUTHENTICATED_NEEDS_PROFILE');
-          return;
-        }
-
-        // No unclaimed legacy profile -> initialize new empty profile
+        // Authenticated user has no profile -> initialize new empty isolated profile
         const createResponse = await apiFetch('/api/profile', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -66,7 +50,6 @@ export function AuthGate({ children }) {
           setProfile(createPayload?.data || null);
           setAuthState('AUTHENTICATED_READY');
         } else {
-          // If creation failed unexpectedly, prompt re-login
           setAuthState('UNAUTHENTICATED');
         }
         return;
@@ -79,7 +62,6 @@ export function AuthGate({ children }) {
         return;
       }
 
-      // Any other unexpected error
       setAuthState('UNAUTHENTICATED');
     } catch {
       if (currentSequence === bootstrapSequenceRef.current) {
@@ -98,12 +80,10 @@ export function AuthGate({ children }) {
     }
     setUser(null);
     setProfile(null);
-    setLegacyClaimAvailable(false);
     setAuthState('UNAUTHENTICATED');
     setAuthView('LOGIN');
   }, []);
 
-  // Handle global 401 AUTH_INVALID event from apiFetch
   useEffect(() => {
     const handleAuthInvalid = () => {
       logout();
@@ -112,11 +92,9 @@ export function AuthGate({ children }) {
     return () => window.removeEventListener(AUTH_INVALID_EVENT, handleAuthInvalid);
   }, [logout]);
 
-  // Handle Supabase Auth state changes
   useEffect(() => {
     let mounted = true;
 
-    // Initial session inspection
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (!mounted) return;
       if (session) {
@@ -133,7 +111,6 @@ export function AuthGate({ children }) {
       if (event === 'SIGNED_OUT' || !session) {
         setUser(null);
         setProfile(null);
-        setLegacyClaimAvailable(false);
         setAuthState('UNAUTHENTICATED');
       } else if (event === 'SIGNED_IN') {
         bootstrapProfile(session);
@@ -148,7 +125,6 @@ export function AuthGate({ children }) {
     };
   }, [bootstrapProfile]);
 
-  // Loading state (no flicker)
   if (authState === 'LOADING') {
     return (
       <main className="auth-gate-shell" aria-live="polite">
@@ -160,7 +136,6 @@ export function AuthGate({ children }) {
     );
   }
 
-  // Unauthenticated: Login or Register
   if (authState === 'UNAUTHENTICATED') {
     return (
       <main className="auth-gate-shell">
@@ -179,23 +154,6 @@ export function AuthGate({ children }) {
     );
   }
 
-  // Authenticated but needs profile claim
-  if (authState === 'AUTHENTICATED_NEEDS_PROFILE' && legacyClaimAvailable) {
-    return (
-      <main className="auth-gate-shell">
-        <LegacyClaimModal
-          onSuccess={(claimedProfile) => {
-            setProfile(claimedProfile);
-            setLegacyClaimAvailable(false);
-            setAuthState('AUTHENTICATED_READY');
-          }}
-          onLogout={logout}
-        />
-      </main>
-    );
-  }
-
-  // Authenticated and ready: render application
   if (authState === 'AUTHENTICATED_READY') {
     return typeof children === 'function'
       ? children({ logout, user, profile })
