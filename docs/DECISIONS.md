@@ -5,7 +5,8 @@ The following architectural and product decisions are confirmed and authoritativ
 ---
 
 ## 1. General Product & User Model
-- **Target User**: Single-user application (personal use only; no multi-tenant or authentication complexity in V1).
+- **Product Identity**: Public multi-asset market intelligence and tracking showcase application. Portfolio accounting is a supporting capability within the broader market intelligence workflow.
+- **Target User & Multi-User Architecture**: Public multi-user application powered by standard Supabase Auth (email/password). Each authenticated user has an isolated `investor_profile` (`user_id UUID NOT NULL UNIQUE REFERENCES auth.users(id)`). New profiles start clean with `cash_available = 0`, 0 holdings, and 0 transactions. Single-owner access controls (`OwnerGate`, `OWNER_ACCESS_TOKEN`, session cookies) and the disposable 20M test profile are permanently retired.
 - **Reporting Currency**: **VND** is the universal portfolio reporting currency. Native quote currencies are preserved and converted using explicit FX rates. Missing FX rates produce partial/unavailable valuations, never assumed 1:1 conversions.
 - **Scope of Execution**: Strictly analysis, tracking, and decision support. No trade execution, no broker order placement, and no automated fund management.
 - **AI Principles**: All quantitative metrics, valuations, and rankings are deterministic facts computed by models/formulas. LLMs explain and summarize facts; they never fabricate financial figures or ratings.
@@ -358,26 +359,21 @@ $$\text{Source Adapter} \longrightarrow \text{Canonical Validation / Sanitizatio
 
 ---
 
-## 12. Single-Owner Security Boundary (Feature 30B1)
+## 12. Historical Single-Owner Security Boundary (Feature 30B1 — Retired)
 
-- **Authentication Model**: V1 uses one high-entropy owner credential supplied through `OWNER_ACCESS_TOKEN`. The backend authenticates first-device authorization with constant-time digest comparison and retains direct bearer support for controlled administration/testing. No signup, OAuth, multi-user identity, or credential hard-coding is introduced.
-- **Trusted-Device Session**: Successful first-device authorization issues a server-signed, 30-day session credential in a first-party `HttpOnly`, `SameSite=Lax` cookie. The raw owner credential is never persisted in browser storage or attached to routine browser API requests. Session expiry is enforced server-side; logout clears and revokes the current session, while rotating `OWNER_ACCESS_TOKEN` invalidates every signed device session.
-- **Same-Origin Browser Boundary**: Browser API calls use relative `/api` URLs. Local Vite and the production Cloudflare Worker proxy those calls to the backend, allowing the session cookie to remain first-party despite separate Cloudflare and Render origins. Privileged Supabase credentials and the raw owner credential remain backend-only.
-- **Private API Boundary**: Profile, holdings, opening positions, transactions, cash, portfolio views, watchlist, alerts, personalized news, opportunities, and investment-brief generation require owner authentication for both reads and writes. Investment-brief authentication applies even in deterministic fallback mode.
-- **Public API Boundary**: Health, canonical asset browsing, generic market snapshot/realtime/history, Analysis V2, cross-asset comparison, generic news, and Vietnam regime context remain public and contain no personal state.
-- **Database Authority**: Private tables and financial RPCs are callable only by the backend's server-only Supabase `service_role` client. Browser code never receives this key. Public/publishable Supabase access is retained only for intentionally public canonical asset and provider-mapping metadata.
-- **Direct Access Prohibition**: `anon` and `authenticated` roles have no direct access to private tables and no execution authority over private financial RPCs. RLS remains enabled and existing financial validation, atomicity, VND, immutability, and projection guards are not weakened.
-- **Deployment State**: The Feature 30 private-table permission migration and owner-authenticated production API boundary are active. Later trusted-device session changes require the existing frontend and backend targets to be redeployed together because the browser proxy and backend cookie contract are coupled.
+- **Historical Context**: During V1 hardening, a single-owner credential model (`OWNER_ACCESS_TOKEN`) and signed session cookie (`vn_invest_owner_session`) were used for private route protection.
+- **Retirement**: This architecture has been completely retired in V1.1 in favor of standard public multi-user Supabase Authentication.
 
 ---
 
-## 13. Multi-User Ownership & Supabase Auth Backend Foundation (Features 13B & 13C)
+## 13. Public Multi-User Architecture & Supabase Auth (V1.1 Improvements 12 & 13)
 
-- **Identity & Authority**: Supabase Auth user JWT (`auth.users.id`) is the authoritative identity for multi-user browser requests.
+- **Authoritative Authentication**: Supabase Auth (email/password) is the sole browser authentication mechanism. Requests send a standard Bearer JWT in the `Authorization` header (`Authorization: Bearer <token>`).
+- **Complete Retirement of Legacy Owner Auth**: `OwnerGate`, `OWNER_ACCESS_TOKEN` browser auth, HMAC session tokens, session cookies (`vn_invest_owner_session`), and `/api/owner/session` endpoints are permanently retired.
+- **Multi-User Profile Model**: Every authenticated user maps 1:1 to an isolated `investor_profile` (`user_id UUID NOT NULL UNIQUE REFERENCES auth.users(id)`).
 - **Financial Data Safety Invariant**: The foreign key `investor_profile.user_id REFERENCES auth.users(id)` uses `ON DELETE RESTRICT`. Auth user deletion cannot cascade delete financial portfolios, holdings, cash ledgers, opening positions, or delivery history.
-- **Transitional Auth Coexistence**: Legacy `OWNER_ACCESS_TOKEN` bearer authentication and trusted owner device sessions (`vn_invest_owner_session` cookie) continue to function unchanged until complete client transition in Feature 13D/13E.
-- **Profile Resolution & Scoping**: Requests authenticated with Supabase user JWT resolve the profile strictly via `WHERE user_id = req.user.id`. Arbitrary client `profileId` in body or query params is ignored and forbidden from spoofing other profiles.
-- **Profile Creation**: Authenticated users without a profile can initialize an empty investor profile (`cash_available = 0`, moderate risk, medium horizon) via `POST /api/profile`. Duplicate creation is idempotent via `UNIQUE(user_id)`.
-- **Atomic One-Time Legacy Profile Claim**: Unowned production legacy profile (`user_id IS NULL`, `id = e4ae09df-3a4a-48eb-b08d-5334687207b1`, `cash_available = 20,000,000 VND`) can only be claimed once via `POST /api/auth/claim-legacy-profile`. The claimant must provide a valid Supabase user JWT (with no existing profile) and prove legacy ownership by presenting `OWNER_ACCESS_TOKEN` (verified in constant time). The claim is executed atomically via the `claim_legacy_profile(UUID)` RPC granted strictly to `service_role`.
-- **Legacy Profile Discovery**: Capability endpoint `GET /api/auth/legacy-claim-status` indicates whether an unclaimed legacy profile exists (`legacyClaimAvailable: boolean`) without leaking any financial numbers, balances, profile IDs, or user data.
-- **Alert Scheduler Isolation**: Background evaluation via `POST /api/internal/alerts/evaluate` remains independently authenticated via `ALERT_SCHEDULER_TOKEN`.
+- **Empty Isolated Onboarding**: Authenticated users create an empty investor profile via `POST /api/profile` (`cash_available = 0`, 0 holdings, 0 transactions). Duplicate creation is conflict-safe and idempotent via `UNIQUE(user_id)`.
+- **Zero Legacy Test Data**: The legacy unowned 20,000,000 VND profile was disposable test data and was permanently purged along with its child rows in migration `20260904010000_finalize_public_multi_user_auth.sql`. Function `claim_legacy_profile` and transitional routes `/api/auth/legacy-claim-status` and `/api/auth/claim-legacy-profile` are permanently removed.
+- **Strict Profile Scoping & Anti-Spoofing**: All private financial endpoints resolve the profile strictly via `WHERE user_id = req.user.id`. Any client-supplied `profileId` in query params or body is completely ignored and cannot spoof other users' data.
+- **Database Authority & Permission Model**: Private tables and financial RPCs are accessible exclusively by the backend's server-only Supabase `service_role` client. `anon` and `authenticated` Supabase roles have zero direct access to private tables.
+- **Background Alert Scheduler & Web Push Delivery**: Price alerts evaluate on a 15-minute background cron schedule (`POST /api/internal/alerts/evaluate`), independently authenticated via `ALERT_SCHEDULER_TOKEN`. Web Push delivers notifications on a best-effort per-device model (`public.push_subscriptions`, `public.alert_notification_deliveries`) with bounded retry (max 3 attempts, 15-minute backoff).

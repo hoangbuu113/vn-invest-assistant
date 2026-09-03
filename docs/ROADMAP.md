@@ -14,159 +14,98 @@ This document serves as the durable strategic memory for project sequencing, fea
 
 ---
 
-## 2. Completed Features (01–29)
+## 2. Completed Historical V1 Features (01–30)
 
-- **Feature 01**: Asset Browser
-- **Feature 02**: Market Snapshot
-- **Feature 03**: News Feed
-- **Feature 04**: Investor Profile
-- **Feature 05**: Portfolio Overview
-- **Feature 06**: Historical Price & Trend
-- **Feature 07**: Deterministic Asset Analysis
-- **Feature 08**: Watchlist / Danh sách theo dõi
+All 30 planned V1 roadmap features have been designed, implemented, hardened, and verified:
+
+- **Feature 01**: Asset Browser (`/api/assets`)
+- **Feature 02**: Market Snapshot (`/api/market/:symbol`)
+- **Feature 03**: News Feed (`/api/news`)
+- **Feature 04**: Investor Profile (`/api/profile`)
+- **Feature 05**: Portfolio Overview (`/api/portfolio/overview`)
+- **Feature 06**: Historical Price & Trend (`/api/market/:symbol/history`)
+- **Feature 07**: Deterministic Asset Analysis (`/api/analysis/:symbol`)
+- **Feature 08**: Watchlist / Danh sách theo dõi (`/api/watchlist`)
 - **Feature 09**: Personal Investment Dashboard / Tổng quan
-- **Feature 10**: Portfolio Composition & Concentration
-- **Feature 11**: Asset Comparison / So sánh tài sản
-- **Feature 12**: Price Alerts V1 / Cảnh báo giá
-- **Feature 13**: Personalized Relevant News / Tin của tôi
-- **Feature 14**: Transaction Ledger / Sổ lệnh giao dịch
-- **Feature 15**: Cash / Capital Ledger / Sổ dòng tiền
+- **Feature 10**: Portfolio Composition & Concentration (`/api/portfolio/composition`)
+- **Feature 11**: Asset Comparison / So sánh tài sản (`base100.series`)
+- **Feature 12**: Price Alerts V1 / Cảnh báo giá (`/api/alerts`)
+- **Feature 13**: Personalized Relevant News / Tin của tôi (`/api/news/personalized`)
+- **Feature 14**: Transaction Ledger / Sổ lệnh giao dịch (`/api/transactions`)
+- **Feature 15**: Cash / Capital Ledger / Sổ dòng tiền (`/api/cash/*`)
 - **Feature 16**: Canonical Multi-Asset Foundation
 - **Feature 17**: Ledger Authority & Position Integrity
 - **Feature 18**: Market Provider Abstraction
-- **Feature 19**: FX & Cross-Currency Valuation Foundation (COMPLETE)
-- **Feature 20**: Real Multi-Asset Providers & Controlled Universe (COMPLETE)
-  - **Feature 20A**: Representative Real Multi-Asset Providers (COMPLETE)
-  - **Feature 20B**: Controlled Crypto Universe Expansion (COMPLETE)
-- **Feature 21**: Asset-Class Market & Historical Semantics (COMPLETE)
-- **Feature 22**: Deterministic Asset Analysis V2 (COMPLETE)
-- **Feature 23**: Multi-Asset News Foundation (COMPLETE)
-- **Feature 24**: Existing Feature Multi-Asset Integration (COMPLETE)
-  - **Feature 24A**: Backend / Canonical Capability Integration (Commit `e292f68`)
-  - **Feature 24B**: Frontend Capability-Aware Integration (Commit `2e2edde`)
-- **Feature 25**: Portfolio Performance & Benchmarking (COMPLETE)
-  - Performance engine (Commit `dec06cd`)
-  - Benchmark integration (Commit `34ec123`)
-  - Performance dashboard (Commit `2c1be74`)
-- **Feature 26**: Crypto Market Data Reliability & Hybrid Quote Authority (COMPLETE)
-  - CoinGecko canonical USD valuation snapshots; Binance native USDT realtime/history/Analysis V2
-  - 40 explicit mappings per provider, resilience controls, and approximate non-accounting VND reference display
-  - Implementation commit `d081fe8`; migration `20260830000000_feature_26a_hybrid_crypto_authority.sql` applied
-- **Feature 27**: Market Regime Engine (COMPLETE)
-  - Reduced Vietnam-first official-source foundation for NSO CPI, SBV money-market observations, and explicit unprovisioned market breadth.
-  - Implementation commit `e38dcba`
-- **Feature 28**: Opportunity Engine (COMPLETE)
-- **Feature 29**: AI Investment Brief (COMPLETE)
+- **Feature 19**: FX & Cross-Currency Valuation Foundation
+- **Feature 20**: Real Multi-Asset Providers & Controlled Universe (49 canonical assets)
+  - **Feature 20A**: Representative Real Multi-Asset Providers
+  - **Feature 20B**: Controlled Crypto Universe Expansion
+- **Feature 21**: Asset-Class Market & Historical Semantics (`VN_EXCHANGE`, `CONTINUOUS_24_7`, `GLOBAL_24_5`)
+- **Feature 22**: Deterministic Asset Analysis V2 (`methodologyVersion = "v2"`)
+- **Feature 23**: Multi-Asset News Foundation (CafeF, CoinDesk, Alpha Vantage)
+- **Feature 24**: Existing Feature Multi-Asset Integration
+  - **Feature 24A**: Backend / Canonical Capability Integration
+  - **Feature 24B**: Frontend Capability-Aware Integration
+- **Feature 25**: Portfolio Performance & Benchmarking
+- **Feature 26**: Crypto Market Data Reliability & Hybrid Quote Authority (CoinGecko USD + Binance USDT)
+- **Feature 27**: Vietnam Market Regime Foundation (NSO CPI, SBV money market, unprovisioned market breadth)
+- **Feature 28**: Deterministic Opportunity Engine (`GET /api/opportunities`)
+- **Feature 29**: Guarded AI Investment Brief (`POST /api/investment-brief`)
+- **Feature 30**: Release Hardening & Production Gate
 
 ---
 
-## 3. Roadmap Execution Status
-All 30 planned roadmap features (Features 01–30) have been designed, implemented, hardened, and verified.
+## 3. V1.1 Production Improvements (Post-V1 Architecture Upgrades)
 
-### Feature 30 — Release Hardening & Production Gate
-- **Status**: COMPLETE.
-- **Scope**: Single-owner access control security activation, error & dependency hardening, controlled test data cleanup, final UI/UX presentation polish, full regression & security verification, documentation freeze, and production acceptance.
+Post-V1 engineering is structured as targeted **V1.1 Improvements** (NOT Feature 31+):
+
+### V1.1 Improvement 12: Web Push Alert Delivery Engine
+- **Scope**: Transitioned price alerts from refresh-only evaluation to background scheduler evaluation (Cloudflare Worker cron `*/15 * * * *` -> `POST /api/internal/alerts/evaluate` with `ALERT_SCHEDULER_TOKEN`).
+- **Engine**: First-party Web Push delivery engine (`web-push`, RFC 8291 / RFC 8292).
+- **Per-Device Delivery**: Multi-device subscriptions (`public.push_subscriptions`) with fanout deliveries (`public.alert_notification_deliveries`).
+- **Resilience**: Bounded retry (up to 3 attempts, 15m backoff, automatic cleanup of 404/410 expired subscriptions).
+- **Delivery Semantics**: Push service acceptance (`sent`) verified; best-effort display without unrealistic delivery guarantees.
+
+### V1.1 Improvement 13: Public Multi-User Supabase Authentication & Profile Isolation
+- **Scope**: Replaced single-owner access control with public multi-user Supabase Auth (email/password).
+- **Retirement**: Completely retired `OwnerGate`, `OWNER_ACCESS_TOKEN` browser auth, HMAC session tokens, and session cookies (`vn_invest_owner_session`).
+- **Isolation**: Each authenticated user maps 1:1 to an isolated `investor_profile` (`user_id UUID NOT NULL UNIQUE REFERENCES auth.users(id)`).
+- **Clean Start**: Every new user starts with `cash_available = 0`, 0 holdings, 0 transactions, and 0 synthetic records.
+- **Cleanup**: The unowned 20,000,000 VND legacy profile was treated as disposable test data and permanently purged.
+
+### V1.1 Improvement 19 & 25: Cross-Currency Accounting Foundation
+- **Scope**: Dual-settlement VND-basis cross-currency accounting foundation.
+- **Valuation**: Crypto and Gold spot current VND valuations operate through current USD/VND authority.
+- **Historical Invariant**: Historical non-VND portfolio performance remains truthfully unavailable when historical FX authority is missing.
+
+### V1.1 Improvement 27: Macro & Regime Hardening
+- **Scope**: CPI reliability improvements active (NSO CPI archive cross-checks).
+- **Truthful Degradation**: SBV money-market rates remain truthfully unavailable under upstream WAF (`OFFICIAL_DATA_UNAVAILABLE`) without fabricating fake interest rates.
+- **Market Breadth**: Retained as `NOT_DEFENSIBLE_FOR_V1.1` (`status: 'unavailable'`, `reason: 'SOURCE_NOT_PROVISIONED'`).
 
 ---
 
-## 4. Ordered Roadmap (Features 28–30)
+## 4. Product Purpose & Non-Goals
 
-- **Feature 28 — Opportunity Engine (COMPLETE)**: Evidence-driven screening and candidate ranking based on transparent quantitative rules and user profile fit.
-- **Feature 29 — AI Investment Brief (COMPLETE)**: Deterministic-first AI synthesis explaining evidence, portfolio risks, macro factors, and scenario uncertainty without inventing financial scores.
-- **Feature 30 — Release Hardening & Final Gate (COMPLETE)**: Single-owner security activation, error hardening, test-data reset, UI polish, production deployment, and acceptance verification.
+- **Core Product Purpose**: Public multi-asset market intelligence and tracking showcase application.
+- **Supporting Role**: Portfolio accounting is a supporting capability within the broader market intelligence workflow.
+- **Non-Goals**:
+  - Direct broker execution or automated trading.
+  - Opaque speculative trading signals or fabricated confidence scores.
+  - Fabricating rates when official data sources degrade or block under WAF.
+  - Multi-hop FX conversions without authoritative rate sources.
 
 ---
 
 ## 5. Token & Cost Efficiency Policy
 
 ### Verification Tiers
-Verification must match the risk level of the change to avoid wasteful token expenditure and redundant execution loops:
-
-- **LOW RISK** (Isolated frontend polish, UI copy, local styling, presentation-only components):
-  - *Verification*: Targeted UI checks, client build (`npm run build`), manual visual check.
-  - *Rule*: Do NOT automatically run full backend regression suites or spawn Codex reviewer agents.
-- **MEDIUM RISK** (API/state integration, component data plumbing, non-financial provider adapters, news parsing/caching):
-  - *Verification*: Affected route/unit tests, integration check, client build, and git diff check.
-  - *Rule*: Broader regression is run only if cross-module dependencies are touched.
-- **HIGH RISK** (Financial accounting, PostgreSQL migrations, ledger mutations, access controls, FX math, core quantitative formulas):
-  - *Verification*: Immediate focused production-path tests, full regression suite (`npm test`), migration history verification, remote database state checks, and `git diff --check`.
-  - *Rule*: One independent reviewer check is valuable; avoid repeated reviewer loops unless a HIGH or CRITICAL defect is found.
+- **LOW RISK**: Targeted UI checks, client build (`npm run build`).
+- **MEDIUM RISK**: Affected route/unit tests, integration check, client build, git diff check.
+- **HIGH RISK**: Full regression suite (`npm test`), migration history verification, remote database state checks, `git diff --check`.
 
 ### Golden Regression Batching
 Comprehensive cross-feature golden regression tests are executed at strategic intervals:
-- After every 2–4 related completed features.
 - At major phase boundaries.
 - Prior to production releases.
 - Immediately following any change to core financial invariants.
-- *Golden Scenario Scope*: Opening cash $\rightarrow$ Deposit $\rightarrow$ Opening position $\rightarrow$ BUY $\rightarrow$ Partial SELL $\rightarrow$ Full SELL $\rightarrow$ Ledger consistency $\rightarrow$ Portfolio valuation $\rightarrow$ Missing price/FX partial valuation.
-
-### Documentation Batching
-To eliminate documentation churn:
-- Comprehensive documentation reconciliation occurs by default after every 2 completed features or at phase boundaries.
-- Immediate doc updates are made only when a feature introduces or modifies a durable architectural invariant required by subsequent tasks.
-- `docs/CURRENT.md` receives brief operational checkpoint updates when needed.
-
----
-
-## 6. Git & GitHub Checkpoint Strategy
-
-- **Local Git**:
-  - Exactly one verified feature = one clean, scoped, reversible local commit.
-  - Do not bundle multiple feature implementations into one mega-commit.
-- **GitHub Remote Push**:
-  - Default: Batch approximately 2–5 verified features per remote push.
-  - Push earlier upon:
-    - High-risk financial/accounting milestones.
-    - Major database schema migrations.
-    - Security / access control milestones.
-    - Before high-risk refactoring or machine/environment changes.
-    - When remote backup is becoming stale.
-  - *Pre-Push Invariant*: Full test suite passing, build passing, `git diff --check` clean, working tree clean. Never assume remote state without verification.
-
----
-
-## 7. Prompt & AI Collaboration Rules
-
-- **Documentation First**: Agents must read repository documentation (`docs/CURRENT.md`, `docs/ROADMAP.md`, `docs/DECISIONS.md`, `docs/ASSET_MODEL.md`) rather than requiring prompts to duplicate complete historical context.
-- **Concise Prompts**: Prompts focus on current task, strict scope boundaries, active invariants, required verifications, and reporting structure.
-- **Role Discipline**: Exactly one active WRITER agent per implementation task. Independent review is optional for low/medium risk and targeted for high-risk integrity tasks.
-- **No Duplicate Audits**: Do not re-audit an architecture that already has an approved architectural decision and audit in place.
-
----
-
-## 8. Frozen & Low-Value Scope
-
-To maintain engineering focus, the following items are strictly frozen or deferred:
-- Duplicate top-level dashboards or redundant portfolio pages.
-- Gamification, community features, or social feeds.
-- Arbitrary AI confidence percentages or unexplained "health scores".
-- Decorative charts that do not aid financial decision-making.
-- Sprawling technical indicator collections without proven methodology.
-- Direct broker order execution or autonomous trading.
-- Massive uncurated crypto token ingestion (scope restricted to ~Top 40 liquid assets).
-- Multi-user authentication complexity in V1.
-- Deep bond coupon/maturity and bank deposit modeling until future phases.
-
-> [!TIP]
-> **Feature Value Rule**: A feature must materially improve the investor's understanding of **money, assets, risk, market conditions, or investment decisions**. Otherwise, it is deferred.
-
----
-
-## 9. Project Director Checkpoint Cadence
-
-The Project Director proactively restates a structured operational checkpoint:
-- After every 2 completed features.
-- At major architectural phase boundaries.
-- When conversation context approaches token limits.
-- Before embarking on high-risk financial work.
-
-### Checkpoint Structure
-```text
-PROJECT CHECKPOINT
-- DONE: [Recent completed features and commits]
-- CURRENT: [Active feature and implementation status]
-- NEXT: [Next 1-2 features in roadmap sequence]
-- CORE INVARIANTS: [Key non-negotiable rules for current phase]
-- UNKNOWN: [Explicit unresolved items preserved without guessing]
-- GITHUB: [Verified local commit vs remote push status]
-```

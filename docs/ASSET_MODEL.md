@@ -4,9 +4,11 @@ This document defines the canonical architectural and conceptual model for multi
 
 ---
 
-## 1. Current Implementation Status (Features 16–30)
+## 1. Current Implementation Status (Features 16–30 & V1.1 Improvements)
 
-Features 16 through 30 establish the canonical schema, ledger authority, provider abstraction, FX valuation, full controlled multi-asset universe, normalized historical semantics, deterministic multi-asset analysis, multi-source news foundation, portfolio performance, comprehensive frontend integration, hybrid Crypto provider authority, market regime context, opportunity engine, guarded AI brief, and production single-owner security hardening:
+VN Invest Assistant is a public multi-asset market intelligence and tracking showcase application. Portfolio accounting operates as a supporting capability within the broader market intelligence workflow.
+
+Features 16 through 30 and V1.1 Improvements establish the canonical schema, ledger authority, provider abstraction, FX valuation, full controlled multi-asset universe, normalized historical semantics, deterministic multi-asset analysis, multi-source news foundation, portfolio performance, comprehensive frontend integration, hybrid Crypto provider authority, market regime context, opportunity engine, guarded AI brief, public multi-user Supabase authentication, and background Web Push delivery:
 
 - **Verified Production Universe (49 Canonical Assets)**:
   - **Vietnamese Equities & ETFs** (`VN_EXCHANGE`, `Asia/Ho_Chi_Minh`, `VND`, `share`):
@@ -29,7 +31,7 @@ Features 16 through 30 establish the canonical schema, ledger authority, provide
     - Snapshot: Live exchange rate supported; History: Intentionally unsupported pending verified timezone reconciliation
     - News: Alpha Vantage forex/macro context with explicit exchange-rate/pair disambiguation (lone `USD` never matches)
 
-- **Implemented Multi-Asset Capabilities**:
+- **Implemented Multi-Asset & V1.1 Capabilities**:
   - Authoritative internal asset identity via UUID (`public.assets.id`).
   - Strict decoupling of internal canonical asset identity from third-party provider symbols (`public.asset_provider_mappings`).
   - Dedicated opening-position baseline authority (`public.position_opening_baselines`) with locked correction upon subsequent ledger activity.
@@ -38,14 +40,17 @@ Features 16 through 30 establish the canonical schema, ledger authority, provide
   - Multi-source news architecture (`server/src/news/`):
     $$\text{Source Adapter} \longrightarrow \text{Sanitization} \longrightarrow \text{Deduplication} \longrightarrow \text{Relevance Engine} \longrightarrow \text{Canonical News Feed}$$
   - Universal reporting currency is strictly `VND`; native non-VND asset valuations are converted on demand via direct `quoteCurrency -> VND` FX rates.
+  - Dual-settlement VND-basis cross-currency accounting foundation: Crypto and Gold spot current VND valuations operate through current USD/VND authority.
+  - Public Multi-User Supabase Auth: Every user has an isolated `investor_profile` (`user_id UUID NOT NULL UNIQUE REFERENCES auth.users(id)`). New profiles start empty with `cash_available = 0`, 0 holdings, and 0 transactions. Legacy 20M test data was completely purged.
+  - Background Price Alert Scheduler & Web Push: Price alerts evaluate on a 15-minute background cron schedule (`POST /api/internal/alerts/evaluate`), triggering multi-device push notifications via first-party Web Push (`public.push_subscriptions`, `public.alert_notification_deliveries`).
   - Multi-asset calendar and historical bar engine (`server/src/history.js`) with calendar-window lookbacks (`1W`, `1M`, `3M`, `6M`, `1Y`) and current-day exclusivity.
   - Provider-neutral deterministic analysis V2 over completed canonical daily history, with universal completed-close metrics and capability-gated OHLC metrics.
-  - Database trigger guard (`enforce_vnd_portfolio_transaction_asset`) strictly enforcing VND-only transaction accounting until multi-currency FX accounting is implemented.
   - Centralized frontend native formatting (`client/src/utils/formatting.js`) and capability-aware UI integration across Dashboard, Watchlist, Portfolio, Composition, Comparison, Alerts, and Detail.
 
 - **Current Intentional Limitations**:
   - USD/VND historical bars remain unsupported due to unresolved daily timezone compatibility.
   - USD/VND deterministic analysis remains unsupported until trustworthy completed historical capability exists.
+  - Historical non-VND portfolio performance remains truthfully unavailable when historical FX authority is missing.
   - Gold Spot history remains close-only, so OHLC-dependent analysis metrics remain unavailable for Gold. Crypto uses completed Binance OHLCV history.
   - Non-VND cost basis and unrealized P/L remain unavailable until acquisition-time FX accounting exists.
   - Non-VND BUY/SELL transactions are strictly blocked at database trigger level.
