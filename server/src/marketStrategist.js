@@ -50,7 +50,7 @@ export async function getMarketStrategist({
   // 2. Fetch normalized news articles from the reader (L1 cache / persistence only)
   let newsArticles = [];
   try {
-    const newsResult = await getNewsFeedFn({ limit: 15, now });
+    const newsResult = await getNewsFeedFn({ limit: 40, now });
     newsArticles = Array.isArray(newsResult?.data)
       ? newsResult.data
       : (Array.isArray(newsResult?.news) ? newsResult.news : []);

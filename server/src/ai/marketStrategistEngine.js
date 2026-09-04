@@ -73,7 +73,14 @@ export function buildMarketStrategistFactPacket({
   }
 
   const validArticleIds = new Set();
-  const untrustedNews = [];
+  const validTickers = new Set();
+  const categorizedNews = {
+    vnMacro: [],
+    vnMarket: [],
+    globalIntermarket: [],
+    crypto: [],
+    other: []
+  };
 
   for (const article of newsArticles) {
     if (!article || typeof article !== 'object') continue;
@@ -82,19 +89,65 @@ export function buildMarketStrategistFactPacket({
 
     validArticleIds.add(articleId);
 
-    untrustedNews.push({
+    const relatedAssets = Array.isArray(article.relatedAssets)
+      ? article.relatedAssets.map((a) => ({ symbol: a.symbol, name: a.name })).filter((a) => a.symbol)
+      : [];
+
+    for (const a of relatedAssets) {
+      if (typeof a.symbol === 'string' && a.symbol.length >= 2 && a.symbol.length <= 5) {
+        validTickers.add(a.symbol.toUpperCase());
+      }
+    }
+
+    const titleLower = (article.title || '').toLowerCase();
+    const excerptLower = (article.excerpt || article.summary || '').toLowerCase();
+    const text = `${titleLower} ${excerptLower}`;
+
+    const normalized = {
       articleId,
       title: article.title || 'Untitled',
       excerpt: article.excerpt || article.summary || '',
       sourceName: article.sourceName || article.source || 'News Source',
       publishedAt: article.publishedAt || null,
       geography: article.geography || 'vietnam',
-      relatedAssets: Array.isArray(article.relatedAssets)
-        ? article.relatedAssets.map((a) => ({ symbol: a.symbol, name: a.name })).filter((a) => a.symbol)
-        : []
-    });
+      relatedAssets
+    };
+
+    if (/bitcoin|btc|crypto|tiền mã hóa|ethereum|eth/.test(text)) {
+      categorizedNews.crypto.push(normalized);
+    } else if (article.geography === 'global' || /fed|dxy|lãi suất mỹ|trung quốc|dầu thô|brent|wall street|lạm phát mỹ/.test(text)) {
+      categorizedNews.globalIntermarket.push(normalized);
+    } else if (/chính sách|thủ tướng|chính phủ|ngân hàng nhà nước|đầu tư công|gdp|cpi|vĩ mô|thuế/.test(text)) {
+      categorizedNews.vnMacro.push(normalized);
+    } else if (/vn-index|hose|hnx|cổ phiếu|chứng khoán|lợi nhuận|doanh thu|kết quả kinh doanh/.test(text)) {
+      categorizedNews.vnMarket.push(normalized);
+    } else {
+      categorizedNews.other.push(normalized);
+    }
   }
 
+  // Bounded diversification selection (up to 12 high-signal articles)
+  const MAX_NEWS_COUNT = 12;
+  const selectedNews = [
+    ...categorizedNews.vnMacro.slice(0, 4),
+    ...categorizedNews.vnMarket.slice(0, 4),
+    ...categorizedNews.globalIntermarket.slice(0, 3),
+    ...categorizedNews.crypto.slice(0, 1)
+  ];
+
+  if (selectedNews.length < MAX_NEWS_COUNT) {
+    const selectedIds = new Set(selectedNews.map((a) => a.articleId));
+    for (const pool of [categorizedNews.vnMacro, categorizedNews.vnMarket, categorizedNews.globalIntermarket, categorizedNews.other]) {
+      for (const item of pool) {
+        if (!selectedIds.has(item.articleId) && selectedNews.length < MAX_NEWS_COUNT) {
+          selectedNews.push(item);
+          selectedIds.add(item.articleId);
+        }
+      }
+    }
+  }
+
+  const untrustedNews = selectedNews.length > 0 ? selectedNews : [];
   const dataAsOf = now.toISOString();
 
   return {
@@ -103,7 +156,8 @@ export function buildMarketStrategistFactPacket({
     evidence,
     untrustedNews,
     validFactIds,
-    validArticleIds
+    validArticleIds,
+    validTickers
   };
 }
 
@@ -250,10 +304,92 @@ export function generateDeterministicMarketStrategist({ factPacket, now = new Da
     });
   }
 
+  const defaultEvId = evidence[0]?.id || 'context';
+
+  const executiveDecision = {
+    stance,
+    conviction: 'medium',
+    oneLineDecision: stance === 'selective_risk_on'
+      ? 'Thị trường vận động tích cực có chọn lọc; ưu tiên giải ngân từng phần vào nhóm doanh nghiệp hưởng lợi đầu tư công và dòng tiền mạnh.'
+      : (stance === 'defensive'
+        ? 'Áp lực vĩ mô và chi phí gia tăng; ưu tiên bảo toàn vốn, hạ đòn bẩy và duy trì thanh khoản tiền mặt.'
+        : 'Thị trường dao động tích lũy; duy trì vị thế cân bằng và chỉ tham gia theo các mốc hỗ trợ kỹ thuật rõ ràng.'),
+    actionNow: stance === 'selective_risk_on'
+      ? 'Không mua đuổi ở các nhịp hưng phấn; chia nhỏ các đợt giải ngân tại vùng hỗ trợ đối với nhóm hưởng lợi hạ tầng và kết quả kinh doanh quý III khởi sắc.'
+      : (stance === 'defensive'
+        ? 'Chủ động hạ tỷ trọng các nhóm nhạy cảm lãi suất và đòn bẩy cao; nâng tỷ trọng tiền mặt lên mức phòng thủ tối thiểu 30-40%.'
+        : 'Duy trì tỷ trọng danh mục ở mức trung bình 50-60%; kiên nhẫn chờ đợi tín hiệu dòng tiền lan tỏa trước khi mở rộng quy mô.')
+  };
+
+  const assetStrategy = [
+    {
+      assetClass: 'vietnam_equities',
+      stance: stance === 'selective_risk_on' ? 'increase' : 'hold',
+      priority: 'high',
+      rationale: 'VN-Index duy trì vận động tích cực nhưng phân hóa, tập trung vào nhóm vốn hóa lớn và đầu tư công có câu chuyện riêng.',
+      evidenceIds: vnIndexObs ? [vnIndexObs.id] : [defaultEvId]
+    },
+    {
+      assetClass: 'gold',
+      stance: 'hold',
+      priority: 'medium',
+      rationale: 'Nắm giữ vị thế phòng thủ chiến lược trước biến số lạm phát quốc tế và bất ổn địa chính trị kéo dài.',
+      evidenceIds: brentObs ? [brentObs.id] : (dxyObs ? [dxyObs.id] : [defaultEvId])
+    },
+    {
+      assetClass: 'usd',
+      stance: 'watch',
+      priority: 'medium',
+      rationale: 'Theo dõi chặt biến động chỉ số DXY và diễn biến tỷ giá trong nước để đánh giá dư địa chính sách tiền tệ.',
+      evidenceIds: usdVndObs ? [usdVndObs.id] : (dxyObs ? [dxyObs.id] : [defaultEvId])
+    },
+    {
+      assetClass: 'crypto',
+      stance: 'watch',
+      priority: 'low',
+      rationale: 'Thị trường tài sản số biến động mạnh theo thanh khoản toàn cầu; hạn chế sử dụng đòn bẩy tài chính.',
+      evidenceIds: dxyObs ? [dxyObs.id] : [defaultEvId]
+    },
+    {
+      assetClass: 'cash',
+      stance: 'hold',
+      priority: 'high',
+      rationale: 'Duy trì thanh khoản sẵn sàng để chủ động tận dụng các nhịp điều chỉnh giải ngân vào các cổ phiếu cơ bản tốt.',
+      evidenceIds: cpiObs ? [cpiObs.id] : [defaultEvId]
+    }
+  ];
+
+  const preferredThemes = [
+    {
+      theme: 'Đầu tư công và xây dựng hạ tầng',
+      stance: 'prefer',
+      rationale: 'Quyết tâm đẩy mạnh giải ngân vốn ngân sách quý III tạo động lực doanh thu và việc làm trực tiếp.',
+      evidenceIds: citedArticleIds.slice(0, 1).concat(vnIndexObs ? [vnIndexObs.id] : [defaultEvId])
+    },
+    {
+      theme: 'Doanh nghiệp đầu ngành dòng tiền mạnh và nợ thấp',
+      stance: 'prefer',
+      rationale: 'Khả năng chống chịu tốt trước biến động chi phí đầu vào và lãi suất vay.',
+      evidenceIds: citedFactIds.slice(0, 2)
+    }
+  ];
+
+  const avoidOrUnderweight = [
+    {
+      theme: 'Nhóm cổ phiếu đầu cơ sử dụng đòn bẩy tài chính cao',
+      reason: 'Biên an toàn thấp và dễ bị tổn thương khi thanh khoản thị trường chung phân hóa.',
+      evidenceIds: citedFactIds.slice(0, 2)
+    }
+  ];
+
   const orientationEvidenceIds = citedFactIds.slice(0, 4);
   const risksEvidenceIds = citedFactIds.slice(0, 3);
 
   return {
+    executiveDecision,
+    assetStrategy,
+    preferredThemes,
+    avoidOrUnderweight,
     marketOverview: {
       vietnam: `${vnIndexProse} ${cpiProse}`.trim(),
       global: globalProse.trim()
@@ -266,6 +402,9 @@ export function generateDeterministicMarketStrategist({ factPacket, now = new Da
       preferredThemes: ['Doanh nghiệp dòng tiền mạnh', 'Nhóm hưởng lợi từ thương mại và xuất khẩu'],
       pressuredThemes: ['Nhóm sử dụng đòn bẩy tài chính cao', 'Doanh nghiệp chịu chi phí nợ USD'],
       rationale: 'Ưu tiên phân bổ thận trọng, tập trung vào doanh nghiệp có nền tảng cơ bản vững chắc và khả năng quản trị biến động dòng tiền tốt trong bối cảnh vĩ mô đan xen.',
+      preferredThemes: preferredThemes.map((t) => t.theme),
+      pressuredThemes: avoidOrUnderweight.map((t) => t.theme),
+      rationale: executiveDecision.actionNow,
       evidenceIds: orientationEvidenceIds.length > 0 ? orientationEvidenceIds : [evidence[0]?.id || 'context']
     },
     risksAndInvalidation: {
@@ -422,6 +561,7 @@ export async function generateMarketStrategist({
             if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
               cleaned = cleaned.slice(firstBrace, lastBrace + 1);
             }
+            rawLlmOutput = JSON.parse(cleaned);
             try {
               rawLlmOutput = JSON.parse(cleaned);
               if (finishReason) {
@@ -497,7 +637,8 @@ export async function generateMarketStrategist({
       if (rawLlmOutput && typeof rawLlmOutput === 'object') {
         const validation = validateMarketStrategistOutput(rawLlmOutput, {
           validFactIds,
-          validArticleIds
+          validArticleIds,
+          validTickers: factPacket.validTickers
         });
 
         if (validation.valid) {
@@ -527,6 +668,17 @@ export async function generateMarketStrategist({
     if (lastProviderError) {
       result.lastProviderError = lastProviderError;
     }
+  }
+
+  // Ensure backward compatibility for any consumers expecting investmentOrientation
+  if (result.executiveDecision && !result.investmentOrientation) {
+    result.investmentOrientation = {
+      stance: result.executiveDecision.stance,
+      preferredThemes: (result.preferredThemes || []).map((t) => typeof t === 'string' ? t : t.theme),
+      pressuredThemes: (result.avoidOrUnderweight || []).map((t) => typeof t === 'string' ? t : t.theme),
+      rationale: result.executiveDecision.actionNow || result.executiveDecision.oneLineDecision,
+      evidenceIds: (result.assetStrategy || []).flatMap((a) => a.evidenceIds || []).slice(0, 6)
+    };
   }
 
   // 4. Cache valid output

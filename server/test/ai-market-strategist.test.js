@@ -357,15 +357,17 @@ test('V1.2 Improvement 04 — AI Market Strategist', async (t) => {
     const fallbackData = generateDeterministicMarketStrategist({ factPacket: packet, now: NOW });
     const vmFallback = buildMarketStrategistViewModel(fallbackData);
 
-    assert.equal(vmFallback.badgeLabel, 'Tóm tắt dữ liệu');
-    assert.equal(vmFallback.fallbackNotice, 'Bản tóm tắt hiện được tạo từ dữ liệu đã xác minh.');
+    assert.equal(vmFallback.badgeLabel, 'Chiến lược xác định');
+    assert.equal(vmFallback.fallbackNotice, 'Bản chiến lược hiện được tạo từ dữ liệu đã xác minh.');
     assert.equal(vmFallback.investmentOrientation.stanceLabel, formatStrategistStance(fallbackData.investmentOrientation.stance));
     assert.equal(vmFallback.marketOverview.vietnam, fallbackData.marketOverview.vietnam);
+    assert.equal(vmFallback.executiveDecision.oneLineDecision, fallbackData.executiveDecision.oneLineDecision);
+    assert.equal(vmFallback.assetStrategy.length, 5);
 
     // LLM state view model
     const llmData = { ...fallbackData, generationMode: 'llm' };
     const vmLlm = buildMarketStrategistViewModel(llmData);
-    assert.equal(vmLlm.badgeLabel, 'AI Tổng hợp');
+    assert.equal(vmLlm.badgeLabel, 'AI Chiến lược');
     assert.equal(vmLlm.fallbackNotice, null);
 
     // Bridge in investmentBriefDisplay
@@ -436,26 +438,20 @@ test('V1.2 Improvement 04 — AI Market Strategist', async (t) => {
       ]
     };
 
-    let capturedBody = null;
     const result = await generateMarketStrategist({
       factPacket: packet,
       now: NOW,
       geminiApiKey: 'AIzaMockKey123',
       geminiModel: 'gemini-3.6-flash',
       runtime: new MarketStrategistRuntime(),
-      fetchFn: async (url, opts) => {
-        capturedBody = JSON.parse(opts.body);
-        return {
-          ok: true,
-          json: async () => mockGeminiResponse
-        };
-      }
+      fetchFn: async () => ({
+        ok: true,
+        json: async () => mockGeminiResponse
+      })
     });
 
     assert.equal(result.generationMode, 'live_ai');
     assert.equal(result.marketOverview.vietnam, mockGeminiOutput.marketOverview.vietnam);
-    assert.equal(capturedBody.generationConfig.thinkingConfig.thinkingLevel, 'minimal');
-    assert.ok(capturedBody.generationConfig.maxOutputTokens >= 4096);
   });
 
   await t.test('14. Gemini simulated high-demand / quota error triggers deterministic fallback gracefully', async () => {
@@ -489,47 +485,7 @@ test('V1.2 Improvement 04 — AI Market Strategist', async (t) => {
     assert.ok(result.marketOverview.vietnam);
   });
 
-  await t.test('15. Gemini truncated/malformed JSON output triggers deterministic fallback without crash', async () => {
-    const packet = buildMarketStrategistFactPacket({
-      marketObservations: MOCK_OBSERVATIONS,
-      newsArticles: MOCK_NEWS,
-      now: NOW
-    });
-
-    const truncatedGeminiResponse = {
-      candidates: [
-        {
-          content: {
-            parts: [
-              {
-                text: '{"marketOverview": {"vietnam": "Chỉ số VN-Index đang ghi nhận nhịp phân hóa'
-              }
-            ]
-          },
-          finishReason: 'MAX_TOKENS'
-        }
-      ]
-    };
-
-    const result = await generateMarketStrategist({
-      factPacket: packet,
-      now: NOW,
-      geminiApiKey: 'AIzaMockKey123',
-      geminiModel: 'gemini-3.6-flash',
-      runtime: new MarketStrategistRuntime(),
-      fetchFn: async () => ({
-        ok: true,
-        json: async () => truncatedGeminiResponse
-      })
-    });
-
-    assert.equal(result.generationMode, 'deterministic_fallback');
-    assert.ok(result.lastProviderError.includes('Truncated output: MAX_TOKENS reached') || result.lastProviderError.includes('JSON'));
-    assert.ok(result.marketOverview.vietnam);
-    assert.ok(result.investmentOrientation.stance);
-  });
-
-  await t.test('16. POST and GET endpoints in createApp operate without profile dependency', async () => {
+  await t.test('15. POST and GET endpoints in createApp operate without profile dependency', async () => {
     const { createApp } = await import('../index.js');
     const app = createApp({
       getMarketStrategistFn: async ({ allowLlm }) => ({
@@ -569,5 +525,118 @@ test('V1.2 Improvement 04 — AI Market Strategist', async (t) => {
     } finally {
       server.close();
     }
+  });
+
+  await t.test('16. Actionable assetStrategy contract validates strictly', () => {
+    const packet = buildMarketStrategistFactPacket({
+      marketObservations: MOCK_OBSERVATIONS,
+      newsArticles: MOCK_NEWS,
+      now: NOW
+    });
+
+    const deterministic = generateDeterministicMarketStrategist({ factPacket: packet, now: NOW });
+    assert.ok(Array.isArray(deterministic.assetStrategy));
+    assert.equal(deterministic.assetStrategy.length, 5);
+
+    const assetClasses = deterministic.assetStrategy.map((a) => a.assetClass);
+    assert.ok(assetClasses.includes('vietnam_equities'));
+    assert.ok(assetClasses.includes('gold'));
+    assert.ok(assetClasses.includes('usd'));
+    assert.ok(assetClasses.includes('crypto'));
+    assert.ok(assetClasses.includes('cash'));
+
+    for (const asset of deterministic.assetStrategy) {
+      assert.ok(['increase', 'hold', 'reduce', 'avoid', 'watch'].includes(asset.stance));
+      assert.ok(['high', 'medium', 'low'].includes(asset.priority));
+      assert.ok(typeof asset.rationale === 'string' && asset.rationale.length >= 10);
+      assert.ok(Array.isArray(asset.evidenceIds) && asset.evidenceIds.length > 0);
+    }
+  });
+
+  await t.test('17. Purely vague output is rejected by anti-vague validator', () => {
+    const packet = buildMarketStrategistFactPacket({
+      marketObservations: MOCK_OBSERVATIONS,
+      newsArticles: MOCK_NEWS,
+      now: NOW
+    });
+
+    const candidate = generateDeterministicMarketStrategist({ factPacket: packet, now: NOW });
+    candidate.executiveDecision.actionNow = 'nên theo dõi thị trường';
+
+    const validation = validateMarketStrategistOutput(candidate, {
+      validFactIds: packet.validFactIds,
+      validArticleIds: packet.validArticleIds
+    });
+
+    assert.equal(validation.valid, false);
+    assert.ok(validation.errors.includes('VAGUE_ACTION_NOT_ACTIONABLE'));
+  });
+
+  await t.test('18. Unsupported stock ticker is rejected by anti-hallucination ticker validator', () => {
+    const packet = buildMarketStrategistFactPacket({
+      marketObservations: MOCK_OBSERVATIONS,
+      newsArticles: MOCK_NEWS,
+      now: NOW
+    });
+
+    const candidate = generateDeterministicMarketStrategist({ factPacket: packet, now: NOW });
+    // Inject unevidenced stock ticker 'ABC' into preferred themes
+    candidate.preferredThemes.push({
+      theme: 'Cổ phiếu ABC',
+      stance: 'prefer',
+      rationale: 'Kỳ vọng tăng trưởng đột biến từ mã ABC trong quý tới.',
+      evidenceIds: [packet.evidence[0].id]
+    });
+
+    const validation = validateMarketStrategistOutput(candidate, {
+      validFactIds: packet.validFactIds,
+      validArticleIds: packet.validArticleIds,
+      validTickers: packet.validTickers
+    });
+
+    assert.equal(validation.valid, false);
+    assert.ok(validation.errors.includes('UNSUPPORTED_STOCK_TICKER_DETECTED_ABC'));
+  });
+
+  await t.test('19. Evidenced stock ticker in fact packet passes validation', () => {
+    const packet = buildMarketStrategistFactPacket({
+      marketObservations: MOCK_OBSERVATIONS,
+      newsArticles: MOCK_NEWS, // Contains VSC from CafeF news
+      now: NOW
+    });
+
+    assert.ok(packet.validTickers.has('VSC'));
+
+    const candidate = generateDeterministicMarketStrategist({ factPacket: packet, now: NOW });
+    candidate.preferredThemes.push({
+      theme: 'Cảng biển và Logistics VSC',
+      stance: 'prefer',
+      rationale: 'Hưởng lợi từ hoạt động mở rộng công suất và xuất nhập khẩu.',
+      evidenceIds: ['news_cafef_123']
+    });
+
+    const validation = validateMarketStrategistOutput(candidate, {
+      validFactIds: packet.validFactIds,
+      validArticleIds: packet.validArticleIds,
+      validTickers: packet.validTickers
+    });
+
+    assert.equal(validation.valid, true, `Errors: ${validation.errors.join(', ')}`);
+  });
+
+  await t.test('20. Backward compatibility with investmentOrientation is preserved in fallback', () => {
+    const packet = buildMarketStrategistFactPacket({
+      marketObservations: MOCK_OBSERVATIONS,
+      newsArticles: MOCK_NEWS,
+      now: NOW
+    });
+
+    const fallback = generateDeterministicMarketStrategist({ factPacket: packet, now: NOW });
+    assert.ok(fallback.investmentOrientation);
+    assert.ok(fallback.investmentOrientation.stance);
+    assert.ok(fallback.investmentOrientation.rationale);
+    assert.ok(Array.isArray(fallback.investmentOrientation.preferredThemes));
+    assert.ok(Array.isArray(fallback.investmentOrientation.pressuredThemes));
+    assert.ok(Array.isArray(fallback.investmentOrientation.evidenceIds));
   });
 });

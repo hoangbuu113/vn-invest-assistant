@@ -1,6 +1,22 @@
-import { ALLOWED_STANCES } from './marketStrategistPrompt.js';
+import {
+  ALLOWED_STANCES,
+  ALLOWED_CONVICTIONS,
+  ALLOWED_ASSET_CLASSES,
+  ALLOWED_ASSET_STANCES,
+  ALLOWED_PRIORITIES,
+  ALLOWED_THEME_STANCES
+} from './marketStrategistPrompt.js';
 
 const FORBIDDEN_WORDS_REGEX = /(?:\b(?:buy now|sell now|mua ngay|bán tháo|mục tiêu giá|giá mục tiêu|cam kết lợi nhuận|chắc chắn tăng|chắc chắn giảm)\b|(?:khuyến nghị (?:mua|bán)))/i;
+
+const PURE_VAGUE_REGEX = /^(?:nên theo dõi thị trường|cần thận trọng|ưu tiên doanh nghiệp tốt|thị trường biến động nên đứng ngoài)[\.\s]*$/i;
+
+const STANDARD_ACRONYMS = new Set([
+  'CPI', 'GDP', 'USD', 'VND', 'FED', 'DXY', 'HNX', 'HOSE', 'VN30', 'BTC',
+  'CNY', 'IMF', 'KPI', 'SBV', 'PMI', 'FDI', 'PBR', 'PER', 'EPS', 'ROE',
+  'ROA', 'OPEC', 'WTI', 'ETF', 'API', 'LLM', 'USA', 'VIB', 'SEC', 'ECB',
+  'BOT', 'III', 'VII', 'XII'
+]);
 
 /**
  * Validates an AI-generated or fallback market strategist output against the strict contract.
@@ -10,6 +26,7 @@ const FORBIDDEN_WORDS_REGEX = /(?:\b(?:buy now|sell now|mua ngay|bán tháo|mụ
  * @param {object} evidenceScope - The valid facts and news provided in the closed input packet.
  * @param {Set<string>|Array<string>} [evidenceScope.validFactIds] - Allowed observation IDs or fact IDs.
  * @param {Set<string>|Array<string>} [evidenceScope.validArticleIds] - Allowed article IDs.
+ * @param {Set<string>|Array<string>} [evidenceScope.validTickers] - Allowed individual stock tickers mentioned in evidence.
  * @returns {{ valid: boolean, errors: string[] }}
  */
 export function validateMarketStrategistOutput(output, evidenceScope = {}) {
@@ -22,8 +39,118 @@ export function validateMarketStrategistOutput(output, evidenceScope = {}) {
   const validFacts = new Set(evidenceScope.validFactIds || []);
   const validArticles = new Set(evidenceScope.validArticleIds || []);
   const allValidEvidence = new Set([...validFacts, ...validArticles]);
+  const allowedTickers = new Set([
+    ...STANDARD_ACRONYMS,
+    ...(evidenceScope.validTickers || [])
+  ]);
 
-  // 1. marketOverview
+  // 1. executiveDecision
+  if (!output.executiveDecision || typeof output.executiveDecision !== 'object') {
+    errors.push('MISSING_EXECUTIVE_DECISION');
+  } else {
+    const ed = output.executiveDecision;
+    if (!ALLOWED_STANCES.includes(ed.stance)) {
+      errors.push(`INVALID_EXECUTIVE_STANCE_${ed.stance}`);
+    }
+    if (!ALLOWED_CONVICTIONS.includes(ed.conviction)) {
+      errors.push(`INVALID_EXECUTIVE_CONVICTION_${ed.conviction}`);
+    }
+    if (typeof ed.oneLineDecision !== 'string' || ed.oneLineDecision.trim().length < 10) {
+      errors.push('INVALID_ONE_LINE_DECISION');
+    }
+    if (typeof ed.actionNow !== 'string' || ed.actionNow.trim().length < 10) {
+      errors.push('INVALID_ACTION_NOW');
+    } else if (PURE_VAGUE_REGEX.test(ed.actionNow.trim())) {
+      errors.push('VAGUE_ACTION_NOT_ACTIONABLE');
+    }
+  }
+
+  // 2. assetStrategy
+  if (!Array.isArray(output.assetStrategy) || output.assetStrategy.length === 0) {
+    errors.push('MISSING_ASSET_STRATEGY');
+  } else {
+    for (let i = 0; i < output.assetStrategy.length; i++) {
+      const as = output.assetStrategy[i];
+      if (!as || typeof as !== 'object') {
+        errors.push(`INVALID_ASSET_STRATEGY_ITEM_${i}`);
+        continue;
+      }
+      if (!ALLOWED_ASSET_CLASSES.includes(as.assetClass)) {
+        errors.push(`INVALID_ASSET_CLASS_${as.assetClass}`);
+      }
+      if (!ALLOWED_ASSET_STANCES.includes(as.stance)) {
+        errors.push(`INVALID_ASSET_STANCE_${as.stance}`);
+      }
+      if (!ALLOWED_PRIORITIES.includes(as.priority)) {
+        errors.push(`INVALID_ASSET_PRIORITY_${as.priority}`);
+      }
+      if (typeof as.rationale !== 'string' || as.rationale.trim().length < 5) {
+        errors.push(`INVALID_ASSET_RATIONALE_${i}`);
+      }
+      if (!Array.isArray(as.evidenceIds) || as.evidenceIds.length === 0) {
+        errors.push(`MISSING_ASSET_EVIDENCE_${i}`);
+      } else {
+        for (const evId of as.evidenceIds) {
+          if (!allValidEvidence.has(evId)) {
+            errors.push(`UNKNOWN_EVIDENCE_ID_IN_ASSET_STRATEGY_${evId}`);
+          }
+        }
+      }
+    }
+  }
+
+  // 3. preferredThemes
+  if (!Array.isArray(output.preferredThemes) || output.preferredThemes.length === 0) {
+    errors.push('MISSING_PREFERRED_THEMES');
+  } else {
+    for (let i = 0; i < output.preferredThemes.length; i++) {
+      const pt = output.preferredThemes[i];
+      if (!pt || typeof pt !== 'object' || typeof pt.theme !== 'string' || pt.theme.trim().length < 2) {
+        errors.push(`INVALID_PREFERRED_THEME_${i}`);
+      }
+      if (!ALLOWED_THEME_STANCES.includes(pt?.stance)) {
+        errors.push(`INVALID_THEME_STANCE_${pt?.stance}`);
+      }
+      if (typeof pt?.rationale !== 'string' || pt.rationale.trim().length < 5) {
+        errors.push(`INVALID_THEME_RATIONALE_${i}`);
+      }
+      if (!Array.isArray(pt?.evidenceIds) || pt.evidenceIds.length === 0) {
+        errors.push(`MISSING_PREFERRED_THEME_EVIDENCE_${i}`);
+      } else {
+        for (const evId of pt.evidenceIds) {
+          if (!allValidEvidence.has(evId)) {
+            errors.push(`UNKNOWN_EVIDENCE_ID_IN_PREFERRED_THEME_${evId}`);
+          }
+        }
+      }
+    }
+  }
+
+  // 4. avoidOrUnderweight
+  if (!Array.isArray(output.avoidOrUnderweight) || output.avoidOrUnderweight.length === 0) {
+    errors.push('MISSING_AVOID_OR_UNDERWEIGHT');
+  } else {
+    for (let i = 0; i < output.avoidOrUnderweight.length; i++) {
+      const au = output.avoidOrUnderweight[i];
+      if (!au || typeof au !== 'object' || typeof au.theme !== 'string' || au.theme.trim().length < 2) {
+        errors.push(`INVALID_AVOID_ITEM_${i}`);
+      }
+      if (typeof au?.reason !== 'string' || au.reason.trim().length < 5) {
+        errors.push(`INVALID_AVOID_REASON_${i}`);
+      }
+      if (!Array.isArray(au?.evidenceIds) || au.evidenceIds.length === 0) {
+        errors.push(`MISSING_AVOID_EVIDENCE_${i}`);
+      } else {
+        for (const evId of au.evidenceIds) {
+          if (!allValidEvidence.has(evId)) {
+            errors.push(`UNKNOWN_EVIDENCE_ID_IN_AVOID_${evId}`);
+          }
+        }
+      }
+    }
+  }
+
+  // 5. marketOverview
   if (!output.marketOverview || typeof output.marketOverview !== 'object') {
     errors.push('MISSING_MARKET_OVERVIEW');
   } else {
@@ -35,7 +162,7 @@ export function validateMarketStrategistOutput(output, evidenceScope = {}) {
     }
   }
 
-  // 2. keyDrivers
+  // 6. keyDrivers
   if (!Array.isArray(output.keyDrivers) || output.keyDrivers.length === 0) {
     errors.push('MISSING_KEY_DRIVERS');
   } else {
@@ -56,35 +183,7 @@ export function validateMarketStrategistOutput(output, evidenceScope = {}) {
     }
   }
 
-  // 3. investmentOrientation
-  if (!output.investmentOrientation || typeof output.investmentOrientation !== 'object') {
-    errors.push('MISSING_INVESTMENT_ORIENTATION');
-  } else {
-    const io = output.investmentOrientation;
-    if (!ALLOWED_STANCES.includes(io.stance)) {
-      errors.push(`INVALID_STANCE_${io.stance}`);
-    }
-    if (!Array.isArray(io.preferredThemes) || io.preferredThemes.length === 0) {
-      errors.push('MISSING_PREFERRED_THEMES');
-    }
-    if (!Array.isArray(io.pressuredThemes) || io.pressuredThemes.length === 0) {
-      errors.push('MISSING_PRESSURED_THEMES');
-    }
-    if (typeof io.rationale !== 'string' || io.rationale.trim().length < 10) {
-      errors.push('INVALID_ORIENTATION_RATIONALE');
-    }
-    if (!Array.isArray(io.evidenceIds) || io.evidenceIds.length === 0) {
-      errors.push('MISSING_ORIENTATION_EVIDENCE');
-    } else {
-      for (const evId of io.evidenceIds) {
-        if (!allValidEvidence.has(evId)) {
-          errors.push(`UNKNOWN_EVIDENCE_ID_IN_ORIENTATION_${evId}`);
-        }
-      }
-    }
-  }
-
-  // 4. risksAndInvalidation
+  // 7. risksAndInvalidation
   if (!output.risksAndInvalidation || typeof output.risksAndInvalidation !== 'object') {
     errors.push('MISSING_RISKS_AND_INVALIDATION');
   } else {
@@ -106,7 +205,7 @@ export function validateMarketStrategistOutput(output, evidenceScope = {}) {
     }
   }
 
-  // 5. watchNext
+  // 8. watchNext
   if (!Array.isArray(output.watchNext) || output.watchNext.length === 0) {
     errors.push('MISSING_WATCH_NEXT');
   } else {
@@ -117,7 +216,7 @@ export function validateMarketStrategistOutput(output, evidenceScope = {}) {
     }
   }
 
-  // 6. citations
+  // 9. citations
   if (!output.citations || typeof output.citations !== 'object') {
     errors.push('MISSING_CITATIONS');
   } else {
@@ -140,10 +239,26 @@ export function validateMarketStrategistOutput(output, evidenceScope = {}) {
     }
   }
 
-  // 7. Anti-hallucination: forbidden recommendation keywords check across all strings
+  // 10. Anti-hallucination: forbidden recommendation keywords check across all strings
   const stringDump = JSON.stringify(output);
   if (FORBIDDEN_WORDS_REGEX.test(stringDump)) {
     errors.push('FORBIDDEN_RECOMMENDATION_KEYWORDS_DETECTED');
+  }
+
+  // 11. Unsupported stock ticker detection in actionable fields
+  const actionableText = [
+    output.executiveDecision?.oneLineDecision || '',
+    output.executiveDecision?.actionNow || '',
+    ...(Array.isArray(output.assetStrategy) ? output.assetStrategy.map((a) => `${a.rationale}`) : []),
+    ...(Array.isArray(output.preferredThemes) ? output.preferredThemes.map((t) => `${t.theme} ${t.rationale}`) : []),
+    ...(Array.isArray(output.avoidOrUnderweight) ? output.avoidOrUnderweight.map((a) => `${a.theme} ${a.reason}`) : [])
+  ].join(' ');
+
+  const tickerMatches = actionableText.match(/\b[A-Z]{3}\b/g) || [];
+  for (const ticker of tickerMatches) {
+    if (!allowedTickers.has(ticker)) {
+      errors.push(`UNSUPPORTED_STOCK_TICKER_DETECTED_${ticker}`);
+    }
   }
 
   return {

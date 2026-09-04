@@ -130,9 +130,189 @@ export function InvestmentBriefPanel() {
       {strategistView && (
         <div className="market-brief-content-body" aria-live="polite">
           <div className="market-brief-sections-stack">
-            {/* 1. Tổng quan thị trường */}
+            {/* 1. Quyết định điều hành & Hành động ngay (Executive Decision) */}
+            {strategistView.executiveDecision && (
+              <article className="market-brief-section-item" style={{
+                background: 'rgba(59, 130, 246, 0.05)',
+                border: '1px solid rgba(59, 130, 246, 0.2)',
+                borderRadius: '8px',
+                padding: '16px'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px', flexWrap: 'wrap', gap: '8px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '13px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-secondary, #94a3b8)' }}>
+                      Quyết định điều hành
+                    </span>
+                    <span className={`stance-badge ${strategistView.executiveDecision.stanceClass}`} style={{
+                      padding: '2px 8px',
+                      borderRadius: '4px',
+                      fontSize: '12px',
+                      fontWeight: 600,
+                      background: 'rgba(59, 130, 246, 0.15)',
+                      color: 'var(--color-primary, #3b82f6)',
+                      border: '1px solid rgba(59, 130, 246, 0.3)'
+                    }}>
+                      {strategistView.executiveDecision.stanceLabel}
+                    </span>
+                  </div>
+                  <span style={{
+                    fontSize: '12px',
+                    padding: '2px 6px',
+                    borderRadius: '4px',
+                    background: 'rgba(255, 255, 255, 0.05)',
+                    color: 'var(--color-text-secondary, #94a3b8)',
+                    border: '1px solid rgba(255, 255, 255, 0.1)'
+                  }}>
+                    Mức độ tin cậy: <strong>{strategistView.executiveDecision.convictionLabel}</strong>
+                  </span>
+                </div>
+
+                <p style={{
+                  fontSize: '15px',
+                  fontWeight: 600,
+                  lineHeight: '1.5',
+                  color: 'var(--color-text-primary, #f8fafc)',
+                  margin: '0 0 10px 0'
+                }}>
+                  {strategistView.executiveDecision.oneLineDecision}
+                </p>
+
+                <div style={{
+                  padding: '10px 12px',
+                  background: 'rgba(0, 0, 0, 0.2)',
+                  borderRadius: '6px',
+                  borderLeft: '3px solid var(--color-primary, #3b82f6)'
+                }}>
+                  <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--color-primary, #60a5fa)', textTransform: 'uppercase', display: 'block', marginBottom: '2px' }}>
+                    Hành động cụ thể lúc này:
+                  </span>
+                  <p style={{ margin: 0, fontSize: '13px', lineHeight: '1.45', color: 'var(--color-text-primary, #e2e8f0)' }}>
+                    {strategistView.executiveDecision.actionNow}
+                  </p>
+                </div>
+              </article>
+            )}
+
+            {/* 2. Ma trận Chiến lược theo Lớp tài sản (Asset Strategy Matrix) */}
+            {strategistView.assetStrategy && strategistView.assetStrategy.length > 0 && (
+              <article className="market-brief-section-item">
+                <h4 className="market-brief-section-heading" style={{ marginBottom: '10px' }}>
+                  Chiến lược phân bổ lớp tài sản
+                </h4>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {strategistView.assetStrategy.map((asset, idx) => (
+                    <div key={idx} style={{
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      justifyContent: 'space-between',
+                      padding: '10px 12px',
+                      background: 'rgba(255, 255, 255, 0.02)',
+                      border: '1px solid rgba(255, 255, 255, 0.06)',
+                      borderRadius: '6px',
+                      gap: '12px',
+                      flexWrap: 'wrap'
+                    }}>
+                      <div style={{ minWidth: '140px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                        <span style={{ fontWeight: 600, fontSize: '13px', color: 'var(--color-text-primary, #f8fafc)' }}>
+                          {asset.assetClassLabel}
+                        </span>
+                        <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                          <span style={{
+                            fontSize: '11px',
+                            fontWeight: 700,
+                            padding: '1px 6px',
+                            borderRadius: '3px',
+                            background: asset.stance === 'increase' ? 'rgba(34, 197, 94, 0.15)' : (asset.stance === 'reduce' || asset.stance === 'avoid' ? 'rgba(239, 68, 68, 0.15)' : 'rgba(234, 179, 8, 0.15)'),
+                            color: asset.stance === 'increase' ? '#22c55e' : (asset.stance === 'reduce' || asset.stance === 'avoid' ? '#ef4444' : '#eab308'),
+                            border: `1px solid ${asset.stance === 'increase' ? 'rgba(34, 197, 94, 0.3)' : (asset.stance === 'reduce' || asset.stance === 'avoid' ? 'rgba(239, 68, 68, 0.3)' : 'rgba(234, 179, 8, 0.3)')}`
+                          }}>
+                            {asset.stanceLabel}
+                          </span>
+                          <span style={{ fontSize: '11px', color: 'var(--color-text-secondary, #94a3b8)' }}>
+                            Ưu tiên: {asset.priorityLabel}
+                          </span>
+                        </div>
+                      </div>
+                      <div style={{ flex: 1, fontSize: '13px', color: 'var(--color-text-secondary, #cbd5e1)', lineHeight: '1.45' }}>
+                        {asset.rationale}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </article>
+            )}
+
+            {/* 3. Chủ đề ưu tiên & Nhóm cần tránh / hạ tỷ trọng */}
+            {(strategistView.preferredThemes.length > 0 || strategistView.avoidOrUnderweight.length > 0) && (
+              <article className="market-brief-section-item">
+                <h4 className="market-brief-section-heading" style={{ marginBottom: '10px' }}>
+                  Chủ đề ưu tiên & Nhóm cần hạn chế
+                </h4>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '10px' }}>
+                  {/* Preferred */}
+                  {strategistView.preferredThemes.length > 0 && (
+                    <div style={{
+                      padding: '12px',
+                      borderRadius: '6px',
+                      background: 'rgba(34, 197, 94, 0.05)',
+                      border: '1px solid rgba(34, 197, 94, 0.15)'
+                    }}>
+                      <div style={{ fontSize: '12px', fontWeight: 700, color: '#22c55e', textTransform: 'uppercase', marginBottom: '6px' }}>
+                        ✓ Ưu tiên quan sát
+                      </div>
+                      <ul style={{ margin: 0, paddingLeft: '16px', fontSize: '13px', color: 'var(--color-text-primary, #f1f5f9)' }}>
+                        {strategistView.preferredThemes.map((item, idx) => (
+                          <li key={idx} style={{ marginBottom: '4px' }}>
+                            <strong>{item.theme}</strong>
+                            {item.rationale && <span style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>: {item.rationale}</span>}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {/* Avoid / Underweight */}
+                  {strategistView.avoidOrUnderweight.length > 0 && (
+                    <div style={{
+                      padding: '12px',
+                      borderRadius: '6px',
+                      background: 'rgba(239, 68, 68, 0.05)',
+                      border: '1px solid rgba(239, 68, 68, 0.15)'
+                    }}>
+                      <div style={{ fontSize: '12px', fontWeight: 700, color: '#ef4444', textTransform: 'uppercase', marginBottom: '6px' }}>
+                        ✕ Cần tránh / Hạ tỷ trọng
+                      </div>
+                      <ul style={{ margin: 0, paddingLeft: '16px', fontSize: '13px', color: 'var(--color-text-primary, #f1f5f9)' }}>
+                        {strategistView.avoidOrUnderweight.map((item, idx) => (
+                          <li key={idx} style={{ marginBottom: '4px' }}>
+                            <strong>{item.theme}</strong>
+                            {item.reason && <span style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>: {item.reason}</span>}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              </article>
+            )}
+
+            {/* 4. Động lực chính & Bối cảnh */}
+            {strategistView.keyDrivers.length > 0 && (
+              <article className="market-brief-section-item">
+                <h4 className="market-brief-section-heading">Động lực thị trường then chốt</h4>
+                <div className="market-brief-statements">
+                  {strategistView.keyDrivers.map((kd, idx) => (
+                    <div key={idx} className="market-brief-statement-row">
+                      <p className="market-brief-prose">• {kd.driver}</p>
+                    </div>
+                  ))}
+                </div>
+              </article>
+            )}
+
+            {/* 5. Tổng quan thị trường */}
             <article className="market-brief-section-item">
-              <h4 className="market-brief-section-heading">1. Tổng quan thị trường</h4>
+              <h4 className="market-brief-section-heading">Bối cảnh kinh tế & thị trường</h4>
               <div className="market-brief-statements">
                 {strategistView.marketOverview.vietnam && (
                   <div className="market-brief-statement-row">
@@ -151,63 +331,10 @@ export function InvestmentBriefPanel() {
               </div>
             </article>
 
-            {/* 2. Động lực chính */}
-            {strategistView.keyDrivers.length > 0 && (
-              <article className="market-brief-section-item">
-                <h4 className="market-brief-section-heading">2. Động lực chính</h4>
-                <div className="market-brief-statements">
-                  {strategistView.keyDrivers.map((kd, idx) => (
-                    <div key={idx} className="market-brief-statement-row">
-                      <p className="market-brief-prose">• {kd.driver}</p>
-                    </div>
-                  ))}
-                </div>
-              </article>
-            )}
-
-            {/* 3. Định hướng đầu tư */}
-            {strategistView.investmentOrientation && (
-              <article className="market-brief-section-item">
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-                  <h4 className="market-brief-section-heading" style={{ margin: 0 }}>3. Định hướng đầu tư</h4>
-                  <span className={`stance-badge ${strategistView.investmentOrientation.stanceClass}`} style={{
-                    padding: '2px 8px',
-                    borderRadius: '4px',
-                    fontSize: '12px',
-                    fontWeight: 600,
-                    background: 'rgba(59, 130, 246, 0.1)',
-                    color: 'var(--color-primary, #2563eb)',
-                    border: '1px solid rgba(59, 130, 246, 0.2)'
-                  }}>
-                    {strategistView.investmentOrientation.stanceLabel}
-                  </span>
-                </div>
-                <div className="market-brief-statements">
-                  <div className="market-brief-statement-row">
-                    <p className="market-brief-prose">{strategistView.investmentOrientation.rationale}</p>
-                  </div>
-                  {strategistView.investmentOrientation.preferredThemes.length > 0 && (
-                    <div className="market-brief-statement-row" style={{ marginTop: '4px' }}>
-                      <p className="market-brief-prose" style={{ fontSize: '13px' }}>
-                        <strong style={{ color: 'var(--color-success, #16a34a)' }}>Ưu tiên quan sát:</strong> {strategistView.investmentOrientation.preferredThemes.join(' · ')}
-                      </p>
-                    </div>
-                  )}
-                  {strategistView.investmentOrientation.pressuredThemes.length > 0 && (
-                    <div className="market-brief-statement-row" style={{ marginTop: '2px' }}>
-                      <p className="market-brief-prose" style={{ fontSize: '13px' }}>
-                        <strong style={{ color: 'var(--color-warning, #d97706)' }}>Chịu áp lực:</strong> {strategistView.investmentOrientation.pressuredThemes.join(' · ')}
-                      </p>
-                    </div>
-                  )}
-                </div>
-              </article>
-            )}
-
-            {/* 4. Rủi ro / điều kiện thay đổi góc nhìn */}
+            {/* 6. Rủi ro / điều kiện thay đổi góc nhìn */}
             {strategistView.risksAndInvalidation && (
               <article className="market-brief-section-item">
-                <h4 className="market-brief-section-heading">4. Rủi ro & điều kiện thay đổi góc nhìn</h4>
+                <h4 className="market-brief-section-heading">Rủi ro & điều kiện đảo chiều góc nhìn</h4>
                 <div className="market-brief-statements">
                   {strategistView.risksAndInvalidation.keyRisks.map((risk, idx) => (
                     <div key={`risk-${idx}`} className="market-brief-statement-row">
@@ -216,17 +343,17 @@ export function InvestmentBriefPanel() {
                   ))}
                   {strategistView.risksAndInvalidation.invalidationConditions.map((cond, idx) => (
                     <div key={`cond-${idx}`} className="market-brief-statement-row">
-                      <p className="market-brief-prose">• <em>Điều kiện đảo chiều:</em> {cond}</p>
+                      <p className="market-brief-prose">• <em>Điều kiện thay đổi quan điểm:</em> {cond}</p>
                     </div>
                   ))}
                 </div>
               </article>
             )}
 
-            {/* 5. Điểm cần theo dõi */}
+            {/* 7. Điểm cần theo dõi tiếp theo */}
             {strategistView.watchNext.length > 0 && (
               <article className="market-brief-section-item">
-                <h4 className="market-brief-section-heading">5. Điểm cần theo dõi</h4>
+                <h4 className="market-brief-section-heading">Điểm theo dõi tiếp theo</h4>
                 <div className="market-brief-statements">
                   {strategistView.watchNext.map((item, idx) => (
                     <div key={idx} className="market-brief-statement-row">
