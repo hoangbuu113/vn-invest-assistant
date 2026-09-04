@@ -166,6 +166,7 @@ describe('Public Multi-User HTTP & Security Boundary', () => {
       ['POST', '/api/cash/withdraw'],
       ['GET', '/api/news/personalized'],
       ['GET', '/api/opportunities'],
+      ['POST', '/api/market-strategist'],
       ['POST', '/api/investment-brief'],
       ['GET', '/api/portfolio/overview'],
       ['GET', '/api/portfolio/composition'],

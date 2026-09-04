@@ -39,6 +39,7 @@ import { buildVietnamRegime, getVietnamRegime, isUsableRegimeDomain } from './sr
 import { runMarketContextCollector } from './src/context/collector.js';
 import { getOpportunities } from './src/opportunities.js';
 import { getInvestmentBrief } from './src/investmentBrief.js';
+import { getMarketStrategist } from './src/marketStrategist.js';
 import {
   createPortfolioTransaction,
   FX_PROVENANCE_METHODS,
@@ -163,6 +164,7 @@ export function createApp(services = {}) {
     runNewsCollectorFn = runNewsCollector,
     getOpportunitiesFn = getOpportunities,
     getInvestmentBriefFn = getInvestmentBrief,
+    getMarketStrategistFn = getMarketStrategist,
     getWatchlistFn = getWatchlist,
     addToWatchlistFn = addToWatchlist,
     removeFromWatchlistFn = removeFromWatchlist,
@@ -1053,6 +1055,30 @@ export function createApp(services = {}) {
         status: 'error',
         code: error.code || 'OPPORTUNITY_SERVICE_UNAVAILABLE',
         message: 'Không thể tạo danh sách cơ hội mô tả lúc này'
+      });
+    }
+  });
+
+  // AI Market Strategist (V1.2 Improvement 04 — public context + normalized news synthesis)
+  app.post('/api/market-strategist', async (req, res) => {
+    const now = new Date();
+    const profileId = requireProfile(req, res);
+    if (!profileId) return;
+
+    try {
+      const result = await getMarketStrategistFn({ now });
+      return res.status(200).json({
+        status: 'ok',
+        data: result
+      });
+    } catch (error) {
+      const statusCode = error?.status === 429 ? 429 : 503;
+      return res.status(statusCode).json({
+        status: 'error',
+        code: statusCode === 429 ? (error.code || 'AI_STRATEGIST_RATE_LIMITED') : 'AI_STRATEGIST_UNAVAILABLE',
+        message: statusCode === 429
+          ? 'Tần suất tạo bản tin chiến lược gia đang được giới hạn. Vui lòng thử lại sau.'
+          : 'Không thể tạo bản tin chiến lược gia thị trường lúc này.'
       });
     }
   });

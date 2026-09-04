@@ -9,6 +9,7 @@ export const PRIVATE_API_PREFIXES = Object.freeze([
   '/api/news/personalized',
   '/api/opportunities',
   '/api/investment-brief',
+  '/api/market-strategist',
   '/api/portfolio',
   '/api/watchlist',
   '/api/alerts',

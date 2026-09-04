@@ -6,6 +6,10 @@ import {
   formatInvestmentBriefEvidence,
   reduceInvestmentBriefState
 } from '../utils/investmentBriefDisplay.js';
+import {
+  buildMarketStrategistViewModel,
+  formatEvidenceValue
+} from '../utils/marketStrategistDisplay.js';
 import { MagneticButton } from './MotionHelpers.jsx';
 
 export function InvestmentBriefPanel() {
@@ -23,7 +27,7 @@ export function InvestmentBriefPanel() {
     activeRequestRef.current = controller;
     dispatch({ type: 'start' });
 
-    apiFetch('/api/investment-brief', {
+    apiFetch('/api/market-strategist', {
       method: 'POST',
       signal: controller.signal
     })
@@ -38,8 +42,9 @@ export function InvestmentBriefPanel() {
         }
         return body;
       })
-      .then((data) => {
+      .then((payload) => {
         if (activeRequestRef.current !== controller || controller.signal.aborted) return;
+        const data = payload?.data || payload;
         dispatch({ type: 'success', data });
       })
       .catch((error) => {
@@ -51,9 +56,10 @@ export function InvestmentBriefPanel() {
       });
   }, []);
 
-  const view = buildInvestmentBriefViewModel(state.data);
+  const strategistView = buildMarketStrategistViewModel(state.data);
+  const legacyView = buildInvestmentBriefViewModel(state.data);
+  const view = strategistView || legacyView;
   const isLoading = state.phase === 'loading';
-  const displaySections = view?.curatedSections?.length > 0 ? view.curatedSections : (view?.sections || []);
 
   return (
     <div className="market-brief-panel">
@@ -64,17 +70,17 @@ export function InvestmentBriefPanel() {
             <span className="market-brief-badge">
               {view?.badgeLabel || 'Tóm tắt dữ liệu'}
             </span>
-            {view && (
+            {view?.generatedAt && (
               <span className="market-brief-timestamp">
                 Cập nhật: {view.generatedAt}
               </span>
             )}
           </div>
           <h3 id="investment-brief-title" className="market-brief-title">
-            Bản tin thị trường
+            Chiến lược gia Thị trường AI
           </h3>
           <p className="market-brief-subtitle">
-            Tổng hợp và phân tích dữ kiện từ bối cảnh kinh tế, danh mục và tin tức đáng chú ý.
+            Bản tin thị trường tổng hợp và phân tích dữ kiện từ bối cảnh kinh tế, thị trường và tin tức đáng chú ý.
           </p>
         </div>
 
@@ -120,11 +126,148 @@ export function InvestmentBriefPanel() {
         </div>
       )}
 
-      {/* Active Content: Curated Sections */}
-      {view && displaySections.length > 0 && (
+      {/* Active Content: AI Market Strategist Structured Sections */}
+      {strategistView && (
         <div className="market-brief-content-body" aria-live="polite">
           <div className="market-brief-sections-stack">
-            {displaySections.map((section) => (
+            {/* 1. Tổng quan thị trường */}
+            <article className="market-brief-section-item">
+              <h4 className="market-brief-section-heading">1. Tổng quan thị trường</h4>
+              <div className="market-brief-statements">
+                {strategistView.marketOverview.vietnam && (
+                  <div className="market-brief-statement-row">
+                    <p className="market-brief-prose">
+                      <strong>Việt Nam:</strong> {strategistView.marketOverview.vietnam}
+                    </p>
+                  </div>
+                )}
+                {strategistView.marketOverview.global && (
+                  <div className="market-brief-statement-row">
+                    <p className="market-brief-prose">
+                      <strong>Toàn cầu:</strong> {strategistView.marketOverview.global}
+                    </p>
+                  </div>
+                )}
+              </div>
+            </article>
+
+            {/* 2. Động lực chính */}
+            {strategistView.keyDrivers.length > 0 && (
+              <article className="market-brief-section-item">
+                <h4 className="market-brief-section-heading">2. Động lực chính</h4>
+                <div className="market-brief-statements">
+                  {strategistView.keyDrivers.map((kd, idx) => (
+                    <div key={idx} className="market-brief-statement-row">
+                      <p className="market-brief-prose">• {kd.driver}</p>
+                    </div>
+                  ))}
+                </div>
+              </article>
+            )}
+
+            {/* 3. Định hướng đầu tư */}
+            {strategistView.investmentOrientation && (
+              <article className="market-brief-section-item">
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                  <h4 className="market-brief-section-heading" style={{ margin: 0 }}>3. Định hướng đầu tư</h4>
+                  <span className={`stance-badge ${strategistView.investmentOrientation.stanceClass}`} style={{
+                    padding: '2px 8px',
+                    borderRadius: '4px',
+                    fontSize: '12px',
+                    fontWeight: 600,
+                    background: 'rgba(59, 130, 246, 0.1)',
+                    color: 'var(--color-primary, #2563eb)',
+                    border: '1px solid rgba(59, 130, 246, 0.2)'
+                  }}>
+                    {strategistView.investmentOrientation.stanceLabel}
+                  </span>
+                </div>
+                <div className="market-brief-statements">
+                  <div className="market-brief-statement-row">
+                    <p className="market-brief-prose">{strategistView.investmentOrientation.rationale}</p>
+                  </div>
+                  {strategistView.investmentOrientation.preferredThemes.length > 0 && (
+                    <div className="market-brief-statement-row" style={{ marginTop: '4px' }}>
+                      <p className="market-brief-prose" style={{ fontSize: '13px' }}>
+                        <strong style={{ color: 'var(--color-success, #16a34a)' }}>Ưu tiên quan sát:</strong> {strategistView.investmentOrientation.preferredThemes.join(' · ')}
+                      </p>
+                    </div>
+                  )}
+                  {strategistView.investmentOrientation.pressuredThemes.length > 0 && (
+                    <div className="market-brief-statement-row" style={{ marginTop: '2px' }}>
+                      <p className="market-brief-prose" style={{ fontSize: '13px' }}>
+                        <strong style={{ color: 'var(--color-warning, #d97706)' }}>Chịu áp lực:</strong> {strategistView.investmentOrientation.pressuredThemes.join(' · ')}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </article>
+            )}
+
+            {/* 4. Rủi ro / điều kiện thay đổi góc nhìn */}
+            {strategistView.risksAndInvalidation && (
+              <article className="market-brief-section-item">
+                <h4 className="market-brief-section-heading">4. Rủi ro & điều kiện thay đổi góc nhìn</h4>
+                <div className="market-brief-statements">
+                  {strategistView.risksAndInvalidation.keyRisks.map((risk, idx) => (
+                    <div key={`risk-${idx}`} className="market-brief-statement-row">
+                      <p className="market-brief-prose">• <strong>Rủi ro:</strong> {risk}</p>
+                    </div>
+                  ))}
+                  {strategistView.risksAndInvalidation.invalidationConditions.map((cond, idx) => (
+                    <div key={`cond-${idx}`} className="market-brief-statement-row">
+                      <p className="market-brief-prose">• <em>Điều kiện đảo chiều:</em> {cond}</p>
+                    </div>
+                  ))}
+                </div>
+              </article>
+            )}
+
+            {/* 5. Điểm cần theo dõi */}
+            {strategistView.watchNext.length > 0 && (
+              <article className="market-brief-section-item">
+                <h4 className="market-brief-section-heading">5. Điểm cần theo dõi</h4>
+                <div className="market-brief-statements">
+                  {strategistView.watchNext.map((item, idx) => (
+                    <div key={idx} className="market-brief-statement-row">
+                      <p className="market-brief-prose">• {typeof item === 'string' ? item : item.item}</p>
+                    </div>
+                  ))}
+                </div>
+              </article>
+            )}
+          </div>
+
+          {/* 6. Evidence Details Collapsible Drawer */}
+          {Array.isArray(strategistView.evidence) && strategistView.evidence.length > 0 && (
+            <details className="market-brief-details-drawer">
+              <summary className="market-brief-details-summary">
+                <span>Nguồn bằng chứng & tham chiếu kiểm chứng ({strategistView.evidence.length})</span>
+              </summary>
+              <div className="market-brief-details-body">
+                <ul className="market-brief-evidence-grid">
+                  {strategistView.evidence.map((item) => (
+                    <li key={item.id} className="market-brief-evidence-tag">
+                      <span className="evidence-tag-label">{item.label}:</span>
+                      <strong className="evidence-tag-val">{formatEvidenceValue(item)}</strong>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </details>
+          )}
+
+          <p className="market-brief-disclaimer-text">
+            Bản tin AI là lớp tổng hợp từ dữ kiện thị trường đã kiểm chứng; không đưa ra giá mục tiêu, dự báo cam kết hay khuyến nghị đầu tư cá nhân hóa.
+          </p>
+        </div>
+      )}
+
+      {/* Legacy View Fallback if strategistView is absent */}
+      {!strategistView && legacyView && legacyView.curatedSections?.length > 0 && (
+        <div className="market-brief-content-body" aria-live="polite">
+          <div className="market-brief-sections-stack">
+            {legacyView.curatedSections.map((section) => (
               <article key={section.id} className="market-brief-section-item">
                 <h4 className="market-brief-section-heading">{section.label}</h4>
                 <div className="market-brief-statements">
@@ -138,7 +281,6 @@ export function InvestmentBriefPanel() {
             ))}
           </div>
 
-          {/* Evidence Details Collapsible Drawer */}
           {Array.isArray(state.data?.evidence) && state.data.evidence.length > 0 && (
             <details className="market-brief-details-drawer">
               <summary className="market-brief-details-summary">

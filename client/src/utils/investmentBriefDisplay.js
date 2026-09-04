@@ -147,8 +147,86 @@ export function buildCuratedSections(data, evidenceMap) {
   }).filter((section) => section.statements.length > 0);
 }
 
-export function buildInvestmentBriefViewModel(data) {
+export function buildInvestmentBriefViewModel(raw) {
+  const data = raw?.data || raw;
   if (!data || typeof data !== 'object') return null;
+
+  // Check if it's the AI Market Strategist shape
+  if (data.marketOverview && data.investmentOrientation) {
+    const isLlm = data.generationMode === 'llm';
+    const isCache = data.generationMode === 'cache';
+    const isFallback = data.generationMode === 'deterministic_fallback' || !data.generationMode;
+
+    const badgeLabel = isLlm ? 'AI Tổng hợp' : isCache ? 'AI Lưu tạm' : 'Tóm tắt dữ liệu';
+    const modeLabel = isLlm
+      ? 'AI tổng hợp từ dữ kiện đã kiểm chứng'
+      : isCache
+        ? 'Bản AI lưu tạm từ dữ kiện tương ứng'
+        : 'Bản tóm tắt xác định — AI trực tiếp chưa được sử dụng';
+
+    const fallbackNotice = isFallback
+      ? 'Bản tóm tắt hiện được tạo từ dữ liệu đã xác minh.'
+      : null;
+
+    const curatedSections = [
+      {
+        id: 'highlights',
+        label: '1. Diễn biến chính',
+        statements: [
+          { text: data.marketOverview.vietnam, evidence: [] },
+          { text: data.marketOverview.global, evidence: [] }
+        ].filter((s) => s.text)
+      },
+      {
+        id: 'context',
+        label: '2. Vì sao đáng chú ý',
+        statements: (Array.isArray(data.keyDrivers) ? data.keyDrivers : []).map((kd) => ({
+          text: kd.driver,
+          evidence: []
+        }))
+      },
+      {
+        id: 'watchItems',
+        label: '3. Điểm cần theo dõi',
+        statements: [
+          {
+            text: `Định hướng: ${data.investmentOrientation.rationale || ''}`,
+            evidence: []
+          },
+          ...(Array.isArray(data.watchNext) ? data.watchNext : []).map((w) => ({
+            text: typeof w === 'string' ? w : w.item || '',
+            evidence: []
+          }))
+        ]
+      },
+      {
+        id: 'catalysts',
+        label: '4. Tin tức ảnh hưởng',
+        statements: (Array.isArray(data.risksAndInvalidation?.keyRisks) ? data.risksAndInvalidation.keyRisks : []).map((r) => ({
+          text: r,
+          evidence: []
+        }))
+      }
+    ];
+
+    return {
+      isStrategist: true,
+      status: data.status || 'ok',
+      generationMode: data.generationMode || 'deterministic_fallback',
+      modeLabel,
+      badgeLabel,
+      fallbackNotice,
+      generatedAt: formatPublishedTime(data.generatedAt),
+      sections: curatedSections,
+      curatedSections,
+      dataAsOf: [],
+      unavailableDomains: [],
+      liveAiEnabled: isLlm,
+      liveAiUsed: isLlm,
+      strategist: data
+    };
+  }
+
   const evidenceMap = new Map(
     (Array.isArray(data.evidence) ? data.evidence : [])
       .filter((item) => typeof item?.id === 'string')
