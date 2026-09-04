@@ -7,10 +7,12 @@ import { fileURLToPath } from 'node:url';
 import { evaluateAlertsBatch, evaluateSingleAlert } from '../src/alerts.js';
 import { evaluateAndPersistAlerts } from '../src/supabase.js';
 import { createApp } from '../index.js';
-import {
+import cloudflareWorker, {
+  APP_API_BASE_URL,
   ALERT_EVALUATION_API_BASE_URL,
   ALERT_EVALUATION_CADENCE_MINUTES,
-  runScheduledAlertEvaluation
+  runScheduledAlertEvaluation,
+  runScheduledContextRefresh
 } from '../../client/server/index.js';
 
 const TEST_DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -346,6 +348,93 @@ describe('V1.1 Improvement 04 — reliable background price alerts', () => {
 
     assert.equal(calls, 1);
     assert.deepEqual(data, { evaluatedCount: 2, triggeredCount: 1, unavailableCount: 0, staleCount: 0 });
+  });
+
+  test('context scheduler uses the existing token and the protected refresh endpoint', async () => {
+    let calls = 0;
+    await assert.rejects(
+      () => runScheduledContextRefresh({}, {
+        fetchFn: async () => {
+          calls++;
+          throw new Error('must not run');
+        }
+      }),
+      (error) => error.code === 'CONTEXT_SCHEDULER_NOT_CONFIGURED'
+    );
+    assert.equal(calls, 0);
+
+    const data = await runScheduledContextRefresh(
+      { ALERT_SCHEDULER_TOKEN: SCHEDULER_TOKEN },
+      {
+        fetchFn: async (url, options) => {
+          calls++;
+          assert.equal(url, `${APP_API_BASE_URL}/api/internal/context/refresh`);
+          assert.equal(options.method, 'POST');
+          assert.equal(options.headers.Authorization, `Bearer ${SCHEDULER_TOKEN}`);
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              status: 'ok',
+              data: { success: true, persisted: 8 }
+            })
+          };
+        }
+      }
+    );
+
+    assert.equal(calls, 1);
+    assert.deepEqual(data, { success: true, persisted: 8 });
+  });
+
+  test('scheduled jobs run independently when one job fails', async () => {
+    const calls = [];
+    const originalFetch = globalThis.fetch;
+    const originalConsoleError = console.error;
+    let waitUntilPromise = null;
+
+    globalThis.fetch = async (url, options) => {
+      calls.push({ url, authorization: options.headers.Authorization });
+      if (url.endsWith('/api/internal/alerts/evaluate')) {
+        throw new Error('alert evaluator unavailable');
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          status: 'ok',
+          data: { success: true, persisted: 6 }
+        })
+      };
+    };
+    console.error = () => {};
+
+    try {
+      await cloudflareWorker.scheduled(
+        null,
+        { ALERT_SCHEDULER_TOKEN: SCHEDULER_TOKEN },
+        {
+          waitUntil(promise) {
+            waitUntilPromise = promise;
+          }
+        }
+      );
+      assert.ok(waitUntilPromise);
+      const results = await waitUntilPromise;
+
+      assert.equal(calls.length, 2);
+      assert.deepEqual(calls.map(({ url }) => url).sort(), [
+        `${ALERT_EVALUATION_API_BASE_URL}/api/internal/alerts/evaluate`,
+        `${APP_API_BASE_URL}/api/internal/context/refresh`
+      ].sort());
+      assert.ok(calls.every(({ authorization }) => authorization === `Bearer ${SCHEDULER_TOKEN}`));
+      assert.equal(results[0].status, 'rejected');
+      assert.equal(results[1].status, 'fulfilled');
+      assert.deepEqual(results[1].value, { success: true, persisted: 6 });
+    } finally {
+      globalThis.fetch = originalFetch;
+      console.error = originalConsoleError;
+    }
   });
 
   test('Cloudflare deployment contract uses one 15-minute Cron Trigger and the existing Worker', () => {
