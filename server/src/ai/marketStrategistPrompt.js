@@ -1,6 +1,6 @@
-export const STRATEGIST_MODEL = process.env.GEMINI_MODEL || 'gemini-3-flash-preview';
+export const STRATEGIST_MODEL = process.env.GEMINI_MODEL || 'gemini-3.6-flash';
 export const STRATEGIST_REASONING_EFFORT = 'low';
-export const STRATEGIST_MAX_OUTPUT_TOKENS = 2048;
+export const STRATEGIST_MAX_OUTPUT_TOKENS = 8192;
 export const STRATEGIST_PROMPT_VERSION = 'ai-market-strategist-prompt-v1';
 export const STRATEGIST_SCHEMA_VERSION = 'ai-market-strategist-schema-v1';
 export const STRATEGIST_METHODOLOGY_VERSION = 'ai-market-strategist-v1';

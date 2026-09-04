@@ -436,20 +436,26 @@ test('V1.2 Improvement 04 — AI Market Strategist', async (t) => {
       ]
     };
 
+    let capturedBody = null;
     const result = await generateMarketStrategist({
       factPacket: packet,
       now: NOW,
       geminiApiKey: 'AIzaMockKey123',
-      geminiModel: 'gemini-3-flash-preview',
+      geminiModel: 'gemini-3.6-flash',
       runtime: new MarketStrategistRuntime(),
-      fetchFn: async () => ({
-        ok: true,
-        json: async () => mockGeminiResponse
-      })
+      fetchFn: async (url, opts) => {
+        capturedBody = JSON.parse(opts.body);
+        return {
+          ok: true,
+          json: async () => mockGeminiResponse
+        };
+      }
     });
 
     assert.equal(result.generationMode, 'live_ai');
     assert.equal(result.marketOverview.vietnam, mockGeminiOutput.marketOverview.vietnam);
+    assert.equal(capturedBody.generationConfig.thinkingConfig.thinkingLevel, 'minimal');
+    assert.ok(capturedBody.generationConfig.maxOutputTokens >= 4096);
   });
 
   await t.test('14. Gemini simulated high-demand / quota error triggers deterministic fallback gracefully', async () => {
@@ -463,7 +469,7 @@ test('V1.2 Improvement 04 — AI Market Strategist', async (t) => {
       factPacket: packet,
       now: NOW,
       geminiApiKey: 'AIzaMockKey123',
-      geminiModel: 'gemini-3-flash-preview',
+      geminiModel: 'gemini-3.6-flash',
       runtime: new MarketStrategistRuntime(),
       fetchFn: async () => ({
         ok: false,
@@ -483,7 +489,47 @@ test('V1.2 Improvement 04 — AI Market Strategist', async (t) => {
     assert.ok(result.marketOverview.vietnam);
   });
 
-  await t.test('15. POST and GET endpoints in createApp operate without profile dependency', async () => {
+  await t.test('15. Gemini truncated/malformed JSON output triggers deterministic fallback without crash', async () => {
+    const packet = buildMarketStrategistFactPacket({
+      marketObservations: MOCK_OBSERVATIONS,
+      newsArticles: MOCK_NEWS,
+      now: NOW
+    });
+
+    const truncatedGeminiResponse = {
+      candidates: [
+        {
+          content: {
+            parts: [
+              {
+                text: '{"marketOverview": {"vietnam": "Chỉ số VN-Index đang ghi nhận nhịp phân hóa'
+              }
+            ]
+          },
+          finishReason: 'MAX_TOKENS'
+        }
+      ]
+    };
+
+    const result = await generateMarketStrategist({
+      factPacket: packet,
+      now: NOW,
+      geminiApiKey: 'AIzaMockKey123',
+      geminiModel: 'gemini-3.6-flash',
+      runtime: new MarketStrategistRuntime(),
+      fetchFn: async () => ({
+        ok: true,
+        json: async () => truncatedGeminiResponse
+      })
+    });
+
+    assert.equal(result.generationMode, 'deterministic_fallback');
+    assert.ok(result.lastProviderError.includes('Truncated output: MAX_TOKENS reached') || result.lastProviderError.includes('JSON'));
+    assert.ok(result.marketOverview.vietnam);
+    assert.ok(result.investmentOrientation.stance);
+  });
+
+  await t.test('16. POST and GET endpoints in createApp operate without profile dependency', async () => {
     const { createApp } = await import('../index.js');
     const app = createApp({
       getMarketStrategistFn: async ({ allowLlm }) => ({

@@ -381,11 +381,12 @@ export async function generateMarketStrategist({
             }
           ],
           generationConfig: {
-            temperature: 0.2,
-            topP: 0.9,
             maxOutputTokens: STRATEGIST_MAX_OUTPUT_TOKENS,
             responseMimeType: 'application/json',
-            responseSchema: toGeminiSchema(MARKET_STRATEGIST_SCHEMA)
+            responseSchema: toGeminiSchema(MARKET_STRATEGIST_SCHEMA),
+            thinkingConfig: {
+              thinkingLevel: 'minimal'
+            }
           }
         };
 
@@ -400,9 +401,12 @@ export async function generateMarketStrategist({
         if (response.ok) {
           const payload = await response.json();
           const candidate = payload?.candidates?.[0];
+          const finishReason = candidate?.finishReason || null;
           let outputText = '';
           if (Array.isArray(candidate?.content?.parts)) {
-            for (const part of candidate.content.parts) {
+            const nonThoughtParts = candidate.content.parts.filter((p) => !p?.thought);
+            const targetParts = nonThoughtParts.length > 0 ? nonThoughtParts : candidate.content.parts;
+            for (const part of targetParts) {
               if (typeof part?.text === 'string') {
                 outputText += part.text;
               }
@@ -413,7 +417,23 @@ export async function generateMarketStrategist({
             if (cleaned.startsWith('```')) {
               cleaned = cleaned.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
             }
-            rawLlmOutput = JSON.parse(cleaned);
+            const firstBrace = cleaned.indexOf('{');
+            const lastBrace = cleaned.lastIndexOf('}');
+            if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+              cleaned = cleaned.slice(firstBrace, lastBrace + 1);
+            }
+            try {
+              rawLlmOutput = JSON.parse(cleaned);
+              if (finishReason) {
+                rawLlmOutput.finishReason = finishReason;
+              }
+            } catch (parseErr) {
+              lastProviderError = finishReason === 'MAX_TOKENS'
+                ? `Truncated output: MAX_TOKENS reached (${parseErr.message})`
+                : `JSON parse error: ${parseErr.message}`;
+            }
+          } else if (finishReason) {
+            lastProviderError = `Empty output with finishReason: ${finishReason}`;
           }
         } else {
           const errData = await response.json().catch(() => null);
@@ -488,7 +508,8 @@ export async function generateMarketStrategist({
             generationMode: (rawLlmOutput.generationMode && rawLlmOutput.generationMode !== 'deterministic_fallback')
               ? rawLlmOutput.generationMode
               : 'live_ai',
-            methodologyVersion: STRATEGIST_METHODOLOGY_VERSION
+            methodologyVersion: STRATEGIST_METHODOLOGY_VERSION,
+            ...(rawLlmOutput.finishReason ? { finishReason: rawLlmOutput.finishReason } : {})
           };
         } else {
           lastProviderError = `Validation errors: ${validation.errors.join(', ')}`;
