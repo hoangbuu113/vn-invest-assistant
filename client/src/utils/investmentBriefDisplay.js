@@ -105,6 +105,48 @@ export function investmentBriefModeLabel(data) {
   return 'Bản tóm tắt xác định — AI trực tiếp chưa được sử dụng';
 }
 
+export const CURATED_SECTION_CONFIG = Object.freeze([
+  {
+    id: 'highlights',
+    label: '1. Diễn biến chính',
+    sourceKeys: ['summary']
+  },
+  {
+    id: 'context',
+    label: '2. Vì sao đáng chú ý',
+    sourceKeys: ['marketContext', 'portfolioObservations']
+  },
+  {
+    id: 'watchItems',
+    label: '3. Điểm cần theo dõi',
+    sourceKeys: ['opportunityEvidence', 'risksAndLimitations']
+  },
+  {
+    id: 'catalysts',
+    label: '4. Tin tức ảnh hưởng',
+    sourceKeys: ['newsContext']
+  }
+]);
+
+export function buildCuratedSections(data, evidenceMap) {
+  if (!data?.sections || typeof data.sections !== 'object') return [];
+
+  return CURATED_SECTION_CONFIG.map(({ id, label, sourceKeys }) => {
+    const rawStatements = sourceKeys.flatMap((key) => (
+      Array.isArray(data.sections[key]) ? data.sections[key] : []
+    ));
+
+    const statements = rawStatements.map((statement) => ({
+      text: statement?.text || '',
+      evidence: (Array.isArray(statement?.evidenceIds) ? statement.evidenceIds : [])
+        .map((evidenceId) => evidenceMap.get(evidenceId))
+        .filter(Boolean)
+    })).filter((s) => typeof s.text === 'string' && s.text.trim().length > 0);
+
+    return { id, label, statements };
+  }).filter((section) => section.statements.length > 0);
+}
+
 export function buildInvestmentBriefViewModel(data) {
   if (!data || typeof data !== 'object') return null;
   const evidenceMap = new Map(
@@ -123,6 +165,8 @@ export function buildInvestmentBriefViewModel(data) {
     }))
   })).filter((section) => section.statements.length > 0);
 
+  const curatedSections = buildCuratedSections(data, evidenceMap);
+
   const dataAsOf = Object.entries(data.dataAsOf || {}).flatMap(([domain, value]) => {
     if (!value || typeof value !== 'object') return [];
     const timestamp = value.marketUpdatedAt
@@ -139,8 +183,13 @@ export function buildInvestmentBriefViewModel(data) {
     status: data.status || 'unavailable',
     generationMode: data.generationMode || 'deterministic_fallback',
     modeLabel: investmentBriefModeLabel(data),
+    badgeLabel: data?.model?.outputAccepted ? 'AI giải thích dữ kiện' : 'Tóm tắt dữ liệu',
+    fallbackNotice: (data.generationMode === 'deterministic_fallback' || !data?.model?.outputAccepted)
+      ? 'Bản tóm tắt hiện được tạo từ dữ liệu đã xác minh.'
+      : null,
     generatedAt: formatPublishedTime(data.generatedAt),
     sections,
+    curatedSections,
     dataAsOf,
     unavailableDomains: Array.isArray(data.unavailableDomains) ? data.unavailableDomains : [],
     liveAiEnabled: data?.model?.configuredEnabled === true,

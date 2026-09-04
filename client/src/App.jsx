@@ -7,6 +7,7 @@ import { MoneyFlowAmbience } from './components/MoneyFlowAmbience.jsx';
 import { WealthOrbit } from './components/WealthOrbit.jsx';
 import { EconomicPulseRail } from './components/EconomicPulseRail.jsx';
 import { VietnamRegimePanel } from './components/VietnamRegimePanel.jsx';
+import { MarketIntelligenceSection } from './components/MarketIntelligenceSection.jsx';
 import {
   TiltCard,
   MagneticButton,
@@ -1771,99 +1772,12 @@ function App({ onLogout }) {
               </div>
 
               <motion.div variants={sectionItemVariants}>
-                <VietnamRegimePanel />
-              </motion.div>
-
-              <motion.div variants={sectionItemVariants}>
-                <InvestmentBriefPanel />
-              </motion.div>
-
-              {/* SECTION 4: TIN MỚI (News Preview - 4 Balanced Responsive Columns) */}
-              <motion.div variants={sectionItemVariants} className="fintech-card" style={{ padding: '1.25rem' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem' }}>
-                  <div>
-                    <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 800, color: 'var(--color-slate-900)' }}>
-                      Tin tức tài chính mới nhất
-                    </h3>
-                    <span style={{ fontSize: '0.78rem', color: 'var(--color-slate-400)' }}>Cập nhật đa nguồn thị trường</span>
-                  </div>
-
-                  <MagneticButton
-                    onClick={() => setActiveTab('news')}
-                    className="fintech-btn btn-secondary btn-sm"
-                  >
-                    Xem tất cả tin tức &rarr;
-                  </MagneticButton>
-                </div>
-
-                {newsLoading && news.length === 0 && (
-                  <div className="dashboard-news-grid">
-                    {[1, 2, 3, 4].map((i) => (
-                      <div key={i} className="skeleton-shimmer" style={{ width: '100%', height: '80px', borderRadius: '6px' }} />
-                    ))}
-                  </div>
-                )}
-
-                {newsError && news.length === 0 && !newsLoading && (
-                  <div className="fintech-banner banner-warning" style={{ margin: 0 }}>
-                    <span>Không thể tải tin tức mới nhất: {newsError}</span>
-                  </div>
-                )}
-
-                {news.length > 0 && (
-                  <div className="dashboard-news-grid">
-                    {news.slice(0, 4).map((item) => {
-                      const catLabel = formatNewsCategory(item.category);
-
-                      return (
-                        <div
-                          key={item.id || item.url}
-                          style={{
-                            padding: '0.85rem',
-                            borderRadius: 'var(--radius-md)',
-                            backgroundColor: 'rgba(248, 250, 252, 0.7)',
-                            border: '1px solid var(--border-subtle)',
-                            display: 'flex',
-                            flexDirection: 'column',
-                            justifyContent: 'space-between',
-                            gap: '0.5rem'
-                          }}
-                        >
-                          <div>
-                            {catLabel && (
-                              <span className="fintech-badge badge-neutral" style={{ fontSize: '0.7rem', padding: '1px 6px', marginBottom: '4px', display: 'inline-block' }}>
-                                {catLabel}
-                              </span>
-                            )}
-                            <a
-                              href={item.url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              style={{
-                                color: 'var(--color-slate-900)',
-                                fontWeight: 700,
-                                fontSize: '0.88rem',
-                                lineHeight: 1.35,
-                                textDecoration: 'none',
-                                display: '-webkit-box',
-                                WebkitLineClamp: 2,
-                                WebkitBoxOrient: 'vertical',
-                                overflow: 'hidden'
-                              }}
-                              className="news-title-link"
-                            >
-                              {item.title}
-                            </a>
-                          </div>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.75rem', color: 'var(--color-slate-400)', marginTop: '4px' }}>
-                            <span>{item.source || 'CafeF'}</span>
-                            <span>{formatPublishedTime(item.publishedAt)}</span>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
+                <MarketIntelligenceSection
+                  news={news}
+                  newsLoading={newsLoading}
+                  newsError={newsError}
+                  onNavigateNews={() => setActiveTab('news')}
+                />
               </motion.div>
             </motion.section>
           )}

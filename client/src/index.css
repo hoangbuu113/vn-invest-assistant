@@ -1000,106 +1000,315 @@ body {
   gap: 1rem;
 }
 
+/* Market Intelligence Surface & Market Pulse (Improvement 01B) */
+.market-intelligence-surface,
 .vietnam-regime-panel {
-  padding: 1.25rem;
+  padding: 1.35rem 1.5rem;
   margin-bottom: 1.5rem;
+  background: var(--bg-card, #ffffff);
+  border: 1px solid var(--border-subtle, #e2e8f0);
+  border-radius: var(--radius-lg, 12px);
+  box-shadow: var(--shadow-sm, 0 1px 3px rgba(0, 0, 0, 0.04));
 }
 
+.market-intelligence-header,
 .regime-panel-header {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
   gap: 1rem;
+  margin-bottom: 1.15rem;
+  flex-wrap: wrap;
+}
+
+.market-intelligence-title-row {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+}
+
+.market-intelligence-title,
+.regime-panel-header h3 {
+  margin: 0;
+  color: var(--color-slate-900, #0f172a);
+  font-size: 1.25rem;
+  font-weight: 800;
+  letter-spacing: -0.015em;
+}
+
+.market-intelligence-status-badge {
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 2px 8px;
+}
+
+.market-intelligence-subtitle,
+.regime-panel-header p {
+  margin: 0.25rem 0 0;
+  color: var(--color-slate-500, #64748b);
+  font-size: 0.84rem;
+}
+
+.market-intelligence-meta {
+  font-size: 0.76rem;
+  color: var(--color-slate-500, #64748b);
+  font-weight: 500;
+}
+
+.market-pulse-loading,
+.regime-loading {
   margin-bottom: 1rem;
 }
 
-.regime-panel-header h3 {
-  margin: 0;
-  color: var(--color-slate-900);
-  font-size: 1.1rem;
-  font-weight: 800;
-}
-
-.regime-panel-header p {
-  margin: 0.25rem 0 0;
-  color: var(--color-slate-500);
+.market-pulse-degraded-notice {
   font-size: 0.8rem;
+  color: var(--color-slate-600, #475569);
+  background: #fffbeb;
+  border: 1px solid #fef3c7;
+  padding: 0.5rem 0.85rem;
+  border-radius: var(--radius-md, 8px);
+  margin-bottom: 1rem;
 }
 
-.regime-domain-grid,
-.regime-loading {
+/* Compact Market Pulse Metric Strip */
+.market-pulse-strip,
+.regime-domain-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0.85rem;
+  margin-bottom: 1.25rem;
 }
 
-.regime-loading .skeleton-shimmer {
-  min-height: 130px;
-  border-radius: var(--radius-md);
-}
-
+.market-pulse-cell,
 .regime-domain-card {
   min-width: 0;
-  padding: 0.95rem;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  background: rgba(248, 250, 252, 0.72);
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--border-subtle, #e2e8f0);
+  border-radius: var(--radius-md, 8px);
+  background: rgba(248, 250, 252, 0.78);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
+.market-pulse-cell:hover {
+  border-color: var(--color-brand-200, #bfdbfe);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.03);
+}
+
+.market-pulse-cell-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.45rem;
+}
+
+.market-pulse-label,
 .regime-domain-title {
-  margin-bottom: 0.75rem;
-  color: var(--color-slate-700);
-  font-size: 0.82rem;
+  color: var(--color-slate-600, #475569);
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.market-pulse-source-tag {
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--color-brand-600, #2563eb);
+  background: var(--color-brand-50, #eff6ff);
+  border: 1px solid var(--color-brand-100, #dbeafe);
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.market-pulse-cell-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.market-pulse-value {
+  color: var(--color-slate-900, #0f172a);
+  font-size: 1.28rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.25;
+}
+
+.market-pulse-null {
+  font-size: 0.8rem;
+  color: var(--color-slate-400, #94a3b8);
+  font-weight: 500;
+}
+
+.market-pulse-pending {
+  font-size: 0.95rem;
+  color: var(--color-slate-600, #475569);
+  font-weight: 700;
+}
+
+.market-pulse-subtext,
+.regime-value-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.78rem;
+  flex-wrap: wrap;
+}
+
+.market-pulse-muted {
+  color: var(--color-slate-500, #64748b);
+  font-size: 0.76rem;
+}
+
+.market-pulse-stale-tag {
+  font-size: 0.7rem;
+  color: #b45309;
+  background: #fef3c7;
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+/* Two-column Main Grid: Brief (Left ~60%) + News (Right ~40%) */
+.market-intelligence-main-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr);
+  gap: 1.25rem;
+  margin-top: 0.75rem;
+  margin-bottom: 1.25rem;
+  align-items: start;
+}
+
+.market-intelligence-brief-wrapper,
+.market-intelligence-news-wrapper {
+  min-width: 0;
+  background: #ffffff;
+  border: 1px solid var(--border-subtle, #e2e8f0);
+  border-radius: var(--radius-md, 10px);
+  padding: 1.15rem;
+}
+
+/* Vietnam Drivers: 4 Pillars */
+.vietnam-drivers-container {
+  margin-top: 1.25rem;
+  padding-top: 1.1rem;
+  border-top: 1px solid var(--border-subtle, #e2e8f0);
+}
+
+.vietnam-drivers-heading {
+  margin: 0 0 0.75rem;
+  color: var(--color-slate-800, #1e293b);
+  font-size: 0.88rem;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.035em;
 }
 
-.regime-value-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
+.vietnam-drivers-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 0.75rem;
-  margin-bottom: 0.55rem;
-  color: var(--color-slate-500);
-  font-size: 0.82rem;
 }
 
-.regime-value-row strong {
-  color: var(--color-slate-900);
-  font-size: 1rem;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
+.driver-pillar-cell {
+  padding: 0.75rem 0.85rem;
+  border: 1px solid var(--border-subtle, #e2e8f0);
+  border-radius: var(--radius-sm, 6px);
+  background: rgba(248, 250, 252, 0.65);
 }
 
-.regime-state-note {
-  margin: 0.4rem 0;
-  color: var(--color-slate-500);
-  font-size: 0.8rem;
-  line-height: 1.45;
+.driver-pillar-title {
+  font-size: 0.74rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--color-slate-600, #475569);
+  letter-spacing: 0.025em;
 }
 
-.regime-source-line {
-  display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
-  margin-top: 0.75rem;
-  padding-top: 0.65rem;
-  border-top: 1px solid var(--border-subtle);
-  color: var(--color-slate-400);
-  font-size: 0.7rem;
+.driver-pillar-status {
+  font-size: 0.88rem;
+  font-weight: 750;
+  color: var(--color-slate-900, #0f172a);
+  margin: 0.2rem 0 0.25rem;
+}
+
+.driver-pillar-desc {
+  font-size: 0.72rem;
+  color: var(--color-slate-500, #64748b);
   line-height: 1.35;
 }
 
-@media (max-width: 820px) {
-  .regime-domain-grid,
-  .regime-loading {
+/* Data Quality Drawer (Progressive Disclosure) */
+.market-regime-data-quality {
+  margin-top: 1rem;
+  padding: 0.75rem 1rem;
+  background: rgba(241, 245, 249, 0.45);
+  border: 1px solid var(--border-subtle, #e2e8f0);
+  border-radius: var(--radius-md, 8px);
+}
+
+.market-regime-quality-summary {
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--color-slate-600, #475569);
+  user-select: none;
+}
+
+.market-regime-quality-summary:hover {
+  color: var(--color-slate-900, #0f172a);
+}
+
+.market-regime-quality-content {
+  margin-top: 0.65rem;
+  font-size: 0.76rem;
+  line-height: 1.6;
+  color: var(--color-slate-600, #475569);
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.quality-item strong {
+  color: var(--color-slate-800, #1e293b);
+}
+
+.quality-disclaimer {
+  margin-top: 0.4rem;
+  padding-top: 0.4rem;
+  border-top: 1px dashed var(--border-subtle, #e2e8f0);
+  font-size: 0.72rem;
+  color: var(--color-slate-400, #94a3b8);
+  font-style: italic;
+}
+
+@media (max-width: 1024px) {
+  .market-pulse-strip,
+  .regime-domain-grid {
     grid-template-columns: 1fr;
   }
 
-  .regime-panel-header {
-    align-items: flex-start;
-    flex-direction: column;
+  .market-intelligence-main-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .vietnam-drivers-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .vietnam-drivers-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .market-intelligence-surface,
+  .vietnam-regime-panel {
+    padding: 1rem;
   }
 }
 
@@ -3994,209 +4203,377 @@ body {
   }
 }
 
-/* Feature 29 — guarded investment brief */
+/* Feature 29 & V1.2 Improvement 01B — Market Brief & Editorial News */
+.market-brief-panel,
 .investment-brief-panel {
-  margin-top: 1.25rem;
-  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
 }
 
-.investment-brief-header,
-.investment-brief-title-row,
-.investment-brief-meta,
-.investment-brief-evidence-list {
+.market-brief-header,
+.investment-brief-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.85rem;
+  margin-bottom: 0.85rem;
+  flex-wrap: wrap;
+}
+
+.market-brief-heading-group {
+  flex: 1;
+  min-width: 0;
+}
+
+.market-brief-kicker-row,
+.investment-brief-title-row {
   display: flex;
   align-items: center;
-}
-
-.investment-brief-header {
-  justify-content: space-between;
-  gap: 1rem;
-}
-
-.investment-brief-header h3 {
-  margin: 0.3rem 0 0.25rem;
-  color: var(--color-slate-900);
-  font-size: 1.15rem;
-}
-
-.investment-brief-header p,
-.investment-brief-privacy,
-.investment-brief-disclaimer {
-  margin: 0;
-  color: var(--color-slate-500);
-  font-size: 0.82rem;
-  line-height: 1.55;
-}
-
-.investment-brief-title-row {
+  gap: 0.5rem;
+  margin-bottom: 0.25rem;
   flex-wrap: wrap;
-  gap: 0.55rem;
 }
 
+.market-brief-badge,
 .investment-brief-kicker,
 .investment-brief-status {
   border-radius: 999px;
-  font-size: 0.7rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0.2rem 0.55rem;
+  background: var(--color-slate-100, #f1f5f9);
+  color: var(--color-slate-700, #334155);
+  border: 1px solid var(--border-subtle, #e2e8f0);
+}
+
+.market-brief-timestamp {
+  font-size: 0.72rem;
+  color: var(--color-slate-500, #64748b);
+}
+
+.market-brief-title,
+.investment-brief-header h3 {
+  margin: 0.2rem 0;
+  color: var(--color-slate-900, #0f172a);
+  font-size: 1.12rem;
   font-weight: 800;
-  padding: 0.25rem 0.55rem;
+  letter-spacing: -0.01em;
 }
 
-.investment-brief-kicker {
-  background: var(--color-brand-50);
-  border: 1px solid var(--color-brand-200);
-  color: var(--color-brand-700);
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
-.investment-brief-status {
-  background: var(--color-slate-100);
-  color: var(--color-slate-600);
-}
-
-.investment-brief-status.status-partial,
-.investment-brief-status.status-fallback {
-  background: #fff7ed;
-  color: #9a3412;
-}
-
-.investment-brief-privacy {
-  border-left: 3px solid var(--color-brand-300);
-  margin-top: 1rem;
-  padding: 0.55rem 0.75rem;
-}
-
-.investment-brief-empty,
-.investment-brief-loading {
-  background: rgba(248, 250, 252, 0.75);
-  border: 1px dashed var(--border-subtle);
-  border-radius: var(--radius-md);
-  color: var(--color-slate-500);
-  font-size: 0.85rem;
-  margin-top: 1rem;
-  padding: 1rem;
-}
-
-.investment-brief-loading {
-  display: grid;
-  gap: 0.65rem;
-}
-
-.investment-brief-loading .skeleton-shimmer {
-  height: 1rem;
-}
-
-.investment-brief-error {
-  margin: 1rem 0 0;
-}
-
-.investment-brief-content {
-  margin-top: 1rem;
-}
-
-.investment-brief-meta {
-  color: var(--color-slate-500);
-  flex-wrap: wrap;
-  font-size: 0.75rem;
-  gap: 0.5rem 1rem;
-}
-
-.investment-brief-sections {
-  display: grid;
-  gap: 0.85rem;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  margin-top: 1rem;
-}
-
-.investment-brief-section {
-  background: rgba(248, 250, 252, 0.75);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  padding: 0.9rem;
-}
-
-.investment-brief-section h4 {
-  color: var(--color-slate-800);
-  font-size: 0.9rem;
-  margin: 0 0 0.65rem;
-}
-
-.investment-brief-statement + .investment-brief-statement {
-  border-top: 1px solid var(--border-subtle);
-  margin-top: 0.75rem;
-  padding-top: 0.75rem;
-}
-
-.investment-brief-statement p {
-  color: var(--color-slate-700);
-  font-size: 0.85rem;
-  line-height: 1.55;
+.market-brief-subtitle,
+.investment-brief-header p {
   margin: 0;
+  color: var(--color-slate-500, #64748b);
+  font-size: 0.8rem;
+  line-height: 1.45;
 }
 
-.investment-brief-evidence-list {
-  align-items: stretch;
-  flex-wrap: wrap;
+.market-brief-action-btn {
+  white-space: nowrap;
+}
+
+.market-brief-fallback-banner {
+  display: flex;
+  align-items: center;
   gap: 0.45rem;
-  margin-top: 0.65rem;
+  background: rgba(241, 245, 249, 0.75);
+  border: 1px solid var(--border-subtle, #e2e8f0);
+  border-radius: var(--radius-sm, 6px);
+  padding: 0.4rem 0.65rem;
+  font-size: 0.75rem;
+  color: var(--color-slate-600, #475569);
+  margin-bottom: 0.85rem;
 }
 
-.investment-brief-evidence {
-  background: #fff;
-  border: 1px solid var(--color-brand-100);
-  border-radius: 8px;
-  display: inline-flex;
+.market-brief-fallback-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-brand-500, #3b82f6);
+  flex-shrink: 0;
+}
+
+.market-brief-empty-state,
+.investment-brief-empty {
+  background: rgba(248, 250, 252, 0.75);
+  border: 1px dashed var(--border-subtle, #cbd5e1);
+  border-radius: var(--radius-md, 8px);
+  color: var(--color-slate-600, #475569);
+  font-size: 0.84rem;
+  padding: 1.25rem 1rem;
+  text-align: center;
+  margin: 0.5rem 0;
+}
+
+.market-brief-loading-skeleton,
+.investment-brief-loading {
+  display: flex;
   flex-direction: column;
-  max-width: 100%;
-  padding: 0.4rem 0.55rem;
+  gap: 0.65rem;
+  padding: 0.75rem 0;
 }
 
-.investment-brief-evidence span,
-.investment-brief-evidence small {
-  color: var(--color-slate-500);
-  font-size: 0.68rem;
+.market-brief-sections-stack,
+.investment-brief-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  margin-top: 0.25rem;
 }
 
-.investment-brief-evidence strong {
-  color: var(--color-slate-900);
-  font-size: 0.78rem;
-  overflow-wrap: anywhere;
+.market-brief-section-item,
+.investment-brief-section {
+  background: rgba(248, 250, 252, 0.65);
+  border: 1px solid var(--border-subtle, #e2e8f0);
+  border-radius: var(--radius-md, 8px);
+  padding: 0.85rem 0.95rem;
 }
 
-.investment-brief-asof {
-  color: var(--color-slate-600);
-  font-size: 0.78rem;
-  margin-top: 1rem;
+.market-brief-section-heading,
+.investment-brief-section h4 {
+  margin: 0 0 0.45rem;
+  color: var(--color-slate-800, #1e293b);
+  font-size: 0.82rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.035em;
 }
 
-.investment-brief-asof summary {
-  cursor: pointer;
-  font-weight: 750;
+.market-brief-statement-row,
+.investment-brief-statement {
+  margin-bottom: 0.35rem;
 }
 
-.investment-brief-asof ul {
-  line-height: 1.7;
+.market-brief-statement-row:last-child {
   margin-bottom: 0;
 }
 
+.market-brief-prose,
+.investment-brief-statement p {
+  margin: 0;
+  color: var(--color-slate-700, #334155);
+  font-size: 0.85rem;
+  line-height: 1.58;
+}
+
+.market-brief-details-drawer {
+  margin-top: 0.85rem;
+  padding: 0.6rem 0.75rem;
+  background: rgba(241, 245, 249, 0.45);
+  border: 1px solid var(--border-subtle, #e2e8f0);
+  border-radius: var(--radius-sm, 6px);
+}
+
+.market-brief-details-summary {
+  cursor: pointer;
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: var(--color-slate-600, #475569);
+  user-select: none;
+}
+
+.market-brief-details-body {
+  margin-top: 0.55rem;
+}
+
+.market-brief-evidence-grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.market-brief-evidence-tag {
+  font-size: 0.72rem;
+  color: var(--color-slate-600, #475569);
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.evidence-tag-label {
+  color: var(--color-slate-500, #64748b);
+}
+
+.evidence-tag-val {
+  color: var(--color-slate-800, #1e293b);
+}
+
+.market-brief-disclaimer-text,
 .investment-brief-disclaimer {
-  border-top: 1px solid var(--border-subtle);
-  margin-top: 1rem;
-  padding-top: 0.8rem;
+  margin-top: 0.85rem;
+  padding-top: 0.65rem;
+  border-top: 1px dashed var(--border-subtle, #e2e8f0);
+  font-size: 0.72rem;
+  color: var(--color-slate-400, #94a3b8);
+  font-style: italic;
+  line-height: 1.45;
+}
+
+/* Compact Editorial News Preview Panel */
+.market-news-preview-panel {
+  display: flex;
+  flex-direction: column;
+}
+
+.market-news-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.65rem;
+  margin-bottom: 0.85rem;
+  flex-wrap: wrap;
+}
+
+.market-news-title {
+  margin: 0;
+  color: var(--color-slate-900, #0f172a);
+  font-size: 1.12rem;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+
+.market-news-subtitle {
+  margin: 0.15rem 0 0;
+  color: var(--color-slate-500, #64748b);
+  font-size: 0.8rem;
+}
+
+.market-news-view-all-btn {
+  font-size: 0.76rem;
+  padding: 0.3rem 0.65rem;
+}
+
+.market-news-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.market-news-card-item {
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--border-subtle, #e2e8f0);
+  border-radius: var(--radius-md, 8px);
+  background: rgba(248, 250, 252, 0.65);
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  transition: border-color 0.2s ease, background-color 0.2s ease;
+}
+
+.market-news-card-item:hover {
+  border-color: var(--color-brand-200, #bfdbfe);
+  background: #ffffff;
+}
+
+.market-news-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+
+.market-news-cat-badge {
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  padding: 1px 5px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+}
+
+.market-news-source-badge {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--color-slate-500, #64748b);
+}
+
+.market-news-time-badge {
+  font-size: 0.68rem;
+  color: var(--color-slate-400, #94a3b8);
+  margin-left: auto;
+}
+
+.market-news-headline {
+  margin: 0;
+  font-size: 0.86rem;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.market-news-link {
+  color: var(--color-slate-900, #0f172a);
+  text-decoration: none;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  transition: color 0.15s ease;
+}
+
+.market-news-link:hover {
+  color: var(--color-brand-600, #2563eb);
+}
+
+.market-news-excerpt {
+  margin: 0;
+  color: var(--color-slate-500, #64748b);
+  font-size: 0.78rem;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.market-news-asset-tags {
+  display: flex;
+  gap: 0.35rem;
+  margin-top: 0.2rem;
+  flex-wrap: wrap;
+}
+
+.market-news-asset-chip {
+  font-size: 0.66rem;
+  font-weight: 800;
+  color: var(--color-brand-700, #1d4ed8);
+  background: var(--color-brand-50, #eff6ff);
+  border: 1px solid var(--color-brand-200, #bfdbfe);
+  padding: 0 5px;
+  border-radius: 3px;
+}
+
+.market-news-skeleton-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.market-news-skeleton-item {
+  padding: 0.65rem;
+  border: 1px solid var(--border-subtle, #e2e8f0);
+  border-radius: var(--radius-md, 8px);
+}
+
+.market-news-empty {
+  font-size: 0.8rem;
+  color: var(--color-slate-400, #94a3b8);
+  padding: 0.85rem;
+  text-align: center;
 }
 
 @media (max-width: 720px) {
-  .investment-brief-header {
+  .market-brief-header,
+  .market-news-header {
     align-items: stretch;
     flex-direction: column;
   }
 
-  .investment-brief-header .fintech-btn {
-    justify-content: center;
+  .market-brief-header .fintech-btn,
+  .market-news-view-all-btn {
     width: 100%;
-  }
-
-  .investment-brief-sections {
-    grid-template-columns: 1fr;
+    justify-content: center;
   }
 }

@@ -1,33 +1,12 @@
 import React, { useCallback, useEffect, useReducer, useRef } from 'react';
-
 import { apiFetch } from '../utils/api.js';
 import {
   INITIAL_INVESTMENT_BRIEF_STATE,
   buildInvestmentBriefViewModel,
-  formatInvestmentBriefAsOf,
   formatInvestmentBriefEvidence,
   reduceInvestmentBriefState
 } from '../utils/investmentBriefDisplay.js';
 import { MagneticButton } from './MotionHelpers.jsx';
-
-const DOMAIN_LABELS = {
-  portfolio: 'Danh mục',
-  composition: 'Cơ cấu',
-  performance: 'Hiệu suất',
-  regime: 'Vĩ mô Việt Nam',
-  opportunity: 'Sàng lọc cơ hội',
-  news: 'Tin tức'
-};
-
-function EvidenceChip({ item }) {
-  return (
-    <span className="investment-brief-evidence" title={`${item.label}: ${formatInvestmentBriefEvidence(item)}`}>
-      <span>{item.label}</span>
-      <strong>{formatInvestmentBriefEvidence(item)}</strong>
-      {item.asOf && <small>Tham chiếu: {formatInvestmentBriefAsOf(item.asOf)}</small>}
-    </span>
-  );
-}
 
 export function InvestmentBriefPanel() {
   const [state, dispatch] = useReducer(reduceInvestmentBriefState, INITIAL_INVESTMENT_BRIEF_STATE);
@@ -74,95 +53,115 @@ export function InvestmentBriefPanel() {
 
   const view = buildInvestmentBriefViewModel(state.data);
   const isLoading = state.phase === 'loading';
+  const displaySections = view?.curatedSections?.length > 0 ? view.curatedSections : (view?.sections || []);
 
   return (
-    <section className="fintech-card investment-brief-panel" aria-labelledby="investment-brief-title">
-      <div className="investment-brief-header">
-        <div>
-          <div className="investment-brief-title-row">
-            <span className="investment-brief-kicker">AI có kiểm soát</span>
-            {view && <span className={`investment-brief-status status-${view.status}`}>{view.modeLabel}</span>}
+    <div className="market-brief-panel">
+      {/* Header */}
+      <div className="market-brief-header">
+        <div className="market-brief-heading-group">
+          <div className="market-brief-kicker-row">
+            <span className="market-brief-badge">
+              {view?.badgeLabel || 'Tóm tắt dữ liệu'}
+            </span>
+            {view && (
+              <span className="market-brief-timestamp">
+                Cập nhật: {view.generatedAt}
+              </span>
+            )}
           </div>
-          <h3 id="investment-brief-title">Bản tin đầu tư AI</h3>
-          <p>
-            Giải thích dữ kiện xác định từ danh mục, thị trường, bối cảnh Việt Nam và tin liên quan.
+          <h3 id="investment-brief-title" className="market-brief-title">
+            Bản tin thị trường
+          </h3>
+          <p className="market-brief-subtitle">
+            Tổng hợp và phân tích dữ kiện từ bối cảnh kinh tế, danh mục và tin tức đáng chú ý.
           </p>
         </div>
+
         <MagneticButton
           onClick={generateBrief}
           disabled={isLoading}
-          className="fintech-btn btn-primary btn-sm"
+          className="fintech-btn btn-primary btn-sm market-brief-action-btn"
+          aria-label={isLoading ? 'Đang tạo bản tin' : view ? 'Làm mới bản tin' : 'Tạo bản tin'}
         >
-          {isLoading ? 'Đang tạo bản tin...' : view ? 'Làm mới bản tin' : 'Tạo bản tin'}
+          {isLoading ? 'Đang tải...' : view ? 'Làm mới bản tin' : 'Tạo bản tin'}
         </MagneticButton>
       </div>
 
-      <p className="investment-brief-privacy">
-        Khi AI trực tiếp được bật, một gói dữ kiện đầu tư đã tối giản sẽ được gửi tới nhà cung cấp AI đã cấu hình. Không gửi sổ giao dịch, sổ tiền mặt, mã định danh nội bộ hoặc bí mật hệ thống.
-      </p>
+      {/* Fallback Notice */}
+      {view && view.fallbackNotice && (
+        <div className="market-brief-fallback-banner">
+          <span className="market-brief-fallback-dot" aria-hidden="true" />
+          <span>{view.fallbackNotice || 'Bản tóm tắt hiện được tạo từ dữ liệu đã xác minh.'}</span>
+        </div>
+      )}
 
+      {/* Idle State */}
       {state.phase === 'idle' && (
-        <div className="investment-brief-empty">
-          Bản tin chỉ được tạo khi bạn chủ động nhấn nút. Nội dung mang tính thông tin, không phải khuyến nghị hay dự báo đầu tư.
+        <div className="market-brief-empty-state">
+          <p>Nhấn <strong>"Tạo bản tin"</strong> để tổng hợp góc nhìn thị trường cập nhật theo dữ kiện thực tế.</p>
         </div>
       )}
 
+      {/* Loading Skeleton */}
       {isLoading && !view && (
-        <div className="investment-brief-loading" aria-live="polite">
-          <div className="skeleton-shimmer" />
-          <div className="skeleton-shimmer" />
-          <div className="skeleton-shimmer" />
+        <div className="market-brief-loading-skeleton" aria-live="polite">
+          <div className="skeleton-shimmer" style={{ width: '90%', height: '20px', borderRadius: '4px', marginBottom: '10px' }} />
+          <div className="skeleton-shimmer" style={{ width: '75%', height: '18px', borderRadius: '4px', marginBottom: '14px' }} />
+          <div className="skeleton-shimmer" style={{ width: '100%', height: '48px', borderRadius: '6px', marginBottom: '10px' }} />
+          <div className="skeleton-shimmer" style={{ width: '95%', height: '38px', borderRadius: '6px' }} />
         </div>
       )}
 
+      {/* Error banner */}
       {state.error && (
-        <div className="fintech-banner banner-warning investment-brief-error" role="alert">
+        <div className="fintech-banner banner-warning market-brief-error" role="alert">
           {state.error}
         </div>
       )}
 
-      {view && (
-        <div className="investment-brief-content" aria-live="polite">
-          <div className="investment-brief-meta">
-            <span>Tạo lúc: <strong>{view.generatedAt}</strong></span>
-            {view.status === 'partial' && <span>Một phần nguồn dữ liệu chưa khả dụng</span>}
-            {view.status === 'fallback' && <span>Đang hiển thị bản tóm tắt xác định</span>}
-          </div>
-
-          <div className="investment-brief-sections">
-            {view.sections.map((section) => (
-              <article key={section.id} className="investment-brief-section">
-                <h4>{section.label}</h4>
-                {section.statements.map((statement, index) => (
-                  <div key={`${section.id}-${index}`} className="investment-brief-statement">
-                    <p>{statement.text}</p>
-                    <div className="investment-brief-evidence-list">
-                      {statement.evidence.map((item) => <EvidenceChip key={item.id} item={item} />)}
+      {/* Active Content: Curated Sections */}
+      {view && displaySections.length > 0 && (
+        <div className="market-brief-content-body" aria-live="polite">
+          <div className="market-brief-sections-stack">
+            {displaySections.map((section) => (
+              <article key={section.id} className="market-brief-section-item">
+                <h4 className="market-brief-section-heading">{section.label}</h4>
+                <div className="market-brief-statements">
+                  {section.statements.map((statement, idx) => (
+                    <div key={idx} className="market-brief-statement-row">
+                      <p className="market-brief-prose">{statement.text}</p>
                     </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </article>
             ))}
           </div>
 
-          {view.dataAsOf.length > 0 && (
-            <details className="investment-brief-asof">
-              <summary>Nguồn và thời điểm tham chiếu</summary>
-              <ul>
-                {view.dataAsOf.map((item) => (
-                  <li key={item.domain}>
-                    <strong>{DOMAIN_LABELS[item.domain] || item.domain}:</strong> {item.value}
-                  </li>
-                ))}
-              </ul>
+          {/* Evidence Details Collapsible Drawer */}
+          {Array.isArray(state.data?.evidence) && state.data.evidence.length > 0 && (
+            <details className="market-brief-details-drawer">
+              <summary className="market-brief-details-summary">
+                <span>Dữ kiện & tham chiếu kiểm chứng ({state.data.evidence.length})</span>
+              </summary>
+              <div className="market-brief-details-body">
+                <ul className="market-brief-evidence-grid">
+                  {state.data.evidence.map((item) => (
+                    <li key={item.id} className="market-brief-evidence-tag">
+                      <span className="evidence-tag-label">{item.label}:</span>
+                      <strong className="evidence-tag-val">{formatInvestmentBriefEvidence(item)}</strong>
+                    </li>
+                  ))}
+                </ul>
+              </div>
             </details>
           )}
 
-          <p className="investment-brief-disclaimer">
-            Bản tin chỉ diễn giải dữ kiện đã cung cấp; không tạo điểm số, giá mục tiêu, dự báo, độ tin cậy hoặc khuyến nghị đầu tư.
+          <p className="market-brief-disclaimer-text">
+            Bản tin chỉ diễn giải dữ kiện đã cung cấp; không tạo điểm số, giá mục tiêu, dự báo hay khuyến nghị đầu tư.
           </p>
         </div>
       )}
-    </section>
+    </div>
   );
 }

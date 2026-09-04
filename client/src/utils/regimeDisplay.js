@@ -49,6 +49,16 @@ export function buildVietnamRegimeViewModel(payload) {
   };
 }
 
+export function formatReferencePeriod(period) {
+  const match = /^(\d{4})-(\d{2})$/.exec(period || '');
+  return match ? `Tháng ${Number(match[2])}/${match[1]}` : 'Chưa xác định';
+}
+
+export function formatDateKey(dateKey) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateKey || '');
+  return match ? `${match[3]}/${match[2]}/${match[1]}` : 'Chưa xác định';
+}
+
 export function formatRegimePercent(value, { signed = false, suffix = '%' } = {}) {
   if (typeof value !== 'number' || !Number.isFinite(value)) return '—';
   const formatted = new Intl.NumberFormat('vi-VN', {
