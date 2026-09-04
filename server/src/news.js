@@ -19,6 +19,21 @@ import {
   NewsService,
   globalNewsService
 } from './news/service.js';
+import {
+  buildArticleId,
+  deduplicateCanonicalArticles,
+  normalizeCanonicalArticle,
+  normalizeRelatedAssets
+} from './news/contract.js';
+import {
+  articleToRow,
+  rowToArticle,
+  persistNewsArticles,
+  fetchPersistedNewsArticles,
+  clearNewsPersistenceStore
+} from './news/repository.js';
+import { NewsReadCache, NewsReadService, globalNewsReadCache, globalNewsReadService } from './news/reader.js';
+import { runNewsCollector } from './news/collector.js';
 
 export {
   CAFEF_FEEDS,
@@ -42,7 +57,21 @@ export {
   MAX_NEWS_LIMIT,
   MAX_SOURCE_ARTICLES,
   NewsService,
-  globalNewsService
+  globalNewsService,
+  buildArticleId,
+  deduplicateCanonicalArticles,
+  normalizeCanonicalArticle,
+  normalizeRelatedAssets,
+  articleToRow,
+  rowToArticle,
+  persistNewsArticles,
+  fetchPersistedNewsArticles,
+  clearNewsPersistenceStore,
+  NewsReadCache,
+  NewsReadService,
+  globalNewsReadCache,
+  globalNewsReadService,
+  runNewsCollector
 };
 
 /**
@@ -166,16 +195,16 @@ export function filterPersonalizedNews(newsItems = [], userAssets = []) {
 export async function getNewsFeed(options = {}) {
   if (Array.isArray(options)) {
     const limit = arguments[1] || 30;
-    const res = await globalNewsService.getNewsFeed({ limit });
+    const res = await globalNewsReadService.getNewsFeed({ limit });
     return res.data;
   }
 
   if (typeof options === 'number') {
-    const res = await globalNewsService.getNewsFeed({ limit: options });
+    const res = await globalNewsReadService.getNewsFeed({ limit: options });
     return res.data;
   }
 
-  return globalNewsService.getNewsFeed(options);
+  return globalNewsReadService.getNewsFeed(options);
 }
 
 /**
@@ -196,17 +225,6 @@ export async function getPersonalizedNewsFeed({
     error.statusCode = 400;
     error.code = 'INVALID_LIMIT';
     throw error;
-  }
-
-  // The production path delegates to Feature 23's canonical aggregation and
-  // UUID-authoritative personalization service. The injected feed path below
-  // exists only for deterministic route tests and applies the same UUID rule.
-  if (getNewsFeedFn === getNewsFeed) {
-    return globalNewsService.getPersonalizedNewsFeed({
-      getHoldingsFn,
-      getWatchlistFn,
-      limit: parsedLimit
-    });
   }
 
   const [holdings, watchlist] = await Promise.all([

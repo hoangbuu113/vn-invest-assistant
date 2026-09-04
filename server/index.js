@@ -27,7 +27,7 @@ import {
   privateSupabase
 } from './src/supabase.js';
 import { getMarketSnapshot, getMarketHistory, getMarketRealtime } from './src/market.js';
-import { getNewsFeed, getPersonalizedNewsFeed } from './src/news.js';
+import { getNewsFeed, getPersonalizedNewsFeed, runNewsCollector } from './src/news.js';
 import { getPortfolioOverview } from './src/portfolio.js';
 import { getPortfolioComposition } from './src/composition.js';
 import { getPortfolioPerformance } from './src/performance.js';
@@ -160,6 +160,7 @@ export function createApp(services = {}) {
     getAssetComparisonFn = getAssetComparison,
     getVietnamRegimeFn = getVietnamRegime,
     runMarketContextCollectorFn = runMarketContextCollector,
+    runNewsCollectorFn = runNewsCollector,
     getOpportunitiesFn = getOpportunities,
     getInvestmentBriefFn = getInvestmentBrief,
     getWatchlistFn = getWatchlist,
@@ -934,11 +935,11 @@ export function createApp(services = {}) {
     }
   });
 
-  // News feed endpoint (Feature 23 — aggregated from CafeF, CoinDesk, Alpha Vantage)
+  // News feed endpoint backed by normalized persistence populated from CafeF, CoinDesk, and Alpha Vantage.
   app.get('/api/news', async (req, res) => {
-    const { limit = 30, assetId } = req.query;
+    const { limit = 30, assetId, geography, topic } = req.query;
     try {
-      const result = await getNewsFeedFn({ limit, assetId });
+      const result = await getNewsFeedFn({ limit, assetId, geography, topic });
       if (Array.isArray(result)) {
         return res.json({
           status: 'ok',
@@ -1512,6 +1513,29 @@ export function createApp(services = {}) {
       return res.status(500).json({
         status: 'error',
         message: 'Failed to refresh market context observations'
+      });
+    }
+  });
+
+  // Internal normalized-news ingestion. Public news requests never call upstream providers.
+  app.post('/api/internal/news/refresh', requireAlertScheduler, async (_req, res) => {
+    try {
+      const summary = await runNewsCollectorFn({
+        now: new Date(),
+        client: supabaseAuthClient
+      });
+      if (!summary.success || summary.failedPersistence > 0) {
+        return res.status(503).json({
+          status: 'degraded',
+          message: 'Durable persistence failed or no usable news was retained',
+          data: summary
+        });
+      }
+      return res.json({ status: 'ok', data: summary });
+    } catch {
+      return res.status(500).json({
+        status: 'error',
+        message: 'Failed to refresh market news'
       });
     }
   });

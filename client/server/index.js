@@ -96,6 +96,45 @@ export async function runScheduledContextRefresh(env, options = {}) {
   }
 }
 
+export async function runScheduledNewsRefresh(env, options = {}) {
+  const token = env?.ALERT_SCHEDULER_TOKEN;
+  if (typeof token !== 'string' || token.length < 32) {
+    throw schedulerError('NEWS_SCHEDULER_NOT_CONFIGURED', 'News scheduler secret is not configured');
+  }
+
+  const fetchFn = options.fetchFn || fetch;
+  const timeoutMs = Number.isFinite(options.timeoutMs) && options.timeoutMs > 0
+    ? options.timeoutMs
+    : 120_000;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetchFn(`${APP_API_BASE_URL}/api/internal/news/refresh`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      body: '{}',
+      redirect: 'error',
+      signal: controller.signal
+    });
+
+    if (!response.ok) {
+      throw schedulerError('NEWS_SCHEDULER_HTTP_ERROR', `News refresh returned HTTP ${response.status}`);
+    }
+
+    const payload = await response.json();
+    if (payload?.status !== 'ok' || !payload.data || typeof payload.data !== 'object') {
+      throw schedulerError('NEWS_SCHEDULER_MALFORMED_RESPONSE', 'News refresh returned malformed data');
+    }
+    return payload.data;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -120,15 +159,19 @@ export default {
     ctx.waitUntil(
       Promise.allSettled([
         runScheduledAlertEvaluation(env),
-        runScheduledContextRefresh(env)
-      ]).then(([alertResult, contextResult]) => {
+        runScheduledContextRefresh(env),
+        runScheduledNewsRefresh(env)
+      ]).then(([alertResult, contextResult, newsResult]) => {
         if (alertResult.status === 'rejected') {
           console.error('Scheduled alert evaluation failed', alertResult.reason?.code || 'ALERT_SCHEDULER_FAILED');
         }
         if (contextResult.status === 'rejected') {
           console.error('Scheduled context refresh failed', contextResult.reason?.code || 'CONTEXT_SCHEDULER_FAILED');
         }
-        return [alertResult, contextResult];
+        if (newsResult.status === 'rejected') {
+          console.error('Scheduled news refresh failed', newsResult.reason?.code || 'NEWS_SCHEDULER_FAILED');
+        }
+        return [alertResult, contextResult, newsResult];
       })
     );
   }

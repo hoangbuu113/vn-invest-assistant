@@ -12,7 +12,8 @@ import cloudflareWorker, {
   ALERT_EVALUATION_API_BASE_URL,
   ALERT_EVALUATION_CADENCE_MINUTES,
   runScheduledAlertEvaluation,
-  runScheduledContextRefresh
+  runScheduledContextRefresh,
+  runScheduledNewsRefresh
 } from '../../client/server/index.js';
 
 const TEST_DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -387,6 +388,43 @@ describe('V1.1 Improvement 04 — reliable background price alerts', () => {
     assert.deepEqual(data, { success: true, persisted: 8 });
   });
 
+  test('news scheduler uses the existing token and the protected collector endpoint', async () => {
+    let calls = 0;
+    await assert.rejects(
+      () => runScheduledNewsRefresh({}, {
+        fetchFn: async () => {
+          calls++;
+          throw new Error('must not run');
+        }
+      }),
+      (error) => error.code === 'NEWS_SCHEDULER_NOT_CONFIGURED'
+    );
+    assert.equal(calls, 0);
+
+    const data = await runScheduledNewsRefresh(
+      { ALERT_SCHEDULER_TOKEN: SCHEDULER_TOKEN },
+      {
+        fetchFn: async (url, options) => {
+          calls++;
+          assert.equal(url, `${APP_API_BASE_URL}/api/internal/news/refresh`);
+          assert.equal(options.method, 'POST');
+          assert.equal(options.headers.Authorization, `Bearer ${SCHEDULER_TOKEN}`);
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              status: 'ok',
+              data: { success: true, durablyPersisted: 12 }
+            })
+          };
+        }
+      }
+    );
+
+    assert.equal(calls, 1);
+    assert.deepEqual(data, { success: true, durablyPersisted: 12 });
+  });
+
   test('scheduled jobs run independently when one job fails', async () => {
     const calls = [];
     const originalFetch = globalThis.fetch;
@@ -422,15 +460,18 @@ describe('V1.1 Improvement 04 — reliable background price alerts', () => {
       assert.ok(waitUntilPromise);
       const results = await waitUntilPromise;
 
-      assert.equal(calls.length, 2);
+      assert.equal(calls.length, 3);
       assert.deepEqual(calls.map(({ url }) => url).sort(), [
         `${ALERT_EVALUATION_API_BASE_URL}/api/internal/alerts/evaluate`,
-        `${APP_API_BASE_URL}/api/internal/context/refresh`
+        `${APP_API_BASE_URL}/api/internal/context/refresh`,
+        `${APP_API_BASE_URL}/api/internal/news/refresh`
       ].sort());
       assert.ok(calls.every(({ authorization }) => authorization === `Bearer ${SCHEDULER_TOKEN}`));
       assert.equal(results[0].status, 'rejected');
       assert.equal(results[1].status, 'fulfilled');
       assert.deepEqual(results[1].value, { success: true, persisted: 6 });
+      assert.equal(results[2].status, 'fulfilled');
+      assert.deepEqual(results[2].value, { success: true, persisted: 6 });
     } finally {
       globalThis.fetch = originalFetch;
       console.error = originalConsoleError;
