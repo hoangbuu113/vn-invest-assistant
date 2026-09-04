@@ -67,8 +67,9 @@ export function VietnamRegimePanel({ briefSlot = null, newsSlot = null }) {
 
       {/* 2. Loading State */}
       {loading && !payload && (
-        <div className="market-pulse-loading" aria-label="Đang tải dữ liệu bối cảnh thị trường">
-          <div className="skeleton-shimmer" style={{ height: '78px', borderRadius: 'var(--radius-md)' }} />
+        <div className="market-pulse-loading" role="status" aria-live="polite">
+          <span className="sr-only">Đang tải dữ liệu bối cảnh thị trường...</span>
+          <div className="skeleton-shimmer" style={{ height: '78px', borderRadius: 'var(--radius-md)' }} aria-hidden="true" />
         </div>
       )}
 
@@ -81,19 +82,17 @@ export function VietnamRegimePanel({ briefSlot = null, newsSlot = null }) {
 
       {/* 4. MARKET PULSE: Compact Metric Strip */}
       <div className="market-pulse-strip">
-        {/* Metric 1: CPI */}
-        <div className="market-pulse-cell">
-          <div className="market-pulse-cell-header">
-            <span className="market-pulse-label">Lạm phát CPI (YoY)</span>
-            <span className="market-pulse-source-tag">NSO</span>
-          </div>
-          <div className="market-pulse-cell-body">
-            <div className="market-pulse-value">
-              {view.inflation.usable
-                ? formatRegimePercent(view.inflation.headlineCpiYoYPct)
-                : <span className="market-pulse-null">Chưa có số liệu CPI chính thức khả dụng.</span>}
+        {/* Metric 1: CPI (Chỉ hiển thị khi có số liệu chính thức khả dụng) */}
+        {view.inflation.usable && view.inflation.headlineCpiYoYPct !== null && (
+          <div className="market-pulse-cell">
+            <div className="market-pulse-cell-header">
+              <span className="market-pulse-label">Lạm phát CPI (YoY)</span>
+              <span className="market-pulse-source-tag">NSO</span>
             </div>
-            {view.inflation.usable && (
+            <div className="market-pulse-cell-body">
+              <div className="market-pulse-value">
+                {formatRegimePercent(view.inflation.headlineCpiYoYPct)}
+              </div>
               <div className="market-pulse-subtext">
                 {view.inflation.threeMonthDeltaPp !== null ? (
                   <span className={view.inflation.threeMonthDeltaPp > 0 ? 'color-loss' : 'color-gain'}>
@@ -106,23 +105,21 @@ export function VietnamRegimePanel({ briefSlot = null, newsSlot = null }) {
                   <span className="market-pulse-stale-tag">Đang hiển thị bản lưu chính thức gần nhất.</span>
                 )}
               </div>
-            )}
-          </div>
-        </div>
-
-        {/* Metric 2: Lãi suất VND qua đêm */}
-        <div className="market-pulse-cell">
-          <div className="market-pulse-cell-header">
-            <span className="market-pulse-label">Lãi suất VND qua đêm</span>
-            <span className="market-pulse-source-tag">SBV</span>
-          </div>
-          <div className="market-pulse-cell-body">
-            <div className="market-pulse-value">
-              {view.moneyMarket.usable
-                ? formatRegimePercent(view.moneyMarket.vndOvernightRatePct)
-                : <span className="market-pulse-null">Chưa có quan sát tuần chính thức khả dụng.</span>}
             </div>
-            {view.moneyMarket.usable && (
+          </div>
+        )}
+
+        {/* Metric 2: Lãi suất VND qua đêm (Chỉ hiển thị khi có quan sát chính thức khả dụng) */}
+        {view.moneyMarket.usable && view.moneyMarket.vndOvernightRatePct !== null && (
+          <div className="market-pulse-cell">
+            <div className="market-pulse-cell-header">
+              <span className="market-pulse-label">Lãi suất VND qua đêm</span>
+              <span className="market-pulse-source-tag">SBV</span>
+            </div>
+            <div className="market-pulse-cell-body">
+              <div className="market-pulse-value">
+                {formatRegimePercent(view.moneyMarket.vndOvernightRatePct)}
+              </div>
               <div className="market-pulse-subtext">
                 {view.moneyMarket.trendPp !== null ? (
                   <span>
@@ -135,9 +132,9 @@ export function VietnamRegimePanel({ briefSlot = null, newsSlot = null }) {
                   <span className="market-pulse-stale-tag">Đang hiển thị bản lưu chính thức gần nhất.</span>
                 )}
               </div>
-            )}
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       {/* 5. SLOTS: Brief + News Row */}
@@ -196,13 +193,18 @@ export function VietnamRegimePanel({ briefSlot = null, newsSlot = null }) {
             <strong>Lạm phát:</strong> {view.inflation.source || 'Cơ quan Thống kê Quốc gia (NSO)'}
             {view.inflation.referencePeriod && ` · Kỳ tham chiếu: ${formatReferencePeriod(view.inflation.referencePeriod)}`}
             {view.inflation.publishedAt && ` · Công bố: ${formatDateKey(view.inflation.publishedAt)}`}
+            {!view.inflation.usable && ' · Chưa có số liệu CPI chính thức khả dụng.'}
           </div>
           <div className="quality-item">
             <strong>Thị trường tiền tệ:</strong> {view.moneyMarket.source || 'Ngân hàng Nhà nước Việt Nam (SBV)'}
             {view.moneyMarket.referenceWeekStart && (
               ` · Tuần tham chiếu: ${formatDateKey(view.moneyMarket.referenceWeekStart)} – ${formatDateKey(view.moneyMarket.referenceWeekEnd)}`
             )}
-            {!view.moneyMarket.usable && ' · Chưa đủ 8 tuần chính thức liên tục để tính xu hướng.'}
+            {!view.moneyMarket.usable && (
+              view.moneyMarket.vndOvernightRatePct === null
+                ? ' · Chưa có quan sát tuần chính thức khả dụng (chưa đủ 8 tuần chính thức liên tục để tính xu hướng).'
+                : ' · Chưa đủ 8 tuần chính thức liên tục để tính xu hướng.'
+            )}
           </div>
           <div className="quality-item">
             <strong>Độ rộng thị trường:</strong> Chưa có nguồn dữ liệu đủ tin cậy để tính toán độ rộng từ danh mục theo dõi giới hạn.

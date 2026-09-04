@@ -17,7 +17,7 @@ export function MarketNewsPreview({
   error = null,
   onViewAll
 }) {
-  const displayItems = Array.isArray(news) ? news.slice(0, 5) : [];
+  const displayItems = Array.isArray(news) ? news.slice(0, 3) : [];
 
   return (
     <div className="market-news-preview-panel">
@@ -39,9 +39,10 @@ export function MarketNewsPreview({
 
       {/* Loading Skeleton */}
       {loading && displayItems.length === 0 && (
-        <div className="market-news-skeleton-list" aria-label="Đang tải tin tức">
+        <div className="market-news-skeleton-list" role="status" aria-live="polite">
+          <span className="sr-only">Đang tải tin tức...</span>
           {[1, 2, 3].map((i) => (
-            <div key={i} className="market-news-skeleton-item">
+            <div key={i} className="market-news-skeleton-item" aria-hidden="true">
               <div className="skeleton-shimmer" style={{ width: '60px', height: '18px', borderRadius: '4px', marginBottom: '8px' }} />
               <div className="skeleton-shimmer" style={{ width: '90%', height: '20px', borderRadius: '4px', marginBottom: '6px' }} />
               <div className="skeleton-shimmer" style={{ width: '100px', height: '14px', borderRadius: '4px' }} />
