@@ -55,7 +55,7 @@ export function buildMarketStrategistViewModel(raw) {
   const stanceLabel = formatStrategistStance(stance);
   const stanceClass = STANCE_CLASSES[stance] || 'stance-neutral';
 
-  const isLlm = data.generationMode === 'llm';
+  const isLlm = data.generationMode === 'llm' || data.generationMode === 'live_ai' || data.generationMode === 'gemini';
   const isCache = data.generationMode === 'cache';
   const isFallback = data.generationMode === 'deterministic_fallback' || !data.generationMode;
 

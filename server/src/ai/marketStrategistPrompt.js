@@ -1,6 +1,6 @@
-export const STRATEGIST_MODEL = 'gpt-5.6-luna';
+export const STRATEGIST_MODEL = process.env.GEMINI_MODEL || 'gemini-3-flash-preview';
 export const STRATEGIST_REASONING_EFFORT = 'low';
-export const STRATEGIST_MAX_OUTPUT_TOKENS = 1200;
+export const STRATEGIST_MAX_OUTPUT_TOKENS = 2048;
 export const STRATEGIST_PROMPT_VERSION = 'ai-market-strategist-prompt-v1';
 export const STRATEGIST_SCHEMA_VERSION = 'ai-market-strategist-schema-v1';
 export const STRATEGIST_METHODOLOGY_VERSION = 'ai-market-strategist-v1';
@@ -11,6 +11,33 @@ export const ALLOWED_STANCES = Object.freeze([
   'selective_risk_on',
   'risk_on'
 ]);
+
+export function toGeminiSchema(schema) {
+  if (!schema || typeof schema !== 'object') return schema;
+  const result = {};
+  if (schema.type) {
+    result.type = schema.type.toUpperCase();
+  }
+  if (schema.description) {
+    result.description = schema.description;
+  }
+  if (Array.isArray(schema.enum)) {
+    result.enum = schema.enum;
+  }
+  if (schema.properties && typeof schema.properties === 'object') {
+    result.properties = {};
+    for (const [key, prop] of Object.entries(schema.properties)) {
+      result.properties[key] = toGeminiSchema(prop);
+    }
+  }
+  if (Array.isArray(schema.required)) {
+    result.required = schema.required;
+  }
+  if (schema.items) {
+    result.items = toGeminiSchema(schema.items);
+  }
+  return result;
+}
 
 export const MARKET_STRATEGIST_SCHEMA = Object.freeze({
   type: 'object',

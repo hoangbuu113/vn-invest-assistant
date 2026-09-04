@@ -8,7 +8,8 @@ import {
   STRATEGIST_METHODOLOGY_VERSION,
   MARKET_STRATEGIST_SCHEMA,
   STRATEGIST_SYSTEM_INSTRUCTIONS,
-  ALLOWED_STANCES
+  ALLOWED_STANCES,
+  toGeminiSchema
 } from './marketStrategistPrompt.js';
 import { validateMarketStrategistOutput } from './marketStrategistValidation.js';
 
@@ -301,7 +302,10 @@ export function generateDeterministicMarketStrategist({ factPacket, now = new Da
 export async function generateMarketStrategist({
   factPacket,
   now = new Date(),
-  apiKey = process.env.OPENAI_API_KEY,
+  geminiApiKey = process.env.GEMINI_API_KEY,
+  geminiModel = process.env.GEMINI_MODEL || STRATEGIST_MODEL,
+  openAiApiKey = process.env.OPENAI_API_KEY,
+  apiKey,
   runtime = globalMarketStrategistRuntime,
   generateLlmFn = null,
   fetchFn = globalThis.fetch,
@@ -324,31 +328,107 @@ export async function generateMarketStrategist({
   }
 
   let result = null;
-  const hasApiKey = typeof apiKey === 'string' && apiKey.trim().length > 0;
+  let lastProviderError = null;
+
+  const effectiveGeminiKey = (typeof geminiApiKey === 'string' && geminiApiKey.trim())
+    ? geminiApiKey.trim()
+    : (typeof apiKey === 'string' && apiKey.startsWith('AIza') ? apiKey.trim() : null);
+
+  const effectiveOpenAiKey = (typeof openAiApiKey === 'string' && openAiApiKey.trim())
+    ? openAiApiKey.trim()
+    : (typeof apiKey === 'string' && !apiKey.startsWith('AIza') ? apiKey.trim() : null);
+
+  const hasAnyKey = Boolean(effectiveGeminiKey || effectiveOpenAiKey);
 
   // 2. Attempt LLM generation if enabled, allowed, and configured
-  if (aiEnabled && allowLlm && hasApiKey) {
+  if (aiEnabled && allowLlm && (hasAnyKey || typeof generateLlmFn === 'function')) {
     try {
       let rawLlmOutput = null;
 
       if (typeof generateLlmFn === 'function') {
         rawLlmOutput = await generateLlmFn({
-          apiKey,
+          apiKey: effectiveGeminiKey || effectiveOpenAiKey || apiKey,
           factPacket,
           fetchFn,
           instructions: STRATEGIST_SYSTEM_INSTRUCTIONS,
           schema: MARKET_STRATEGIST_SCHEMA
         });
-      } else {
+      } else if (effectiveGeminiKey) {
+        // Direct Gemini REST invocation with structured JSON output
+        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${encodeURIComponent(effectiveGeminiKey)}`;
+        const geminiBody = {
+          systemInstruction: {
+            parts: [
+              {
+                text: `${STRATEGIST_SYSTEM_INSTRUCTIONS}\n\nLƯU Ý QUAN TRỌNG: Bạn BẮT BUỘC phải trả về đúng định dạng JSON theo schema đã cho, không thêm bất kỳ văn bản ngoài JSON. Mọi evidenceId trong keyDrivers, investmentOrientation, risksAndInvalidation và citations PHẢI LẤY CHÍNH XÁC từ danh sách ID có sẵn (availableFactIds và availableArticleIds). Tuyệt đối không tự sửa hoặc rút ngắn ID.`
+              }
+            ]
+          },
+          contents: [
+            {
+              role: 'user',
+              parts: [
+                {
+                  text: JSON.stringify({
+                    availableFactIds: Array.from(validFactIds),
+                    availableArticleIds: Array.from(validArticleIds),
+                    marketContext: factPacket.evidence,
+                    marketNews: factPacket.untrustedNews,
+                    now: factPacket.now
+                  })
+                }
+              ]
+            }
+          ],
+          generationConfig: {
+            temperature: 0.2,
+            topP: 0.9,
+            maxOutputTokens: STRATEGIST_MAX_OUTPUT_TOKENS,
+            responseMimeType: 'application/json',
+            responseSchema: toGeminiSchema(MARKET_STRATEGIST_SCHEMA)
+          }
+        };
+
+        const response = await fetchFn(geminiUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(geminiBody)
+        });
+
+        if (response.ok) {
+          const payload = await response.json();
+          const candidate = payload?.candidates?.[0];
+          let outputText = '';
+          if (Array.isArray(candidate?.content?.parts)) {
+            for (const part of candidate.content.parts) {
+              if (typeof part?.text === 'string') {
+                outputText += part.text;
+              }
+            }
+          }
+          if (outputText) {
+            let cleaned = outputText.trim();
+            if (cleaned.startsWith('```')) {
+              cleaned = cleaned.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+            }
+            rawLlmOutput = JSON.parse(cleaned);
+          }
+        } else {
+          const errData = await response.json().catch(() => null);
+          lastProviderError = errData?.error?.message || `HTTP ${response.status} ${response.statusText}`;
+        }
+      } else if (effectiveOpenAiKey) {
         // Direct OpenAI invocation with structured outputs
         const response = await fetchFn('https://api.openai.com/v1/responses', {
           method: 'POST',
           headers: {
-            Authorization: `Bearer ${apiKey.trim()}`,
+            Authorization: `Bearer ${effectiveOpenAiKey}`,
             'Content-Type': 'application/json'
           },
           body: JSON.stringify({
-            model: STRATEGIST_MODEL,
+            model: 'gpt-5.6-luna',
             reasoning: { effort: STRATEGIST_REASONING_EFFORT },
             instructions: STRATEGIST_SYSTEM_INSTRUCTIONS,
             input: JSON.stringify({
@@ -388,6 +468,9 @@ export async function generateMarketStrategist({
           if (outputText) {
             rawLlmOutput = JSON.parse(outputText);
           }
+        } else {
+          const errData = await response.json().catch(() => null);
+          lastProviderError = errData?.error?.message || `HTTP ${response.status}`;
         }
       }
 
@@ -402,13 +485,17 @@ export async function generateMarketStrategist({
             ...rawLlmOutput,
             generatedAt: now.toISOString(),
             dataAsOf: factPacket.dataAsOf,
-            generationMode: 'llm',
+            generationMode: (rawLlmOutput.generationMode && rawLlmOutput.generationMode !== 'deterministic_fallback')
+              ? rawLlmOutput.generationMode
+              : 'live_ai',
             methodologyVersion: STRATEGIST_METHODOLOGY_VERSION
           };
+        } else {
+          lastProviderError = `Validation errors: ${validation.errors.join(', ')}`;
         }
       }
-    } catch {
-      // Gracefully fall through to deterministic fallback on any network, timeout, or parsing error
+    } catch (err) {
+      lastProviderError = err?.message || 'LLM execution error';
       result = null;
     }
   }
@@ -416,6 +503,9 @@ export async function generateMarketStrategist({
   // 3. Fall back to deterministic synthesis if LLM was skipped, failed, or invalid
   if (!result) {
     result = generateDeterministicMarketStrategist({ factPacket, now });
+    if (lastProviderError) {
+      result.lastProviderError = lastProviderError;
+    }
   }
 
   // 4. Cache valid output

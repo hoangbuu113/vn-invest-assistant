@@ -400,7 +400,7 @@ test('V1.2 Improvement 04 — AI Market Strategist', async (t) => {
       getMarketContextFabricFn: async () => ({ facts: MOCK_OBSERVATIONS }),
       getNewsFeedFn: async () => ({ data: MOCK_NEWS }),
       runtime: new MarketStrategistRuntime(),
-      apiKey: 'sk-mock-key',
+      geminiApiKey: 'AIzaMockKey',
       aiEnabled: true,
       allowLlm: false,
       generateLlmFn: async () => {
@@ -413,11 +413,81 @@ test('V1.2 Improvement 04 — AI Market Strategist', async (t) => {
     assert.equal(res.generationMode, 'deterministic_fallback');
   });
 
-  await t.test('13. POST and GET endpoints in createApp operate without profile dependency', async () => {
+  await t.test('13. Gemini provider live response parsing with schema validation', async () => {
+    const packet = buildMarketStrategistFactPacket({
+      marketObservations: MOCK_OBSERVATIONS,
+      newsArticles: MOCK_NEWS,
+      now: NOW
+    });
+
+    const mockGeminiOutput = generateDeterministicMarketStrategist({ factPacket: packet, now: NOW });
+    const mockGeminiResponse = {
+      candidates: [
+        {
+          content: {
+            parts: [
+              {
+                text: JSON.stringify(mockGeminiOutput)
+              }
+            ]
+          },
+          finishReason: 'STOP'
+        }
+      ]
+    };
+
+    const result = await generateMarketStrategist({
+      factPacket: packet,
+      now: NOW,
+      geminiApiKey: 'AIzaMockKey123',
+      geminiModel: 'gemini-3-flash-preview',
+      runtime: new MarketStrategistRuntime(),
+      fetchFn: async () => ({
+        ok: true,
+        json: async () => mockGeminiResponse
+      })
+    });
+
+    assert.equal(result.generationMode, 'live_ai');
+    assert.equal(result.marketOverview.vietnam, mockGeminiOutput.marketOverview.vietnam);
+  });
+
+  await t.test('14. Gemini simulated high-demand / quota error triggers deterministic fallback gracefully', async () => {
+    const packet = buildMarketStrategistFactPacket({
+      marketObservations: MOCK_OBSERVATIONS,
+      newsArticles: MOCK_NEWS,
+      now: NOW
+    });
+
+    const result = await generateMarketStrategist({
+      factPacket: packet,
+      now: NOW,
+      geminiApiKey: 'AIzaMockKey123',
+      geminiModel: 'gemini-3-flash-preview',
+      runtime: new MarketStrategistRuntime(),
+      fetchFn: async () => ({
+        ok: false,
+        status: 503,
+        statusText: 'Service Unavailable',
+        json: async () => ({
+          error: {
+            code: 503,
+            message: 'This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.'
+          }
+        })
+      })
+    });
+
+    assert.equal(result.generationMode, 'deterministic_fallback');
+    assert.ok(result.lastProviderError.includes('high demand'));
+    assert.ok(result.marketOverview.vietnam);
+  });
+
+  await t.test('15. POST and GET endpoints in createApp operate without profile dependency', async () => {
     const { createApp } = await import('../index.js');
     const app = createApp({
       getMarketStrategistFn: async ({ allowLlm }) => ({
-        generationMode: allowLlm ? 'deterministic_fallback' : 'deterministic_fallback',
+        generationMode: allowLlm ? 'live_ai' : 'deterministic_fallback',
         marketOverview: { vietnam: 'VN test', global: 'Global test' }
       })
     });

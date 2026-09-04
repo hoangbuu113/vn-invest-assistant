@@ -153,7 +153,7 @@ export function buildInvestmentBriefViewModel(raw) {
 
   // Check if it's the AI Market Strategist shape
   if (data.marketOverview && data.investmentOrientation) {
-    const isLlm = data.generationMode === 'llm';
+    const isLlm = data.generationMode === 'llm' || data.generationMode === 'live_ai' || data.generationMode === 'gemini';
     const isCache = data.generationMode === 'cache';
     const isFallback = data.generationMode === 'deterministic_fallback' || !data.generationMode;
 
