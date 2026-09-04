@@ -19,7 +19,7 @@ export const PRIVATE_API_PREFIXES = Object.freeze([
   '/api/push'
 ]);
 
-export function isPrivateApiPath(path) {
+export function isPrivateApiPath(path, method = 'POST') {
   if (typeof path !== 'string') return false;
   let pathname = path;
   try {
@@ -28,6 +28,9 @@ export function isPrivateApiPath(path) {
     pathname = path.split('?')[0];
   }
   const normalizedPath = pathname.replace(/\/+$/, '') || '/';
+  if (normalizedPath === '/api/market-strategist' && typeof method === 'string' && method.toUpperCase() === 'GET') {
+    return false;
+  }
   return PRIVATE_API_PREFIXES.some(
     (prefix) => normalizedPath === prefix || normalizedPath.startsWith(`${prefix}/`)
   );
@@ -44,8 +47,9 @@ function notifyAuthInvalid() {
 
 export async function apiFetch(path, options = {}) {
   const headers = new Headers(options.headers || {});
+  const method = options.method || 'GET';
 
-  if (isPrivateApiPath(path)) {
+  if (isPrivateApiPath(path, method)) {
     const token = await getAccessToken();
     if (token && !headers.has('Authorization')) {
       headers.set('Authorization', `Bearer ${token}`);

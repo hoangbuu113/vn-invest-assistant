@@ -305,7 +305,8 @@ export async function generateMarketStrategist({
   runtime = globalMarketStrategistRuntime,
   generateLlmFn = null,
   fetchFn = globalThis.fetch,
-  aiEnabled = true
+  aiEnabled = true,
+  allowLlm = true
 } = {}) {
   const { validFactIds, validArticleIds, evidence } = factPacket;
   const fingerprint = computeStrategistFingerprint({ validFactIds, validArticleIds });
@@ -325,8 +326,8 @@ export async function generateMarketStrategist({
   let result = null;
   const hasApiKey = typeof apiKey === 'string' && apiKey.trim().length > 0;
 
-  // 2. Attempt LLM generation if enabled and configured
-  if (aiEnabled && hasApiKey) {
+  // 2. Attempt LLM generation if enabled, allowed, and configured
+  if (aiEnabled && allowLlm && hasApiKey) {
     try {
       let rawLlmOutput = null;
 

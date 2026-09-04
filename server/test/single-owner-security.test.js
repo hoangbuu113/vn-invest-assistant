@@ -148,6 +148,8 @@ describe('Public Multi-User HTTP & Security Boundary', () => {
     ]) {
       assert.equal(isPrivateApiPath(path), false, path);
     }
+    assert.equal(isPrivateApiPath('/api/market-strategist', 'GET'), false);
+    assert.equal(isPrivateApiPath('/api/market-strategist', 'POST'), true);
   });
 
   test('every actual personal route denies missing credentials with 401 AUTH_REQUIRED', async () => {

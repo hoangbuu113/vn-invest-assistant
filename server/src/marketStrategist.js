@@ -30,7 +30,8 @@ export async function getMarketStrategist({
   runtime = globalMarketStrategistRuntime,
   generateLlmFn = null,
   fetchFn = globalThis.fetch,
-  aiEnabled = process.env.AI_BRIEF_ENABLED !== 'false'
+  aiEnabled = process.env.AI_BRIEF_ENABLED !== 'false',
+  allowLlm = true
 } = {}) {
   // 1. Fetch validated market context facts from the fabric (L1 cache / persistence only)
   let marketObservations = [];
@@ -69,6 +70,7 @@ export async function getMarketStrategist({
     runtime,
     generateLlmFn,
     fetchFn,
-    aiEnabled
+    aiEnabled,
+    allowLlm
   });
 }

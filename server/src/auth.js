@@ -18,9 +18,12 @@ export const PRIVATE_API_PREFIXES = Object.freeze([
 
 export const MIN_ALERT_SCHEDULER_TOKEN_LENGTH = 32;
 
-export function isPrivateApiPath(pathname) {
+export function isPrivateApiPath(pathname, method = 'POST') {
   if (typeof pathname !== 'string') return false;
   const path = pathname.split('?')[0].replace(/\/+$/, '') || '/';
+  if (path === '/api/market-strategist' && typeof method === 'string' && method.toUpperCase() === 'GET') {
+    return false;
+  }
   return PRIVATE_API_PREFIXES.some((prefix) => path === prefix || path.startsWith(`${prefix}/`));
 }
 
@@ -70,7 +73,7 @@ export function createAuthMiddleware({
   getProfileByUserIdFn
 } = {}) {
   return async function requireAuth(req, res, next) {
-    if (!isPrivateApiPath(req.path)) return next();
+    if (!isPrivateApiPath(req.path, req.method)) return next();
 
     const authHeader = req.get('authorization');
     if (authHeader === undefined || authHeader === null) {

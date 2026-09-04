@@ -392,4 +392,66 @@ test('V1.2 Improvement 04 — AI Market Strategist', async (t) => {
     assert.equal(res.citations.articleIds.length > 0, true);
     assert.equal(res.evidence.length, 4);
   });
+
+  await t.test('12. allowLlm=false skips LLM invocation and returns deterministic synthesis or cache', async () => {
+    let llmCalled = false;
+    const res = await getMarketStrategist({
+      now: NOW,
+      getMarketContextFabricFn: async () => ({ facts: MOCK_OBSERVATIONS }),
+      getNewsFeedFn: async () => ({ data: MOCK_NEWS }),
+      runtime: new MarketStrategistRuntime(),
+      apiKey: 'sk-mock-key',
+      aiEnabled: true,
+      allowLlm: false,
+      generateLlmFn: async () => {
+        llmCalled = true;
+        return {};
+      }
+    });
+
+    assert.equal(llmCalled, false);
+    assert.equal(res.generationMode, 'deterministic_fallback');
+  });
+
+  await t.test('13. POST and GET endpoints in createApp operate without profile dependency', async () => {
+    const { createApp } = await import('../index.js');
+    const app = createApp({
+      getMarketStrategistFn: async ({ allowLlm }) => ({
+        generationMode: allowLlm ? 'deterministic_fallback' : 'deterministic_fallback',
+        marketOverview: { vietnam: 'VN test', global: 'Global test' }
+      })
+    });
+
+    const server = app.listen(0);
+    const { port } = server.address();
+    try {
+      // Public GET request without auth or profile succeeds (200)
+      const getRes = await fetch(`http://127.0.0.1:${port}/api/market-strategist`);
+      assert.equal(getRes.status, 200);
+      const getBody = await getRes.json();
+      assert.equal(getBody.status, 'ok');
+      assert.equal(getBody.data.marketOverview.vietnam, 'VN test');
+
+      // Unauthenticated POST request is rejected (401 AUTH_REQUIRED)
+      const unauthPostRes = await fetch(`http://127.0.0.1:${port}/api/market-strategist`, {
+        method: 'POST'
+      });
+      assert.equal(unauthPostRes.status, 401);
+
+      // Authenticated POST request without profileId succeeds (200 OK, no profile dependency)
+      const testPayload = Buffer.from(JSON.stringify({ sub: 'user-123' })).toString('base64url');
+      const testToken = `header.${testPayload}.signature`;
+      const authPostRes = await fetch(`http://127.0.0.1:${port}/api/market-strategist`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${testToken}`
+        }
+      });
+      assert.equal(authPostRes.status, 200);
+      const postBody = await authPostRes.json();
+      assert.equal(postBody.status, 'ok');
+    } finally {
+      server.close();
+    }
+  });
 });

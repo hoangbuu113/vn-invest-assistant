@@ -1059,14 +1059,29 @@ export function createApp(services = {}) {
     }
   });
 
-  // AI Market Strategist (V1.2 Improvement 04 — public context + normalized news synthesis)
+  // AI Market Strategist — Public read-only endpoint (reads cached global brief or deterministic synthesis without paid LLM call)
+  app.get('/api/market-strategist', async (req, res) => {
+    const now = new Date();
+    try {
+      const result = await getMarketStrategistFn({ now, allowLlm: false });
+      return res.status(200).json({
+        status: 'ok',
+        data: result
+      });
+    } catch (error) {
+      return res.status(503).json({
+        status: 'error',
+        code: 'AI_STRATEGIST_UNAVAILABLE',
+        message: 'Không thể đọc bản tin chiến lược gia thị trường lúc này.'
+      });
+    }
+  });
+
+  // AI Market Strategist — Protected generation/refresh endpoint (public-data oriented, no profile dependency)
   app.post('/api/market-strategist', async (req, res) => {
     const now = new Date();
-    const profileId = requireProfile(req, res);
-    if (!profileId) return;
-
     try {
-      const result = await getMarketStrategistFn({ now });
+      const result = await getMarketStrategistFn({ now, allowLlm: true });
       return res.status(200).json({
         status: 'ok',
         data: result
