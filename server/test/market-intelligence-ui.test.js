@@ -38,9 +38,11 @@ test('V1.2 Improvement 01B — Market Intelligence UI presentation contract', as
 
   await t.test('InvestmentBriefPanel source satisfies truthful brief & non-debug UI contract', () => {
     const source = fs.readFileSync(path.join(clientDir, 'components', 'InvestmentBriefPanel.jsx'), 'utf8');
+    const styles = fs.readFileSync(path.join(clientDir, 'index.css'), 'utf8');
 
-    // Title and button contract
-    assert.match(source, /Bản tin thị trường/);
+    // Decision-first title and manual refresh contract
+    assert.match(source, /AI Market Strategist/);
+    assert.match(source, /Bây giờ nên làm gì\?/);
     assert.match(source, /Tạo bản tin/);
     assert.match(source, /Làm mới bản tin/);
     assert.match(source, /method:\s*'POST'/);
@@ -50,11 +52,24 @@ test('V1.2 Improvement 01B — Market Intelligence UI presentation contract', as
     assert.doesNotMatch(source, /useEffect\(\(\)\s*=>\s*\{[^}]*apiFetch/s);
 
     // Fallback notice when live AI is inactive
-    assert.match(source, /Bản tóm tắt hiện được tạo từ dữ liệu đã xác minh/);
+    assert.match(source, /Bản chiến lược hiện được tạo từ dữ liệu đã xác minh/);
 
-    // Raw evidence IDs not rendered in main prose
+    // Main view exposes the decision hierarchy while context/evidence stay progressive.
+    assert.match(source, /strategist-command/);
+    assert.match(source, /strategist-allocation-table/);
+    assert.match(source, /strategist-theme-opportunity/);
+    assert.match(source, /strategist-theme-risk/);
+    assert.match(source, /strategist-context-drawer/);
     assert.doesNotMatch(source, /investment-brief-evidence-list/);
     assert.match(source, /market-brief-details-drawer/);
+
+    // The active strategist surface uses dedicated responsive styles rather than inline decoration.
+    const strategistMarkup = source.split('Active Content: decision-first AI Market Strategist surface')[1]
+      .split('Legacy View Fallback')[0];
+    assert.doesNotMatch(strategistMarkup, /style=\{/);
+    assert.match(styles, /\.strategist-command\s*\{/);
+    assert.match(styles, /@media \(max-width: 520px\)/);
+    assert.match(styles, /\.strategist-allocation-row > p\s*\{[^}]*color:\s*#334155/s);
   });
 
   await t.test('MarketNewsPreview source satisfies editorial presentation contract', () => {
