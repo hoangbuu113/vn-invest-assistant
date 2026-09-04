@@ -138,22 +138,6 @@ export function VietnamRegimePanel({ briefSlot = null, newsSlot = null }) {
             )}
           </div>
         </div>
-
-        {/* Metric 3: Độ rộng & Thanh khoản */}
-        <div className="market-pulse-cell">
-          <div className="market-pulse-cell-header">
-            <span className="market-pulse-label">Độ rộng thị trường</span>
-            <span className="market-pulse-source-tag">HOSE / HNX</span>
-          </div>
-          <div className="market-pulse-cell-body">
-            <div className="market-pulse-value">
-              <span className="market-pulse-pending">Đang chuẩn bị</span>
-            </div>
-            <div className="market-pulse-subtext">
-              <span className="market-pulse-muted">Chưa có nguồn dữ liệu đủ tin cậy</span>
-            </div>
-          </div>
-        </div>
       </div>
 
       {/* 5. SLOTS: Brief + News Row */}

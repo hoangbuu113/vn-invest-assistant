@@ -2,13 +2,13 @@ import React from 'react';
 import { formatPublishedTime } from '../utils/formatting.js';
 import { MagneticButton } from './MotionHelpers.jsx';
 
-const CATEGORY_STYLES = {
-  macro: { label: 'Vĩ mô', bg: '#f0fdf4', color: '#166534', border: '#bbf7d0' },
-  market: { label: 'Thị trường', bg: '#eff6ff', color: '#1e40af', border: '#bfdbfe' },
-  company: { label: 'Doanh nghiệp', bg: '#faf5ff', color: '#6b21a8', border: '#e9d5ff' },
-  global: { label: 'Quốc tế', bg: '#fff7ed', color: '#9a3412', border: '#fed7aa' },
-  crypto: { label: 'Crypto', bg: '#fdf2f8', color: '#9d174d', border: '#fbcfe8' },
-  gold: { label: 'Vàng', bg: '#fefce8', color: '#854d0e', border: '#fef08a' }
+const CATEGORY_LABELS = {
+  macro: 'Vĩ mô',
+  market: 'Thị trường',
+  company: 'Doanh nghiệp',
+  global: 'Quốc tế',
+  crypto: 'Crypto',
+  gold: 'Vàng'
 };
 
 export function MarketNewsPreview({
@@ -68,25 +68,14 @@ export function MarketNewsPreview({
       {displayItems.length > 0 && (
         <div className="market-news-list">
           {displayItems.map((item) => {
-            const cat = CATEGORY_STYLES[item.category] || {
-              label: item.category || 'Tin tức',
-              bg: '#f8fafc',
-              color: '#475569',
-              border: '#e2e8f0'
-            };
+            const catLabel = CATEGORY_LABELS[item.category] || item.category || 'Tin tức';
+            const catClass = item.category ? `news-cat-${item.category}` : 'news-cat-default';
 
             return (
               <article key={item.id || item.url} className="market-news-card-item">
                 <div className="market-news-card-meta">
-                  <span
-                    className="market-news-cat-badge"
-                    style={{
-                      backgroundColor: cat.bg,
-                      color: cat.color,
-                      borderColor: cat.border
-                    }}
-                  >
-                    {cat.label}
+                  <span className={`market-news-cat-badge ${catClass}`}>
+                    {catLabel}
                   </span>
                   <span className="market-news-source-badge">{item.source || 'Tin tức'}</span>
                   <span className="market-news-time-badge">{formatPublishedTime(item.publishedAt)}</span>
@@ -111,9 +100,17 @@ export function MarketNewsPreview({
 
                 {Array.isArray(item.relatedAssets) && item.relatedAssets.length > 0 && (
                   <div className="market-news-asset-tags">
-                    {item.relatedAssets.slice(0, 3).map((sym) => (
-                      <span key={sym} className="market-news-asset-chip">{sym}</span>
-                    ))}
+                    {item.relatedAssets.slice(0, 3).map((asset, idx) => {
+                      const tagLabel = typeof asset === 'string'
+                        ? asset
+                        : (asset?.symbol || asset?.assetId || asset?.name || '');
+                      if (!tagLabel) return null;
+                      return (
+                        <span key={asset?.assetId || tagLabel || idx} className="market-news-asset-chip">
+                          {tagLabel}
+                        </span>
+                      );
+                    })}
                   </div>
                 )}
               </article>
