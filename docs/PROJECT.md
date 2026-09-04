@@ -1,10 +1,10 @@
-# Project Overview: Vietnam Personal Investment Assistant
+# Project Overview: VN Invest Assistant
 
 ## 1. Purpose
-A personal investment analysis application designed for learning full-stack and vibe coding while serving as a practical, real-life tool for tracking and analyzing investment opportunities in Vietnam and across priority global asset classes.
+A public multi-user, Vietnam-focused multi-asset market intelligence and tracking showcase application. Its primary focus is delivering institutional-grade market intelligence, monitoring, multi-source news, macroeconomic regime context, price alerts, watchlists, cross-asset context, and future AI synthesis for Vietnam and priority global asset classes. Portfolio tracking and accounting operate as a supporting/demo capability.
 
-## 2. Target User
-- Single user — personal use only.
+## 2. Target User & Architecture
+- Public multi-user platform with Supabase authentication and strictly isolated per-profile data.
 
 ## 3. Approved Tech Stack
 - **Frontend**: React + Vite + JavaScript
@@ -26,11 +26,10 @@ A personal investment analysis application designed for learning full-stack and 
 - **VND** (all portfolio valuations and summaries normalize to Vietnamese Đồng; native quote currencies are preserved and converted via explicit FX rates).
 
 ## 6. Core Product Goals
-- Ingest and normalize market data across priority asset classes.
-- Provide deterministic quantitative analysis, trends, and comparisons.
-- Track personal holdings, immutable transaction history, and auditable cash flows.
-- Monitor price alerts and relevant market news deterministically.
-- Maintain transparent data integrity (never fabricate missing prices, timestamps, or FX rates).
+- **Primary**: Deliver public market intelligence, macroeconomic regime tracking, multi-asset context, multi-source news, watchlists, price alerts, and future AI synthesis.
+- **Supporting**: Track user holdings, immutable transaction history, and auditable cash flows within isolated user profiles.
+- Provide deterministic quantitative analysis, trends, and comparisons across Vietnam equities, crypto, gold, and FX.
+- Maintain transparent data integrity (never fabricate missing prices, timestamps, or FX rates; missing is never zero).
 
 ## 7. Non-Goals
 - Does **NOT** execute trades or place broker orders.

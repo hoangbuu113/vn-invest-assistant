@@ -4,7 +4,9 @@ import {
   buildVietnamRegimeViewModel,
   formatRegimePercent,
   formatReferencePeriod,
-  formatDateKey
+  formatDateKey,
+  formatMetricValue,
+  formatMetricChange
 } from '../utils/regimeDisplay.js';
 
 export function VietnamRegimePanel({ briefSlot = null, newsSlot = null }) {
@@ -18,7 +20,7 @@ export function VietnamRegimePanel({ briefSlot = null, newsSlot = null }) {
     apiFetch('/api/regime/vietnam', { signal: controller.signal })
       .then(async (response) => {
         const body = await response.json().catch(() => null);
-        if (body?.moneyMarket || body?.inflation || body?.marketBreadth) {
+        if (body?.moneyMarket || body?.inflation || body?.marketBreadth || body?.pillars) {
           setPayload(body);
           setRequestError(false);
           return;
@@ -35,6 +37,15 @@ export function VietnamRegimePanel({ briefSlot = null, newsSlot = null }) {
   }, []);
 
   const view = useMemo(() => buildVietnamRegimeViewModel(payload), [payload]);
+
+  // Derived pillar helper observations
+  const macroCpi = view.pillars?.macro?.find((o) => o.factId === 'vn.macro.cpi.yoy' || o.id === 'macro.cpi_yoy');
+  const monetaryUsdVnd = view.pillars?.monetary?.find((o) => o.factId === 'vn.monetary.fx.usd_vnd' || o.id === 'monetary.usd_vnd');
+  const marketVnindex = view.pillars?.market?.find((o) => o.factId === 'vn.market.vnindex.close' || o.id === 'market.vnindex');
+  const marketVn30 = view.pillars?.market?.find((o) => o.factId === 'vn.market.vn30.close' || o.id === 'market.vn30');
+  const intermarketDxy = view.pillars?.intermarket?.find((o) => o.factId === 'global.intermarket.dxy.quote' || o.id === 'intermarket.dxy');
+  const intermarketBrent = view.pillars?.intermarket?.find((o) => o.factId === 'global.intermarket.brent.futures' || o.id === 'intermarket.brent');
+  const intermarketGoldSpot = view.pillars?.intermarket?.find((o) => o.factId === 'global.intermarket.gold_spot.price' || o.id === 'intermarket.gold_spot');
 
   return (
     <section className="market-intelligence-surface fintech-card" aria-labelledby="vietnam-regime-title">
@@ -60,7 +71,7 @@ export function VietnamRegimePanel({ briefSlot = null, newsSlot = null }) {
           <span className="market-intelligence-meta-label">
             {view.inflation.usable && view.inflation.referencePeriod
               ? `Tham chiếu: ${formatReferencePeriod(view.inflation.referencePeriod)}`
-              : 'Nguồn chính thức'}
+              : 'Nguồn chính thức & thị trường'}
           </span>
         </div>
       </div>
@@ -80,60 +91,82 @@ export function VietnamRegimePanel({ briefSlot = null, newsSlot = null }) {
         </div>
       )}
 
-      {/* 4. MARKET PULSE: Compact Metric Strip */}
+      {/* 4. MARKET PULSE: Compact Metric Strip (Adaptive verified metrics) */}
       <div className="market-pulse-strip">
-        {/* Metric 1: CPI (Chỉ hiển thị khi có số liệu chính thức khả dụng) */}
-        {view.inflation.usable && view.inflation.headlineCpiYoYPct !== null && (
-          <div className="market-pulse-cell">
-            <div className="market-pulse-cell-header">
-              <span className="market-pulse-label">Lạm phát CPI (YoY)</span>
-              <span className="market-pulse-source-tag">NSO</span>
-            </div>
-            <div className="market-pulse-cell-body">
-              <div className="market-pulse-value">
-                {formatRegimePercent(view.inflation.headlineCpiYoYPct)}
+        {view.pulseMetrics && view.pulseMetrics.length > 0 ? (
+          view.pulseMetrics.map((metric) => (
+            <div key={metric.id} className="market-pulse-cell">
+              <div className="market-pulse-cell-header">
+                <span className="market-pulse-label">{metric.label}</span>
+                <span className="market-pulse-source-tag">{metric.source}</span>
               </div>
-              <div className="market-pulse-subtext">
-                {view.inflation.threeMonthDeltaPp !== null ? (
-                  <span className={view.inflation.threeMonthDeltaPp > 0 ? 'color-loss' : 'color-gain'}>
-                    {formatRegimePercent(view.inflation.threeMonthDeltaPp, { signed: true, suffix: 'điểm %' })} (3T)
-                  </span>
-                ) : (
-                  <span className="market-pulse-muted">Chưa đủ kỳ M-3 để tính thay đổi 3 tháng.</span>
-                )}
-                {view.inflation.status === 'stale' && (
-                  <span className="market-pulse-stale-tag">Đang hiển thị bản lưu chính thức gần nhất.</span>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Metric 2: Lãi suất VND qua đêm (Chỉ hiển thị khi có quan sát chính thức khả dụng) */}
-        {view.moneyMarket.usable && view.moneyMarket.vndOvernightRatePct !== null && (
-          <div className="market-pulse-cell">
-            <div className="market-pulse-cell-header">
-              <span className="market-pulse-label">Lãi suất VND qua đêm</span>
-              <span className="market-pulse-source-tag">SBV</span>
-            </div>
-            <div className="market-pulse-cell-body">
-              <div className="market-pulse-value">
-                {formatRegimePercent(view.moneyMarket.vndOvernightRatePct)}
-              </div>
-              <div className="market-pulse-subtext">
-                {view.moneyMarket.trendPp !== null ? (
-                  <span>
-                    {formatRegimePercent(view.moneyMarket.trendPp, { signed: true, suffix: 'điểm %' })} vs TB 4T
-                  </span>
-                ) : (
-                  <span className="market-pulse-muted">Chưa đủ 8 tuần chính thức liên tục để tính xu hướng.</span>
-                )}
-                {view.moneyMarket.status === 'stale' && (
-                  <span className="market-pulse-stale-tag">Đang hiển thị bản lưu chính thức gần nhất.</span>
-                )}
+              <div className="market-pulse-cell-body">
+                <div className="market-pulse-value">
+                  {formatMetricValue(metric.value, metric.unit)}
+                </div>
+                <div className="market-pulse-subtext">
+                  {metric.change !== null ? (
+                    <span className={metric.change > 0 ? 'color-gain' : metric.change < 0 ? 'color-loss' : ''}>
+                      {formatMetricChange(metric.change, metric.changePercent, metric.changeUnit, metric.changeUnitType)}
+                    </span>
+                  ) : (
+                    <span className="market-pulse-muted">Chưa có dữ liệu biến động phiên.</span>
+                  )}
+                  {(metric.status === 'stale' || metric.freshness === 'stale') && (
+                    <span className="market-pulse-stale-tag">Đang hiển thị bản lưu gần nhất.</span>
+                  )}
+                </div>
               </div>
             </div>
-          </div>
+          ))
+        ) : (
+          /* Fallback for legacy payloads */
+          <>
+            {view.inflation.usable && view.inflation.headlineCpiYoYPct !== null && (
+              <div className="market-pulse-cell">
+                <div className="market-pulse-cell-header">
+                  <span className="market-pulse-label">Lạm phát CPI (YoY)</span>
+                  <span className="market-pulse-source-tag">NSO</span>
+                </div>
+                <div className="market-pulse-cell-body">
+                  <div className="market-pulse-value">
+                    {formatRegimePercent(view.inflation.headlineCpiYoYPct)}
+                  </div>
+                  <div className="market-pulse-subtext">
+                    {view.inflation.threeMonthDeltaPp !== null ? (
+                      <span className={view.inflation.threeMonthDeltaPp > 0 ? 'color-loss' : 'color-gain'}>
+                        {formatRegimePercent(view.inflation.threeMonthDeltaPp, { signed: true, suffix: 'điểm %' })} (3T)
+                      </span>
+                    ) : (
+                      <span className="market-pulse-muted">Chưa đủ kỳ M-3 để tính thay đổi 3 tháng.</span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+            {view.moneyMarket.usable && view.moneyMarket.vndOvernightRatePct !== null && (
+              <div className="market-pulse-cell">
+                <div className="market-pulse-cell-header">
+                  <span className="market-pulse-label">Lãi suất VND qua đêm</span>
+                  <span className="market-pulse-source-tag">SBV</span>
+                </div>
+                <div className="market-pulse-cell-body">
+                  <div className="market-pulse-value">
+                    {formatRegimePercent(view.moneyMarket.vndOvernightRatePct)}
+                  </div>
+                  <div className="market-pulse-subtext">
+                    {view.moneyMarket.trendPp !== null ? (
+                      <span>
+                        {formatRegimePercent(view.moneyMarket.trendPp, { signed: true, suffix: 'điểm %' })} vs TB 4T
+                      </span>
+                    ) : (
+                      <span className="market-pulse-muted">Chưa đủ 8 tuần chính thức liên tục để tính xu hướng.</span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+          </>
         )}
       </div>
 
@@ -149,36 +182,64 @@ export function VietnamRegimePanel({ briefSlot = null, newsSlot = null }) {
       <div className="vietnam-drivers-container">
         <h4 className="vietnam-drivers-heading">Trụ cột bối cảnh Việt Nam</h4>
         <div className="vietnam-drivers-grid">
+          {/* Pillar 1: Vĩ mô */}
           <div className="driver-pillar-cell">
             <div className="driver-pillar-title">Vĩ mô</div>
             <div className="driver-pillar-status">
-              {view.inflation.usable
-                ? `CPI: ${formatRegimePercent(view.inflation.headlineCpiYoYPct)}`
-                : 'Chưa cập nhật'}
+              {macroCpi && macroCpi.value !== null
+                ? `CPI: ${formatRegimePercent(macroCpi.value)}`
+                : (view.inflation.usable ? `CPI: ${formatRegimePercent(view.inflation.headlineCpiYoYPct)}` : 'Chưa cập nhật')}
             </div>
-            <div className="driver-pillar-desc">Chỉ số giá tiêu dùng & áp lực chi phí (NSO)</div>
+            <div className="driver-pillar-desc">
+              Chỉ số giá tiêu dùng & áp lực chi phí (NSO)
+            </div>
           </div>
 
+          {/* Pillar 2: Tiền tệ */}
           <div className="driver-pillar-cell">
             <div className="driver-pillar-title">Tiền tệ</div>
             <div className="driver-pillar-status">
-              {view.moneyMarket.usable
-                ? `ON: ${formatRegimePercent(view.moneyMarket.vndOvernightRatePct)}`
-                : 'Chưa cập nhật'}
+              {monetaryUsdVnd && monetaryUsdVnd.value !== null
+                ? `${formatMetricValue(monetaryUsdVnd.value, 'VND')}`
+                : (view.moneyMarket.usable ? `ON: ${formatRegimePercent(view.moneyMarket.vndOvernightRatePct)}` : 'Chưa cập nhật')}
             </div>
-            <div className="driver-pillar-desc">Thanh khoản liên ngân hàng & lãi suất (SBV)</div>
+            <div className="driver-pillar-desc">
+              {view.moneyMarket.usable
+                ? `Tỷ giá USD/VND & Lãi suất qua đêm (${formatRegimePercent(view.moneyMarket.vndOvernightRatePct)})`
+                : 'Tỷ giá USD/VND & Lãi suất liên ngân hàng (SBV)'}
+            </div>
           </div>
 
+          {/* Pillar 3: Thị trường */}
           <div className="driver-pillar-cell">
             <div className="driver-pillar-title">Thị trường</div>
-            <div className="driver-pillar-status">Cổ phiếu & Quỹ</div>
-            <div className="driver-pillar-desc">Giao dịch niêm yết theo dõi (HOSE / HNX)</div>
+            <div className="driver-pillar-status">
+              {marketVnindex && marketVnindex.value !== null
+                ? `VN-Index: ${formatMetricValue(marketVnindex.value, 'điểm')}`
+                : 'Cổ phiếu & Quỹ'}
+            </div>
+            <div className="driver-pillar-desc">
+              {marketVn30 && marketVn30.value !== null
+                ? `VN30: ${formatMetricValue(marketVn30.value, 'điểm')} · HOSE / HNX`
+                : 'Giao dịch niêm yết theo dõi (HOSE / HNX)'}
+            </div>
           </div>
 
+          {/* Pillar 4: Liên thị trường */}
           <div className="driver-pillar-cell">
             <div className="driver-pillar-title">Liên thị trường</div>
-            <div className="driver-pillar-status">Tỷ giá & Hàng hóa</div>
-            <div className="driver-pillar-desc">USD/VND, Vàng và thị trường quốc tế</div>
+            <div className="driver-pillar-status">
+              {intermarketDxy && intermarketDxy.value !== null
+                ? `DXY: ${formatMetricValue(intermarketDxy.value, '')}`
+                : 'Tỷ giá & Hàng hóa'}
+            </div>
+            <div className="driver-pillar-desc">
+              {intermarketGoldSpot && intermarketGoldSpot.value !== null
+                ? `Vàng Spot: ${formatMetricValue(intermarketGoldSpot.value, 'USD')} · Dầu & TP Mỹ (10N)`
+                : (intermarketBrent && intermarketBrent.value !== null
+                  ? `Dầu Brent: ${formatMetricValue(intermarketBrent.value, 'USD')} · Vàng & TP Mỹ (10N)`
+                  : 'USD/VND, Vàng và thị trường quốc tế')}
+            </div>
           </div>
         </div>
       </div>
@@ -207,10 +268,16 @@ export function VietnamRegimePanel({ briefSlot = null, newsSlot = null }) {
             )}
           </div>
           <div className="quality-item">
+            <strong>Thị trường chứng khoán:</strong> VNDIRECT dchart API (VN-Index, VN30, HNX-Index).
+          </div>
+          <div className="quality-item">
+            <strong>Liên thị trường & Hàng hóa:</strong> Twelve Data (USD/VND giao ngay), Alpha Vantage (Vàng giao ngay XAU/USD), và Yahoo Finance (DXY, US10Y, Dầu Brent tương lai, Vàng tương lai COMEX).
+          </div>
+          <div className="quality-item">
             <strong>Độ rộng thị trường:</strong> Chưa có nguồn dữ liệu đủ tin cậy để tính toán độ rộng từ danh mục theo dõi giới hạn.
           </div>
           <div className="quality-disclaimer">
-            Chỉ báo mô tả từ nguồn chính thức, không phải dự báo hay khuyến nghị.
+            Chỉ báo mô tả từ nguồn chính thức và thị trường, không phải dự báo hay khuyến nghị.
           </div>
         </div>
       </details>

@@ -36,6 +36,7 @@ import { getBinanceHealth } from './src/providers/index.js';
 import { getAssetAnalysis } from './src/analysis.js';
 import { getAssetComparison } from './src/comparison.js';
 import { buildVietnamRegime, getVietnamRegime, isUsableRegimeDomain } from './src/regime.js';
+import { runMarketContextCollector } from './src/context/collector.js';
 import { getOpportunities } from './src/opportunities.js';
 import { getInvestmentBrief } from './src/investmentBrief.js';
 import {
@@ -158,6 +159,7 @@ export function createApp(services = {}) {
     getAssetAnalysisFn = getAssetAnalysis,
     getAssetComparisonFn = getAssetComparison,
     getVietnamRegimeFn = getVietnamRegime,
+    runMarketContextCollectorFn = runMarketContextCollector,
     getOpportunitiesFn = getOpportunities,
     getInvestmentBriefFn = getInvestmentBrief,
     getWatchlistFn = getWatchlist,
@@ -996,8 +998,10 @@ export function createApp(services = {}) {
   app.get('/api/regime/vietnam', async (req, res) => {
     const now = new Date();
     try {
-      const result = await getVietnamRegimeFn({ now });
-      const usable = isUsableRegimeDomain(result?.moneyMarket) || isUsableRegimeDomain(result?.inflation);
+      const result = await getVietnamRegimeFn({ now, client: supabaseAuthClient });
+      const usable = isUsableRegimeDomain(result?.moneyMarket) ||
+                     isUsableRegimeDomain(result?.inflation) ||
+                     (Array.isArray(result?.pulseMetrics) && result.pulseMetrics.length > 0);
       if (!usable) {
         return res.status(503).json({
           ...result,
@@ -1482,6 +1486,32 @@ export function createApp(services = {}) {
       return res.status(500).json({
         status: 'error',
         message: 'Failed to evaluate price alerts'
+      });
+    }
+  });
+
+  // Internal market context refresh endpoint (Feature 27B / Improvement 02 collector)
+  app.post('/api/internal/context/refresh', requireAlertScheduler, async (req, res) => {
+    try {
+      const summary = await runMarketContextCollectorFn({
+        now: new Date(),
+        client: supabaseAuthClient
+      });
+      if (!summary.isDurable || summary.failedPersistence > 0) {
+        return res.status(503).json({
+          status: 'degraded',
+          message: 'Durable persistence failed or degraded during context refresh',
+          data: summary
+        });
+      }
+      return res.json({
+        status: 'ok',
+        data: summary
+      });
+    } catch (error) {
+      return res.status(500).json({
+        status: 'error',
+        message: 'Failed to refresh market context observations'
       });
     }
   });

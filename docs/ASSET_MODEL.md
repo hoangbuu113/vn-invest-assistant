@@ -88,7 +88,7 @@ The conceptual model accommodates the following priority asset classes:
 - **Stock**: Listed equity shares (e.g. Vietnamese equities on HOSE/HNX).
 - **ETF**: Exchange-traded funds priced continuously during market sessions.
 - **Fund**: Open-ended mutual funds with periodic NAV valuation.
-- **Gold**: Spot bullion instruments (Gold Spot `XAU/USD`).
+- **Gold**: Spot bullion instruments (Gold Spot `XAU/USD`). Note: COMEX Gold Futures (`GC=F`) are reference futures contracts and must not be conflated with spot `XAU/USD`.
 - **FX**: Foreign exchange currency pairs (initially `USD/VND` market context).
 - **Crypto**: Liquid major cryptocurrencies (audited 40-asset canonical universe).
 

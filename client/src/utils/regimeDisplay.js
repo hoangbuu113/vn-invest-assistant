@@ -17,6 +17,36 @@ export function buildVietnamRegimeViewModel(payload) {
     moneyMarket.status === 'stale' && moneyMarket.underlyingStatus === 'available'
   );
 
+  // Normalize raw pillars
+  const rawPillars = payload?.pillars || {};
+  const pillars = {
+    macro: Array.isArray(rawPillars.macro) ? rawPillars.macro : [],
+    monetary: Array.isArray(rawPillars.monetary) ? rawPillars.monetary : [],
+    market: Array.isArray(rawPillars.market) ? rawPillars.market : [],
+    intermarket: Array.isArray(rawPillars.intermarket) ? rawPillars.intermarket : []
+  };
+
+  // Normalize pulse metrics
+  const rawPulse = Array.isArray(payload?.pulseMetrics) ? payload.pulseMetrics : [];
+  const pulseMetrics = rawPulse.map((p) => ({
+    id: p.id,
+    factId: p.factId || p.id,
+    label: p.label || p.id,
+    value: finiteOrNull(p.value),
+    unit: typeof p.unit === 'string' ? p.unit : '',
+    unitType: p.unitType || null,
+    change: finiteOrNull(p.change),
+    changeUnit: typeof p.changeUnit === 'string' ? p.changeUnit : (p.unit || ''),
+    changeUnitType: p.changeUnitType || null,
+    changePercent: finiteOrNull(p.changePercent),
+    volume: finiteOrNull(p.volume),
+    volumeUnit: typeof p.volumeUnit === 'string' ? p.volumeUnit : null,
+    source: typeof p.source === 'string' ? p.source : '',
+    referenceTime: typeof p.referenceTime === 'string' ? p.referenceTime : null,
+    status: p.status || 'available',
+    freshness: p.freshness || 'fresh'
+  })).filter((p) => p.value !== null);
+
   return {
     partial: payload?.partial === true,
     fetchedAt: typeof payload?.fetchedAt === 'string' ? payload.fetchedAt : null,
@@ -45,7 +75,9 @@ export function buildVietnamRegimeViewModel(payload) {
     marketBreadth: {
       status: breadth.status || 'unavailable',
       reason: breadth.reason || null
-    }
+    },
+    pillars,
+    pulseMetrics
   };
 }
 
@@ -67,4 +99,79 @@ export function formatRegimePercent(value, { signed = false, suffix = '%' } = {}
     signDisplay: signed ? 'exceptZero' : 'auto'
   }).format(value);
   return `${formatted} ${suffix}`;
+}
+
+export function formatMetricValue(value, unit = '') {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return '—';
+
+  const cleanUnit = typeof unit === 'string' ? unit.trim() : '';
+
+  if (cleanUnit === '%') {
+    return formatRegimePercent(value);
+  }
+
+  if (cleanUnit === 'VND') {
+    return new Intl.NumberFormat('vi-VN', {
+      maximumFractionDigits: 0
+    }).format(value) + ' VND';
+  }
+
+  if (cleanUnit === 'điểm') {
+    return new Intl.NumberFormat('vi-VN', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    }).format(value) + ' điểm';
+  }
+
+  if (cleanUnit === 'USD/thùng' || cleanUnit === 'USD/oz') {
+    return new Intl.NumberFormat('en-US', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    }).format(value) + ` ${cleanUnit}`;
+  }
+
+  if (cleanUnit === 'USD') {
+    return '$' + new Intl.NumberFormat('en-US', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    }).format(value);
+  }
+
+  if (cleanUnit === 'CNY') {
+    return new Intl.NumberFormat('vi-VN', {
+      minimumFractionDigits: 4,
+      maximumFractionDigits: 4
+    }).format(value) + ' CNY';
+  }
+
+  return new Intl.NumberFormat('vi-VN', {
+    maximumFractionDigits: 2
+  }).format(value) + (cleanUnit ? ` ${cleanUnit}` : '');
+}
+
+export function formatMetricChange(change, changePercent, unit = '', unitType = null) {
+  if (typeof change !== 'number' || !Number.isFinite(change)) return null;
+
+  const sign = change > 0 ? '+' : '';
+  const formattedChange = new Intl.NumberFormat('vi-VN', {
+    maximumFractionDigits: 2
+  }).format(change);
+
+  const cleanUnit = typeof unit === 'string' ? unit.trim() : '';
+
+  if (cleanUnit === 'điểm %' || unitType === 'percentage_point') {
+    return `${sign}${formattedChange} điểm %`;
+  }
+
+  const unitSuffix = cleanUnit ? (cleanUnit === '%' ? '%' : ` ${cleanUnit}`) : '';
+
+  if (typeof changePercent === 'number' && Number.isFinite(changePercent)) {
+    const formattedPercent = new Intl.NumberFormat('vi-VN', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    }).format(changePercent);
+    return `${sign}${formattedChange}${unitSuffix} (${sign}${formattedPercent}%)`;
+  }
+
+  return `${sign}${formattedChange}${unitSuffix}`;
 }

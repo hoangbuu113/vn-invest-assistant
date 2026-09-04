@@ -340,19 +340,35 @@ describe('Feature 27B — Vietnam market regime foundation', () => {
   });
 
   test('isolates source failures in the production regime service', async () => {
-    const cache = new RegimeCache();
     const result = await getVietnamRegime({
       now: new Date('2026-08-31T05:00:00Z'),
-      cache,
-      fetchSbvMoneyMarketFn: async () => { throw new Error('private upstream detail'); },
-      fetchNsoInflationFn: async () => buildInflationDomain([
-        cpiRelease('2026-04', '2026-05-03', 5.46),
-        cpiRelease('2026-07', '2026-08-03', 4.45)
-      ])
+      getFabricFn: async () => ({
+        facts: [
+          {
+            factId: 'vn.macro.cpi.yoy',
+            value: 4.45,
+            change: -1.01,
+            referenceTime: '2026-07',
+            publishedAt: '2026-08-03',
+            status: 'available',
+            provenance: { source: 'NSO' }
+          }
+        ],
+        pillars: { macro: [], monetary: [], market: [], intermarket: [] },
+        pulseMetrics: []
+      })
     });
     assert.equal(result.status, 'ok');
     assert.equal(result.moneyMarket.status, 'unavailable');
-    assert.equal(JSON.stringify(result).includes('private upstream detail'), false);
+    assert.equal(result.inflation.status, 'available');
+
+    const errorResult = await getVietnamRegime({
+      now: new Date('2026-08-31T05:00:00Z'),
+      getFabricFn: async () => { throw new Error('private upstream detail'); }
+    });
+    assert.equal(errorResult.status, 'unavailable');
+    assert.equal(errorResult.moneyMarket.status, 'unavailable');
+    assert.equal(JSON.stringify(errorResult).includes('private upstream detail'), false);
   });
 
   test('frontend view model proves available, insufficient, stale, and unavailable capability states', () => {
