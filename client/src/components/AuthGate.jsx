@@ -200,8 +200,8 @@ export function AuthGate({ children }) {
 
   if (authState === 'CHECKING_SESSION' || authState === 'LOADING') {
     return (
-      <main className="auth-gate-shell" aria-live="polite">
-        <div className="auth-session-loading">
+      <main className="auth-gate-shell">
+        <div className="auth-session-loading" role="status" aria-live="polite">
           <span className="auth-session-loading-dot" aria-hidden="true" />
           <span>Đang tải phiên đăng nhập…</span>
         </div>
@@ -211,22 +211,24 @@ export function AuthGate({ children }) {
 
   if (authState === 'BOOTSTRAPPING_PROFILE') {
     return (
-      <main className="auth-gate-shell" aria-live="polite">
+      <main className="auth-gate-shell">
         <div className="auth-card" style={{ textAlign: 'center' }}>
           <div className="auth-brand" style={{ justifyContent: 'center' }}>
             <span className="auth-brand-icon" aria-hidden="true">◆</span>
             <span className="auth-brand-name">VN Invest Assistant</span>
           </div>
-          <div className="auth-session-loading" style={{ margin: '24px 0 12px' }}>
-            <span className="auth-session-loading-dot" aria-hidden="true" />
-            <span style={{ fontSize: '1rem', color: 'var(--color-slate-800)' }}>Đăng nhập thành công</span>
+          <div role="status" aria-live="polite">
+            <div className="auth-session-loading" style={{ margin: '24px 0 12px' }}>
+              <span className="auth-session-loading-dot" aria-hidden="true" />
+              <span style={{ fontSize: '1rem', color: 'var(--color-slate-800)' }}>Đăng nhập thành công</span>
+            </div>
+            <p className="auth-subtitle" style={{ margin: '0 0 8px' }}>
+              Đang tải dữ liệu tài khoản và danh mục đầu tư…
+            </p>
+            <p style={{ fontSize: '0.78rem', color: 'var(--color-slate-400)', margin: 0 }}>
+              Hệ thống có thể mất vài giây để kết nối máy chủ dữ liệu.
+            </p>
           </div>
-          <p className="auth-subtitle" style={{ margin: '0 0 8px' }}>
-            Đang tải dữ liệu tài khoản và danh mục đầu tư…
-          </p>
-          <p style={{ fontSize: '0.78rem', color: 'var(--color-slate-400)', margin: 0 }}>
-            Hệ thống có thể mất vài giây để kết nối máy chủ dữ liệu.
-          </p>
         </div>
       </main>
     );
@@ -234,18 +236,20 @@ export function AuthGate({ children }) {
 
   if (authState === 'BOOTSTRAP_ERROR') {
     return (
-      <main className="auth-gate-shell" role="alert">
+      <main className="auth-gate-shell">
         <div className="auth-card" style={{ textAlign: 'center' }}>
           <div className="auth-brand" style={{ justifyContent: 'center' }}>
             <span className="auth-brand-icon" aria-hidden="true">◆</span>
             <span className="auth-brand-name">VN Invest Assistant</span>
           </div>
-          <h2 className="auth-title" style={{ fontSize: '1.25rem', marginBottom: '8px' }}>
-            Kết nối máy chủ chậm
-          </h2>
-          <p className="auth-subtitle" style={{ marginBottom: '20px' }}>
-            {bootstrapError || 'Không thể kết nối đến máy chủ dữ liệu tài khoản. Phiên đăng nhập của bạn đã được bảo lưu.'}
-          </p>
+          <div role="alert" aria-live="assertive">
+            <h2 className="auth-title" style={{ fontSize: '1.25rem', marginBottom: '8px' }}>
+              Kết nối máy chủ chậm
+            </h2>
+            <p className="auth-subtitle" style={{ marginBottom: '20px' }}>
+              {bootstrapError || 'Không thể kết nối đến máy chủ dữ liệu tài khoản. Phiên đăng nhập của bạn đã được bảo lưu.'}
+            </p>
+          </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             <button
               type="button"
