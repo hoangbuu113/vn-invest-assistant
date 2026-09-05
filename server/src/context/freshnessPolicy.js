@@ -27,7 +27,8 @@ export const CADENCE_POLICIES = Object.freeze({
   CURRENT_MARKET_FX: 'CURRENT_MARKET_FX',
   SBV_EFFECTIVE_FX: 'SBV_EFFECTIVE_FX',
   SBV_INTERBANK_LAGGED: 'SBV_INTERBANK_LAGGED',
-  SBV_MONTHLY_LAGGED: 'SBV_MONTHLY_LAGGED'
+  SBV_MONTHLY_LAGGED: 'SBV_MONTHLY_LAGGED',
+  CUSTOMS_MONTHLY_RELEASE: 'CUSTOMS_MONTHLY_RELEASE'
 });
 
 export const FACT_POLICY_MAP = Object.freeze({
@@ -75,7 +76,13 @@ export const FACT_POLICY_MAP = Object.freeze({
   'global.intermarket.gold_spot.price': CADENCE_POLICIES.CURRENT_MARKET_FX,
   'intermarket.gold_spot': CADENCE_POLICIES.CURRENT_MARKET_FX,
   'global.intermarket.fx.usd_cny': CADENCE_POLICIES.CURRENT_MARKET_FX,
-  'intermarket.usd_cny': CADENCE_POLICIES.CURRENT_MARKET_FX
+  'intermarket.usd_cny': CADENCE_POLICIES.CURRENT_MARKET_FX,
+  'vn.trade.goods.exports.month_usd': CADENCE_POLICIES.CUSTOMS_MONTHLY_RELEASE,
+  'trade.goods.exports.month_usd': CADENCE_POLICIES.CUSTOMS_MONTHLY_RELEASE,
+  'vn.trade.goods.imports.month_usd': CADENCE_POLICIES.CUSTOMS_MONTHLY_RELEASE,
+  'trade.goods.imports.month_usd': CADENCE_POLICIES.CUSTOMS_MONTHLY_RELEASE,
+  'vn.trade.goods.balance.month_usd': CADENCE_POLICIES.CUSTOMS_MONTHLY_RELEASE,
+  'trade.goods.balance.month_usd': CADENCE_POLICIES.CUSTOMS_MONTHLY_RELEASE
 });
 
 function parseObservationTimestamp(obs) {
@@ -114,7 +121,8 @@ export function evaluateObservationFreshness(obs, now = new Date()) {
 
   switch (policy) {
     case CADENCE_POLICIES.MONTHLY_MACRO:
-    case CADENCE_POLICIES.NSO_MONTHLY_RELEASE: {
+    case CADENCE_POLICIES.NSO_MONTHLY_RELEASE:
+    case CADENCE_POLICIES.CUSTOMS_MONTHLY_RELEASE: {
       if (typeof obs.referenceTime === 'string' && /^\d{4}-\d{2}$/.test(obs.referenceTime)) {
         const [yearStr, monthStr] = obs.referenceTime.split('-');
         const refYear = Number(yearStr);

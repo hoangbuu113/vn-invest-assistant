@@ -21,7 +21,8 @@ export const SIGNAL_TYPES = Object.freeze([
   'FX_PRESSURE',
   'GLOBAL_YIELD_PRESSURE',
   'GLOBAL_USD_PRESSURE',
-  'COMMODITY_PRESSURE'
+  'COMMODITY_PRESSURE',
+  'VN_TRADE_CONTEXT'
 ]);
 
 /**
@@ -329,6 +330,54 @@ export function deriveMarketSignals({ observations = [], marketObservations = nu
       generatedAt,
       status: 'active',
       limitations: 'Giá dầu thô Brent tương lai giao gần; tác động gián tiếp đến kỳ vọng lạm phát năng lượng đầu vào.'
+    });
+  }
+
+  // 7. VN_TRADE_CONTEXT: requires merchandise trade observations (balance, exports, imports)
+  const balanceObs = findObs('vn.trade.goods.balance.month_usd');
+  const exportsObs = findObs('vn.trade.goods.exports.month_usd');
+  const importsObs = findObs('vn.trade.goods.imports.month_usd');
+
+  const usableBalance = isUsable(balanceObs) ? balanceObs : null;
+  const usableExports = isUsable(exportsObs) ? exportsObs : null;
+  const usableImports = isUsable(importsObs) ? importsObs : null;
+
+  if (usableBalance || (usableExports && usableImports)) {
+    const primary = usableBalance || usableExports;
+    const obsId = primary.observationId || primary.id;
+    const inputEvidenceIds = [
+      usableBalance?.observationId || usableBalance?.id,
+      usableExports?.observationId || usableExports?.id,
+      usableImports?.observationId || usableImports?.id
+    ].filter(Boolean);
+
+    const isStale = (primary.status === 'stale' || primary.freshness === 'stale');
+    const balanceVal = usableBalance ? usableBalance.value : (usableExports.value - usableImports.value);
+
+    let state = 'neutral';
+    if (isStale) {
+      state = 'neutral';
+    } else if (balanceVal > 0) {
+      state = 'surplus';
+    } else if (balanceVal < 0) {
+      state = 'deficit';
+    } else {
+      state = 'balanced';
+    }
+
+    signals.push({
+      signalId: `sig.vn_trade_context:${obsId}`,
+      signalType: 'VN_TRADE_CONTEXT',
+      state,
+      value: balanceVal,
+      unit: primary.unit || 'USD',
+      inputEvidenceIds,
+      methodologyVersion: SIGNAL_METHODOLOGY_VERSION,
+      generatedAt,
+      status: 'active',
+      limitations: isStale
+        ? 'Số liệu thương mại hải quan đã quá hạn (stale); tín hiệu duy trì trạng thái trung tính/không định hướng cho tới kỳ công bố mới.'
+        : 'Số liệu cán cân thương mại hàng hóa công bố định kỳ bởi Tổng cục Hải quan; phản ánh tình trạng xuất nhập khẩu hàng hóa thực tế và không hàm ý xu hướng trực tiếp cho thị trường chứng khoán (không suy diễn "thặng dư => cổ phiếu tăng"). Chưa bao gồm thương mại dịch vụ và cán cân vốn.'
     });
   }
 

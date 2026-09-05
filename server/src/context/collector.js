@@ -419,6 +419,7 @@ export async function runMarketContextCollector({
   fetchUsdVndFn = fetchUsdVndObservation,
   fetchNsoMacroFn = null,
   fetchSbvOfficialFn = null,
+  fetchCustomsTradeFn = null,
   forceRefresh = false
 } = {}) {
   // 1. Check due gating for slow-moving official sources
@@ -431,7 +432,7 @@ export async function runMarketContextCollector({
   const lastKnownGood = await fetchLatestPersistedObservations(client, now);
 
   // 3. Fetch live data across pillars concurrently with fault isolation
-  const [macroRes, sbvRes, sbvOfficialRes, usdVndRes, marketRes, intermarketRes] = await Promise.allSettled([
+  const [macroRes, sbvRes, sbvOfficialRes, usdVndRes, marketRes, intermarketRes, tradeRes] = await Promise.allSettled([
     macroDue
       ? (fetchNsoMacroFn ? fetchNsoMacroFn({ now, fetchFn }) : fetchNsoInflationFn({ now }))
       : Promise.resolve(null),
@@ -443,7 +444,10 @@ export async function runMarketContextCollector({
       : Promise.resolve(null),
     fetchUsdVndFn({ now, fetchFn }),
     fetchMarketPillarFn({ now, fetchFn }),
-    fetchGlobalPillarFn({ now, fetchFn })
+    fetchGlobalPillarFn({ now, fetchFn }),
+    fetchCustomsTradeFn
+      ? fetchCustomsTradeFn({ now, fetchFn })
+      : Promise.resolve(null)
   ]);
 
   // Record checkpoints if due sources ran
@@ -487,8 +491,12 @@ export async function runMarketContextCollector({
     }
   }
 
+  const rawTrade = (tradeRes && tradeRes.status === 'fulfilled' && Array.isArray(tradeRes.value))
+    ? tradeRes.value
+    : [];
+
   // When macro is not due, omit newly fetched macro so LKG retains all persisted macro facts
-  const rawMacro = macroDue
+  const baseMacro = macroDue
     ? (macroRes.status === 'fulfilled'
         ? normalizeMacroObservations(
             fetchNsoMacroFn ? null : macroRes.value,
@@ -497,6 +505,8 @@ export async function runMarketContextCollector({
           )
         : normalizeMacroObservations(null, now))
     : [];
+
+  const rawMacro = [...baseMacro, ...rawTrade];
 
   const rawMonetary = sbvDue
     ? normalizeMonetaryObservations(
