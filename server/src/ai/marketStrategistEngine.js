@@ -818,7 +818,7 @@ export async function generateMarketStrategist({
           systemInstruction: {
             parts: [
               {
-                text: `${STRATEGIST_SYSTEM_INSTRUCTIONS}\n\nLƯU Ý QUAN TRỌNG: Bạn BẮT BUỘC phải trả về đúng định dạng JSON theo schema đã cho, không thêm bất kỳ văn bản ngoài JSON. Mọi evidenceId PHẢI LẤY CHÍNH XÁC từ danh sách ID có sẵn (availableObservationIds, availableArticleIds, availableSignalIds). Tuyệt đối không tự sửa, rút ngắn ID, hoặc sáng tạo số liệu.`
+                text: `${STRATEGIST_SYSTEM_INSTRUCTIONS}\n\nLƯU Ý QUAN TRỌNG: Bạn BẮT BUỘC phải trả về đúng định dạng JSON theo schema đã cho, không thêm bất kỳ văn bản ngoài JSON. Mọi evidenceId PHẢI LẤY CHÍNH XÁC từ danh sách ID có sẵn (availableObservationIds, availableArticleIds, availableSignalIds). Tuyệt đối không tự sửa, rút ngắn ID, hoặc sáng tạo số liệu. TUYỆT ĐỐI KHÔNG đề cập mã cổ phiếu riêng lẻ nào (như VIC, STB, VCB, SSI...); chỉ phân tích cấp lớp tài sản và nhóm ngành.`
               }
             ]
           },

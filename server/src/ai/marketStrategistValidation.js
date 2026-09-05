@@ -17,7 +17,8 @@ const STANDARD_ACRONYMS = new Set([
   'CPI', 'GDP', 'USD', 'VND', 'FED', 'DXY', 'HNX', 'HOSE', 'VN30', 'BTC',
   'CNY', 'IMF', 'KPI', 'SBV', 'PMI', 'FDI', 'PBR', 'PER', 'EPS', 'ROE',
   'ROA', 'OPEC', 'WTI', 'ETF', 'API', 'LLM', 'USA', 'VIB', 'SEC', 'ECB',
-  'BOT', 'III', 'VII', 'XII'
+  'BOT', 'III', 'VII', 'XII',
+  'HCM', 'OMO', 'VNI', 'YOY', 'MOM', 'QOQ', 'TTM', 'ADB', 'WB', 'EVN'
 ]);
 
 /**

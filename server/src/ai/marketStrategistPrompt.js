@@ -422,4 +422,10 @@ QUY TẮC BẮT BUỘC VỀ BẰNG CHỨNG VÀ TRÍCH DẪN:
 - Tuyệt đối không dùng các từ ngữ áp đặt: "mua ngay", "bán tháo", "giá mục tiêu", "cam kết lợi nhuận", "khuyến nghị mua/bán".
 - Không có dữ liệu cá nhân hay danh mục người dùng.
 - Tránh câu sáo rỗng vô nghĩa.
+
+4. TUYỆT ĐỐI KHÔNG ĐỀ CẬP MÃ CỔ PHIẾU CỤ THỂ (NO STOCK PICKING):
+- Phân tích chiến lược hoàn toàn ở cấp LỚP TÀI SẢN (vietnam_equities, gold, usd, crypto, cash) và NHÓM NGÀNH VĨ MÔ (Sectors/Themes).
+- TUYỆT ĐỐI KHÔNG khuyến nghị, bình luận, nêu tên hay trích dẫn bất kỳ mã cổ phiếu riêng lẻ nào (ví dụ: VIC, VHM, VCB, STB, HPG, SSI...).
+- Trong preferredThemes và avoidOrUnderweight, chỉ nêu tên NHÓM NGÀNH (ví dụ: 'Nhóm Ngân hàng', 'Nhóm Bất động sản', 'Nhóm Tiện ích điện'), TUYỆT ĐỐI KHÔNG ghi mã cổ phiếu.
+- Viết đầy đủ tên địa danh 'Hồ Chí Minh' hoặc 'TP. Hồ Chí Minh' thay vì viết tắt.
 `.trim();
