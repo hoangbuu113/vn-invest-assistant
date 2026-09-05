@@ -455,10 +455,102 @@ export function validateMarketStrategistOutput(output, evidenceScope = {}) {
     errors.push(...numericalErrors);
   }
 
+  // 13. Claim corroboration, supersession & contradiction integrity check
+  if (Array.isArray(evidenceScope.claims) && evidenceScope.claims.length > 0) {
+    const claimErrors = validateClaimIntegrity(output, evidenceScope.claims);
+    errors.push(...claimErrors);
+  }
+
   return {
     valid: errors.length === 0,
     errors
   };
+}
+
+/**
+ * Validates claim integrity against narrative text.
+ * Enforces:
+ * - Contradicted claims require explicit limitation/uncertainty surfacing
+ * - Superseded claims cannot be stated as current authoritative figures
+ * - Single source families cannot masquerade as multiple independent corroborations
+ * - Unsupported claims cannot be stated as settled facts
+ */
+export function validateClaimIntegrity(output, claims = []) {
+  const errors = [];
+  if (!Array.isArray(claims) || claims.length === 0) {
+    return errors;
+  }
+
+  // Concatenate narrative text
+  const narrativeTexts = [
+    output.executiveDecision?.oneLineDecision || '',
+    output.executiveDecision?.actionNow || '',
+    output.marketOverview?.vietnam || '',
+    output.marketOverview?.global || '',
+    ...(Array.isArray(output.keyDrivers) ? output.keyDrivers.map((k) => k?.driver || '') : []),
+    ...(Array.isArray(output.assetStrategy) ? output.assetStrategy.map((a) => a?.rationale || '') : []),
+    ...(Array.isArray(output.preferredThemes) ? output.preferredThemes.map((t) => `${t?.theme || ''} ${t?.rationale || ''}`) : []),
+    ...(Array.isArray(output.avoidOrUnderweight) ? output.avoidOrUnderweight.map((a) => `${a?.theme || ''} ${a?.reason || ''}`) : [])
+  ];
+  const fullText = narrativeTexts.join('\n');
+  const fullTextLower = fullText.toLowerCase();
+
+  for (const claim of claims) {
+    if (!claim) continue;
+
+    // 1. Contradicted Claims Gate
+    if (claim.supportStatus === 'CONTRADICTED') {
+      let subjectMentioned = false;
+      if (claim.subject === 'vn.macro.cpi.yoy' && /(?:cpi|lạm phát)/i.test(fullText)) {
+        subjectMentioned = true;
+      } else if (claim.subject && fullTextLower.includes(claim.subject.toLowerCase())) {
+        subjectMentioned = true;
+      }
+      if (claim.numericValue !== null && claim.numericValue !== undefined && fullText.includes(String(claim.numericValue))) {
+        subjectMentioned = true;
+      }
+
+      if (subjectMentioned) {
+        const uncertaintyWords = /(?:bất đồng|xung đột|mâu thuẫn|chưa thống nhất|tranh cãi|khác biệt|thận trọng|chưa xác thực|hạn chế|chênh lệch|đối nghịch|không đồng nhất|không thống nhất)/i;
+        if (!uncertaintyWords.test(fullText)) {
+          errors.push(`CONTRADICTED_CLAIM_WITHOUT_LIMITATION_${claim.claimId || claim.subject}: Contradicted claim ${claim.subject} is cited but narrative fails to surface data conflict or uncertainty.`);
+        }
+      }
+    }
+
+    // 2. Superseded Claims Gate
+    if (claim.supportStatus === 'SUPERSEDED') {
+      if (claim.numericValue !== null && claim.numericValue !== undefined) {
+        const numStr = String(claim.numericValue);
+        if (fullText.includes(numStr)) {
+          const supersededExplanation = /(?:sơ bộ|đã được điều chỉnh|thay thế|số cũ|trước đó|chính thức thay)/i;
+          if (!supersededExplanation.test(fullText)) {
+            errors.push(`SUPERSEDED_CLAIM_TREATED_AS_CURRENT_${claim.claimId || claim.subject}: Superseded claim value ${numStr} is cited as current without disclosing revision.`);
+          }
+        }
+      }
+    }
+
+    // 3. Fake Corroboration / Duplicated Source Family Gate
+    if (claim.independentSourceCount < 2) {
+      const fakeCorroborationRegex = /(?:nhiều nguồn độc lập|các nguồn tin độc lập đều|nhiều tổ chức độc lập xác nhận|nhiều nguồn xác nhận độc lập|multiple independent sources)/i;
+      if (fakeCorroborationRegex.test(fullText)) {
+        errors.push(`FALSE_CORROBORATION_DETECTED: Narrative asserts multiple independent confirmations, but independentSourceCount is ${claim.independentSourceCount}.`);
+      }
+    }
+
+    // 4. Unsupported Claim Stated as Authoritative Gate
+    if (claim.supportStatus === 'INSUFFICIENT_EVIDENCE') {
+      if (claim.numericValue !== null && claim.numericValue !== undefined && fullText.includes(String(claim.numericValue))) {
+        const uncertaintyWords = /(?:chưa kiểm chứng|thiếu dữ liệu|chưa đủ cơ sở|ước tính sơ bộ|chưa có xác nhận)/i;
+        if (!uncertaintyWords.test(fullText)) {
+          errors.push(`UNSUPPORTED_CLAIM_STATED_AS_AUTHORITY_${claim.claimId || claim.subject}: Unsupported claim stated without evidence caveat.`);
+        }
+      }
+    }
+  }
+
+  return errors;
 }
 
 /**
@@ -606,7 +698,8 @@ export function applySharedPublicationGate(candidate, factPacket = {}, now = new
     validArticleIds: factPacket.validArticleIds || new Set(),
     validSignalIds: factPacket.validSignalIds || new Set(),
     validTickers: factPacket.validTickers || new Set(),
-    observations: factPacket.evidence || []
+    observations: factPacket.evidence || [],
+    claims: factPacket.claims || []
   };
 
   const validation = validateMarketStrategistOutput(candidate, evidenceScope);

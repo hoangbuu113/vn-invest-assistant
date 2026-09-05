@@ -20,6 +20,12 @@ import { normalizeReferencePeriodKey } from '../context/factModel.js';
 import { persistRunManifest } from './marketStrategistManifest.js';
 import { calculateArticleContentHash } from '../news/contract.js';
 import { FACT_POLICY_MAP, CADENCE_POLICIES } from '../context/freshnessPolicy.js';
+import {
+  extractClaimsFromObservation,
+  extractClaimsFromArticle,
+  reconcileClaims,
+  classifySourceFamily
+} from '../claims/index.js';
 
 export const STRATEGIST_CACHE_TTL_MS = 15 * 60 * 1000; // 15 minutes
 export const STRATEGIST_COOLDOWN_MS = 15 * 1000;       // 15 seconds
@@ -35,10 +41,15 @@ export const STRATEGIST_SELECTION_POLICY_VERSION = 'v1.2';
 export function buildMarketStrategistFactPacket({
   marketObservations = [],
   newsArticles = [],
+  claims: customClaims = null,
   now = new Date()
 } = {}) {
   // Security guard: Ensure zero private data is passed
-  const allInputs = [...marketObservations, ...newsArticles];
+  const allInputs = [
+    ...marketObservations,
+    ...newsArticles,
+    ...(Array.isArray(customClaims) ? customClaims : [])
+  ];
   for (const item of allInputs) {
     if (!item || typeof item !== 'object') continue;
     if (
@@ -181,6 +192,66 @@ export function buildMarketStrategistFactPacket({
   const evidenceCoverage = computeEvidenceCoverage({ evidence, untrustedNews, now });
   const dataAsOf = evidenceCoverage.dataAsOf;
 
+  // Reconcile claims deterministically
+  const observationClaimItems = marketObservations.flatMap(extractClaimsFromObservation);
+  const articleClaimItems = selectedNews.flatMap(extractClaimsFromArticle);
+  const candidateClaims = [
+    ...observationClaimItems.map((i) => i.claim),
+    ...articleClaimItems.map((i) => i.claim),
+    ...(Array.isArray(customClaims) ? customClaims : [])
+  ];
+
+  const evidenceForReconciliation = [
+    ...marketObservations.map((obs) => ({
+      evidenceId: obs.observationId || obs.id,
+      evidenceType: 'observation',
+      sourceFamily: classifySourceFamily({
+        url: obs.provenance?.documentUrl || obs.provenance?.url,
+        sourceId: obs.source,
+        publisher: obs.provenance?.authority
+      }),
+      ...obs
+    })),
+    ...selectedNews.map((art) => ({
+      evidenceId: art.articleId || art.id,
+      evidenceType: 'article',
+      sourceFamily: classifySourceFamily({
+        url: art.url,
+        sourceId: art.sourceId || art.source,
+        publisher: art.publisher,
+        title: art.title,
+        summary: art.excerpt || art.summary
+      }),
+      ...art
+    }))
+  ];
+
+  const reconciledResults = reconcileClaims(candidateClaims, evidenceForReconciliation);
+  const claims = reconciledResults.map(({ claim, sourceFamilies, independentFamilies }) => ({
+    claimId: claim.claimId,
+    claimType: claim.claimType,
+    subject: claim.subject,
+    predicate: claim.predicate,
+    value: claim.numericValue,
+    numericValue: claim.numericValue,
+    valueText: claim.valueText,
+    unit: claim.unit,
+    referencePeriod: claim.referencePeriod,
+    scope: claim.scope,
+    authorityLevel: claim.authorityLevel,
+    supportStatus: claim.supportStatus,
+    sourceCount: claim.sourceCount,
+    independentSourceCount: claim.independentSourceCount,
+    contradictionCount: claim.contradictionCount,
+    sourceFamilies: sourceFamilies || [],
+    independentFamilies: independentFamilies || [],
+    revisionOf: claim.revisionOf,
+    limitations: claim.limitations,
+    confidenceDimensions: claim.confidenceDimensions
+  }));
+
+  const validClaimIds = new Set(claims.map((c) => c.claimId));
+
   return {
     now,
     dataAsOf,
@@ -188,10 +259,12 @@ export function buildMarketStrategistFactPacket({
     evidence,
     untrustedNews,
     derivedSignals,
+    claims,
     validFactIds,
     validArticleIds,
     validArticleVersionIds,
     validSignalIds,
+    validClaimIds,
     validTickers
   };
 }
@@ -527,9 +600,17 @@ export function generateDeterministicMarketStrategist({ factPacket, now = new Da
     ? `Chỉ số VN-Index ghi nhận mức ${vnIndexObs.value} điểm (${vnIndexObs.change !== null && vnIndexObs.change >= 0 ? '+' : ''}${vnIndexObs.change ?? 0} điểm), phản ánh tâm lý giao dịch có sự phân hóa giữa các nhóm ngành.`
     : 'Thị trường chứng khoán Việt Nam duy trì nhịp tích lũy trong bối cảnh các chỉ số thanh khoản cần thêm tín hiệu xác nhận.';
 
-  const cpiProse = cpiObs?.value
-    ? `Lạm phát CPI (YoY) ở mức ${cpiObs.value}%, trong vùng kiểm soát của chính sách vĩ mô nhưng vẫn đòi hỏi theo dõi chặt chẽ biến động chi phí đầu vào.`
-    : 'Dữ liệu lạm phát chính thức tiếp tục được cập nhật theo kỳ công bố của cơ quan thống kê.';
+  const isCpiContradicted = (factPacket.claims || []).some(
+    (c) => c.subject === 'vn.macro.cpi.yoy' && (c.supportStatus === 'CONTRADICTED' || c.contradictionCount > 0)
+  );
+  let cpiProse = 'Dữ liệu lạm phát chính thức tiếp tục được cập nhật theo kỳ công bố của cơ quan thống kê.';
+  if (cpiObs?.value) {
+    if (isCpiContradicted) {
+      cpiProse = `Lạm phát CPI (YoY) ghi nhận ở mức ${cpiObs.value}%, tuy nhiên tồn tại sự khác biệt và tranh cãi giữa các nguồn số liệu; nhà đầu tư cần thận trọng theo dõi các công bố chính thức tiếp theo.`;
+    } else {
+      cpiProse = `Lạm phát CPI (YoY) ở mức ${cpiObs.value}%, trong vùng kiểm soát của chính sách vĩ mô nhưng vẫn đòi hỏi theo dõi chặt chẽ biến động chi phí đầu vào.`;
+    }
+  }
 
   const globalProse = dxyObs?.value
     ? `Trên thị trường quốc tế, chỉ số DXY đạt ${dxyObs.value} điểm${us10yObs?.value ? ` và lợi suất Trái phiếu Mỹ 10 năm ở mức ${us10yObs.value}%` : ''}, tác động đến mặt bằng tỷ giá và dòng vốn biên giới.`
