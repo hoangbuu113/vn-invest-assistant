@@ -1113,7 +1113,7 @@ test('V1.3 Strategy Stability — Comprehensive 30-Scenario Specification Suite'
     });
 
     assert.equal(asmt.policyVersion, STABILITY_POLICY_VERSION);
-    assert.equal(asmt.policyVersion, 'strategy-stability-v1');
+    assert.ok(asmt.policyVersion === 'strategy-stability-v1' || asmt.policyVersion === 'strategy-stability-v2');
   });
 
   // 29. evidenceFingerprint and decisionFingerprint remain distinct

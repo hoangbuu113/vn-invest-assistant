@@ -44,6 +44,10 @@ export function rowToStrategyVersion(row) {
     horizon: row.horizon || 'medium',
     invalidationConditions: row.invalidation_conditions || [],
     status: row.status,
+    lifecycleState: row.lifecycle_state,
+    dataQualityState: row.data_quality_state,
+    watchReasons: row.watch_reasons || [],
+    shockOverride: row.shock_override || null,
     policyVersion: row.policy_version,
     runManifestId: row.run_manifest_id || null,
     nextReviewDueAt: row.next_review_due_at || null,
@@ -79,6 +83,10 @@ export function strategyVersionToRow(version) {
     horizon: version.horizon || 'medium',
     invalidation_conditions: version.invalidationConditions || [],
     status: version.status,
+    lifecycle_state: version.lifecycleState,
+    data_quality_state: version.dataQualityState,
+    watch_reasons: version.watchReasons || [],
+    shock_override: version.shockOverride || null,
     policy_version: version.policyVersion,
     run_manifest_id: version.runManifestId || null,
     next_review_due_at: version.nextReviewDueAt || null,
@@ -108,6 +116,12 @@ export function rowToStrategyAssessment(row) {
     triggerReason: row.trigger_reason || {},
     materialChanges: row.material_changes || [],
     limitations: row.limitations || null,
+    lifecycleState: row.lifecycle_state,
+    dataQualityState: row.data_quality_state,
+    watchReasons: row.watch_reasons || [],
+    shockOverride: row.shock_override || null,
+    confirmationKeys: row.confirmation_keys || [],
+    idempotencyKey: row.idempotency_key || null,
     policyVersion: row.policy_version,
     runManifestId: row.run_manifest_id || null,
     createdAt: row.created_at
@@ -136,6 +150,12 @@ export function strategyAssessmentToRow(assessment) {
     trigger_reason: assessment.triggerReason || {},
     material_changes: assessment.materialChanges || [],
     limitations: assessment.limitations || null,
+    lifecycle_state: assessment.lifecycleState,
+    data_quality_state: assessment.dataQualityState,
+    watch_reasons: assessment.watchReasons || [],
+    shock_override: assessment.shockOverride || null,
+    confirmation_keys: assessment.confirmationKeys || [],
+    idempotency_key: assessment.idempotencyKey || null,
     policy_version: assessment.policyVersion,
     run_manifest_id: assessment.runManifestId || null,
     created_at: assessment.createdAt
@@ -213,6 +233,7 @@ export async function getStrategyVersionById(strategyId, client = privateSupabas
 
 /**
  * Persists a StrategyVersion to database and memory store.
+ * Enforces single published strategy constraint.
  */
 export async function persistStrategyVersion(strategyVersion, client = privateSupabase) {
   if (!strategyVersion?.strategyId) {
@@ -220,6 +241,18 @@ export async function persistStrategyVersion(strategyVersion, client = privateSu
   }
 
   assertZeroPrivateData(strategyVersion, 'PERSIST_STRATEGY_VERSION');
+
+  // Enforce single published strategy constraint in memory store (mirrors idx_strategy_versions_single_published)
+  if (strategyVersion.status === STRATEGY_LIFECYCLE_STATUSES.PUBLISHED) {
+    for (const [id, existing] of memoryStrategyVersions.entries()) {
+      if (id !== strategyVersion.strategyId && existing.status === STRATEGY_LIFECYCLE_STATUSES.PUBLISHED) {
+        const err = new Error('Unique constraint violation: idx_strategy_versions_single_published (multiple published versions forbidden)');
+        err.code = '23505';
+        err.constraint = 'idx_strategy_versions_single_published';
+        throw err;
+      }
+    }
+  }
 
   // In-memory update
   memoryStrategyVersions.set(strategyVersion.strategyId, strategyVersion);
@@ -235,11 +268,19 @@ export async function persistStrategyVersion(strategyVersion, client = privateSu
       .upsert(row, { onConflict: 'strategy_id' });
 
     if (error) {
+      if (error.code === '23505' || error.message?.includes('idx_strategy_versions_single_published')) {
+        await getCurrentPublishedStrategy(client);
+        const err = new Error('Unique constraint violation: idx_strategy_versions_single_published (multiple published versions forbidden)');
+        err.code = '23505';
+        err.constraint = 'idx_strategy_versions_single_published';
+        throw err;
+      }
       return { isDurable: false, strategyId: strategyVersion.strategyId, error };
     }
     return { isDurable: true, strategyId: strategyVersion.strategyId };
   } catch (err) {
-    return { isDurable: false, strategyId: strategyVersion.strategyId, error: err };
+    await getCurrentPublishedStrategy(client);
+    throw err;
   }
 }
 
@@ -374,4 +415,56 @@ export async function listStrategyAssessments(strategyId = null, client = privat
   } catch {
     return memoryList;
   }
+}
+
+/**
+ * Retrieves a StrategyAssessment by its idempotencyKey.
+ */
+export async function getStrategyAssessmentByIdempotencyKey(idempotencyKey, client = privateSupabase) {
+  if (!idempotencyKey) return null;
+
+  for (const asmt of memoryStrategyAssessments.values()) {
+    if (asmt.idempotencyKey === idempotencyKey) {
+      return asmt;
+    }
+  }
+
+  if (!client) return null;
+
+  try {
+    const { data, error } = await client
+      .from('strategy_assessments')
+      .select('*')
+      .eq('idempotency_key', idempotencyKey)
+      .maybeSingle();
+
+    if (error || !data) return null;
+    const assessment = rowToStrategyAssessment(data);
+    if (assessment) {
+      memoryStrategyAssessments.set(assessment.assessmentId, assessment);
+    }
+    return assessment;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Strategy assessments are append-only.
+ * Any attempt to UPDATE an assessment is rejected (mirrors DB trigger trg_prevent_strategy_assessments_mutation).
+ */
+export async function updateStrategyAssessment(assessmentId, updates = {}, client = privateSupabase) {
+  const err = new Error('strategy_assessments is append-only: UPDATE and DELETE operations are forbidden.');
+  err.code = 'APPEND_ONLY_VIOLATION';
+  throw err;
+}
+
+/**
+ * Strategy assessments are append-only.
+ * Any attempt to DELETE an assessment is rejected (mirrors DB trigger trg_prevent_strategy_assessments_mutation).
+ */
+export async function deleteStrategyAssessment(assessmentId, client = privateSupabase) {
+  const err = new Error('strategy_assessments is append-only: UPDATE and DELETE operations are forbidden.');
+  err.code = 'APPEND_ONLY_VIOLATION';
+  throw err;
 }

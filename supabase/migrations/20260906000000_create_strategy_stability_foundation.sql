@@ -32,6 +32,14 @@ CREATE TABLE IF NOT EXISTS public.strategy_versions (
     run_manifest_id TEXT,
     next_review_due_at TIMESTAMPTZ,
     limitations TEXT,
+    lifecycle_state TEXT NOT NULL DEFAULT 'STABLE' CHECK (
+        lifecycle_state IN ('STABLE', 'WATCH', 'REVIEW_REQUIRED', 'EVALUATING')
+    ),
+    data_quality_state TEXT NOT NULL DEFAULT 'HEALTHY' CHECK (
+        data_quality_state IN ('HEALTHY', 'DEGRADED', 'INSUFFICIENT')
+    ),
+    watch_reasons JSONB NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(watch_reasons) = 'array'),
+    shock_override JSONB DEFAULT NULL CHECK (shock_override IS NULL OR jsonb_typeof(shock_override) = 'object'),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -56,13 +64,23 @@ CREATE TABLE IF NOT EXISTS public.strategy_assessments (
         result IN ('KEEP', 'DETAILS', 'CONFIDENCE', 'PUBLISH_NEW')
     ),
     evaluation_status TEXT NOT NULL CHECK (
-        evaluation_status IN ('COMPLETED', 'FAILED', 'DEFERRED')
+        evaluation_status IN ('COMPLETED', 'FAILED', 'DEFERRED', 'SUPERSEDED')
     ),
     trigger_reason JSONB NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(trigger_reason) = 'object'),
     material_changes JSONB NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(material_changes) = 'array'),
     limitations TEXT,
     policy_version TEXT NOT NULL,
     run_manifest_id TEXT,
+    lifecycle_state TEXT NOT NULL DEFAULT 'STABLE' CHECK (
+        lifecycle_state IN ('STABLE', 'WATCH', 'REVIEW_REQUIRED', 'EVALUATING')
+    ),
+    data_quality_state TEXT NOT NULL DEFAULT 'HEALTHY' CHECK (
+        data_quality_state IN ('HEALTHY', 'DEGRADED', 'INSUFFICIENT')
+    ),
+    watch_reasons JSONB NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(watch_reasons) = 'array'),
+    shock_override JSONB DEFAULT NULL CHECK (shock_override IS NULL OR jsonb_typeof(shock_override) = 'object'),
+    confirmation_keys JSONB NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(confirmation_keys) = 'array'),
+    idempotency_key TEXT UNIQUE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -70,6 +88,11 @@ COMMENT ON TABLE public.strategy_assessments IS
     'Append-only evaluation log assessing incoming evidence packets against active strategy versions. Strictly non-private.';
 
 -- Indices
+-- Concurrency Hardening: Partial unique index ensuring at most ONE active published strategy version
+CREATE UNIQUE INDEX IF NOT EXISTS idx_strategy_versions_single_published
+    ON public.strategy_versions ((status))
+    WHERE (status = 'published');
+
 CREATE INDEX IF NOT EXISTS idx_strategy_versions_status_published
     ON public.strategy_versions (status, published_at DESC);
 
@@ -87,6 +110,24 @@ CREATE INDEX IF NOT EXISTS idx_strategy_assessments_assessed_at
 
 CREATE INDEX IF NOT EXISTS idx_strategy_assessments_evidence_fp
     ON public.strategy_assessments (evidence_fingerprint);
+
+CREATE INDEX IF NOT EXISTS idx_strategy_assessments_idempotency
+    ON public.strategy_assessments (idempotency_key)
+    WHERE (idempotency_key IS NOT NULL);
+
+-- Append-Only Hardening: PostgreSQL trigger blocking UPDATE and DELETE on strategy_assessments
+CREATE OR REPLACE FUNCTION public.prevent_strategy_assessments_mutation()
+RETURNS TRIGGER AS $$
+BEGIN
+    RAISE EXCEPTION 'strategy_assessments is append-only: UPDATE and DELETE operations are forbidden.';
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_prevent_strategy_assessments_mutation ON public.strategy_assessments;
+CREATE TRIGGER trg_prevent_strategy_assessments_mutation
+    BEFORE UPDATE OR DELETE ON public.strategy_assessments
+    FOR EACH ROW
+    EXECUTE FUNCTION public.prevent_strategy_assessments_mutation();
 
 -- Row Level Security (RLS)
 ALTER TABLE public.strategy_versions ENABLE ROW LEVEL SECURITY;
@@ -116,8 +157,8 @@ REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON public.strategy_assessments FROM anon
 GRANT SELECT ON public.strategy_versions TO anon, authenticated;
 GRANT SELECT ON public.strategy_assessments TO anon, authenticated;
 
--- Grant all privileges to service_role
+-- Grant privileges to service_role (SELECT, INSERT, UPDATE on strategy_versions for status supersession)
 GRANT ALL ON public.strategy_versions TO service_role;
-GRANT ALL ON public.strategy_assessments TO service_role;
+GRANT SELECT, INSERT ON public.strategy_assessments TO service_role;
 
 COMMIT;

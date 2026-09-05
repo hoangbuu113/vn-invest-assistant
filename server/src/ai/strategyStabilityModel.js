@@ -10,7 +10,8 @@ export const ASSESSMENT_RESULTS = Object.freeze({
 export const EVALUATION_STATUSES = Object.freeze({
   COMPLETED: 'COMPLETED',
   FAILED: 'FAILED',
-  DEFERRED: 'DEFERRED'
+  DEFERRED: 'DEFERRED',
+  SUPERSEDED: 'SUPERSEDED'
 });
 
 export const STRATEGY_LIFECYCLE_STATUSES = Object.freeze({
@@ -18,7 +19,40 @@ export const STRATEGY_LIFECYCLE_STATUSES = Object.freeze({
   SUPERSEDED: 'superseded'
 });
 
-export const STABILITY_POLICY_VERSION = 'strategy-stability-v1';
+export const STRATEGY_LIFECYCLE_STATES = Object.freeze({
+  STABLE: 'STABLE',
+  WATCH: 'WATCH',
+  REVIEW_REQUIRED: 'REVIEW_REQUIRED',
+  EVALUATING: 'EVALUATING'
+});
+
+export const DATA_QUALITY_STATES = Object.freeze({
+  HEALTHY: 'HEALTHY',
+  DEGRADED: 'DEGRADED',
+  INSUFFICIENT: 'INSUFFICIENT'
+});
+
+export const SHOCK_SCOPES = Object.freeze({
+  MARKET_WIDE: 'MARKET_WIDE',
+  ASSET_CLASS: 'ASSET_CLASS',
+  TACTICAL_RISK_OVERLAY: 'TACTICAL_RISK_OVERLAY',
+  POLICY: 'POLICY'
+});
+
+export const SHOCK_STATUSES = Object.freeze({
+  ACTIVE: 'ACTIVE',
+  RESOLVED: 'RESOLVED'
+});
+
+export const REVISION_TYPES = Object.freeze({
+  NEW_PERIOD: 'NEW_PERIOD',
+  DATA_REVISION: 'DATA_REVISION',
+  SOURCE_CORRECTION: 'SOURCE_CORRECTION',
+  METHODOLOGY_CHANGE: 'METHODOLOGY_CHANGE',
+  RETRACTION: 'RETRACTION'
+});
+
+export const STABILITY_POLICY_VERSION = 'strategy-stability-v2';
 
 export const VALID_CONFIDENCE_VALUES = Object.freeze([
   'HIGH',
@@ -33,7 +67,7 @@ export const VALID_CONFIDENCE_VALUES = Object.freeze([
 export function assertZeroPrivateData(obj, contextName = 'STRATEGY_DATA') {
   if (!obj || typeof obj !== 'object') return;
   const jsonStr = JSON.stringify(obj);
-  if (/(?:"userId"|"user_id"|"portfolio"|"holdings"|"cash"|"transactions"|"email")\s*:/i.test(jsonStr)) {
+  if (/(?:"userId"|"user_id"|"portfolio"|"portfolioId"|"portfolio_id"|"holdings"|"holding"|"cash"|"transactions"|"transaction"|"email")\s*:/i.test(jsonStr)) {
     const err = new Error(`FORBIDDEN_USER_DATA_IN_${contextName}: Private user or portfolio data is strictly prohibited`);
     err.code = 'FORBIDDEN_USER_DATA';
     throw err;
@@ -193,39 +227,107 @@ export function computeDecisionFingerprint(strategyOrBrief) {
 }
 
 /**
+ * Generates a deterministic confirmation identity key for evidence tracking.
+ * Ingredients: factId, referencePeriod, observationId/versionId, claimId, dependencyGroup, sessionDate.
+ * Guarantees:
+ * - Repeated reads of the same observation produce the same key.
+ * - Multiple syndicated articles from the same dependency produce the same key.
+ * - New reference period or new independent dependency produces a distinct key.
+ */
+export function computeConfirmationKey({
+  factId = null,
+  referencePeriod = null,
+  observationId = null,
+  versionId = null,
+  claimId = null,
+  dependencyGroup = null,
+  sessionDate = null
+} = {}) {
+  const parts = [
+    factId ? String(factId).trim().toLowerCase() : '',
+    referencePeriod ? String(referencePeriod).trim().toLowerCase() : '',
+    observationId ? String(observationId).trim().toLowerCase() : (versionId ? String(versionId).trim().toLowerCase() : ''),
+    claimId ? String(claimId).trim().toLowerCase() : '',
+    dependencyGroup ? String(dependencyGroup).trim().toUpperCase() : '',
+    sessionDate ? String(sessionDate).trim().toLowerCase() : ''
+  ];
+  return parts.join('|');
+}
+
+/**
+ * Creates and validates an immutable ShockOverride metadata record.
+ */
+export function createShockOverride({
+  triggerEvidence = [],
+  scope = SHOCK_SCOPES.MARKET_WIDE,
+  reason = '',
+  startedAt = new Date().toISOString(),
+  resolutionCondition = null,
+  status = SHOCK_STATUSES.ACTIVE,
+  resolvedAt = null
+} = {}) {
+  if (!Object.values(SHOCK_SCOPES).includes(scope)) {
+    throw new Error(`createShockOverride: invalid scope '${scope}'`);
+  }
+  if (!Object.values(SHOCK_STATUSES).includes(status)) {
+    throw new Error(`createShockOverride: invalid status '${status}'`);
+  }
+
+  assertZeroPrivateData({ triggerEvidence, reason, resolutionCondition }, 'SHOCK_OVERRIDE');
+
+  return Object.freeze({
+    triggerEvidence: Array.isArray(triggerEvidence) ? triggerEvidence : [triggerEvidence].filter(Boolean),
+    scope,
+    reason: String(reason || ''),
+    startedAt: startedAt instanceof Date ? startedAt.toISOString() : String(startedAt || new Date().toISOString()),
+    resolutionCondition: resolutionCondition && typeof resolutionCondition === 'object'
+      ? resolutionCondition
+      : (typeof resolutionCondition === 'string' && resolutionCondition.trim() ? { description: resolutionCondition.trim() } : null),
+    status,
+    resolvedAt: resolvedAt instanceof Date ? resolvedAt.toISOString() : (resolvedAt || null)
+  });
+}
+
+/**
  * Creates and validates an immutable StrategyVersion instance.
  */
-export function createStrategyVersion({
-  strategyId,
-  previousStrategyId = null,
-  generatedAt,
-  publishedAt,
-  dataAsAsOf,
-  dataAsOf = dataAsAsOf,
-  evidenceFingerprint,
-  decisionFingerprint,
-  triggerReason = {},
-  materialChanges = [],
-  confidence,
-  regime = {},
-  executiveDecision = {},
-  assetStrategy = [],
-  preferredThemes = [],
-  avoidOrUnderweight = [],
-  riskOverlay = {},
-  horizon = 'medium',
-  invalidationConditions = [],
-  status = STRATEGY_LIFECYCLE_STATUSES.PUBLISHED,
-  policyVersion = STABILITY_POLICY_VERSION,
-  runManifestId = null,
-  nextReviewDueAt = null,
-  limitations = null,
-  methodologyVersion = 'strategist-v1',
-  evidenceCoverage = null,
-  investmentOrientation = null,
-  rawOutput = null,
-  createdAt = null
-}) {
+export function createStrategyVersion(options = {}) {
+  assertZeroPrivateData(options, 'STRATEGY_VERSION');
+  const {
+    strategyId,
+    previousStrategyId = null,
+    generatedAt,
+    publishedAt,
+    dataAsAsOf,
+    dataAsOf = dataAsAsOf,
+    evidenceFingerprint,
+    decisionFingerprint,
+    triggerReason = {},
+    materialChanges = [],
+    confidence,
+    regime = {},
+    executiveDecision = {},
+    assetStrategy = [],
+    preferredThemes = [],
+    avoidOrUnderweight = [],
+    riskOverlay = {},
+    horizon = 'medium',
+    invalidationConditions = [],
+    status = STRATEGY_LIFECYCLE_STATUSES.PUBLISHED,
+    lifecycleState = STRATEGY_LIFECYCLE_STATES.STABLE,
+    dataQualityState = DATA_QUALITY_STATES.HEALTHY,
+    watchReasons = [],
+    shockOverride = null,
+    policyVersion = STABILITY_POLICY_VERSION,
+    runManifestId = null,
+    nextReviewDueAt = null,
+    limitations = null,
+    methodologyVersion = 'strategist-v1',
+    evidenceCoverage = null,
+    investmentOrientation = null,
+    rawOutput = null,
+    createdAt = null
+  } = options;
   if (!strategyId || typeof strategyId !== 'string') {
     throw new Error('createStrategyVersion: strategyId must be a non-empty string');
   }
@@ -241,6 +343,12 @@ export function createStrategyVersion({
   if (!Object.values(STRATEGY_LIFECYCLE_STATUSES).includes(status)) {
     throw new Error(`createStrategyVersion: invalid status '${status}'`);
   }
+  if (!Object.values(STRATEGY_LIFECYCLE_STATES).includes(lifecycleState)) {
+    throw new Error(`createStrategyVersion: invalid lifecycleState '${lifecycleState}'`);
+  }
+  if (!Object.values(DATA_QUALITY_STATES).includes(dataQualityState)) {
+    throw new Error(`createStrategyVersion: invalid dataQualityState '${dataQualityState}'`);
+  }
 
   assertZeroPrivateData({
     strategyId,
@@ -251,7 +359,9 @@ export function createStrategyVersion({
     preferredThemes,
     avoidOrUnderweight,
     riskOverlay,
-    invalidationConditions
+    invalidationConditions,
+    shockOverride,
+    watchReasons
   }, 'STRATEGY_VERSION');
 
   const publishedIso = publishedAt instanceof Date ? publishedAt.toISOString() : (publishedAt || new Date().toISOString());
@@ -278,6 +388,10 @@ export function createStrategyVersion({
     horizon: String(horizon || 'medium'),
     invalidationConditions: Array.isArray(invalidationConditions) ? invalidationConditions : [],
     status,
+    lifecycleState,
+    dataQualityState,
+    watchReasons: Array.isArray(watchReasons) ? watchReasons : [],
+    shockOverride: shockOverride && typeof shockOverride === 'object' ? shockOverride : null,
     policyVersion: policyVersion || STABILITY_POLICY_VERSION,
     runManifestId: runManifestId || null,
     nextReviewDueAt: nextReviewDueAt instanceof Date ? nextReviewDueAt.toISOString() : (nextReviewDueAt || null),
@@ -300,26 +414,34 @@ export function createStrategyVersion({
 /**
  * Creates and validates an append-only StrategyAssessment record.
  */
-export function createStrategyAssessment({
-  assessmentId,
-  strategyId,
-  assessedAt,
-  dataAsAsOf,
-  dataAsOf = dataAsAsOf,
-  evidenceFingerprint,
-  previousEvidenceFingerprint = null,
-  decisionFingerprint,
-  confidence,
-  previousConfidence = null,
-  result,
-  evaluationStatus = EVALUATION_STATUSES.COMPLETED,
-  triggerReason = {},
-  materialChanges = [],
-  limitations = null,
-  policyVersion = STABILITY_POLICY_VERSION,
-  runManifestId = null,
-  createdAt = null
-}) {
+export function createStrategyAssessment(options = {}) {
+  assertZeroPrivateData(options, 'STRATEGY_ASSESSMENT');
+  const {
+    assessmentId,
+    strategyId,
+    assessedAt,
+    dataAsAsOf,
+    dataAsOf = dataAsAsOf,
+    evidenceFingerprint,
+    previousEvidenceFingerprint = null,
+    decisionFingerprint,
+    confidence,
+    previousConfidence = null,
+    result,
+    evaluationStatus = EVALUATION_STATUSES.COMPLETED,
+    triggerReason = {},
+    materialChanges = [],
+    limitations = null,
+    lifecycleState = STRATEGY_LIFECYCLE_STATES.STABLE,
+    dataQualityState = DATA_QUALITY_STATES.HEALTHY,
+    watchReasons = [],
+    shockOverride = null,
+    confirmationKeys = [],
+    idempotencyKey = null,
+    policyVersion = STABILITY_POLICY_VERSION,
+    runManifestId = null,
+    createdAt = null
+  } = options;
   if (!assessmentId || typeof assessmentId !== 'string') {
     throw new Error('createStrategyAssessment: assessmentId must be a non-empty string');
   }
@@ -344,13 +466,22 @@ export function createStrategyAssessment({
   if (previousConfidence !== null && !VALID_CONFIDENCE_VALUES.includes(previousConfidence)) {
     throw new Error(`createStrategyAssessment: invalid previousConfidence '${previousConfidence}'`);
   }
+  if (!Object.values(STRATEGY_LIFECYCLE_STATES).includes(lifecycleState)) {
+    throw new Error(`createStrategyAssessment: invalid lifecycleState '${lifecycleState}'`);
+  }
+  if (!Object.values(DATA_QUALITY_STATES).includes(dataQualityState)) {
+    throw new Error(`createStrategyAssessment: invalid dataQualityState '${dataQualityState}'`);
+  }
 
   assertZeroPrivateData({
     assessmentId,
     strategyId,
     triggerReason,
     materialChanges,
-    limitations
+    limitations,
+    shockOverride,
+    watchReasons,
+    confirmationKeys
   }, 'STRATEGY_ASSESSMENT');
 
   const assessedIso = assessedAt instanceof Date ? assessedAt.toISOString() : (assessedAt || new Date().toISOString());
@@ -371,6 +502,12 @@ export function createStrategyAssessment({
     triggerReason: triggerReason && typeof triggerReason === 'object' ? triggerReason : {},
     materialChanges: Array.isArray(materialChanges) ? materialChanges : [],
     limitations: limitations || null,
+    lifecycleState,
+    dataQualityState,
+    watchReasons: Array.isArray(watchReasons) ? watchReasons : [],
+    shockOverride: shockOverride && typeof shockOverride === 'object' ? shockOverride : null,
+    confirmationKeys: Array.isArray(confirmationKeys) ? confirmationKeys : [],
+    idempotencyKey: idempotencyKey ? String(idempotencyKey) : null,
     policyVersion: policyVersion || STABILITY_POLICY_VERSION,
     runManifestId: runManifestId || null,
     createdAt: createdAt || assessedIso

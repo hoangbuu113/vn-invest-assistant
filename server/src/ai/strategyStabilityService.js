@@ -3,6 +3,10 @@ import {
   ASSESSMENT_RESULTS,
   EVALUATION_STATUSES,
   STRATEGY_LIFECYCLE_STATUSES,
+  STRATEGY_LIFECYCLE_STATES,
+  DATA_QUALITY_STATES,
+  SHOCK_SCOPES,
+  SHOCK_STATUSES,
   STABILITY_POLICY_VERSION,
   computeDecisionFingerprint,
   createStrategyVersion,
@@ -13,6 +17,7 @@ import { assessStrategyMateriality } from './strategyAssessmentGate.js';
 import {
   getCurrentPublishedStrategy,
   getLatestStrategyAssessment,
+  getStrategyAssessmentByIdempotencyKey,
   persistStrategyVersion,
   persistStrategyAssessment,
   supersedeStrategyVersion
@@ -24,11 +29,13 @@ import {
 
 /**
  * Orchestrates the Strategy Stability lifecycle (Two Clocks):
- * 1. Evaluates incoming validated evidence against active StrategyVersion via pre-AI gate.
- * 2. If review is not required: logs append-only KEEP assessment, skips AI/LLM.
- * 3. If review is required: runs strategist engine, compares candidate decisionFingerprint against current.
- * 4. Publishes new StrategyVersion ONLY when decisionFingerprint differs and candidate passes safety gates.
- * 5. Returns active strategy enriched with latest assessment metadata.
+ * 1. Checks exact idempotency retries.
+ * 2. Evaluates incoming validated evidence against active StrategyVersion via pre-AI gate.
+ * 3. Enforces read-only provider-free guarantees on allowLlm=false.
+ * 4. Manages lifecycle states: STABLE, WATCH, REVIEW_REQUIRED, EVALUATING.
+ * 5. Protects against stale evaluation publishing when evidence is superseded.
+ * 6. Publishes new StrategyVersion ONLY when decisionFingerprint differs and candidate passes safety gates.
+ * 7. Hardens against concurrency races on published strategy versions.
  */
 export async function evaluateAndApplyStrategyStability({
   factPacket,
@@ -42,7 +49,12 @@ export async function evaluateAndApplyStrategyStability({
   generateLlmFn,
   fetchFn,
   aiEnabled,
-  client
+  client,
+  idempotencyKey = null,
+  getAuthoritativeEvidenceFingerprint = null,
+  authoritativeEvidenceFingerprint = null,
+  onStateTransition = null,
+  isReadOnly = false
 } = {}) {
   if (!factPacket || typeof factPacket !== 'object') {
     throw new TypeError('evaluateAndApplyStrategyStability requires a valid factPacket');
@@ -53,11 +65,40 @@ export async function evaluateAndApplyStrategyStability({
   const nowIso = now instanceof Date ? now.toISOString() : new Date().toISOString();
   const nowMs = now instanceof Date ? now.getTime() : Date.now();
 
-  // 1. Retrieve current published strategy and latest assessment
+  // 1. Check assessment idempotency for exact retries
+  if (idempotencyKey) {
+    const existing = await getStrategyAssessmentByIdempotencyKey(idempotencyKey, client);
+    if (existing) {
+      const current = await getCurrentPublishedStrategy(client);
+      return {
+        ...(current?.rawOutput || {}),
+        ...(current || {}),
+        publishedAt: current?.publishedAt,
+        strategyPublishedAt: current?.publishedAt,
+        latestAssessmentAt: existing.assessedAt,
+        latestAssessmentResult: existing.result,
+        latestAssessmentStatus: existing.evaluationStatus,
+        lifecycleState: existing.lifecycleState,
+        dataQualityState: existing.dataQualityState,
+        watchReasons: existing.watchReasons || [],
+        shockOverride: existing.shockOverride || null,
+        confirmationKeys: existing.confirmationKeys || [],
+        idempotencyKey: existing.idempotencyKey,
+        currentConfidence: current?.confidence || existing.confidence,
+        dataAsOf: existing.dataAsOf,
+        decisionFingerprint: existing.decisionFingerprint,
+        evidenceFingerprint: existing.evidenceFingerprint,
+        lastAssessment: existing,
+        isIdempotentReplay: true
+      };
+    }
+  }
+
+  // 2. Retrieve current published strategy and latest assessment
   const currentStrategy = await getCurrentPublishedStrategy(client);
   const lastAssessment = await getLatestStrategyAssessment(currentStrategy?.strategyId, client);
 
-  // 2. Compute evidence fingerprint
+  // 3. Compute evidence fingerprint
   const evidenceFingerprint = factPacket.evidenceFingerprint || computeStrategistFingerprint({
     validFactIds: factPacket.validFactIds,
     validArticleIds: factPacket.validArticleIds,
@@ -69,7 +110,7 @@ export async function evaluateAndApplyStrategyStability({
     claims: factPacket.claims
   });
 
-  // 3. Pre-AI Gate: evaluate whether review is warranted
+  // 4. Pre-AI Gate: evaluate whether review is warranted and determine lifecycle state
   const gateResult = assessStrategyMateriality({
     currentStrategy,
     lastAssessment,
@@ -77,9 +118,40 @@ export async function evaluateAndApplyStrategyStability({
     now
   });
 
-  // Fast path: Current strategy exists and no deep review required -> KEEP without AI
-  if (currentStrategy && !gateResult.requiresReview) {
-    const assessmentId = `asmt_${nowMs}_${createHash('sha256').update(`KEEP:${currentStrategy.strategyId}:${nowIso}`).digest('hex').slice(0, 12)}`;
+  // 5. Public read-only path (e.g. GET endpoint with isReadOnly: true and existing published strategy)
+  // Invariant: Public GET is provider-free and NEVER mutates lifecycle state.
+  if (currentStrategy && isReadOnly) {
+    return {
+      ...(currentStrategy.rawOutput || {}),
+      ...currentStrategy,
+      publishedAt: currentStrategy.publishedAt,
+      strategyPublishedAt: currentStrategy.publishedAt,
+      latestAssessmentAt: lastAssessment?.assessedAt || currentStrategy.publishedAt,
+      latestAssessmentResult: lastAssessment?.result || ASSESSMENT_RESULTS.KEEP,
+      latestAssessmentStatus: lastAssessment?.evaluationStatus || EVALUATION_STATUSES.COMPLETED,
+      lifecycleState: lastAssessment?.lifecycleState || currentStrategy.lifecycleState || STRATEGY_LIFECYCLE_STATES.STABLE,
+      dataQualityState: gateResult.dataQualityState,
+      watchReasons: lastAssessment?.watchReasons || currentStrategy.watchReasons || [],
+      shockOverride: lastAssessment?.shockOverride || currentStrategy.shockOverride || null,
+      reviewPending: gateResult.requiresReview,
+      currentConfidence: currentStrategy.confidence,
+      dataAsOf: currentStrategy.dataAsOf,
+      decisionFingerprint: currentStrategy.decisionFingerprint,
+      evidenceFingerprint: currentStrategy.evidenceFingerprint,
+      lastAssessment: lastAssessment || null
+    };
+  }
+
+  // 6. Fast path / Insufficient Data Protection:
+  // Invariant: INSUFFICIENT data != NEUTRAL market.
+  // When critical evidence is unavailable/stale, do NOT run synthesis to overwrite market conclusion.
+  // Instead, preserve current published market conclusion and record a KEEP assessment with limitations.
+  if (currentStrategy && (gateResult.dataQualityState === DATA_QUALITY_STATES.INSUFFICIENT || !gateResult.requiresReview)) {
+    const isInsufficient = gateResult.dataQualityState === DATA_QUALITY_STATES.INSUFFICIENT;
+    const targetLifecycleState = isInsufficient
+      ? (currentStrategy.lifecycleState || STRATEGY_LIFECYCLE_STATES.STABLE)
+      : (gateResult.lifecycleState || STRATEGY_LIFECYCLE_STATES.STABLE);
+    const assessmentId = `asmt_${nowMs}_${createHash('sha256').update(`KEEP:${currentStrategy.strategyId}:${nowIso}:${targetLifecycleState}:${gateResult.dataQualityState}`).digest('hex').slice(0, 12)}`;
     const assessment = createStrategyAssessment({
       assessmentId,
       strategyId: currentStrategy.strategyId,
@@ -92,8 +164,18 @@ export async function evaluateAndApplyStrategyStability({
       previousConfidence: currentStrategy.confidence,
       result: ASSESSMENT_RESULTS.KEEP,
       evaluationStatus: EVALUATION_STATUSES.COMPLETED,
-      triggerReason: gateResult.reasons[0] || {},
+      triggerReason: gateResult.reasons[0] || (isInsufficient ? {
+        type: MATERIALITY_TRIGGER_TYPES.DATA_QUALITY_DEGRADATION,
+        description: 'Chất lượng dữ liệu thị trường không đủ (INSUFFICIENT); bảo lưu chiến lược đã xuất bản.'
+      } : {}),
       materialChanges: [],
+      limitations: isInsufficient ? 'Chưa đủ dữ liệu tin cậy để đánh giá lại chiến lược thị trường.' : null,
+      lifecycleState: targetLifecycleState,
+      dataQualityState: gateResult.dataQualityState,
+      watchReasons: gateResult.watchReasons || [],
+      shockOverride: gateResult.shockOverride || null,
+      confirmationKeys: gateResult.confirmationKeys || [],
+      idempotencyKey,
       policyVersion: STABILITY_POLICY_VERSION,
       runManifestId: null
     });
@@ -104,9 +186,15 @@ export async function evaluateAndApplyStrategyStability({
       ...(currentStrategy.rawOutput || {}),
       ...currentStrategy,
       publishedAt: currentStrategy.publishedAt,
+      strategyPublishedAt: currentStrategy.publishedAt,
       latestAssessmentAt: assessment.assessedAt,
       latestAssessmentResult: ASSESSMENT_RESULTS.KEEP,
       latestAssessmentStatus: EVALUATION_STATUSES.COMPLETED,
+      lifecycleState: targetLifecycleState,
+      dataQualityState: gateResult.dataQualityState,
+      watchReasons: assessment.watchReasons,
+      shockOverride: assessment.shockOverride,
+      confirmationKeys: assessment.confirmationKeys,
       currentConfidence: currentStrategy.confidence,
       dataAsOf: factPacket.dataAsOf || currentStrategy.dataAsOf,
       decisionFingerprint: currentStrategy.decisionFingerprint,
@@ -115,7 +203,13 @@ export async function evaluateAndApplyStrategyStability({
     };
   }
 
-  // 4. Review is required: execute strategist synthesis
+  // 7. Review is required: Snapshot freeze and transition to EVALUATING
+  const snapshotEvidenceFingerprint = evidenceFingerprint;
+  const snapshotDataAsOf = factPacket.dataAsOf || nowIso;
+  if (typeof onStateTransition === 'function') {
+    onStateTransition(STRATEGY_LIFECYCLE_STATES.EVALUATING);
+  }
+
   let candidateOutput = null;
   let providerError = null;
 
@@ -137,7 +231,7 @@ export async function evaluateAndApplyStrategyStability({
     providerError = err?.message || 'LLM_SYNTHESIS_ERROR';
   }
 
-  // 5. Handle AI / generation failure during required review
+  // 8. Handle AI / generation failure during required review
   const hasProviderFailure = Boolean(providerError || (allowLlm && candidateOutput?.lastProviderError));
   if (hasProviderFailure || !candidateOutput) {
     const errorDetails = providerError || candidateOutput?.lastProviderError || 'Synthesis failed during required review';
@@ -148,7 +242,7 @@ export async function evaluateAndApplyStrategyStability({
         strategyId: currentStrategy.strategyId,
         assessedAt: nowIso,
         dataAsOf: factPacket.dataAsOf || currentStrategy.dataAsOf,
-        evidenceFingerprint,
+        evidenceFingerprint: snapshotEvidenceFingerprint,
         previousEvidenceFingerprint: lastAssessment?.evidenceFingerprint || currentStrategy.evidenceFingerprint,
         decisionFingerprint: currentStrategy.decisionFingerprint,
         confidence: currentStrategy.confidence,
@@ -157,6 +251,12 @@ export async function evaluateAndApplyStrategyStability({
         evaluationStatus: EVALUATION_STATUSES.FAILED,
         triggerReason: gateResult.reasons[0] || {},
         limitations: errorDetails,
+        lifecycleState: STRATEGY_LIFECYCLE_STATES.REVIEW_REQUIRED, // Failure returns to REVIEW_REQUIRED, NOT STABLE!
+        dataQualityState: gateResult.dataQualityState,
+        watchReasons: gateResult.watchReasons || [],
+        shockOverride: gateResult.shockOverride || null,
+        confirmationKeys: gateResult.confirmationKeys || [],
+        idempotencyKey,
         policyVersion: STABILITY_POLICY_VERSION,
         runManifestId: null
       });
@@ -167,13 +267,19 @@ export async function evaluateAndApplyStrategyStability({
         ...(currentStrategy.rawOutput || {}),
         ...currentStrategy,
         publishedAt: currentStrategy.publishedAt,
+        strategyPublishedAt: currentStrategy.publishedAt,
         latestAssessmentAt: failedAssessment.assessedAt,
         latestAssessmentResult: ASSESSMENT_RESULTS.KEEP,
         latestAssessmentStatus: EVALUATION_STATUSES.FAILED,
+        lifecycleState: STRATEGY_LIFECYCLE_STATES.REVIEW_REQUIRED,
+        dataQualityState: gateResult.dataQualityState,
+        watchReasons: failedAssessment.watchReasons,
+        shockOverride: failedAssessment.shockOverride,
+        confirmationKeys: failedAssessment.confirmationKeys,
         currentConfidence: currentStrategy.confidence,
         dataAsOf: factPacket.dataAsOf || currentStrategy.dataAsOf,
         decisionFingerprint: currentStrategy.decisionFingerprint,
-        evidenceFingerprint,
+        evidenceFingerprint: snapshotEvidenceFingerprint,
         lastAssessment: failedAssessment,
         providerError: errorDetails
       };
@@ -185,7 +291,69 @@ export async function evaluateAndApplyStrategyStability({
     }
   }
 
-  // 6. Compute candidate decision fingerprint
+  // 9. Stale Evaluation Protection
+  // Compare current authoritative evidence baseline with evaluation snapshot
+  let isSuperseded = false;
+  if (typeof getAuthoritativeEvidenceFingerprint === 'function') {
+    const currentAuthoritativeFp = await getAuthoritativeEvidenceFingerprint();
+    if (currentAuthoritativeFp && currentAuthoritativeFp !== snapshotEvidenceFingerprint) {
+      isSuperseded = true;
+    }
+  } else if (authoritativeEvidenceFingerprint && authoritativeEvidenceFingerprint !== snapshotEvidenceFingerprint) {
+    isSuperseded = true;
+  }
+
+  if (isSuperseded && currentStrategy) {
+    const assessmentId = `asmt_${nowMs}_${createHash('sha256').update(`DEFERRED:${currentStrategy.strategyId}:${nowIso}`).digest('hex').slice(0, 12)}`;
+    const deferredAssessment = createStrategyAssessment({
+      assessmentId,
+      strategyId: currentStrategy.strategyId,
+      assessedAt: nowIso,
+      dataAsOf: snapshotDataAsOf,
+      evidenceFingerprint: snapshotEvidenceFingerprint,
+      previousEvidenceFingerprint: lastAssessment?.evidenceFingerprint || currentStrategy.evidenceFingerprint,
+      decisionFingerprint: currentStrategy.decisionFingerprint,
+      confidence: currentStrategy.confidence,
+      previousConfidence: currentStrategy.confidence,
+      result: ASSESSMENT_RESULTS.KEEP,
+      evaluationStatus: EVALUATION_STATUSES.DEFERRED,
+      triggerReason: gateResult.reasons[0] || {},
+      limitations: 'Bằng chứng thị trường đã thay đổi trong khi AI đang đánh giá; hoãn xuất bản (DEFERRED) và chuyển lại REVIEW_REQUIRED.',
+      lifecycleState: STRATEGY_LIFECYCLE_STATES.REVIEW_REQUIRED,
+      dataQualityState: gateResult.dataQualityState,
+      watchReasons: gateResult.watchReasons || [],
+      shockOverride: gateResult.shockOverride || null,
+      confirmationKeys: gateResult.confirmationKeys || [],
+      idempotencyKey,
+      policyVersion: STABILITY_POLICY_VERSION,
+      runManifestId: candidateOutput?.runId || null
+    });
+
+    await persistStrategyAssessment(deferredAssessment, client);
+
+    return {
+      ...(currentStrategy.rawOutput || {}),
+      ...currentStrategy,
+      publishedAt: currentStrategy.publishedAt,
+      strategyPublishedAt: currentStrategy.publishedAt,
+      latestAssessmentAt: deferredAssessment.assessedAt,
+      latestAssessmentResult: ASSESSMENT_RESULTS.KEEP,
+      latestAssessmentStatus: EVALUATION_STATUSES.DEFERRED,
+      lifecycleState: STRATEGY_LIFECYCLE_STATES.REVIEW_REQUIRED,
+      dataQualityState: gateResult.dataQualityState,
+      watchReasons: deferredAssessment.watchReasons,
+      shockOverride: deferredAssessment.shockOverride,
+      confirmationKeys: deferredAssessment.confirmationKeys,
+      currentConfidence: currentStrategy.confidence,
+      dataAsOf: currentStrategy.dataAsOf,
+      decisionFingerprint: currentStrategy.decisionFingerprint,
+      evidenceFingerprint: snapshotEvidenceFingerprint,
+      lastAssessment: deferredAssessment,
+      isDeferred: true
+    };
+  }
+
+  // 10. Compute candidate decision fingerprint
   const candidateDecisionFingerprint = computeDecisionFingerprint(candidateOutput);
 
   // Case A: Cold start (no previous strategy published)
@@ -197,7 +365,7 @@ export async function evaluateAndApplyStrategyStability({
       generatedAt: candidateOutput.generatedAt || nowIso,
       publishedAt: nowIso,
       dataAsOf: candidateOutput.dataAsOf || factPacket.dataAsOf || nowIso,
-      evidenceFingerprint,
+      evidenceFingerprint: snapshotEvidenceFingerprint,
       decisionFingerprint: candidateDecisionFingerprint,
       triggerReason: gateResult.reasons[0] || {},
       materialChanges: ['INITIAL_PUBLICATION'],
@@ -211,6 +379,10 @@ export async function evaluateAndApplyStrategyStability({
       horizon: candidateOutput.horizon || 'medium',
       invalidationConditions: candidateOutput.invalidationConditions || [],
       status: STRATEGY_LIFECYCLE_STATUSES.PUBLISHED,
+      lifecycleState: STRATEGY_LIFECYCLE_STATES.STABLE,
+      dataQualityState: gateResult.dataQualityState,
+      watchReasons: [],
+      shockOverride: gateResult.shockOverride || null,
       policyVersion: STABILITY_POLICY_VERSION,
       runManifestId: candidateOutput.runId || null,
       limitations: candidateOutput.limitations || null,
@@ -228,7 +400,7 @@ export async function evaluateAndApplyStrategyStability({
       strategyId,
       assessedAt: nowIso,
       dataAsOf: newVersion.dataAsOf,
-      evidenceFingerprint,
+      evidenceFingerprint: snapshotEvidenceFingerprint,
       previousEvidenceFingerprint: null,
       decisionFingerprint: candidateDecisionFingerprint,
       confidence: newVersion.confidence,
@@ -237,6 +409,12 @@ export async function evaluateAndApplyStrategyStability({
       evaluationStatus: EVALUATION_STATUSES.COMPLETED,
       triggerReason: gateResult.reasons[0] || {},
       materialChanges: ['INITIAL_PUBLICATION'],
+      lifecycleState: STRATEGY_LIFECYCLE_STATES.STABLE,
+      dataQualityState: gateResult.dataQualityState,
+      watchReasons: [],
+      shockOverride: gateResult.shockOverride || null,
+      confirmationKeys: gateResult.confirmationKeys || [],
+      idempotencyKey,
       policyVersion: STABILITY_POLICY_VERSION,
       runManifestId: candidateOutput.runId || null
     });
@@ -248,13 +426,19 @@ export async function evaluateAndApplyStrategyStability({
       ...newVersion,
       strategyId,
       publishedAt: newVersion.publishedAt,
+      strategyPublishedAt: newVersion.publishedAt,
       latestAssessmentAt: assessment.assessedAt,
       latestAssessmentResult: ASSESSMENT_RESULTS.PUBLISH_NEW,
       latestAssessmentStatus: EVALUATION_STATUSES.COMPLETED,
+      lifecycleState: STRATEGY_LIFECYCLE_STATES.STABLE,
+      dataQualityState: gateResult.dataQualityState,
+      watchReasons: [],
+      shockOverride: gateResult.shockOverride || null,
+      confirmationKeys: assessment.confirmationKeys,
       currentConfidence: newVersion.confidence,
       dataAsOf: newVersion.dataAsOf,
       decisionFingerprint: candidateDecisionFingerprint,
-      evidenceFingerprint,
+      evidenceFingerprint: snapshotEvidenceFingerprint,
       lastAssessment: assessment
     };
   }
@@ -286,7 +470,7 @@ export async function evaluateAndApplyStrategyStability({
       strategyId: currentStrategy.strategyId,
       assessedAt: nowIso,
       dataAsOf: candidateOutput.dataAsOf || factPacket.dataAsOf || currentStrategy.dataAsOf,
-      evidenceFingerprint,
+      evidenceFingerprint: snapshotEvidenceFingerprint,
       previousEvidenceFingerprint: lastAssessment?.evidenceFingerprint || currentStrategy.evidenceFingerprint,
       decisionFingerprint: currentStrategy.decisionFingerprint,
       confidence: candidateConfidence,
@@ -295,6 +479,12 @@ export async function evaluateAndApplyStrategyStability({
       evaluationStatus: EVALUATION_STATUSES.COMPLETED,
       triggerReason: gateResult.reasons[0] || {},
       materialChanges,
+      lifecycleState: STRATEGY_LIFECYCLE_STATES.STABLE,
+      dataQualityState: gateResult.dataQualityState,
+      watchReasons: [],
+      shockOverride: gateResult.shockOverride || null,
+      confirmationKeys: gateResult.confirmationKeys || [],
+      idempotencyKey,
       policyVersion: STABILITY_POLICY_VERSION,
       runManifestId: candidateOutput.runId || null
     });
@@ -305,13 +495,19 @@ export async function evaluateAndApplyStrategyStability({
       ...(currentStrategy.rawOutput || candidateOutput || {}),
       ...currentStrategy,
       publishedAt: currentStrategy.publishedAt,
+      strategyPublishedAt: currentStrategy.publishedAt,
       latestAssessmentAt: assessment.assessedAt,
       latestAssessmentResult: resultOutcome,
       latestAssessmentStatus: EVALUATION_STATUSES.COMPLETED,
+      lifecycleState: STRATEGY_LIFECYCLE_STATES.STABLE,
+      dataQualityState: gateResult.dataQualityState,
+      watchReasons: [],
+      shockOverride: gateResult.shockOverride || null,
+      confirmationKeys: assessment.confirmationKeys,
       currentConfidence: candidateConfidence,
       dataAsOf: assessment.dataAsOf,
       decisionFingerprint: currentStrategy.decisionFingerprint,
-      evidenceFingerprint,
+      evidenceFingerprint: snapshotEvidenceFingerprint,
       materialChanges,
       lastAssessment: assessment
     };
@@ -330,7 +526,7 @@ export async function evaluateAndApplyStrategyStability({
     generatedAt: candidateOutput.generatedAt || nowIso,
     publishedAt: nowIso,
     dataAsOf: candidateOutput.dataAsOf || factPacket.dataAsOf || nowIso,
-    evidenceFingerprint,
+    evidenceFingerprint: snapshotEvidenceFingerprint,
     decisionFingerprint: candidateDecisionFingerprint,
     triggerReason: gateResult.reasons[0] || {},
     materialChanges,
@@ -344,6 +540,10 @@ export async function evaluateAndApplyStrategyStability({
     horizon: candidateOutput.horizon || 'medium',
     invalidationConditions: candidateOutput.invalidationConditions || [],
     status: STRATEGY_LIFECYCLE_STATUSES.PUBLISHED,
+    lifecycleState: STRATEGY_LIFECYCLE_STATES.STABLE,
+    dataQualityState: gateResult.dataQualityState,
+    watchReasons: [],
+    shockOverride: gateResult.shockOverride || null,
     policyVersion: STABILITY_POLICY_VERSION,
     runManifestId: candidateOutput.runId || null,
     limitations: candidateOutput.limitations || null,
@@ -356,8 +556,21 @@ export async function evaluateAndApplyStrategyStability({
   // Mark previous strategy version as superseded
   await supersedeStrategyVersion(currentStrategy.strategyId, client);
 
-  // Persist new version
-  await persistStrategyVersion(newVersion, client);
+  // Persist new version (catches concurrent published conflict if any)
+  try {
+    await persistStrategyVersion(newVersion, client);
+  } catch (err) {
+    if (err.code === '23505' || err.message?.includes('idx_strategy_versions_single_published')) {
+      const refreshed = await getCurrentPublishedStrategy(client);
+      return {
+        ...(refreshed?.rawOutput || {}),
+        ...(refreshed || {}),
+        conflict: true,
+        concurrencyError: err.message
+      };
+    }
+    throw err;
+  }
 
   // Record PUBLISH_NEW assessment
   const assessmentId = `asmt_${nowMs}_${createHash('sha256').update(`PUB:${newStrategyId}:${nowIso}`).digest('hex').slice(0, 12)}`;
@@ -366,7 +579,7 @@ export async function evaluateAndApplyStrategyStability({
     strategyId: newStrategyId,
     assessedAt: nowIso,
     dataAsOf: newVersion.dataAsOf,
-    evidenceFingerprint,
+    evidenceFingerprint: snapshotEvidenceFingerprint,
     previousEvidenceFingerprint: currentStrategy.evidenceFingerprint,
     decisionFingerprint: candidateDecisionFingerprint,
     confidence: newVersion.confidence,
@@ -375,6 +588,12 @@ export async function evaluateAndApplyStrategyStability({
     evaluationStatus: EVALUATION_STATUSES.COMPLETED,
     triggerReason: gateResult.reasons[0] || {},
     materialChanges,
+    lifecycleState: STRATEGY_LIFECYCLE_STATES.STABLE,
+    dataQualityState: gateResult.dataQualityState,
+    watchReasons: [],
+    shockOverride: gateResult.shockOverride || null,
+    confirmationKeys: gateResult.confirmationKeys || [],
+    idempotencyKey,
     policyVersion: STABILITY_POLICY_VERSION,
     runManifestId: candidateOutput.runId || null
   });
@@ -386,13 +605,19 @@ export async function evaluateAndApplyStrategyStability({
     ...newVersion,
     strategyId: newStrategyId,
     publishedAt: newVersion.publishedAt,
+    strategyPublishedAt: newVersion.publishedAt,
     latestAssessmentAt: assessment.assessedAt,
     latestAssessmentResult: ASSESSMENT_RESULTS.PUBLISH_NEW,
     latestAssessmentStatus: EVALUATION_STATUSES.COMPLETED,
+    lifecycleState: STRATEGY_LIFECYCLE_STATES.STABLE,
+    dataQualityState: gateResult.dataQualityState,
+    watchReasons: [],
+    shockOverride: gateResult.shockOverride || null,
+    confirmationKeys: assessment.confirmationKeys,
     currentConfidence: newVersion.confidence,
     dataAsOf: newVersion.dataAsOf,
     decisionFingerprint: candidateDecisionFingerprint,
-    evidenceFingerprint,
+    evidenceFingerprint: snapshotEvidenceFingerprint,
     lastAssessment: assessment
   };
 }

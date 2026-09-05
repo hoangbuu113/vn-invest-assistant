@@ -1063,7 +1063,7 @@ export function createApp(services = {}) {
   app.get('/api/market-strategist', async (req, res) => {
     const now = new Date();
     try {
-      const result = await getMarketStrategistFn({ now, allowLlm: false });
+      const result = await getMarketStrategistFn({ now, allowLlm: false, isReadOnly: true });
       return res.status(200).json({
         status: 'ok',
         data: result
