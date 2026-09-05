@@ -10,6 +10,7 @@ import {
   deriveTradeBalance,
   normalizeCustomsTradeFacts,
   ingestCustomsDocument,
+  fetchCustomsWithSafeRedirect,
   TRADE_FACT_IDS,
   TRADE_REVISION_STATUS
 } from '../src/context/providers/customsTrade.js';
@@ -19,6 +20,11 @@ import {
   VALID_EXPORT_TEXT_FEB_2026,
   VALID_IMPORT_TEXT_FEB_2026,
   REVISED_EXPORT_TEXT_FEB_2026,
+  FINAL_EXPORT_TEXT_FEB_2026,
+  EXPORT_TEXT_NO_REVISION,
+  EXPORT_TEXT_CONFLICTING_REVISION,
+  REVISED_IMPORT_TEXT_FEB_2026,
+  FINAL_IMPORT_TEXT_FEB_2026,
   SEMIMONTHLY_EXPORT_TEXT,
   CUMULATIVE_ONLY_EXPORT_TEXT,
   PERCENT_CHANGE_ONLY_TEXT,
@@ -35,7 +41,12 @@ import {
   FACT_LIFECYCLE_STATUS
 } from '../src/context/factModel.js';
 
-import { applyRuntimeFreshness, CADENCE_POLICIES } from '../src/context/freshnessPolicy.js';
+import {
+  applyRuntimeFreshness,
+  CADENCE_POLICIES,
+  CADENCE_POLICY_METADATA,
+  evaluateObservationFreshness
+} from '../src/context/freshnessPolicy.js';
 import { deriveMarketSignals } from '../src/ai/derivedSignals.js';
 import { runMarketContextCollector } from '../src/context/collector.js';
 
@@ -143,6 +154,7 @@ test('10. unit scale preserved', () => {
   assert.ok(exportObs);
   assert.equal(exportObs.unit, 'USD');
   assert.equal(exportObs.value, 33090034032);
+  assert.equal(exportObs.source, 'Cục Hải quan - Bộ Tài chính (Vietnam Customs)');
 });
 
 test('11. missing != zero', () => {
@@ -223,7 +235,7 @@ test('16. trade balance derived value keeps both input IDs', () => {
   });
 
   const [exportObs] = normalizeCustomsTradeFacts({ exportDocResult: exportParsed, derivedBalance: false });
-  const [importObs] = normalizeCustomsTradeFacts({ exportDocResult: importParsed, derivedBalance: false });
+  const [importObs] = normalizeCustomsTradeFacts({ importDocResult: importParsed, derivedBalance: false });
 
   const balanceObs = deriveTradeBalance(exportObs, importObs);
   assert.equal(balanceObs.status, OBSERVATION_STATUS.AVAILABLE);
@@ -237,11 +249,12 @@ test('17. derived balance is not marked as directly published official value', (
   const exportParsed = parseCustomsTradeDocumentText(VALID_EXPORT_TEXT_FEB_2026);
   const importParsed = parseCustomsTradeDocumentText(VALID_IMPORT_TEXT_FEB_2026);
   const [exportObs] = normalizeCustomsTradeFacts({ exportDocResult: exportParsed, derivedBalance: false });
-  const [importObs] = normalizeCustomsTradeFacts({ exportDocResult: importParsed, derivedBalance: false });
+  const [importObs] = normalizeCustomsTradeFacts({ importDocResult: importParsed, derivedBalance: false });
 
   const balanceObs = deriveTradeBalance(exportObs, importObs);
   assert.equal(balanceObs.source, 'Vietnam Customs (Derived)');
   assert.ok(balanceObs.provenance.publisherNotice.includes('không phải số liệu công bố trực tiếp'));
+  assert.ok(balanceObs.provenance.publisherNotice.includes('Cục Hải quan - Bộ Tài chính'));
 });
 
 test('18. stale/unavailable inputs do not create directional trade signal', () => {
@@ -382,4 +395,236 @@ test('23. no private portfolio/profile data enters pipeline', () => {
   assert.ok(!serialized.includes('portfolio'));
   assert.ok(!serialized.includes('cash_available'));
   assert.ok(!serialized.includes('holdings'));
+});
+
+test('24. revision marker derived from document content ("Sơ bộ" -> preliminary)', () => {
+  const result = parseCustomsTradeDocumentText(VALID_EXPORT_TEXT_FEB_2026);
+  assert.equal(result.revisionMarker, TRADE_REVISION_STATUS.PRELIMINARY);
+});
+
+test('25. revision marker derived from document content ("Điều chỉnh" -> revised)', () => {
+  const result = parseCustomsTradeDocumentText(REVISED_EXPORT_TEXT_FEB_2026);
+  assert.equal(result.revisionMarker, TRADE_REVISION_STATUS.REVISED);
+});
+
+test('26. revision marker derived from document content ("Chính thức" -> final)', () => {
+  const result = parseCustomsTradeDocumentText(FINAL_EXPORT_TEXT_FEB_2026);
+  assert.equal(result.revisionMarker, TRADE_REVISION_STATUS.FINAL);
+});
+
+test('27. filename suffix does not override document content', () => {
+  // Filename has (vn-sb) (preliminary), but document content has "Điều chỉnh" (revised)
+  const result = parseCustomsTradeDocumentText(REVISED_EXPORT_TEXT_FEB_2026, {
+    sourceUrl: OFFICIAL_CUSTOMS_URLS.EXPORT_FEB_2026_SB
+  });
+  // Authoritative status comes from document content
+  assert.equal(result.revisionMarker, TRADE_REVISION_STATUS.REVISED);
+  // Filename suffix is retained only as non-authoritative hint
+  assert.equal(result.filenameRevisionHint, TRADE_REVISION_STATUS.PRELIMINARY);
+  assert.equal(result.provenance.filenameRevisionHint, TRADE_REVISION_STATUS.PRELIMINARY);
+  assert.equal(result.provenance.revisionMarker, TRADE_REVISION_STATUS.REVISED);
+});
+
+test('28. document without revision text yields revisionMarker = "unknown"', () => {
+  // URL has (vn-sb), but text has no revision indicators
+  const result = parseCustomsTradeDocumentText(EXPORT_TEXT_NO_REVISION, {
+    sourceUrl: OFFICIAL_CUSTOMS_URLS.EXPORT_FEB_2026_SB
+  });
+  assert.equal(result.status, 'available');
+  assert.equal(result.revisionMarker, TRADE_REVISION_STATUS.UNKNOWN);
+  assert.equal(result.filenameRevisionHint, TRADE_REVISION_STATUS.PRELIMINARY);
+});
+
+test('29. document with conflicting revision indicators in text is quarantined', () => {
+  const result = parseCustomsTradeDocumentText(EXPORT_TEXT_CONFLICTING_REVISION);
+  assert.equal(result.status, 'quarantined');
+  assert.equal(result.reason, 'CONFLICTING_REVISION_INDICATORS');
+});
+
+test('30. trade balance derived when export and import have identical known revisionMarker', () => {
+  // Both preliminary
+  const prelimExport = parseCustomsTradeDocumentText(VALID_EXPORT_TEXT_FEB_2026);
+  const prelimImport = parseCustomsTradeDocumentText(VALID_IMPORT_TEXT_FEB_2026);
+  const [exportObs] = normalizeCustomsTradeFacts({ exportDocResult: prelimExport, derivedBalance: false });
+  const [importObs] = normalizeCustomsTradeFacts({ importDocResult: prelimImport, derivedBalance: false });
+
+  const balanceObs = deriveTradeBalance(exportObs, importObs);
+  assert.equal(balanceObs.status, OBSERVATION_STATUS.AVAILABLE);
+  assert.equal(balanceObs.revisionMarker, TRADE_REVISION_STATUS.PRELIMINARY);
+  assert.deepEqual(balanceObs.provenance.inputRevisionMarkers, [
+    TRADE_REVISION_STATUS.PRELIMINARY,
+    TRADE_REVISION_STATUS.PRELIMINARY
+  ]);
+
+  // Both revised
+  const revisedExport = parseCustomsTradeDocumentText(REVISED_EXPORT_TEXT_FEB_2026);
+  const revisedImport = parseCustomsTradeDocumentText(REVISED_IMPORT_TEXT_FEB_2026);
+  const [revExportObs] = normalizeCustomsTradeFacts({ exportDocResult: revisedExport, derivedBalance: false });
+  const [revImportObs] = normalizeCustomsTradeFacts({ importDocResult: revisedImport, derivedBalance: false });
+
+  const revBalanceObs = deriveTradeBalance(revExportObs, revImportObs);
+  assert.equal(revBalanceObs.status, OBSERVATION_STATUS.AVAILABLE);
+  assert.equal(revBalanceObs.revisionMarker, TRADE_REVISION_STATUS.REVISED);
+  assert.deepEqual(revBalanceObs.provenance.inputRevisionMarkers, [
+    TRADE_REVISION_STATUS.REVISED,
+    TRADE_REVISION_STATUS.REVISED
+  ]);
+});
+
+test('31. trade balance rejected with REVISION_VINTAGE_MISMATCH when revisionMarkers differ', () => {
+  const prelimExport = parseCustomsTradeDocumentText(VALID_EXPORT_TEXT_FEB_2026);
+  const revisedImport = parseCustomsTradeDocumentText(REVISED_IMPORT_TEXT_FEB_2026);
+  const [exportObs] = normalizeCustomsTradeFacts({ exportDocResult: prelimExport, derivedBalance: false });
+  const [importObs] = normalizeCustomsTradeFacts({ importDocResult: revisedImport, derivedBalance: false });
+
+  const balanceObs = deriveTradeBalance(exportObs, importObs);
+  assert.equal(balanceObs.status, OBSERVATION_STATUS.UNAVAILABLE);
+  assert.equal(balanceObs.value, null);
+  assert.equal(balanceObs.statusReason, 'REVISION_VINTAGE_MISMATCH');
+  assert.deepEqual(balanceObs.provenance.inputRevisionMarkers, [
+    TRADE_REVISION_STATUS.PRELIMINARY,
+    TRADE_REVISION_STATUS.REVISED
+  ]);
+});
+
+test('32. trade balance rejected with REVISION_VINTAGE_MISMATCH when either revisionMarker is unknown', () => {
+  const unkExport = parseCustomsTradeDocumentText(EXPORT_TEXT_NO_REVISION);
+  const prelimImport = parseCustomsTradeDocumentText(VALID_IMPORT_TEXT_FEB_2026);
+  const [exportObs] = normalizeCustomsTradeFacts({ exportDocResult: unkExport, derivedBalance: false });
+  const [importObs] = normalizeCustomsTradeFacts({ importDocResult: prelimImport, derivedBalance: false });
+
+  assert.equal(exportObs.revisionMarker, TRADE_REVISION_STATUS.UNKNOWN);
+  const balanceObs = deriveTradeBalance(exportObs, importObs);
+  assert.equal(balanceObs.status, OBSERVATION_STATUS.UNAVAILABLE);
+  assert.equal(balanceObs.value, null);
+  assert.equal(balanceObs.statusReason, 'REVISION_VINTAGE_MISMATCH');
+  assert.deepEqual(balanceObs.provenance.inputRevisionMarkers, [
+    TRADE_REVISION_STATUS.UNKNOWN,
+    TRADE_REVISION_STATUS.PRELIMINARY
+  ]);
+});
+
+test('33. safe redirect fetcher allows valid official Customs redirect', async () => {
+  const requestedUrls = [];
+  const mockFetch = async (url, options) => {
+    requestedUrls.push({ url, redirect: options?.redirect });
+    if (url === 'https://customs.gov.vn/report.pdf') {
+      return {
+        status: 302,
+        ok: false,
+        headers: { location: 'https://files.customs.gov.vn/CustomsCMS/TONG_CUC/2026/report.pdf' }
+      };
+    }
+    if (url === 'https://files.customs.gov.vn/CustomsCMS/TONG_CUC/2026/report.pdf') {
+      return {
+        status: 200,
+        ok: true,
+        arrayBuffer: async () => new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d]).buffer
+      };
+    }
+    throw new Error(`Unexpected URL: ${url}`);
+  };
+
+  const res = await fetchCustomsWithSafeRedirect('https://customs.gov.vn/report.pdf', {
+    fetchFn: mockFetch
+  });
+
+  assert.equal(res.success, true);
+  assert.equal(res.finalUrl, 'https://files.customs.gov.vn/CustomsCMS/TONG_CUC/2026/report.pdf');
+  assert.equal(requestedUrls.length, 2);
+  assert.equal(requestedUrls[0].redirect, 'manual');
+  assert.equal(requestedUrls[1].redirect, 'manual');
+});
+
+test('34. safe redirect fetcher rejects redirect to unapproved external host, localhost, or non-HTTPS', async () => {
+  const testCases = [
+    { target: 'https://malicious-site.com/evil.pdf', desc: 'external host' },
+    { target: 'http://files.customs.gov.vn/insecure.pdf', desc: 'insecure http' },
+    { target: 'https://localhost:8080/report.pdf', desc: 'localhost' },
+    { target: 'https://192.168.1.1/report.pdf', desc: 'private IP' }
+  ];
+
+  for (const { target, desc } of testCases) {
+    const requestedUrls = [];
+    const mockFetch = async (url) => {
+      requestedUrls.push(url);
+      return {
+        status: 302,
+        ok: false,
+        headers: { location: target }
+      };
+    };
+
+    const res = await fetchCustomsWithSafeRedirect('https://customs.gov.vn/start.pdf', {
+      fetchFn: mockFetch
+    });
+
+    assert.equal(res.success, false, `Expected failure for ${desc}`);
+    assert.equal(res.status, 'rejected', `Expected rejected status for ${desc}`);
+    assert.equal(res.reason, 'UNAPPROVED_REDIRECT_TARGET', `Expected UNAPPROVED_REDIRECT_TARGET for ${desc}`);
+    // Pre-flight check must have prevented any outgoing request to the target!
+    assert.equal(requestedUrls.length, 1, `Request must NOT be sent to target for ${desc}`);
+    assert.equal(requestedUrls[0], 'https://customs.gov.vn/start.pdf');
+  }
+});
+
+test('35. safe redirect fetcher enforces maximum redirect limit', async () => {
+  let callCount = 0;
+  const mockFetch = async () => {
+    callCount++;
+    return {
+      status: 302,
+      ok: false,
+      headers: { location: `https://files.customs.gov.vn/hop_${callCount}.pdf` }
+    };
+  };
+
+  const res = await fetchCustomsWithSafeRedirect('https://files.customs.gov.vn/initial.pdf', {
+    fetchFn: mockFetch,
+    maxRedirects: 2
+  });
+
+  assert.equal(res.success, false);
+  assert.equal(res.status, 'rejected');
+  assert.equal(res.reason, 'TOO_MANY_REDIRECTS');
+  assert.ok(res.details.includes('limit (2)'));
+});
+
+test('36. publication time semantics and customs freshness engineering policy classification', async () => {
+  // 1. Ingestion without explicit publishedAt maintains publishedAt = null and fetchedAt = now
+  const mockFetch = async () => ({
+    status: 200,
+    ok: true,
+    arrayBuffer: async () => VALID_PDF_MOCK_BUFFER
+  });
+
+  const now = new Date('2026-09-05T12:00:00.000Z');
+  const intakeRes = await ingestCustomsDocument({
+    documentUrl: OFFICIAL_CUSTOMS_URLS.EXPORT_FEB_2026_SB, // path contains /2026/3/4/
+    now,
+    fetchFn: mockFetch,
+    pdfParseFn: async () => ({ text: VALID_EXPORT_TEXT_FEB_2026 })
+  });
+
+  assert.equal(intakeRes.success, true);
+  const [obs] = intakeRes.observations;
+  // Publication date is NEVER guessed from /2026/3/4/ in URL
+  assert.equal(obs.publishedAt, null);
+  assert.equal(obs.fetchedAt, '2026-09-05T12:00:00.000Z');
+  // Authority provenance correctly set
+  assert.equal(obs.source, 'Cục Hải quan - Bộ Tài chính (Vietnam Customs)');
+
+  // 2. Freshness policy metadata classifies CUSTOMS_MONTHLY_RELEASE as ENGINEERING_POLICY
+  const policyMeta = CADENCE_POLICY_METADATA[CADENCE_POLICIES.CUSTOMS_MONTHLY_RELEASE];
+  assert.ok(policyMeta);
+  assert.equal(policyMeta.policyType, 'ENGINEERING_POLICY');
+  assert.equal(policyMeta.isOfficialSla, false);
+  assert.equal(policyMeta.cadenceDays, 45);
+
+  // 3. Runtime freshness evaluation exposes policyType and isOfficialSla
+  const freshnessResult = evaluateObservationFreshness(obs, new Date('2026-03-15T00:00:00.000Z'));
+  assert.equal(freshnessResult.freshness, 'fresh');
+  assert.equal(freshnessResult.status, 'available');
+  assert.equal(freshnessResult.policyType, 'ENGINEERING_POLICY');
+  assert.equal(freshnessResult.isOfficialSla, false);
 });

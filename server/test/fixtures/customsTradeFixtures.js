@@ -90,6 +90,96 @@ LượngTrị giá (USD)Trị giá (USD)Lượng
 TỔNG TRỊ GIÁUSD 33.250.000.000 76.550.000.000
 `;
 
+export const FINAL_EXPORT_TEXT_FEB_2026 = `
+CỤC HẢI QUAN
+BỘ TÀI CHÍNH
+Tháng 2 năm 2026
+XUẤT KHẨU HÀNG HÓA THEO THÁNG
+Ban CNTT & Thống kê Hải quan
+Biểu số 015.T/BCB-TC
+Chính thức
+Cộng dồn đến hết
+tháng báo cáo
+ĐVT
+Số trong tháng báo cáo
+Nhóm/Mặt hàng chủ yếu
+STT
+LượngTrị giá (USD)Trị giá (USD)Lượng
+TỔNG TRỊ GIÁUSD 33.300.000.000 76.600.000.000
+`;
+
+export const EXPORT_TEXT_NO_REVISION = `
+CỤC HẢI QUAN
+BỘ TÀI CHÍNH
+Tháng 2 năm 2026
+XUẤT KHẨU HÀNG HÓA THEO THÁNG
+Ban CNTT & Thống kê Hải quan
+Biểu số 015.T/BCB-TC
+Cộng dồn đến hết
+tháng báo cáo
+ĐVT
+Số trong tháng báo cáo
+Nhóm/Mặt hàng chủ yếu
+STT
+LượngTrị giá (USD)Trị giá (USD)Lượng
+TỔNG TRỊ GIÁUSD 33.090.034.032 76.392.787.810
+`;
+
+export const EXPORT_TEXT_CONFLICTING_REVISION = `
+CỤC HẢI QUAN
+BỘ TÀI CHÍNH
+Tháng 2 năm 2026
+XUẤT KHẨU HÀNG HÓA THEO THÁNG
+Ban CNTT & Thống kê Hải quan
+Biểu số 015.T/BCB-TC
+Sơ bộ
+Chính thức
+Cộng dồn đến hết
+tháng báo cáo
+ĐVT
+Số trong tháng báo cáo
+Nhóm/Mặt hàng chủ yếu
+STT
+LượngTrị giá (USD)Trị giá (USD)Lượng
+TỔNG TRỊ GIÁUSD 33.090.034.032 76.392.787.810
+`;
+
+export const REVISED_IMPORT_TEXT_FEB_2026 = `
+CỤC HẢI QUAN
+BỘ TÀI CHÍNH
+Tháng 2 năm 2026
+NHẬP KHẨU HÀNG HÓA THEO THÁNG
+Ban CNTT & Thống kê Hải quan
+Biểu số 016.T/BCB-TC
+Điều chỉnh
+Cộng dồn đến hết
+tháng báo cáo
+ĐVT
+Số trong tháng báo cáo
+Nhóm/Mặt hàng chủ yếu
+STT
+LượngTrị giá (USD)Trị giá (USD)Lượng
+TỔNG TRỊ GIÁUSD 34.200.000.000 79.400.000.000
+`;
+
+export const FINAL_IMPORT_TEXT_FEB_2026 = `
+CỤC HẢI QUAN
+BỘ TÀI CHÍNH
+Tháng 2 năm 2026
+NHẬP KHẨU HÀNG HÓA THEO THÁNG
+Ban CNTT & Thống kê Hải quan
+Biểu số 016.T/BCB-TC
+Chính thức
+Cộng dồn đến hết
+tháng báo cáo
+ĐVT
+Số trong tháng báo cáo
+Nhóm/Mặt hàng chủ yếu
+STT
+LượngTrị giá (USD)Trị giá (USD)Lượng
+TỔNG TRỊ GIÁUSD 34.250.000.000 79.450.000.000
+`;
+
 export const SEMIMONTHLY_EXPORT_TEXT = `
 CỤC HẢI QUAN
 BỘ TÀI CHÍNH

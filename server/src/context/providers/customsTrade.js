@@ -51,7 +51,8 @@ export const TRADE_REPORT_TYPES = Object.freeze({
 export const TRADE_REVISION_STATUS = Object.freeze({
   PRELIMINARY: 'preliminary',
   REVISED: 'revised',
-  FINAL: 'final'
+  FINAL: 'final',
+  UNKNOWN: 'unknown'
 });
 
 /**
@@ -227,14 +228,45 @@ export function parseCustomsTradeDocumentText(text, { sourceUrl = null, publishe
   }
 
   // 4. Extract revision status
-  let revisionMarker = TRADE_REVISION_STATUS.PRELIMINARY;
-  if (/chính\s*thức/i.test(cleanText) || /\(vn-ct\)/i.test(sourceUrl || '')) {
-    revisionMarker = TRADE_REVISION_STATUS.FINAL;
-  } else if (/điều\s*chỉnh/i.test(cleanText) || /\(vn-dc\)/i.test(sourceUrl || '')) {
-    revisionMarker = TRADE_REVISION_STATUS.REVISED;
-  } else if (/sơ\s*bộ/i.test(cleanText) || /\(vn-sb\)/i.test(sourceUrl || '')) {
-    revisionMarker = TRADE_REVISION_STATUS.PRELIMINARY;
+  // URL/filename suffix is captured strictly as non-authoritative hint for provenance
+  let filenameRevisionHint = null;
+  if (sourceUrl) {
+    let decodedUrl = sourceUrl;
+    try {
+      decodedUrl = decodeURIComponent(sourceUrl);
+    } catch {}
+
+    if (/\(vn-sb\)|%28vn-sb%29/i.test(sourceUrl) || /\(vn-sb\)/i.test(decodedUrl)) {
+      filenameRevisionHint = TRADE_REVISION_STATUS.PRELIMINARY;
+    } else if (/\(vn-dc\)|%28vn-dc%29/i.test(sourceUrl) || /\(vn-dc\)/i.test(decodedUrl)) {
+      filenameRevisionHint = TRADE_REVISION_STATUS.REVISED;
+    } else if (/\(vn-ct\)|%28vn-ct%29/i.test(sourceUrl) || /\(vn-ct\)/i.test(decodedUrl)) {
+      filenameRevisionHint = TRADE_REVISION_STATUS.FINAL;
+    }
   }
+
+  // Authoritative revision status MUST be determined strictly from verified document content
+  const hasPreliminary = /(?:^|[^\p{L}\p{N}])sơ\s*bộ(?=[^\p{L}\p{N}]|$)/iu.test(cleanText);
+  const hasRevised = /(?:^|[^\p{L}\p{N}])điều\s*chỉnh(?=[^\p{L}\p{N}]|$)/iu.test(cleanText);
+  const hasFinal = /(?:^|[^\p{L}\p{N}])chính\s*thức(?=[^\p{L}\p{N}]|$)/iu.test(cleanText);
+
+  const matchedMarkers = [
+    hasPreliminary && TRADE_REVISION_STATUS.PRELIMINARY,
+    hasRevised && TRADE_REVISION_STATUS.REVISED,
+    hasFinal && TRADE_REVISION_STATUS.FINAL
+  ].filter(Boolean);
+
+  if (matchedMarkers.length > 1) {
+    return {
+      status: 'quarantined',
+      reason: 'CONFLICTING_REVISION_INDICATORS',
+      details: `Document text contains conflicting revision indicators: ${matchedMarkers.join(', ')}`
+    };
+  }
+
+  const revisionMarker = matchedMarkers.length === 1
+    ? matchedMarkers[0]
+    : TRADE_REVISION_STATUS.UNKNOWN;
 
   // 5. Unit validation
   // Vietnam Customs Biểu 015 and 016 explicitly specify currency unit "USD" or "Trị giá (USD)"
@@ -302,15 +334,17 @@ export function parseCustomsTradeDocumentText(text, { sourceUrl = null, publishe
     unit: 'USD',
     referencePeriod,
     revisionMarker,
+    filenameRevisionHint,
     sourceUrl,
     publishedAt: publishedAt || null,
     provenance: {
-      source: 'Tổng cục Hải quan Việt Nam (Vietnam Customs)',
+      source: 'Cục Hải quan - Bộ Tài chính (Vietnam Customs)',
       releaseUrl: sourceUrl || null,
       formNumber,
       rawMonthlyText: rawMonthlyStr,
       rawYtdText: rawYtdStr,
       revisionMarker,
+      filenameRevisionHint,
       referencePeriod
     }
   };
@@ -418,7 +452,32 @@ export function deriveTradeBalance(exportObs, importObs, { now = new Date() } = 
     });
   }
 
-  // 4. Calculate balance: exports - imports
+  // 4. Reconcile revision vintage compatibility
+  const exportRev = exportObs.revisionMarker;
+  const importRev = importObs.revisionMarker;
+
+  if (
+    !exportRev ||
+    !importRev ||
+    exportRev === TRADE_REVISION_STATUS.UNKNOWN ||
+    importRev === TRADE_REVISION_STATUS.UNKNOWN ||
+    exportRev !== importRev
+  ) {
+    return createUnavailableObservation(factId, PILLARS.MACRO, label, 'REVISION_VINTAGE_MISMATCH', {
+      factId,
+      metric,
+      unit: 'USD',
+      referenceTime: exportObs.referenceTime,
+      authorityLevel: AUTHORITY_LEVELS.PRIMARY_OFFICIAL,
+      provenance: {
+        isDerived: true,
+        formula: 'exports - imports',
+        inputRevisionMarkers: [exportRev || null, importRev || null]
+      }
+    });
+  }
+
+  // 5. Calculate balance: exports - imports
   const balanceValue = exportVal - importVal;
 
   const inputObservationIds = [
@@ -431,15 +490,8 @@ export function deriveTradeBalance(exportObs, importObs, { now = new Date() } = 
     importObs.provenance?.releaseUrl
   ].filter(Boolean);
 
-  const inputRevisionMarkers = [
-    exportObs.revisionMarker || null,
-    importObs.revisionMarker || null
-  ];
-
-  // Harmonized revision marker
-  const revisionMarker = exportObs.revisionMarker === importObs.revisionMarker
-    ? exportObs.revisionMarker
-    : (exportObs.revisionMarker || importObs.revisionMarker || null);
+  const inputRevisionMarkers = [exportRev, importRev];
+  const revisionMarker = exportRev;
 
   const referenceTime = exportObs.referenceTime;
   const publishedAt = exportObs.publishedAt || importObs.publishedAt || null;
@@ -468,7 +520,7 @@ export function deriveTradeBalance(exportObs, importObs, { now = new Date() } = 
       inputObservationIds,
       inputSourceUrls,
       inputRevisionMarkers,
-      publisherNotice: 'Chỉ số dẫn xuất từ số liệu xuất khẩu và nhập khẩu chính thức của Tổng cục Hải quan; không phải số liệu công bố trực tiếp.'
+      publisherNotice: 'Chỉ số dẫn xuất từ số liệu xuất khẩu và nhập khẩu chính thức của Cục Hải quan - Bộ Tài chính; không phải số liệu công bố trực tiếp.'
     }
   });
 }
@@ -502,7 +554,7 @@ export function normalizeCustomsTradeFacts({
       observedAt: null,
       publishedAt: exportDocResult.publishedAt,
       fetchedAt: now.toISOString(),
-      source: 'Tổng cục Hải quan Việt Nam (Vietnam Customs)',
+      source: 'Cục Hải quan - Bộ Tài chính (Vietnam Customs)',
       authorityLevel: AUTHORITY_LEVELS.PRIMARY_OFFICIAL,
       revisionMarker: exportDocResult.revisionMarker,
       status: OBSERVATION_STATUS.AVAILABLE,
@@ -544,7 +596,7 @@ export function normalizeCustomsTradeFacts({
       observedAt: null,
       publishedAt: importDocResult.publishedAt,
       fetchedAt: now.toISOString(),
-      source: 'Tổng cục Hải quan Việt Nam (Vietnam Customs)',
+      source: 'Cục Hải quan - Bộ Tài chính (Vietnam Customs)',
       authorityLevel: AUTHORITY_LEVELS.PRIMARY_OFFICIAL,
       revisionMarker: importDocResult.revisionMarker,
       status: OBSERVATION_STATUS.AVAILABLE,
@@ -583,13 +635,137 @@ export function normalizeCustomsTradeFacts({
 }
 
 /**
+ * Safe fetcher with strict redirect SSRF protection.
+ * Enforces:
+ * - redirect: 'manual'
+ * - Every hop pre-validated with isOfficialCustomsUrl before issuing request
+ * - Relative redirects resolved against current URL
+ * - Bounded redirect count (max 2)
+ * - Rejection of unapproved hosts, localhost, private IP, non-HTTPS targets
+ */
+export async function fetchCustomsWithSafeRedirect(initialUrl, {
+  fetchFn = fetch,
+  maxRedirects = 2,
+  headers = { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+} = {}) {
+  let currentUrl = initialUrl;
+  let redirectsRemaining = maxRedirects;
+
+  while (true) {
+    if (!isOfficialCustomsUrl(currentUrl)) {
+      return {
+        success: false,
+        status: 'rejected',
+        reason: 'UNAPPROVED_SOURCE_HOST',
+        details: `URL is not an approved official Customs HTTPS endpoint: ${currentUrl}`
+      };
+    }
+
+    let res;
+    try {
+      res = await fetchFn(currentUrl, {
+        method: 'GET',
+        headers,
+        redirect: 'manual'
+      });
+    } catch (err) {
+      return {
+        success: false,
+        status: 'failed',
+        reason: 'FETCH_ERROR',
+        error: String(err?.message || err)
+      };
+    }
+
+    // Check for standard HTTP redirect codes
+    if ([301, 302, 303, 307, 308].includes(res?.status)) {
+      const location = (typeof res?.headers?.get === 'function')
+        ? res.headers.get('location')
+        : res?.headers?.location;
+
+      if (!location) {
+        return {
+          success: false,
+          status: 'failed',
+          reason: 'REDIRECT_WITHOUT_LOCATION',
+          details: `Redirect response ${res?.status} missing Location header`
+        };
+      }
+
+      if (redirectsRemaining <= 0) {
+        return {
+          success: false,
+          status: 'rejected',
+          reason: 'TOO_MANY_REDIRECTS',
+          details: `Exceeded maximum redirect limit (${maxRedirects})`
+        };
+      }
+
+      redirectsRemaining--;
+
+      let resolvedUrl;
+      try {
+        resolvedUrl = new URL(location, currentUrl).href;
+      } catch {
+        return {
+          success: false,
+          status: 'rejected',
+          reason: 'INVALID_REDIRECT_URL',
+          details: `Unable to parse redirect target Location: ${location}`
+        };
+      }
+
+      // Pre-flight SSRF check on redirect destination BEFORE making next request
+      if (!isOfficialCustomsUrl(resolvedUrl)) {
+        return {
+          success: false,
+          status: 'rejected',
+          reason: 'UNAPPROVED_REDIRECT_TARGET',
+          details: `Redirect target is not an approved official Customs HTTPS endpoint: ${resolvedUrl}`
+        };
+      }
+
+      currentUrl = resolvedUrl;
+      continue;
+    }
+
+    if (!res?.ok) {
+      return {
+        success: false,
+        status: 'unavailable',
+        reason: 'FETCH_FAILED',
+        httpStatus: res?.status
+      };
+    }
+
+    try {
+      const arrayBuf = await res.arrayBuffer();
+      return {
+        success: true,
+        buffer: Buffer.from(arrayBuf),
+        finalUrl: currentUrl
+      };
+    } catch (err) {
+      return {
+        success: false,
+        status: 'failed',
+        reason: 'BUFFER_READ_FAILED',
+        error: String(err?.message || err)
+      };
+    }
+  }
+}
+
+/**
  * Safe Controlled Official Document Intake Entry Point.
  * Flow:
- * validated official URL -> fetch document once -> verify signature -> classify & parse -> normalize
+ * validated official URL -> fetch document safely (with bounded pre-flight redirect SSRF checks) ->
+ * verify signature -> classify & parse -> normalize
  */
 export async function ingestCustomsDocument({
   documentUrl,
   buffer = null,
+  publishedAt = null,
   now = new Date(),
   fetchFn = fetch,
   pdfParseFn = pdfParse
@@ -606,35 +782,29 @@ export async function ingestCustomsDocument({
 
   // 2. Fetch document if buffer not already provided
   let pdfBuffer = buffer;
+  let finalSourceUrl = documentUrl;
+
   if (!pdfBuffer) {
-    try {
-      const res = await fetchFn(documentUrl, {
-        method: 'GET',
-        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
-      });
-      if (!res.ok) {
-        return {
-          success: false,
-          status: 'unavailable',
-          reason: 'FETCH_FAILED',
-          httpStatus: res.status
-        };
-      }
-      const arrayBuf = await res.arrayBuffer();
-      pdfBuffer = Buffer.from(arrayBuf);
-    } catch (err) {
+    const fetchResult = await fetchCustomsWithSafeRedirect(documentUrl, { fetchFn });
+    if (!fetchResult.success) {
       return {
         success: false,
-        status: 'failed',
-        reason: 'FETCH_ERROR',
-        error: String(err?.message || err)
+        status: fetchResult.status,
+        reason: fetchResult.reason,
+        details: fetchResult.details,
+        httpStatus: fetchResult.httpStatus,
+        error: fetchResult.error
       };
     }
+    pdfBuffer = fetchResult.buffer;
+    finalSourceUrl = fetchResult.finalUrl;
   }
 
   // 3. Parse document
+  // Publication date is never guessed from URL path; remains null unless explicitly provided
   const parsed = await parseCustomsTradeDocument(pdfBuffer, {
-    sourceUrl: documentUrl,
+    sourceUrl: finalSourceUrl,
+    publishedAt,
     pdfParseFn
   });
 

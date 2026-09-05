@@ -377,7 +377,8 @@ export function createUnavailableObservation(
     unit = '',
     unitType = null,
     referenceTime = null,
-    authorityLevel = AUTHORITY_LEVELS.MARKET_REFERENCE
+    authorityLevel = AUTHORITY_LEVELS.MARKET_REFERENCE,
+    provenance = null
   } = {}
 ) {
   const resolvedFactId = factId || id;
@@ -396,6 +397,6 @@ export function createUnavailableObservation(
     authorityLevel,
     status: OBSERVATION_STATUS.UNAVAILABLE,
     statusReason: reason,
-    provenance: { reason }
+    provenance: { reason, ...(provenance && typeof provenance === 'object' ? provenance : {}) }
   });
 }

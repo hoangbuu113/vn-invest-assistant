@@ -377,7 +377,7 @@ export function deriveMarketSignals({ observations = [], marketObservations = nu
       status: 'active',
       limitations: isStale
         ? 'Số liệu thương mại hải quan đã quá hạn (stale); tín hiệu duy trì trạng thái trung tính/không định hướng cho tới kỳ công bố mới.'
-        : 'Số liệu cán cân thương mại hàng hóa công bố định kỳ bởi Tổng cục Hải quan; phản ánh tình trạng xuất nhập khẩu hàng hóa thực tế và không hàm ý xu hướng trực tiếp cho thị trường chứng khoán (không suy diễn "thặng dư => cổ phiếu tăng"). Chưa bao gồm thương mại dịch vụ và cán cân vốn.'
+        : 'Số liệu cán cân thương mại hàng hóa công bố định kỳ bởi Cục Hải quan - Bộ Tài chính; phản ánh tình trạng xuất nhập khẩu hàng hóa thực tế và không hàm ý xu hướng trực tiếp cho thị trường chứng khoán (không suy diễn "thặng dư => cổ phiếu tăng"). Chưa bao gồm thương mại dịch vụ và cán cân vốn.'
     });
   }
 

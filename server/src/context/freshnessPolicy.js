@@ -31,6 +31,15 @@ export const CADENCE_POLICIES = Object.freeze({
   CUSTOMS_MONTHLY_RELEASE: 'CUSTOMS_MONTHLY_RELEASE'
 });
 
+export const CADENCE_POLICY_METADATA = Object.freeze({
+  [CADENCE_POLICIES.CUSTOMS_MONTHLY_RELEASE]: Object.freeze({
+    policyType: 'ENGINEERING_POLICY',
+    isOfficialSla: false,
+    cadenceDays: 45,
+    disclaimer: 'Provisional internal engineering policy based on typical monthly reporting cadence; not an official Vietnam Customs publication commitment or statutory SLA.'
+  })
+});
+
 export const FACT_POLICY_MAP = Object.freeze({
   'vn.macro.cpi.yoy': CADENCE_POLICIES.NSO_MONTHLY_RELEASE,
   'macro.cpi_yoy': CADENCE_POLICIES.NSO_MONTHLY_RELEASE,
@@ -121,8 +130,7 @@ export function evaluateObservationFreshness(obs, now = new Date()) {
 
   switch (policy) {
     case CADENCE_POLICIES.MONTHLY_MACRO:
-    case CADENCE_POLICIES.NSO_MONTHLY_RELEASE:
-    case CADENCE_POLICIES.CUSTOMS_MONTHLY_RELEASE: {
+    case CADENCE_POLICIES.NSO_MONTHLY_RELEASE: {
       if (typeof obs.referenceTime === 'string' && /^\d{4}-\d{2}$/.test(obs.referenceTime)) {
         const [yearStr, monthStr] = obs.referenceTime.split('-');
         const refYear = Number(yearStr);
@@ -152,6 +160,42 @@ export function evaluateObservationFreshness(obs, now = new Date()) {
         }
       }
       return { freshness: 'fresh', isStale: false, status: 'available', policy };
+    }
+
+    case CADENCE_POLICIES.CUSTOMS_MONTHLY_RELEASE: {
+      const meta = CADENCE_POLICY_METADATA[CADENCE_POLICIES.CUSTOMS_MONTHLY_RELEASE];
+      const policyType = meta?.policyType || 'ENGINEERING_POLICY';
+      const isOfficialSla = meta?.isOfficialSla ?? false;
+
+      if (typeof obs.referenceTime === 'string' && /^\d{4}-\d{2}$/.test(obs.referenceTime)) {
+        const [yearStr, monthStr] = obs.referenceTime.split('-');
+        const refYear = Number(yearStr);
+        const refMonth = Number(monthStr); // 1-12
+        const refEndMs = new Date(Date.UTC(refYear, refMonth, 0, 23, 59, 59)).getTime();
+        const ageFromRefEndDays = (nowMs - refEndMs) / (24 * 3600 * 1000);
+        if (ageFromRefEndDays > 45) {
+          return { freshness: 'stale', isStale: true, status: 'stale', policy, reason: 'MONTHLY_CADENCE_EXPIRED', policyType, isOfficialSla };
+        }
+        return { freshness: 'fresh', isStale: false, status: 'available', policy, policyType, isOfficialSla };
+      }
+      if (typeof obs.referenceTime === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(obs.referenceTime)) {
+        const refKey = normalizeReferencePeriodKey(obs.referenceTime);
+        const refMs = Date.parse(refKey);
+        if (Number.isFinite(refMs)) {
+          const ageDays = (nowMs - refMs) / (24 * 3600 * 1000);
+          if (ageDays > 45) {
+            return { freshness: 'stale', isStale: true, status: 'stale', policy, reason: 'MONTHLY_CADENCE_EXPIRED', policyType, isOfficialSla };
+          }
+          return { freshness: 'fresh', isStale: false, status: 'available', policy, policyType, isOfficialSla };
+        }
+      }
+      if (obsTimeMs) {
+        const ageDays = (nowMs - obsTimeMs) / (24 * 3600 * 1000);
+        if (ageDays > 45) {
+          return { freshness: 'stale', isStale: true, status: 'stale', policy, reason: 'MONTHLY_AGE_EXCEEDED', policyType, isOfficialSla };
+        }
+      }
+      return { freshness: 'fresh', isStale: false, status: 'available', policy, policyType, isOfficialSla };
     }
 
     case CADENCE_POLICIES.QUARTERLY_MACRO:
