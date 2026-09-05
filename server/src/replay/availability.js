@@ -178,13 +178,8 @@ export function resolveEvidenceAvailabilityTime(evidenceItem, {
     });
   }
 
-  // Check explicit trust instant ingestion flags on the item itself
-  const instantIngestion = Boolean(
-    assumeInstantIngestion ||
-    evidenceItem.trustInstantIngestion === true ||
-    evidenceItem.assumeInstantIngestion === true ||
-    evidenceItem.instantIngestion === true
-  );
+  // Instant ingestion must be controlled ONLY by trusted caller configuration, never by payload fields
+  const instantIngestion = assumeInstantIngestion === true;
 
   const isCorrection = isVersionedCorrection(evidenceItem);
 

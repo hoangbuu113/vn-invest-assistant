@@ -779,3 +779,91 @@ test('26. claim corroboration and contradiction preservation under as-of', () =>
   assert.ok(claim15);
   assert.equal(claim15.contradictionCount, 1);
 });
+
+// 27. payload trustInstantIngestion=true cannot bypass first-seen requirement under default caller options
+test('27. payload trustInstantIngestion=true cannot bypass first-seen requirement under default caller options', () => {
+  const item = {
+    factId: 'vn.macro.cpi.yoy',
+    value: 4.89,
+    publishedAt: '2026-09-01T08:00:00.000Z',
+    trustInstantIngestion: true
+  };
+
+  const avail = resolveEvidenceAvailabilityTime(item);
+  assert.equal(avail.isAvailable, false);
+  assert.equal(avail.replaySafe, false);
+  assert.equal(avail.classification, AVAILABILITY_CLASSIFICATION.UNSAFE_MISSING_SYSTEM_FIRST_SEEN);
+
+  const packet = buildHistoricalEvidencePacket({
+    asOf: '2026-09-05T00:00:00.000Z',
+    observations: [item]
+  });
+  assert.equal(packet.observations.length, 0);
+  assert.equal(packet.replayMetadata.excludedUnsafeTimestampCount, 1);
+});
+
+// 28. payload assumeInstantIngestion=true and instantIngestion=true cannot bypass under default options
+test('28. payload assumeInstantIngestion=true and instantIngestion=true cannot bypass under default options', () => {
+  const itemAssume = {
+    factId: 'vn.macro.cpi.yoy',
+    value: 4.89,
+    publishedAt: '2026-09-01T08:00:00.000Z',
+    assumeInstantIngestion: true
+  };
+  const itemInstant = {
+    factId: 'vn.macro.cpi.yoy',
+    value: 4.89,
+    publishedAt: '2026-09-01T08:00:00.000Z',
+    instantIngestion: true
+  };
+
+  assert.equal(resolveEvidenceAvailabilityTime(itemAssume).isAvailable, false);
+  assert.equal(resolveEvidenceAvailabilityTime(itemAssume).classification, AVAILABILITY_CLASSIFICATION.UNSAFE_MISSING_SYSTEM_FIRST_SEEN);
+
+  assert.equal(resolveEvidenceAvailabilityTime(itemInstant).isAvailable, false);
+  assert.equal(resolveEvidenceAvailabilityTime(itemInstant).classification, AVAILABILITY_CLASSIFICATION.UNSAFE_MISSING_SYSTEM_FIRST_SEEN);
+
+  const packet = buildHistoricalEvidencePacket({
+    asOf: '2026-09-05T00:00:00.000Z',
+    observations: [itemAssume, itemInstant]
+  });
+  assert.equal(packet.observations.length, 0);
+  assert.equal(packet.replayMetadata.excludedUnsafeTimestampCount, 2);
+});
+
+// 29. trusted caller option assumeInstantIngestion=true enables explicit internal contract
+test('29. trusted caller option assumeInstantIngestion=true enables explicit internal contract', () => {
+  const item = {
+    factId: 'vn.macro.cpi.yoy',
+    value: 4.89,
+    publishedAt: '2026-09-01T08:00:00.000Z'
+  };
+
+  const avail = resolveEvidenceAvailabilityTime(item, { assumeInstantIngestion: true });
+  assert.equal(avail.isAvailable, true);
+  assert.equal(avail.replaySafe, true);
+  assert.equal(avail.availabilityTime, '2026-09-01T08:00:00.000Z');
+  assert.equal(avail.classification, AVAILABILITY_CLASSIFICATION.SYSTEM_KNOWABLE_ASSUMED_INSTANT_INGESTION);
+
+  const packet = buildHistoricalEvidencePacket({
+    asOf: '2026-09-05T00:00:00.000Z',
+    observations: [item],
+    assumeInstantIngestion: true
+  });
+  assert.equal(packet.observations.length, 1);
+  assert.equal(packet.observations[0].factId, 'vn.macro.cpi.yoy');
+});
+
+// 30. publishedAt + valid firstSeenAt still obeys max(publishedAt, firstSeenAt)
+test('30. publishedAt + valid firstSeenAt still obeys max(publishedAt, firstSeenAt)', () => {
+  const obs = {
+    factId: 'vn.macro.cpi.yoy',
+    value: 4.89,
+    publishedAt: '2026-09-01T09:00:00.000Z',
+    firstSeenAt: '2026-09-01T11:00:00.000Z'
+  };
+
+  const avail = resolveEvidenceAvailabilityTime(obs, { assumeInstantIngestion: true });
+  assert.equal(avail.availabilityTime, '2026-09-01T11:00:00.000Z');
+  assert.equal(avail.classification, AVAILABILITY_CLASSIFICATION.SYSTEM_KNOWABLE_FROM_SOURCE_AND_FIRST_SEEN);
+});
