@@ -49,12 +49,15 @@ export function rowToArticle(row) {
     relatedAssets: row.related_assets
   }, { fetchedAt: row.fetched_at, sourceStatus: row.freshness === 'stale' ? 'stale' : 'ok' });
   if (!article) return null;
+  const effectiveArticleId = row.article_id || article.articleId;
+  const effectiveContentHash = row.content_hash || article.contentHash;
+  const effectiveVersionId = row.version_id || `${effectiveArticleId}:v_${effectiveContentHash}`;
   return Object.freeze({
     ...article,
-    articleId: row.article_id,
-    id: row.article_id,
-    versionId: row.version_id || article.versionId,
-    contentHash: row.content_hash || article.contentHash,
+    articleId: effectiveArticleId,
+    id: effectiveArticleId,
+    versionId: effectiveVersionId,
+    contentHash: effectiveContentHash,
     geography: row.geography || article.geography,
     sourceAuthority: row.source_authority || article.sourceAuthority,
     quality: row.quality || article.quality,

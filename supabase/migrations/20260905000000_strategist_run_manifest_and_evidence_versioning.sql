@@ -1,4 +1,4 @@
-﻿-- Migration: 20260905000000_strategist_run_manifest_and_evidence_versioning.sql
+-- Migration: 20260905000000_strategist_run_manifest_and_evidence_versioning.sql
 -- Description: Run manifests and evidence versioning audit trail for AI Market Strategist.
 -- Public market strategy run manifests: strictly non-private market evidence and audit receipts.
 -- Read-only for authenticated and anonymous users, writes restricted to service_role.
@@ -9,6 +9,24 @@ BEGIN;
 ALTER TABLE IF EXISTS public.market_news_articles
     ADD COLUMN IF NOT EXISTS content_hash TEXT,
     ADD COLUMN IF NOT EXISTS version_id TEXT;
+
+-- Safe deterministic backfill for existing legacy rows lacking version_id or content_hash.
+-- Derives content_hash using SHA-256 of canonical fields, preserving exact article_id identity.
+UPDATE public.market_news_articles
+SET
+    content_hash = COALESCE(
+        content_hash,
+        SUBSTRING(encode(sha256(convert_to(concat_ws('|', COALESCE(title, ''), COALESCE(excerpt, ''), COALESCE(published_at::text, ''), COALESCE(canonical_url, '')), 'UTF8')), 'hex') FROM 1 FOR 12)
+    ),
+    version_id = COALESCE(
+        version_id,
+        article_id || ':v_' || SUBSTRING(encode(sha256(convert_to(concat_ws('|', COALESCE(title, ''), COALESCE(excerpt, ''), COALESCE(published_at::text, ''), COALESCE(canonical_url, '')), 'UTF8')), 'hex') FROM 1 FOR 12)
+    )
+WHERE version_id IS NULL OR content_hash IS NULL;
+
+-- Index on version_id for fast exact version lookups
+CREATE INDEX IF NOT EXISTS idx_market_news_version_id
+    ON public.market_news_articles (version_id);
 
 -- Create run manifests table
 CREATE TABLE IF NOT EXISTS public.market_strategist_runs (

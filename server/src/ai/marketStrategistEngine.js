@@ -18,6 +18,7 @@ import {
 import { deriveMarketSignals } from './derivedSignals.js';
 import { normalizeReferencePeriodKey } from '../context/factModel.js';
 import { persistRunManifest } from './marketStrategistManifest.js';
+import { calculateArticleContentHash } from '../news/contract.js';
 
 export const STRATEGIST_CACHE_TTL_MS = 15 * 60 * 1000; // 15 minutes
 export const STRATEGIST_COOLDOWN_MS = 15 * 1000;       // 15 seconds
@@ -121,12 +122,13 @@ export function buildMarketStrategistFactPacket({
     const excerptLower = (article.excerpt || article.summary || '').toLowerCase();
     const text = `${titleLower} ${excerptLower}`;
 
-    const versionId = article.versionId || `${articleId}:v_${article.contentHash || '1'}`;
+    const contentHash = article.contentHash || calculateArticleContentHash(article);
+    const versionId = article.versionId || `${articleId}:v_${contentHash}`;
     const normalized = {
       articleId,
       id: articleId,
       versionId,
-      contentHash: article.contentHash || null,
+      contentHash,
       title: article.title || 'Untitled',
       excerpt: article.excerpt || article.summary || '',
       sourceName: article.sourceName || article.source || 'News Source',
@@ -175,11 +177,13 @@ export function buildMarketStrategistFactPacket({
   const validArticleVersionIds = new Set(selectedNews.map((a) => a.versionId).filter(Boolean));
 
   const untrustedNews = selectedNews.length > 0 ? selectedNews : [];
-  const dataAsOf = computeEvidenceDataAsOf({ evidence, untrustedNews, now });
+  const evidenceCoverage = computeEvidenceCoverage({ evidence, untrustedNews, now });
+  const dataAsOf = evidenceCoverage.dataAsOf;
 
   return {
     now,
     dataAsOf,
+    evidenceCoverage,
     evidence,
     untrustedNews,
     derivedSignals,
@@ -192,24 +196,28 @@ export function buildMarketStrategistFactPacket({
 }
 
 /**
- * Computes dataAsOf from the actual timestamps of selected evidence and news.
- * Guarantees that dataAsOf is historically truthful and does not advance simply because request time changed.
+ * Computes comprehensive evidence coverage and cadence limitations across all selected facts and news.
+ * Guarantees that public strategist consumers are never misled into believing older monthly macro facts
+ * share the intraday timestamp of real-time indicators.
  */
-export function computeEvidenceDataAsOf({ evidence = [], untrustedNews = [], now = new Date() } = {}) {
-  let maxTimeMs = 0;
+export function computeEvidenceCoverage({ evidence = [], untrustedNews = [], now = new Date() } = {}) {
+  let newestMs = 0;
+  let oldestMs = Infinity;
+  let limitingEvidence = null;
+  const cadenceBreakdown = {};
 
   for (const obs of Array.isArray(evidence) ? evidence : []) {
     if (!obs) continue;
+    let obsTimeMs = null;
     let foundExact = false;
     const timeCandidates = [obs.publishedTime, obs.publishedAt, obs.observedAt];
     for (const cand of timeCandidates) {
       if (typeof cand === 'string' && cand.trim()) {
         const ms = Date.parse(cand.trim());
         if (Number.isFinite(ms)) {
-          if (ms > maxTimeMs) {
-            maxTimeMs = ms;
-          }
+          obsTimeMs = ms;
           foundExact = true;
+          break;
         }
       }
     }
@@ -217,8 +225,33 @@ export function computeEvidenceDataAsOf({ evidence = [], untrustedNews = [], now
     if (!foundExact && typeof obs.referenceTime === 'string' && obs.referenceTime.trim()) {
       const trimmed = obs.referenceTime.trim();
       const ms = Date.parse(trimmed) || Date.parse(`${trimmed}T00:00:00.000Z`);
-      if (Number.isFinite(ms) && ms > maxTimeMs) {
-        maxTimeMs = ms;
+      if (Number.isFinite(ms)) {
+        obsTimeMs = ms;
+      }
+    }
+
+    if (obsTimeMs !== null) {
+      if (obsTimeMs > newestMs) {
+        newestMs = obsTimeMs;
+      }
+      if (obsTimeMs < oldestMs) {
+        oldestMs = obsTimeMs;
+        limitingEvidence = {
+          factId: obs.factId || obs.id,
+          observationId: obs.observationId || obs.id,
+          pillar: obs.pillar || 'unknown',
+          referenceTime: obs.referenceTime || null,
+          timestamp: new Date(obsTimeMs).toISOString()
+        };
+      }
+      if (obs.pillar) {
+        if (!cadenceBreakdown[obs.pillar] || obsTimeMs > cadenceBreakdown[obs.pillar].timestampMs) {
+          cadenceBreakdown[obs.pillar] = {
+            asOf: new Date(obsTimeMs).toISOString(),
+            timestampMs: obsTimeMs,
+            referenceTime: obs.referenceTime || null
+          };
+        }
       }
     }
   }
@@ -227,17 +260,53 @@ export function computeEvidenceDataAsOf({ evidence = [], untrustedNews = [], now
     if (!article) continue;
     if (typeof article.publishedAt === 'string' && article.publishedAt.trim()) {
       const ms = Date.parse(article.publishedAt.trim());
-      if (Number.isFinite(ms) && ms > maxTimeMs) {
-        maxTimeMs = ms;
+      if (Number.isFinite(ms)) {
+        if (ms > newestMs) newestMs = ms;
+        if (ms < oldestMs) {
+          oldestMs = ms;
+          limitingEvidence = {
+            factId: 'news',
+            observationId: article.versionId || article.articleId,
+            pillar: 'news',
+            referenceTime: null,
+            timestamp: new Date(ms).toISOString()
+          };
+        }
       }
     }
   }
 
-  if (maxTimeMs > 0) {
-    return new Date(maxTimeMs).toISOString();
+  const hasEvidence = newestMs > 0;
+  const newestIso = hasEvidence ? new Date(newestMs).toISOString() : (now instanceof Date ? now : new Date()).toISOString();
+  const oldestIso = hasEvidence && oldestMs !== Infinity ? new Date(oldestMs).toISOString() : newestIso;
+
+  const cadenceLimitations = [];
+  if (cadenceBreakdown.macro && cadenceBreakdown.market && cadenceBreakdown.macro.timestampMs < cadenceBreakdown.market.timestampMs) {
+    cadenceLimitations.push(`Dữ liệu vĩ mô (kỳ ${cadenceBreakdown.macro.referenceTime || cadenceBreakdown.macro.asOf}) công bố định kỳ theo tháng/quý, có độ trễ so với diễn biến thị trường đóng cửa phiên gần nhất (${cadenceBreakdown.market.referenceTime || cadenceBreakdown.market.asOf}).`);
+  }
+  if (cadenceBreakdown.market && (cadenceBreakdown.intermarket || cadenceBreakdown.monetary)) {
+    const newerTime = Math.max(cadenceBreakdown.intermarket?.timestampMs || 0, cadenceBreakdown.monetary?.timestampMs || 0);
+    if (newerTime > cadenceBreakdown.market.timestampMs) {
+      cadenceLimitations.push('Chỉ số chứng khoán cơ sở phản ánh phiên đóng cửa gần nhất; tỷ giá và chỉ số liên thị trường quốc tế có thể tiếp tục biến động trong phiên hiện tại.');
+    }
   }
 
-  return (now instanceof Date ? now : new Date()).toISOString();
+  return {
+    dataAsOf: newestIso,
+    newestEvidenceAt: newestIso,
+    oldestEvidenceAt: oldestIso,
+    limitingEvidence,
+    cadenceLimitations,
+    hasMixedCadence: oldestIso !== newestIso
+  };
+}
+
+/**
+ * Computes dataAsOf from the actual timestamps of selected evidence and news.
+ * Guarantees that dataAsOf is historically truthful and does not advance simply because request time changed.
+ */
+export function computeEvidenceDataAsOf({ evidence = [], untrustedNews = [], now = new Date() } = {}) {
+  return computeEvidenceCoverage({ evidence, untrustedNews, now }).dataAsOf;
 }
 
 /**
@@ -625,6 +694,7 @@ export function generateDeterministicMarketStrategist({ factPacket, now = new Da
     },
     generatedAt: now instanceof Date ? now.toISOString() : new Date().toISOString(),
     dataAsOf: factPacket.dataAsOf,
+    evidenceCoverage: factPacket.evidenceCoverage || null,
     generationMode: 'deterministic_fallback',
     methodologyVersion: STRATEGIST_METHODOLOGY_VERSION
   };
@@ -669,6 +739,7 @@ export async function generateMarketStrategist({
       return {
         ...cached,
         generationMode: 'cache',
+        evidenceCoverage: cached.evidenceCoverage || factPacket.evidenceCoverage || null,
         evidence,
         derivedSignals: derivedSignals || []
       };
@@ -856,6 +927,7 @@ export async function generateMarketStrategist({
             ...publication.output,
             generatedAt: now instanceof Date ? now.toISOString() : new Date().toISOString(),
             dataAsOf: factPacket.dataAsOf,
+            evidenceCoverage: factPacket.evidenceCoverage || null,
             generationMode: (rawLlmOutput.generationMode && rawLlmOutput.generationMode !== 'deterministic_fallback')
               ? rawLlmOutput.generationMode
               : 'live_ai',
@@ -926,6 +998,8 @@ export async function generateMarketStrategist({
   return {
     ...result,
     runId: manifest.runId,
+    dataAsOf: result.dataAsOf || factPacket.dataAsOf,
+    evidenceCoverage: result.evidenceCoverage || factPacket.evidenceCoverage || null,
     evidence,
     derivedSignals: derivedSignals || []
   };

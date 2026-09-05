@@ -584,6 +584,7 @@ export function buildSafeInsufficientEvidenceBrief({
     },
     generatedAt,
     dataAsOf: factPacket.dataAsOf || generatedAt,
+    evidenceCoverage: factPacket.evidenceCoverage || null,
     generationMode: 'deterministic_fallback',
     methodologyVersion: STRATEGIST_METHODOLOGY_VERSION,
     gateAudit: {

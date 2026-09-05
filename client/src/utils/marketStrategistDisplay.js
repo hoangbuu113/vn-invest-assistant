@@ -163,6 +163,9 @@ export function buildMarketStrategistViewModel(raw) {
 
   return {
     isStrategist: true,
+    runId: data.runId || null,
+    dataAsOf: data.dataAsOf || null,
+    evidenceCoverage: data.evidenceCoverage || null,
     badgeLabel,
     modeLabel,
     fallbackNotice,

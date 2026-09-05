@@ -31,12 +31,14 @@ import {
   calculateArticleContentHash
 } from '../src/news/contract.js';
 import {
-  applyNewsFreshness
+  applyNewsFreshness,
+  rowToArticle
 } from '../src/news/repository.js';
 import {
   buildMarketStrategistFactPacket,
   computeStrategistFingerprint,
   computeEvidenceDataAsOf,
+  computeEvidenceCoverage,
   generateMarketStrategist,
   generateDeterministicMarketStrategist,
   MarketStrategistRuntime,
@@ -596,6 +598,174 @@ test('V1.2 Improvement 05B — Evidence Versioning & Reproducibility (Astra Regr
         userId: 'usr_secret_123'
       }, null);
     }, /FORBIDDEN_USER_DATA/);
+  });
+
+  await t.test('18. Mixed Cadence Evidence Coverage — Truthful dataAsOf & Limitation Explanations', async () => {
+    const cpiObs = createMarketObservation({
+      factId: 'vn.macro.cpi.yoy',
+      pillar: PILLARS.MACRO,
+      value: 3.45,
+      unit: '%',
+      referenceTime: '2026-08',
+      observedAt: '2026-08-29T02:00:00.000Z'
+    });
+
+    const vnIndexObs = createMarketObservation({
+      factId: 'vn.market.vnindex.close',
+      pillar: PILLARS.MARKET,
+      value: 1845.2,
+      unit: 'điểm',
+      referenceTime: '2026-09-04',
+      observedAt: '2026-09-04T08:00:00.000Z'
+    });
+
+    const fxObs = createMarketObservation({
+      factId: 'vn.monetary.usdvnd',
+      pillar: PILLARS.MONETARY,
+      value: 25420,
+      unit: 'VND',
+      referenceTime: '2026-09-05',
+      observedAt: '2026-09-05T09:30:00.000Z'
+    });
+
+    const newsArticle = normalizeCanonicalArticle({
+      sourceId: 'cafef',
+      title: 'Tỷ giá USD hạ nhiệt trong phiên sáng',
+      excerpt: 'Thị trường ngoại tệ ghi nhận giao dịch ổn định.',
+      url: 'https://cafef.vn/ty-gia-sang.chn',
+      publishedAt: '2026-09-05T09:45:00.000Z'
+    }, { fetchedAt: '2026-09-05T09:50:00.000Z' });
+
+    const coverage = computeEvidenceCoverage({
+      evidence: [cpiObs, vnIndexObs, fxObs],
+      untrustedNews: [newsArticle],
+      now: new Date('2026-09-05T10:00:00.000Z')
+    });
+
+    // 1. dataAsOf is truthful latest timestamp
+    assert.equal(coverage.dataAsOf, '2026-09-05T09:45:00.000Z');
+    assert.equal(coverage.newestEvidenceAt, '2026-09-05T09:45:00.000Z');
+
+    // 2. Oldest / limiting evidence is correctly identified as monthly CPI
+    assert.equal(coverage.oldestEvidenceAt, '2026-08-29T02:00:00.000Z');
+    assert.equal(coverage.limitingEvidence.factId, 'vn.macro.cpi.yoy');
+    assert.equal(coverage.limitingEvidence.pillar, PILLARS.MACRO);
+
+    // 3. Mixed cadence flags and limitations are transparently exposed
+    assert.equal(coverage.hasMixedCadence, true);
+    assert.ok(coverage.cadenceLimitations.length > 0);
+    assert.ok(coverage.cadenceLimitations.some((msg) => msg.includes('vĩ mô') && msg.includes('độ trễ')));
+
+    // 4. Fact packet and generated strategist expose the full coverage contract
+    const packet = buildMarketStrategistFactPacket({
+      marketObservations: [cpiObs, vnIndexObs, fxObs],
+      newsArticles: [newsArticle],
+      now: new Date('2026-09-05T10:00:00.000Z')
+    });
+
+    assert.equal(packet.dataAsOf, coverage.dataAsOf);
+    assert.deepEqual(packet.evidenceCoverage, coverage);
+
+    const deterministic = generateDeterministicMarketStrategist({ factPacket: packet, now: new Date() });
+    assert.equal(deterministic.dataAsOf, coverage.dataAsOf);
+    assert.deepEqual(deterministic.evidenceCoverage, coverage);
+
+    const runtime = new MarketStrategistRuntime();
+    const result = await generateMarketStrategist({
+      factPacket: packet,
+      allowLlm: false,
+      runtime
+    });
+    assert.equal(result.dataAsOf, coverage.dataAsOf);
+    assert.deepEqual(result.evidenceCoverage, coverage);
+  });
+
+  await t.test('19. Legacy News Row Compatibility — Graceful Tolerance & Deterministic Identity', () => {
+    // Legacy row straight from database where version_id and content_hash are NULL
+    const legacyRow = {
+      article_id: 'news_cafef_legacy_9999',
+      version_id: null,
+      content_hash: null,
+      source_id: 'cafef',
+      source_name: 'CafeF',
+      title: 'Chính sách tiền tệ tiếp tục ưu tiên ổn định vĩ mô',
+      excerpt: 'Ngân hàng Nhà nước điều hành đồng bộ các công cụ lãi suất và tỷ giá.',
+      canonical_url: 'https://cafef.vn/chinh-sach-tien-te-legacy.chn',
+      published_at: '2026-09-04T07:00:00.000Z',
+      fetched_at: '2026-09-04T07:05:00.000Z',
+      language: 'vi',
+      category: 'macro',
+      topic: 'chính sách',
+      related_assets: [],
+      geography: 'vietnam',
+      source_authority: 'FINANCIAL_MEDIA',
+      quality: 'VALIDATED_METADATA',
+      freshness: 'fresh'
+    };
+
+    // rowToArticle must not throw and must derive deterministic versionId
+    const article = rowToArticle(legacyRow);
+    assert.ok(article);
+    assert.equal(article.articleId, legacyRow.article_id, 'Must preserve exact article_id');
+    assert.ok(article.versionId.startsWith(`${legacyRow.article_id}:v_`));
+    assert.ok(typeof article.contentHash === 'string' && article.contentHash.length > 0);
+
+    // Citations must resolve when citing legacy article's versionId
+    const obs = createMarketObservation({
+      factId: 'vn.market.vnindex.close',
+      pillar: PILLARS.MARKET,
+      value: 1850,
+      unit: 'điểm'
+    });
+
+    const packet = buildMarketStrategistFactPacket({
+      marketObservations: [obs],
+      newsArticles: [article]
+    });
+
+    assert.ok(packet.validArticleIds.has(article.articleId));
+    assert.ok(packet.validArticleVersionIds.has(article.versionId));
+
+    const candidate = generateDeterministicMarketStrategist({ factPacket: packet, now: new Date() });
+    candidate.citations.articleIds = [article.versionId];
+    const validation = validateMarketStrategistOutput(candidate, packet);
+    assert.equal(validation.valid, true);
+
+    // Correcting content on legacy article produces a NEW versionId while keeping same articleId
+    const correctedRow = {
+      ...legacyRow,
+      excerpt: 'Ngân hàng Nhà nước điều hành đồng bộ các công cụ lãi suất, tỷ giá và cung ứng tiền qua OMO.'
+    };
+    const correctedArticle = rowToArticle(correctedRow);
+    assert.equal(correctedArticle.articleId, legacyRow.article_id, 'articleId must remain strictly unchanged');
+    assert.notEqual(correctedArticle.versionId, article.versionId, 'Corrected excerpt must produce new versionId');
+    assert.notEqual(correctedArticle.contentHash, article.contentHash, 'Corrected excerpt must produce new contentHash');
+  });
+
+  await t.test('20. calculateArticleContentHash — Schema Flexibility & Missing Field Tolerance', () => {
+    // CamelCase article object
+    const hash1 = calculateArticleContentHash({
+      url: 'https://cafef.vn/tin-tuc-1.chn',
+      publishedAt: '2026-09-04T10:00:00.000Z',
+      title: 'Tiêu đề bài viết',
+      summary: 'Tóm tắt nội dung'
+    });
+
+    // DB snake_case row object with equivalent content
+    const hash2 = calculateArticleContentHash({
+      canonical_url: 'https://cafef.vn/tin-tuc-1.chn',
+      published_at: '2026-09-04T10:00:00.000Z',
+      title: 'Tiêu đề bài viết',
+      excerpt: 'Tóm tắt nội dung'
+    });
+
+    assert.equal(hash1, hash2, 'Hash must be identical across camelCase and snake_case row formats');
+    assert.equal(hash1.length, 12, 'Hash must be 12-char hexadecimal slice');
+
+    // Robust against missing optional fields
+    const hashEmpty = calculateArticleContentHash({});
+    assert.equal(typeof hashEmpty, 'string');
+    assert.equal(hashEmpty.length, 12);
   });
 
 });

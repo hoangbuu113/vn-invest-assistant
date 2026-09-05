@@ -47,10 +47,12 @@ export function normalizeRelatedAssets(relationships = []) {
  * Calculates a deterministic content hash of the article's material content.
  * Distinguishes article versions when content is corrected or updated.
  */
-export function calculateArticleContentHash({ title, excerpt, summary, publishedAt, url } = {}) {
+export function calculateArticleContentHash(article = {}) {
+  const url = article.url || article.canonical_url || article.canonicalUrl || '';
+  const publishedAt = article.publishedAt || article.published_at || null;
   const content = {
-    title: cleanPlainText(title) || '',
-    excerpt: cleanPlainText(summary || excerpt) || '',
+    title: cleanPlainText(article.title) || '',
+    excerpt: cleanPlainText(article.summary || article.excerpt) || '',
     publishedAt: normalizePublishedAt(publishedAt) || '',
     url: normalizeUrl(url) || ''
   };
