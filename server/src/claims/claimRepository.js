@@ -6,6 +6,14 @@ const memoryClaims = new Map();
 const memoryEvidenceLinks = new Map();
 
 /**
+ * ARCHITECTURAL BOUNDARY (01D Historical Replay):
+ * - `market_claims` stores the CURRENT reconciled assessment state (supportStatus, counts, dimensions, limitations).
+ * - Point-in-time historical reconstruction is deferred to 01D and must query historical slices of
+ *   timestamped `claim_evidence_links` and immutable observations/news versions.
+ * - `market_claims` rows evolve via upsert and are NOT independently append-only ledger entries.
+ */
+
+/**
  * Converts a database row to a canonical MarketClaim object.
  */
 export function rowToClaim(row) {
@@ -71,6 +79,10 @@ export function claimToRow(claim) {
 
 /**
  * Persists reconciled claims and their evidence links to database and in-memory store.
+ * Strictly guarantees:
+ * - Independence must be positively established (isIndependent: ev.isIndependent === true).
+ * - Omitted independence defaults strictly to false.
+ * - dependencyGroup is durably recorded for future 01D historical replay reconstruction.
  */
 export async function persistClaims(reconciledList = [], client = privateSupabase) {
   if (!Array.isArray(reconciledList) || reconciledList.length === 0) {
@@ -95,7 +107,9 @@ export async function persistClaims(reconciledList = [], client = privateSupabas
         evidenceType: ev.evidenceType || 'observation',
         evidenceId: ev.evidenceId || ev.id,
         sourceFamily: ev.sourceFamily || 'UNKNOWN',
-        isIndependent: ev.isIndependent !== false
+        dependencyGroup: ev.dependencyGroup || 'UNKNOWN_DEPENDENCY',
+        isIndependent: ev.isIndependent === true,
+        createdAt: ev.createdAt || new Date().toISOString()
       });
     }
 
@@ -115,7 +129,9 @@ export async function persistClaims(reconciledList = [], client = privateSupabas
             evidence_type: ev.evidenceType || 'observation',
             evidence_id: ev.evidenceId || ev.id,
             source_family: ev.sourceFamily || 'UNKNOWN',
-            is_independent: ev.isIndependent !== false
+            dependency_group: ev.dependencyGroup || 'UNKNOWN_DEPENDENCY',
+            is_independent: ev.isIndependent === true,
+            created_at: ev.createdAt || new Date().toISOString()
           }));
           await client.from('claim_evidence_links').upsert(linkRows, {
             onConflict: 'claim_id,evidence_type,evidence_id'
@@ -200,4 +216,11 @@ export async function getAllActiveClaims(client = privateSupabase) {
 export function clearMemoryClaims() {
   memoryClaims.clear();
   memoryEvidenceLinks.clear();
+}
+
+/**
+ * Retrieves in-memory evidence links for a specific claim.
+ */
+export function getEvidenceLinksForClaim(claimId) {
+  return memoryEvidenceLinks.get(claimId) || [];
 }

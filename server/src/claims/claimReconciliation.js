@@ -6,8 +6,12 @@ import {
 } from './claimModel.js';
 import {
   SOURCE_FAMILIES,
+  DEPENDENCY_GROUPS,
   aggregateEvidenceSources,
-  isFamilyIndependent
+  classifySourceFamily,
+  isFamilyIndependent,
+  isDependencyIndependent,
+  resolveClaimDependency
 } from './sourceFamily.js';
 import { doesEvidenceSupportClaim } from './claimExtractor.js';
 
@@ -63,29 +67,69 @@ export function reconcileClaims(candidateClaims = [], evidenceItems = []) {
     // B. Reconcile each claim in group
     for (const claim of claimsInGroup) {
       // Find all supporting evidence items
-      const supportingEvidence = [];
+      const rawSupportingEvidence = [];
       for (const ev of evidenceItems) {
         if (!ev) continue;
         if (doesEvidenceSupportClaim(ev, claim)) {
-          supportingEvidence.push(ev);
+          rawSupportingEvidence.push(ev);
         }
       }
 
-      // Aggregate independent source families
+      // Aggregate independent source families & dependency groups
       let sourceCount = 0;
       let independentSourceCount = 0;
       let sourceFamilies = [];
       let independentFamilies = [];
+      let supportingEvidence = [];
 
-      if (supportingEvidence.length > 0) {
-        const agg = aggregateEvidenceSources(supportingEvidence);
+      if (rawSupportingEvidence.length > 0) {
+        const agg = aggregateEvidenceSources(rawSupportingEvidence, {
+          subject: claim.subject,
+          claimType: claim.claimType
+        });
         sourceCount = agg.sourceCount;
         independentSourceCount = agg.independentSourceCount;
         sourceFamilies = agg.sourceFamilies;
         independentFamilies = agg.independentFamilies;
+
+        // Annotate each supporting evidence item with resolved dependencyGroup and truthful isIndependent flag
+        const seenIndependentGroups = new Set();
+        supportingEvidence = rawSupportingEvidence.map((ev) => {
+          const directFamily = ev.sourceFamily || classifySourceFamily(ev);
+          const depGroup =
+            ev.dependencyGroup ||
+            resolveClaimDependency({
+              publisherFamily: directFamily,
+              subject: ev.subject || claim.subject || ev.factId,
+              claimType: ev.claimType || claim.claimType,
+              url: ev.url,
+              sourceId: ev.sourceId || ev.source,
+              publisher: ev.publisher,
+              title: ev.title,
+              summary: ev.summary || ev.excerpt,
+              text: ev.text,
+              snippet: ev.snippet || ''
+            });
+
+          const isDepIndep = isDependencyIndependent(depGroup);
+          let isItemIndependent = false;
+          if (isDepIndep && !seenIndependentGroups.has(depGroup)) {
+            seenIndependentGroups.add(depGroup);
+            isItemIndependent = true;
+          }
+
+          return {
+            ...ev,
+            sourceFamily: directFamily,
+            dependencyGroup: depGroup,
+            isIndependent: isItemIndependent
+          };
+        });
       } else {
         sourceCount = claim.sourceCount || 1;
-        independentSourceCount = claim.independentSourceCount || 1;
+        independentSourceCount = claim.independentSourceCount !== undefined
+          ? claim.independentSourceCount
+          : (claim.authorityLevel === CLAIM_AUTHORITY_LEVELS.PRIMARY_OFFICIAL ? 1 : 0);
         sourceFamilies = claim.sourceFamilies || [];
         independentFamilies = claim.independentFamilies || [];
       }
@@ -155,17 +199,18 @@ export function reconcileClaims(candidateClaims = [], evidenceItems = []) {
         if (independentSourceCount >= 2) {
           supportStatus = CLAIM_STATUS.CORROBORATED;
         } else if (independentSourceCount === 1) {
-          if (claim.authorityLevel === CLAIM_AUTHORITY_LEVELS.PRIMARY_OFFICIAL) {
+          if (
+            claim.authorityLevel === CLAIM_AUTHORITY_LEVELS.PRIMARY_OFFICIAL ||
+            claim.authorityLevel === CLAIM_AUTHORITY_LEVELS.MARKET_REFERENCE
+          ) {
             supportStatus = CLAIM_STATUS.SUPPORTED;
           } else {
             supportStatus = CLAIM_STATUS.SINGLE_SOURCE;
           }
         } else {
-          if (!claim.supportStatus || claim.supportStatus === CLAIM_STATUS.INSUFFICIENT_EVIDENCE) {
-            supportStatus = CLAIM_STATUS.INSUFFICIENT_EVIDENCE;
-            if (!limitations) {
-              limitations = 'Không có đủ bằng chứng nguồn độc lập hỗ trợ xác thực.';
-            }
+          supportStatus = CLAIM_STATUS.INSUFFICIENT_EVIDENCE;
+          if (!limitations) {
+            limitations = 'Không có đủ bằng chứng nguồn độc lập hỗ trợ xác thực.';
           }
         }
       }

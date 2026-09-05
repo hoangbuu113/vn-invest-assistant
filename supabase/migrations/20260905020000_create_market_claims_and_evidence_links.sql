@@ -70,7 +70,8 @@ CREATE TABLE IF NOT EXISTS public.claim_evidence_links (
     evidence_type TEXT NOT NULL CHECK (evidence_type IN ('observation', 'article')),
     evidence_id TEXT NOT NULL,
     source_family TEXT NOT NULL,
-    is_independent BOOLEAN NOT NULL DEFAULT true,
+    dependency_group TEXT NOT NULL DEFAULT 'UNKNOWN_DEPENDENCY',
+    is_independent BOOLEAN NOT NULL DEFAULT false,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT uq_claim_evidence_link UNIQUE (claim_id, evidence_type, evidence_id)
 );
@@ -90,6 +91,9 @@ CREATE INDEX IF NOT EXISTS idx_claim_evidence_links_claim
 
 CREATE INDEX IF NOT EXISTS idx_claim_evidence_links_evidence
     ON public.claim_evidence_links (evidence_type, evidence_id);
+
+CREATE INDEX IF NOT EXISTS idx_claim_evidence_links_dep_group
+    ON public.claim_evidence_links (dependency_group);
 
 -- Row Level Security (RLS)
 ALTER TABLE public.market_claims ENABLE ROW LEVEL SECURITY;

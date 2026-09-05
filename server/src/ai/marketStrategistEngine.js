@@ -24,7 +24,10 @@ import {
   extractClaimsFromObservation,
   extractClaimsFromArticle,
   reconcileClaims,
-  classifySourceFamily
+  classifySourceFamily,
+  resolveClaimDependency,
+  SOURCE_FAMILIES,
+  DEPENDENCY_GROUPS
 } from '../claims/index.js';
 
 export const STRATEGIST_CACHE_TTL_MS = 15 * 60 * 1000; // 15 minutes
@@ -202,16 +205,34 @@ export function buildMarketStrategistFactPacket({
   ];
 
   const evidenceForReconciliation = [
-    ...marketObservations.map((obs) => ({
-      evidenceId: obs.observationId || obs.id,
-      evidenceType: 'observation',
-      sourceFamily: classifySourceFamily({
+    ...marketObservations.map((obs) => {
+      const factId = obs.factId || obs.id;
+      const directFamily = classifySourceFamily({
         url: obs.provenance?.documentUrl || obs.provenance?.url,
         sourceId: obs.source,
         publisher: obs.provenance?.authority
-      }),
-      ...obs
-    })),
+      });
+      const depGroup = resolveClaimDependency({
+        publisherFamily: directFamily,
+        subject: factId,
+        url: obs.provenance?.documentUrl || obs.provenance?.url,
+        sourceId: obs.source,
+        publisher: obs.provenance?.authority
+      });
+      const effectiveFamily =
+        directFamily !== SOURCE_FAMILIES.UNKNOWN
+          ? directFamily
+          : depGroup !== DEPENDENCY_GROUPS.UNKNOWN_DEPENDENCY
+          ? depGroup
+          : SOURCE_FAMILIES.UNKNOWN;
+      return {
+        evidenceId: obs.observationId || obs.id,
+        evidenceType: 'observation',
+        sourceFamily: effectiveFamily,
+        dependencyGroup: depGroup,
+        ...obs
+      };
+    }),
     ...selectedNews.map((art) => ({
       evidenceId: art.articleId || art.id,
       evidenceType: 'article',
@@ -434,9 +455,11 @@ export function computeStrategistFingerprint({
   validFactIds = new Set(),
   validArticleIds = new Set(),
   validSignalIds = new Set(),
+  validClaimIds = new Set(),
   evidence = [],
   untrustedNews = [],
   derivedSignals = [],
+  claims = [],
   selectionPolicyVersion = STRATEGIST_SELECTION_POLICY_VERSION,
   model = STRATEGIST_MODEL,
   promptVersion = STRATEGIST_PROMPT_VERSION,
@@ -463,11 +486,22 @@ export function computeStrategistFingerprint({
     signalTokens = Array.from(validSignalIds);
   }
 
+  let claimTokens = [];
+  if (Array.isArray(claims) && claims.length > 0) {
+    claimTokens = claims.map(
+      (c) =>
+        `${c.claimId}:${c.supportStatus || 'unknown'}:${c.independentSourceCount ?? 0}:${c.contradictionCount ?? 0}:${c.revisionOf || 'none'}:${c.authorityLevel || 'unknown'}`
+    );
+  } else if (validClaimIds && validClaimIds.size > 0) {
+    claimTokens = Array.from(validClaimIds);
+  }
+
   const sortedFacts = Array.from(new Set(factTokens)).sort().join('|');
   const sortedNews = Array.from(new Set(newsTokens)).sort().join('|');
   const sortedSignals = Array.from(new Set(signalTokens)).sort().join('|');
+  const sortedClaims = Array.from(new Set(claimTokens)).sort().join('|');
 
-  const rawKey = `${sortedFacts}::${sortedNews}::${sortedSignals}::${selectionPolicyVersion}::${model}::${promptVersion}::${schemaVersion}`;
+  const rawKey = `${sortedFacts}::${sortedNews}::${sortedSignals}::${sortedClaims}::${selectionPolicyVersion}::${model}::${promptVersion}::${schemaVersion}`;
   return createHash('sha256').update(rawKey).digest('hex');
 }
 
@@ -840,15 +874,26 @@ export async function generateMarketStrategist({
   aiEnabled = true,
   allowLlm = true
 } = {}) {
-  const { validFactIds, validArticleIds, validSignalIds, evidence, untrustedNews, derivedSignals } = factPacket;
+  const {
+    validFactIds,
+    validArticleIds,
+    validSignalIds,
+    validClaimIds,
+    evidence,
+    untrustedNews,
+    derivedSignals,
+    claims
+  } = factPacket;
   const effectiveModel = geminiModel || STRATEGIST_MODEL;
   const fingerprint = computeStrategistFingerprint({
     validFactIds,
     validArticleIds,
     validSignalIds,
+    validClaimIds,
     evidence,
     untrustedNews,
     derivedSignals,
+    claims,
     model: effectiveModel
   });
 

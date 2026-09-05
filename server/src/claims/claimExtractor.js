@@ -4,7 +4,12 @@ import {
   CLAIM_STATUS,
   createMarketClaim
 } from './claimModel.js';
-import { classifySourceFamily } from './sourceFamily.js';
+import {
+  SOURCE_FAMILIES,
+  DEPENDENCY_GROUPS,
+  classifySourceFamily,
+  resolveClaimDependency
+} from './sourceFamily.js';
 
 const EPSILON_PERCENT = 0.02;
 const EPSILON_CURRENCY = 1.0;
@@ -60,7 +65,18 @@ export function extractClaimsFromObservation(obs) {
       supportStatus: CLAIM_STATUS.SUPPORTED,
       publishedAt
     });
-    return [{ claim, evidence: { evidenceId: obs.observationId, evidenceType: 'observation', sourceFamily } }];
+    return [
+      {
+        claim,
+        evidence: {
+          evidenceId: obs.observationId,
+          evidenceType: 'observation',
+          sourceFamily,
+          dependencyGroup: DEPENDENCY_GROUPS.OFFICIAL_NSO,
+          isIndependent: true
+        }
+      }
+    ];
   }
 
   // 2. SBV Central USD/VND Rate
@@ -79,7 +95,18 @@ export function extractClaimsFromObservation(obs) {
       supportStatus: CLAIM_STATUS.SUPPORTED,
       publishedAt
     });
-    return [{ claim, evidence: { evidenceId: obs.observationId, evidenceType: 'observation', sourceFamily } }];
+    return [
+      {
+        claim,
+        evidence: {
+          evidenceId: obs.observationId,
+          evidenceType: 'observation',
+          sourceFamily,
+          dependencyGroup: DEPENDENCY_GROUPS.OFFICIAL_SBV,
+          isIndependent: true
+        }
+      }
+    ];
   }
 
   // 3. Vietnam Customs Trade Exports
@@ -98,7 +125,18 @@ export function extractClaimsFromObservation(obs) {
       supportStatus: CLAIM_STATUS.SUPPORTED,
       publishedAt
     });
-    return [{ claim, evidence: { evidenceId: obs.observationId, evidenceType: 'observation', sourceFamily } }];
+    return [
+      {
+        claim,
+        evidence: {
+          evidenceId: obs.observationId,
+          evidenceType: 'observation',
+          sourceFamily,
+          dependencyGroup: DEPENDENCY_GROUPS.OFFICIAL_CUSTOMS,
+          isIndependent: true
+        }
+      }
+    ];
   }
 
   // 4. Vietnam Customs Trade Imports
@@ -117,7 +155,18 @@ export function extractClaimsFromObservation(obs) {
       supportStatus: CLAIM_STATUS.SUPPORTED,
       publishedAt
     });
-    return [{ claim, evidence: { evidenceId: obs.observationId, evidenceType: 'observation', sourceFamily } }];
+    return [
+      {
+        claim,
+        evidence: {
+          evidenceId: obs.observationId,
+          evidenceType: 'observation',
+          sourceFamily,
+          dependencyGroup: DEPENDENCY_GROUPS.OFFICIAL_CUSTOMS,
+          isIndependent: true
+        }
+      }
+    ];
   }
 
   // 5. Vietnam Customs Trade Balance
@@ -136,7 +185,18 @@ export function extractClaimsFromObservation(obs) {
       supportStatus: CLAIM_STATUS.SUPPORTED,
       publishedAt
     });
-    return [{ claim, evidence: { evidenceId: obs.observationId, evidenceType: 'observation', sourceFamily } }];
+    return [
+      {
+        claim,
+        evidence: {
+          evidenceId: obs.observationId,
+          evidenceType: 'observation',
+          sourceFamily,
+          dependencyGroup: DEPENDENCY_GROUPS.OFFICIAL_CUSTOMS,
+          isIndependent: true
+        }
+      }
+    ];
   }
 
   // General Market Observation Fallback
@@ -146,6 +206,19 @@ export function extractClaimsFromObservation(obs) {
       : obs.pillar === 'monetary'
       ? CLAIM_TYPES.MONETARY_NUMERIC
       : CLAIM_TYPES.MARKET_EVENT;
+
+  const depGroup = resolveClaimDependency({
+    publisherFamily: sourceFamily,
+    subject: factId,
+    claimType
+  });
+
+  const effectiveFamily =
+    sourceFamily !== SOURCE_FAMILIES.UNKNOWN
+      ? sourceFamily
+      : depGroup !== DEPENDENCY_GROUPS.UNKNOWN_DEPENDENCY
+      ? depGroup
+      : SOURCE_FAMILIES.UNKNOWN;
 
   const claim = createMarketClaim({
     claimType,
@@ -162,7 +235,18 @@ export function extractClaimsFromObservation(obs) {
     publishedAt
   });
 
-  return [{ claim, evidence: { evidenceId: obs.observationId, evidenceType: 'observation', sourceFamily } }];
+  return [
+    {
+      claim,
+      evidence: {
+        evidenceId: obs.observationId,
+        evidenceType: 'observation',
+        sourceFamily: effectiveFamily,
+        dependencyGroup: depGroup,
+        isIndependent: true
+      }
+    }
+  ];
 }
 
 /**
@@ -200,13 +284,23 @@ export function extractClaimsFromArticle(article) {
   }
 
   // 1. Exact Monthly CPI YoY
-  // e.g. "CPI tháng 8 tăng 4.89%", "CPI tháng 08/2026 tăng 4,89% so với cùng kỳ"
-  const cpiMonthlyRegex = /(?:cpi|chỉ số giá tiêu dùng)\s+tháng\s+(1[0-2]|0?[1-9])(?:\s*(?:năm|\/|-)\s*(\d{4}))?[^\d\n\r%]{0,50}?(?:tăng|đạt|ở mức)\s*(\d+(?:[\.,]\d+)?)\s*%/gi;
+  // e.g. "CPI tháng 8 tăng 4.89%", "According to GSO, CPI rose 4.89%"
+  const cpiMonthlyRegex = /(?:cpi|chỉ số giá tiêu dùng)\s+tháng\s+(1[0-2]|0?[1-9])(?:\s*(?:năm|\/|-)\s*(\d{4}))?[^\d\n\r%]{0,50}?(?:tăng|đạt|ở mức|rose|increased by)\s*(\d+(?:[\.,]\d+)?)\s*%/gi;
   for (const match of combined.matchAll(cpiMonthlyRegex)) {
     const month = match[1].padStart(2, '0');
     const year = match[2] || pubYear;
     const value = parseVietnameseNumber(match[3]);
     if (value !== null) {
+      const depGroup = resolveClaimDependency({
+        publisherFamily: sourceFamily,
+        subject: 'vn.macro.cpi.yoy',
+        claimType: CLAIM_TYPES.MACRO_NUMERIC,
+        snippet: match[0],
+        title,
+        summary,
+        text
+      });
+
       const claim = createMarketClaim({
         claimType: CLAIM_TYPES.MACRO_NUMERIC,
         subject: 'vn.macro.cpi.yoy',
@@ -219,7 +313,17 @@ export function extractClaimsFromArticle(article) {
         supportStatus: CLAIM_STATUS.SINGLE_SOURCE,
         publishedAt
       });
-      extracted.push({ claim, evidence: { evidenceId: articleId, evidenceType: 'article', sourceFamily } });
+      extracted.push({
+        claim,
+        evidence: {
+          evidenceId: articleId,
+          evidenceType: 'article',
+          sourceFamily,
+          dependencyGroup: depGroup,
+          snippet: match[0],
+          isIndependent: false // Secondary media reporting official stats is not independent measurement
+        }
+      });
     }
   }
 
@@ -231,6 +335,16 @@ export function extractClaimsFromArticle(article) {
     const year = match[2] || pubYear;
     const value = parseVietnameseNumber(match[3]);
     if (value !== null) {
+      const depGroup = resolveClaimDependency({
+        publisherFamily: sourceFamily,
+        subject: 'vn.macro.cpi.ytd_average',
+        claimType: CLAIM_TYPES.MACRO_NUMERIC,
+        snippet: match[0],
+        title,
+        summary,
+        text
+      });
+
       const claim = createMarketClaim({
         claimType: CLAIM_TYPES.MACRO_NUMERIC,
         subject: 'vn.macro.cpi.ytd_average',
@@ -243,7 +357,17 @@ export function extractClaimsFromArticle(article) {
         supportStatus: CLAIM_STATUS.SINGLE_SOURCE,
         publishedAt
       });
-      extracted.push({ claim, evidence: { evidenceId: articleId, evidenceType: 'article', sourceFamily } });
+      extracted.push({
+        claim,
+        evidence: {
+          evidenceId: articleId,
+          evidenceType: 'article',
+          sourceFamily,
+          dependencyGroup: depGroup,
+          snippet: match[0],
+          isIndependent: false
+        }
+      });
     }
   }
 
@@ -254,6 +378,16 @@ export function extractClaimsFromArticle(article) {
     const value = parseCurrencyNumber(match[1]);
     if (value !== null) {
       const refPeriod = publishedAt ? publishedAt.slice(0, 10) : 'current';
+      const depGroup = resolveClaimDependency({
+        publisherFamily: sourceFamily,
+        subject: 'vn.monetary.fx.sbv_central.usd_vnd',
+        claimType: CLAIM_TYPES.MONETARY_NUMERIC,
+        snippet: match[0],
+        title,
+        summary,
+        text
+      });
+
       const claim = createMarketClaim({
         claimType: CLAIM_TYPES.MONETARY_NUMERIC,
         subject: 'vn.monetary.fx.sbv_central.usd_vnd',
@@ -266,7 +400,17 @@ export function extractClaimsFromArticle(article) {
         supportStatus: CLAIM_STATUS.SINGLE_SOURCE,
         publishedAt
       });
-      extracted.push({ claim, evidence: { evidenceId: articleId, evidenceType: 'article', sourceFamily } });
+      extracted.push({
+        claim,
+        evidence: {
+          evidenceId: articleId,
+          evidenceType: 'article',
+          sourceFamily,
+          dependencyGroup: depGroup,
+          snippet: match[0],
+          isIndependent: false
+        }
+      });
     }
   }
 
@@ -277,6 +421,16 @@ export function extractClaimsFromArticle(article) {
     const value = parseCurrencyNumber(match[1]);
     if (value !== null) {
       const refPeriod = publishedAt ? publishedAt.slice(0, 10) : 'current';
+      const depGroup = resolveClaimDependency({
+        publisherFamily: sourceFamily,
+        subject: 'vn.monetary.fx.commercial.usd_vnd',
+        claimType: CLAIM_TYPES.MONETARY_NUMERIC,
+        snippet: match[0],
+        title,
+        summary,
+        text
+      });
+
       const claim = createMarketClaim({
         claimType: CLAIM_TYPES.MONETARY_NUMERIC,
         subject: 'vn.monetary.fx.commercial.usd_vnd',
@@ -289,7 +443,17 @@ export function extractClaimsFromArticle(article) {
         supportStatus: CLAIM_STATUS.SINGLE_SOURCE,
         publishedAt
       });
-      extracted.push({ claim, evidence: { evidenceId: articleId, evidenceType: 'article', sourceFamily } });
+      extracted.push({
+        claim,
+        evidence: {
+          evidenceId: articleId,
+          evidenceType: 'article',
+          sourceFamily,
+          dependencyGroup: depGroup,
+          snippet: match[0],
+          isIndependent: false
+        }
+      });
     }
   }
 
@@ -298,22 +462,32 @@ export function extractClaimsFromArticle(article) {
 
 /**
  * Checks whether an evidence item (observation or article) semantically supports a specific claim.
- * Conservative: Citation membership alone is insufficient. Exact semantic match is required.
+ * Conservative rules:
+ * - Direct citation/topic mention alone is strictly insufficient.
+ * - If claim has a numeric value, the evidence item MUST possess an exact finite numeric value matching within tolerance.
+ * - Reference period and scope must match.
  */
 export function doesEvidenceSupportClaim(evidenceItem, claim) {
   if (!evidenceItem || !claim) return false;
 
-  // Direct claimId or subject link
+  // Direct claimId link
   if (evidenceItem.claimId && (evidenceItem.claimId === claim.claimId || evidenceItem.claimId === claim.id)) {
     return true;
   }
+
+  // If evidenceItem specifies subject explicitly
   if (evidenceItem.subject && evidenceItem.subject === claim.subject) {
-    if (evidenceItem.referencePeriod && claim.referencePeriod && evidenceItem.referencePeriod !== claim.referencePeriod) {
+    if (claim.referencePeriod && evidenceItem.referencePeriod && evidenceItem.referencePeriod !== claim.referencePeriod) {
       return false;
     }
-    if (evidenceItem.numericValue !== undefined && evidenceItem.numericValue !== null && claim.numericValue !== null) {
+    // Strict numeric check: topic mention != support for exact number
+    if (claim.numericValue !== null && claim.numericValue !== undefined) {
+      const evVal = evidenceItem.numericValue ?? evidenceItem.value;
+      if (evVal === null || evVal === undefined || !Number.isFinite(Number(evVal))) {
+        return false;
+      }
       const tolerance = claim.unit === '%' ? EPSILON_PERCENT : EPSILON_CURRENCY;
-      if (Math.abs(Number(evidenceItem.numericValue) - Number(claim.numericValue)) > tolerance) {
+      if (Math.abs(Number(evVal) - Number(claim.numericValue)) > tolerance) {
         return false;
       }
     }
@@ -325,14 +499,18 @@ export function doesEvidenceSupportClaim(evidenceItem, claim) {
     if (evidenceItem.factId !== claim.subject) return false;
 
     // Reference period check
-    if (evidenceItem.referenceTime && claim.referencePeriod) {
+    if (claim.referencePeriod && evidenceItem.referenceTime) {
       if (evidenceItem.referenceTime !== claim.referencePeriod) return false;
     }
 
-    // Numeric value check
-    if (claim.numericValue !== null) {
+    // Strict numeric check
+    if (claim.numericValue !== null && claim.numericValue !== undefined) {
+      const obsVal = evidenceItem.value ?? evidenceItem.numericValue;
+      if (obsVal === null || obsVal === undefined || !Number.isFinite(Number(obsVal))) {
+        return false;
+      }
       const tolerance = claim.unit === '%' ? EPSILON_PERCENT : EPSILON_CURRENCY;
-      if (Math.abs(Number(evidenceItem.value) - Number(claim.numericValue)) > tolerance) {
+      if (Math.abs(Number(obsVal) - Number(claim.numericValue)) > tolerance) {
         return false;
       }
     }

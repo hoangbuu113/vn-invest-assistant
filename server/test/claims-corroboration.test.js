@@ -14,6 +14,7 @@ import {
 
 import {
   SOURCE_FAMILIES,
+  DEPENDENCY_GROUPS,
   classifySourceFamily,
   isFamilyIndependent,
   aggregateEvidenceSources
@@ -30,8 +31,13 @@ import {
 } from '../src/claims/claimReconciliation.js';
 
 import {
+  persistClaims
+} from '../src/claims/claimRepository.js';
+
+import {
   buildMarketStrategistFactPacket,
-  generateDeterministicMarketStrategist
+  generateDeterministicMarketStrategist,
+  computeStrategistFingerprint
 } from '../src/ai/marketStrategistEngine.js';
 
 import {
@@ -84,7 +90,7 @@ test('2. Three articles copying same family do not become 3 corroborations', () 
   assert.deepEqual(agg.independentFamilies, [SOURCE_FAMILIES.CAFEF]);
 });
 
-test('3. Two genuinely independent source families corroborate', () => {
+test('3. Secondary media reporting official statistics collapses to official dependency group (not corroborated)', () => {
   const nsoObs = {
     factId: 'vn.macro.cpi.yoy',
     observationId: 'obs_nso_cpi',
@@ -97,7 +103,8 @@ test('3. Two genuinely independent source families corroborate', () => {
     articleId: 'art_reuters_1',
     url: 'https://reuters.com/markets/vietnam-cpi-august',
     sourceId: 'reuters',
-    title: 'Vietnam CPI rises 4.89% in August',
+    title: 'Vietnam CPI rises 4.89% in August, according to NSO',
+    summary: 'According to the National Statistics Office, Vietnam CPI rose 4.89% YoY.',
     publishedAt: '2026-08-30T08:00:00Z'
   };
 
@@ -120,22 +127,64 @@ test('3. Two genuinely independent source families corroborate', () => {
       factId: 'vn.macro.cpi.yoy',
       value: 4.89,
       referenceTime: '2026-08',
-      sourceFamily: SOURCE_FAMILIES.OFFICIAL_NSO
+      sourceFamily: SOURCE_FAMILIES.OFFICIAL_NSO,
+      dependencyGroup: DEPENDENCY_GROUPS.OFFICIAL_NSO
     },
     {
       evidenceId: 'art_reuters_1',
       url: 'https://reuters.com/article',
       sourceId: 'reuters',
       title: 'Vietnam CPI tháng 8 tăng 4.89%',
-      sourceFamily: SOURCE_FAMILIES.REUTERS
+      summary: 'Theo Tổng cục Thống kê, CPI tháng 8 tăng 4.89%',
+      sourceFamily: SOURCE_FAMILIES.REUTERS,
+      snippet: 'Theo Tổng cục Thống kê (NSO), CPI tháng 8 tăng 4.89%'
     }
   ];
 
   const reconciled = reconcileClaims([claimNSO, claimReuters], evidence);
-  const corroboratedClaim = reconciled.find((r) => r.claim.authorityLevel === CLAIM_AUTHORITY_LEVELS.PRIMARY_OFFICIAL);
-  assert.ok(corroboratedClaim, 'NSO claim exists');
-  assert.equal(corroboratedClaim.claim.independentSourceCount, 2);
-  assert.equal(corroboratedClaim.claim.supportStatus, CLAIM_STATUS.CORROBORATED);
+  const nsoResult = reconciled.find((r) => r.claim.authorityLevel === CLAIM_AUTHORITY_LEVELS.PRIMARY_OFFICIAL);
+  assert.ok(nsoResult, 'NSO claim exists');
+  assert.equal(nsoResult.claim.independentSourceCount, 1, 'Official + secondary reporting official must collapse to 1 independent dependency group');
+  assert.equal(nsoResult.claim.supportStatus, CLAIM_STATUS.SUPPORTED, 'Must be SUPPORTED, never CORROBORATED');
+  assert.deepEqual(nsoResult.independentFamilies, [DEPENDENCY_GROUPS.OFFICIAL_NSO]);
+
+  // Check evidence links independence assignment
+  const nsoLink = nsoResult.supportingEvidence.find((e) => e.evidenceId === 'obs_nso_cpi');
+  const reutersLink = nsoResult.supportingEvidence.find((e) => e.evidenceId === 'art_reuters_1');
+  assert.equal(nsoLink.isIndependent, true, 'Primary official evidence is independent');
+  assert.equal(reutersLink.isIndependent, false, 'Derivative media evidence in same dependency group is NOT independent');
+});
+
+test('3B. Two genuinely independent source families corroborate', () => {
+  const issuerClaim = createMarketClaim({
+    claimType: CLAIM_TYPES.CORPORATE_EVENT,
+    subject: 'vn.issuer.vnm.restructuring',
+    predicate: 'ANNOUNCED',
+    valueText: 'Approved restructuring plan',
+    scope: 'corporate_action',
+    authorityLevel: CLAIM_AUTHORITY_LEVELS.PRIMARY_OFFICIAL
+  });
+
+  const ev1 = {
+    evidenceId: 'ir_release_1',
+    subject: 'vn.issuer.vnm.restructuring',
+    sourceFamily: SOURCE_FAMILIES.ISSUER_IR,
+    dependencyGroup: DEPENDENCY_GROUPS.ISSUER_IR,
+    title: 'Vinamilk công bố phương án tái cấu trúc'
+  };
+
+  const ev2 = {
+    evidenceId: 'market_investigation_1',
+    subject: 'vn.issuer.vnm.restructuring',
+    sourceFamily: SOURCE_FAMILIES.CAFEF,
+    dependencyGroup: DEPENDENCY_GROUPS.CAFEF,
+    title: 'CafeF độc quyền: Chi tiết lộ trình tái cấu trúc của Vinamilk'
+  };
+
+  const reconciled = reconcileClaims([issuerClaim], [ev1, ev2]);
+  assert.equal(reconciled[0].claim.independentSourceCount, 2, 'Two genuinely independent primary sources yield count = 2');
+  assert.equal(reconciled[0].claim.supportStatus, CLAIM_STATUS.CORROBORATED, 'Independent sources corroborate');
+  assert.deepEqual(reconciled[0].independentFamilies, [DEPENDENCY_GROUPS.CAFEF, DEPENDENCY_GROUPS.ISSUER_IR]);
 });
 
 test('4. Official source outranks secondary report for numeric fact', () => {
@@ -561,4 +610,147 @@ test('20. Claim storage RLS blocks anon/auth writes', () => {
   // Verify service-role grant
   assert.ok(sql.includes('GRANT ALL ON public.market_claims TO service_role;'));
   assert.ok(sql.includes('GRANT ALL ON public.claim_evidence_links TO service_role;'));
+});
+
+test('21. Database migration includes dependency_group and defaults is_independent to false', () => {
+  const migrationPath = resolve(import.meta.dirname, '../../supabase/migrations/20260905020000_create_market_claims_and_evidence_links.sql');
+  const sql = readFileSync(migrationPath, 'utf8');
+
+  assert.ok(sql.includes("dependency_group TEXT NOT NULL DEFAULT 'UNKNOWN_DEPENDENCY'"), 'dependency_group column must be defined');
+  assert.ok(sql.includes('is_independent BOOLEAN NOT NULL DEFAULT false'), 'is_independent must default to false');
+  assert.ok(sql.includes('CREATE INDEX IF NOT EXISTS idx_claim_evidence_links_dep_group'), 'Index on dependency_group must exist');
+});
+
+test('22. Unknown dependency strictly defaults to non-independent in persistence and memory', async () => {
+  const claim = createMarketClaim({
+    claimType: CLAIM_TYPES.NEWS_ASSERTION,
+    subject: 'vn.issuer.test.event',
+    predicate: 'REPORTED',
+    valueText: 'Some unverified event'
+  });
+
+  const evUnknown = {
+    evidenceId: 'ev_anon_1',
+    evidenceType: 'article',
+    sourceFamily: SOURCE_FAMILIES.UNKNOWN,
+    dependencyGroup: DEPENDENCY_GROUPS.UNKNOWN_DEPENDENCY
+    // Note: isIndependent omitted intentionally to test default
+  };
+
+  const saved = await persistClaims([{ claim, supportingEvidence: [evUnknown] }], null);
+  assert.equal(saved.length, 1);
+  const links = (await import('../src/claims/claimRepository.js')).getEvidenceLinksForClaim(claim.claimId);
+  assert.equal(links.length, 1);
+  assert.equal(links[0].dependencyGroup, DEPENDENCY_GROUPS.UNKNOWN_DEPENDENCY);
+  assert.equal(links[0].isIndependent, false, 'Omitted or unknown independence must default strictly to false');
+});
+
+test('23. Subject mention without finite numeric value strictly fails to support numeric claim', () => {
+  const specificClaim = createMarketClaim({
+    claimType: CLAIM_TYPES.MACRO_NUMERIC,
+    subject: 'vn.macro.cpi.yoy',
+    numericValue: 4.89,
+    unit: '%',
+    referencePeriod: '2026-08',
+    scope: 'monthly_yoy'
+  });
+
+  // 1. Evidence item specifying subject only, no numeric value
+  const evSubjectOnly = {
+    evidenceId: 'art_topic',
+    subject: 'vn.macro.cpi.yoy'
+  };
+  assert.equal(doesEvidenceSupportClaim(evSubjectOnly, specificClaim), false, 'Subject only cannot support numeric claim');
+
+  // 2. Evidence item with null numeric value
+  const evNullVal = {
+    evidenceId: 'art_topic_null',
+    subject: 'vn.macro.cpi.yoy',
+    value: null
+  };
+  assert.equal(doesEvidenceSupportClaim(evNullVal, specificClaim), false, 'Null value cannot support numeric claim');
+
+  // 3. Evidence item with non-numeric string
+  const evNonNumeric = {
+    evidenceId: 'art_topic_nan',
+    subject: 'vn.macro.cpi.yoy',
+    value: 'not_a_number'
+  };
+  assert.equal(doesEvidenceSupportClaim(evNonNumeric, specificClaim), false, 'NaN string cannot support numeric claim');
+
+  // 4. Observation with null value
+  const obsNull = {
+    factId: 'vn.macro.cpi.yoy',
+    observationId: 'obs_null',
+    value: null
+  };
+  assert.equal(doesEvidenceSupportClaim(obsNull, specificClaim), false, 'Observation with null value cannot support numeric claim');
+});
+
+test('24. Claim status transition alters strategist cache fingerprint', () => {
+  const claim1 = createMarketClaim({
+    claimType: CLAIM_TYPES.MACRO_NUMERIC,
+    subject: 'vn.macro.cpi.yoy',
+    numericValue: 4.89,
+    unit: '%',
+    referencePeriod: '2026-08',
+    supportStatus: CLAIM_STATUS.SUPPORTED,
+    independentSourceCount: 1,
+    contradictionCount: 0
+  });
+
+  const claimContradicted = createMarketClaim({
+    ...claim1,
+    supportStatus: CLAIM_STATUS.CONTRADICTED,
+    contradictionCount: 1
+  });
+
+  const fp1 = computeStrategistFingerprint({
+    claims: [claim1]
+  });
+
+  const fp2 = computeStrategistFingerprint({
+    claims: [claimContradicted]
+  });
+
+  assert.notEqual(fp1, fp2, 'Claim status change must invalidate strategist cache fingerprint');
+});
+
+test('25. Array reordering of identical claims preserves strategist cache fingerprint', () => {
+  const claimA = createMarketClaim({
+    claimType: CLAIM_TYPES.MACRO_NUMERIC,
+    subject: 'vn.macro.cpi.yoy',
+    numericValue: 4.89,
+    unit: '%',
+    referencePeriod: '2026-08',
+    supportStatus: CLAIM_STATUS.SUPPORTED
+  });
+
+  const claimB = createMarketClaim({
+    claimType: CLAIM_TYPES.MONETARY_NUMERIC,
+    subject: 'vn.monetary.fx.sbv_central.usd_vnd',
+    numericValue: 25240,
+    unit: 'VND',
+    referencePeriod: '2026-09-05',
+    supportStatus: CLAIM_STATUS.SUPPORTED
+  });
+
+  const fpOrder1 = computeStrategistFingerprint({
+    claims: [claimA, claimB]
+  });
+
+  const fpOrder2 = computeStrategistFingerprint({
+    claims: [claimB, claimA]
+  });
+
+  assert.equal(fpOrder1, fpOrder2, 'Fingerprint must be invariant to order of claims in array');
+});
+
+test('26. 01D historical replay architectural boundary is documented in repository', () => {
+  const repoPath = resolve(import.meta.dirname, '../src/claims/claimRepository.js');
+  const repoContent = readFileSync(repoPath, 'utf8');
+
+  assert.ok(repoContent.includes('ARCHITECTURAL BOUNDARY (01D Historical Replay)'), 'Boundary header must be present');
+  assert.ok(repoContent.includes('point-in-time') || repoContent.includes('Point-in-time'), 'Point-in-time replay documentation must be present');
+  assert.ok(repoContent.includes('claim_evidence_links'), 'Evidence links replay foundation must be mentioned');
 });
