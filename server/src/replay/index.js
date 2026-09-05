@@ -1,10 +1,11 @@
 /**
- * Historical As-of Replay Module (01D)
+ * Historical As-of Replay Module (01D.1)
  */
 
 export {
   resolveEvidenceAvailabilityTime,
-  AVAILABILITY_CLASSIFICATION
+  AVAILABILITY_CLASSIFICATION,
+  isReplaySafeAvailability
 } from './availability.js';
 
 export {

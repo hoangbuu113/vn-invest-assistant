@@ -1,26 +1,31 @@
 /**
- * Historical As-of Replay Foundation (01D)
+ * Historical As-of Replay Foundation (01D.1)
  *
  * Implements deterministic point-in-time evidence reconstruction:
- * "What did VN Invest Assistant actually know at time T?"
+ * "What could THIS SYSTEM actually have known at time T?"
  *
  * Hardened Invariants:
- * 1. Replay Cutoff (asOf):
- *    - Evidence is eligible ONLY if its availability time <= asOf.
+ * 1. Definitive Replay Semantic:
+ *    - Replay cutoff (asOf) evaluates system-knowable time:
+ *      systemKnowableAt = max(sourceAvailableAt, systemFirstSeenAt).
+ *    - systemKnowableAt can NEVER be earlier than systemFirstSeenAt.
  *    - Future evidence, later revisions, subsequent news corrections, and subsequent
  *      corroborations are strictly excluded.
  * 2. Immutable Observation Selection:
- *    - Vintages are grouped by factId and ordered using `compareObservationVintages`.
- *    - Never uses latest-row shortcuts.
- *    - Preserves reference period and vintage status precedence.
+ *    - Vintages are grouped by (factId + referencePeriod) to preserve full historical
+ *      cadence (e.g. July and August data both survive in historical observations).
+ *    - Within each reference period, ordered using `compareObservationVintages`.
+ *    - A separate `latestFactSnapshot` projection provides the latest single period per fact.
  * 3. News Version Selection:
- *    - If an article has multiple versions (e.g. initial v1 vs subsequent correction v2),
- *      only the latest version available by asOf is selected.
- *    - Future corrections do not alter earlier replay packets.
+ *    - Each news version is evaluated by its own versionAvailableAt / systemKnowableAt.
+ *    - Corrections retain original article publishedAt, but are excluded before their
+ *      actual version availability time.
+ *    - versionId is strictly a tie-breaker, never an eligibility shortcut.
  * 4. As-of Claim Reconstruction:
- *    - Current `market_claims` rows (with current supportStatus/counts) are NEVER used.
+ *    - Current `market_claims` database rows are NEVER used.
  *    - Claims are deterministically extracted and reconciled point-in-time from asOf evidence
  *      using the authoritative 01C claim reconciliation engine.
+ *    - Custom claims must be replay-safe and <= asOf; cannot bypass cutoff.
  * 5. As-of Freshness:
  *    - Freshness is evaluated relative to `asOf`, NEVER `new Date()` or current server clock.
  * 6. Deterministic Fingerprint:
@@ -34,9 +39,14 @@
 
 import {
   resolveEvidenceAvailabilityTime,
-  AVAILABILITY_CLASSIFICATION
+  AVAILABILITY_CLASSIFICATION,
+  isReplaySafeAvailability
 } from './availability.js';
-import { compareObservationVintages } from '../context/factModel.js';
+import {
+  compareObservationVintages,
+  normalizeReferencePeriodKey,
+  selectLatestObservationPerFact
+} from '../context/factModel.js';
 import { applyRuntimeFreshness } from '../context/freshnessPolicy.js';
 import { deriveTradeBalance } from '../context/providers/customsTrade.js';
 import { applyNewsFreshness } from '../news/repository.js';
@@ -93,8 +103,9 @@ function assertNoPrivateData(items = [], label = 'evidence') {
  * @param {Array<object>} [params.newsArticles=[]] - Candidate news articles and versions.
  * @param {Array<object>} [params.customClaims=[]] - Optional pre-existing candidate claims.
  * @param {Array<object>} [params.claimEvidenceLinks=[]] - Optional historical evidence links.
- * @param {boolean} [params.includeDerived=true] - Whether to compute derived facts (trade balance) and signals.
+ * @param {boolean} [params.includeDerived=true] - Whether to compute derived facts and signals.
  * @param {string} [params.policyVersion=REPLAY_POLICY_VERSION] - Policy version string.
+ * @param {boolean} [params.assumeInstantIngestion=false] - Optional explicit trusted ingestion flag.
  * @returns {object} The reconstructed point-in-time historical evidence packet.
  */
 export function buildHistoricalEvidencePacket({
@@ -104,7 +115,8 @@ export function buildHistoricalEvidencePacket({
   customClaims = [],
   claimEvidenceLinks = [],
   includeDerived = true,
-  policyVersion = REPLAY_POLICY_VERSION
+  policyVersion = REPLAY_POLICY_VERSION,
+  assumeInstantIngestion = false
 } = {}) {
   // 1. Strict asOf validation
   if (!asOf) {
@@ -129,41 +141,65 @@ export function buildHistoricalEvidencePacket({
 
   const limitations = [];
   let excludedFutureObsCount = 0;
+  let excludedFutureNewsCount = 0;
+  let excludedFutureClaimsCount = 0;
+  let excludedBeforeSystemFirstSeenObsCount = 0;
+  let excludedBeforeSystemFirstSeenNewsCount = 0;
+  let backfilledObsExcludedCount = 0;
   let excludedUnsafeObsCount = 0;
+  let excludedUnsafeNewsCount = 0;
+  let excludedUnsafeClaimsCount = 0;
+  let excludedUnsafeVersionCount = 0;
 
   // 3. Observation Point-in-Time Selection
+  // Group by (factId + referencePeriod) to preserve full multi-period evidence history.
   const candidateObs = Array.isArray(observations) ? observations : [];
-  const eligibleObsByFact = new Map();
+  const eligibleObsByGroup = new Map();
 
   for (const obs of candidateObs) {
     if (!obs || typeof obs !== 'object') continue;
 
-    const avail = resolveEvidenceAvailabilityTime(obs);
-    if (avail.classification === AVAILABILITY_CLASSIFICATION.UNSAFE_FOR_REPLAY) {
+    const avail = resolveEvidenceAvailabilityTime(obs, { assumeInstantIngestion });
+    if (!avail.replaySafe || avail.availabilityTimestampMs === null) {
       excludedUnsafeObsCount++;
       limitations.push(
-        `Observation ${obs.observationId || obs.factId || 'unknown'} excluded: lacks trustworthy availability timestamp.`
+        `Observation ${obs.observationId || obs.factId || 'unknown'} excluded: lacks trustworthy availability timestamp (${avail.classification || 'UNSAFE'}).`
       );
       continue;
     }
 
     if (avail.availabilityTimestampMs > asOfMs) {
       excludedFutureObsCount++;
+      if (
+        avail.sourceAvailableAt &&
+        Date.parse(avail.sourceAvailableAt) <= asOfMs &&
+        avail.systemFirstSeenAt &&
+        Date.parse(avail.systemFirstSeenAt) > asOfMs
+      ) {
+        excludedBeforeSystemFirstSeenObsCount++;
+        // If source published over 30 days prior to system first-seen, count as backfilled
+        if (Date.parse(avail.systemFirstSeenAt) - Date.parse(avail.sourceAvailableAt) > 30 * 24 * 3600 * 1000) {
+          backfilledObsExcludedCount++;
+        }
+      }
       continue;
     }
 
-    const factKey = obs.factId ? obs.factId : (obs.evidenceId || obs.id || obs.subject);
-    if (!factKey) continue;
+    const factId = obs.factId ? obs.factId : (obs.evidenceId || obs.id || obs.subject);
+    if (!factId) continue;
 
-    if (!eligibleObsByFact.has(factKey)) {
-      eligibleObsByFact.set(factKey, []);
+    const normRef = normalizeReferencePeriodKey(obs.referenceTime) || (obs.referenceTime ? obs.referenceTime.trim() : 'point');
+    const groupKey = `${factId}:${normRef}`;
+
+    if (!eligibleObsByGroup.has(groupKey)) {
+      eligibleObsByGroup.set(groupKey, []);
     }
-    eligibleObsByFact.get(factKey).push({ obs, avail });
+    eligibleObsByGroup.get(groupKey).push({ obs, avail });
   }
 
-  // Select single best observation per fact using compareObservationVintages
+  // Select single best vintage per (factId, referencePeriod) group
   const asOfObservations = [];
-  for (const [factId, items] of eligibleObsByFact.entries()) {
+  for (const [, items] of eligibleObsByGroup.entries()) {
     items.sort((a, b) => compareObservationVintages(a.obs, b.obs));
     const winningObs = items[0].obs;
     // Apply runtime freshness relative to asOfDate (NEVER wall-clock time)
@@ -171,53 +207,86 @@ export function buildHistoricalEvidencePacket({
     asOfObservations.push(freshObs);
   }
 
-  // Sort observations deterministically by factId
-  asOfObservations.sort((a, b) => (a.factId || '').localeCompare(b.factId || ''));
+  // Sort observations deterministically
+  asOfObservations.sort((a, b) => {
+    const idA = a.observationId || a.factId || '';
+    const idB = b.observationId || b.factId || '';
+    return idA.localeCompare(idB);
+  });
 
   // 4. Derived Facts (Merchandise Trade Balance) Point-in-Time
+  // Matches exports and imports for each period present in historical observations.
   if (includeDerived) {
-    const exportsObs = asOfObservations.find(
-      (o) => o.factId === 'vn.trade.goods.exports.month_usd'
-    );
-    const importsObs = asOfObservations.find(
-      (o) => o.factId === 'vn.trade.goods.imports.month_usd'
+    const distinctRefTimes = new Set(
+      asOfObservations
+        .filter((o) => o.factId === 'vn.trade.goods.exports.month_usd' && o.referenceTime)
+        .map((o) => o.referenceTime)
     );
 
-    if (exportsObs && importsObs) {
-      // Derive trade balance point-in-time; checks matching period, units, and revision markers
-      const derivedBalance = deriveTradeBalance(exportsObs, importsObs, { now: asOfDate });
-      const existingIdx = asOfObservations.findIndex(
-        (o) => o.factId === 'vn.trade.goods.balance.month_usd'
+    // Also include null/undated if any
+    if (asOfObservations.some((o) => o.factId === 'vn.trade.goods.exports.month_usd' && !o.referenceTime)) {
+      distinctRefTimes.add(null);
+    }
+
+    for (const ref of distinctRefTimes) {
+      const exportsObs = asOfObservations.find(
+        (o) => o.factId === 'vn.trade.goods.exports.month_usd' && (o.referenceTime || null) === ref
       );
-      if (existingIdx >= 0) {
-        // If an explicit observation was already selected, keep it; otherwise attach derived
-      } else {
-        asOfObservations.push(derivedBalance);
-        asOfObservations.sort((a, b) => (a.factId || '').localeCompare(b.factId || ''));
+      const importsObs = asOfObservations.find(
+        (o) => o.factId === 'vn.trade.goods.imports.month_usd' && (o.referenceTime || null) === ref
+      );
+
+      if (exportsObs && importsObs) {
+        const derivedBalance = deriveTradeBalance(exportsObs, importsObs, { now: asOfDate });
+        const existingIdx = asOfObservations.findIndex(
+          (o) => o.factId === 'vn.trade.goods.balance.month_usd' && (o.referenceTime || null) === ref
+        );
+        if (existingIdx < 0) {
+          asOfObservations.push(derivedBalance);
+        }
       }
     }
+
+    asOfObservations.sort((a, b) => {
+      const idA = a.observationId || a.factId || '';
+      const idB = b.observationId || b.factId || '';
+      return idA.localeCompare(idB);
+    });
   }
+
+  // Projection: Single latest observation per fact (for current-state consumers)
+  const latestFactSnapshot = selectLatestObservationPerFact(asOfObservations);
+  latestFactSnapshot.sort((a, b) => (a.factId || '').localeCompare(b.factId || ''));
 
   // 5. News Article Point-in-Time Selection
   const candidateNews = Array.isArray(newsArticles) ? newsArticles : [];
   const eligibleNewsByArticle = new Map();
-  let excludedFutureNewsCount = 0;
-  let excludedUnsafeNewsCount = 0;
 
   for (const art of candidateNews) {
     if (!art || typeof art !== 'object') continue;
 
-    const avail = resolveEvidenceAvailabilityTime(art);
-    if (avail.classification === AVAILABILITY_CLASSIFICATION.UNSAFE_FOR_REPLAY) {
+    const avail = resolveEvidenceAvailabilityTime(art, { assumeInstantIngestion });
+    if (!avail.replaySafe || avail.availabilityTimestampMs === null) {
       excludedUnsafeNewsCount++;
+      if (avail.classification === AVAILABILITY_CLASSIFICATION.UNSAFE_UNTRUSTWORTHY_VERSION_TIME) {
+        excludedUnsafeVersionCount++;
+      }
       limitations.push(
-        `News article ${art.articleId || art.url || 'unknown'} excluded: lacks trustworthy availability timestamp.`
+        `News article ${art.articleId || art.url || 'unknown'} excluded: lacks trustworthy availability timestamp (${avail.classification || 'UNSAFE'}).`
       );
       continue;
     }
 
     if (avail.availabilityTimestampMs > asOfMs) {
       excludedFutureNewsCount++;
+      if (
+        avail.sourceAvailableAt &&
+        Date.parse(avail.sourceAvailableAt) <= asOfMs &&
+        avail.systemFirstSeenAt &&
+        Date.parse(avail.systemFirstSeenAt) > asOfMs
+      ) {
+        excludedBeforeSystemFirstSeenNewsCount++;
+      }
       continue;
     }
 
@@ -230,16 +299,25 @@ export function buildHistoricalEvidencePacket({
     eligibleNewsByArticle.get(artKey).push({ art, avail });
   }
 
-  // For articles with multiple versions (corrections/updates), select latest available by asOf
+  // Select latest eligible version deterministically by version availability time
   const asOfNews = [];
-  for (const [artKey, items] of eligibleNewsByArticle.entries()) {
+  for (const [, items] of eligibleNewsByArticle.entries()) {
     items.sort((a, b) => {
+      // 1. Latest knowable version availability time wins
       if (b.avail.availabilityTimestampMs !== a.avail.availabilityTimestampMs) {
         return b.avail.availabilityTimestampMs - a.avail.availabilityTimestampMs;
       }
+      // 2. VersionId tie-breaker (only when availability times are identical)
       return (b.art.versionId || '').localeCompare(a.art.versionId || '');
     });
-    const winningArticle = items[0].art;
+
+    const winningItem = items[0];
+    const winningArticle = {
+      ...winningItem.art,
+      articlePublishedAt: winningItem.avail.articlePublishedAt || winningItem.avail.sourceAvailableAt,
+      versionAvailableAt: winningItem.avail.versionAvailableAt || winningItem.avail.availabilityTime
+    };
+
     // Apply news freshness relative to asOfDate
     const freshArticle = applyNewsFreshness(winningArticle, asOfDate);
     asOfNews.push(freshArticle);
@@ -340,16 +418,21 @@ export function buildHistoricalEvidencePacket({
     }
   }
 
-  // C. Optional custom claims knowable at asOf
+  // C. Optional custom claims knowable at asOf (must be replay-safe)
   if (Array.isArray(customClaims) && customClaims.length > 0) {
     for (const claim of customClaims) {
-      if (!claim) continue;
-      const avail = resolveEvidenceAvailabilityTime(claim);
-      if (
-        avail.classification !== AVAILABILITY_CLASSIFICATION.UNSAFE_FOR_REPLAY &&
-        avail.availabilityTimestampMs > asOfMs
-      ) {
-        continue; // Future claim
+      if (!claim || typeof claim !== 'object') continue;
+      const avail = resolveEvidenceAvailabilityTime(claim, { assumeInstantIngestion });
+      if (!avail.replaySafe || avail.availabilityTimestampMs === null) {
+        excludedUnsafeClaimsCount++;
+        limitations.push(
+          `Custom claim ${claim.claimId || 'unknown'} excluded: lacks trustworthy availability timestamp (${avail.classification || 'UNSAFE'}).`
+        );
+        continue;
+      }
+      if (avail.availabilityTimestampMs > asOfMs) {
+        excludedFutureClaimsCount++;
+        continue; // Future claim excluded
       }
       candidateClaims.push(claim);
     }
@@ -374,7 +457,7 @@ export function buildHistoricalEvidencePacket({
       if (linkCreatedAt) {
         const ms = Date.parse(linkCreatedAt);
         if (Number.isFinite(ms) && ms > asOfMs) {
-          continue; // Link created after asOf
+          continue;
         }
       }
       asOfLinks.push(link);
@@ -404,8 +487,10 @@ export function buildHistoricalEvidencePacket({
 
   // 10. Assemble Replay Metadata
   const totalIncluded = asOfObservations.length + asOfNews.length;
-  const totalExcludedFuture = excludedFutureObsCount + excludedFutureNewsCount;
-  const totalExcludedUnsafe = excludedUnsafeObsCount + excludedUnsafeNewsCount;
+  const totalExcludedFuture = excludedFutureObsCount + excludedFutureNewsCount + excludedFutureClaimsCount;
+  const totalExcludedUnsafe = excludedUnsafeObsCount + excludedUnsafeNewsCount + excludedUnsafeClaimsCount;
+  const totalExcludedBeforeSystemFirstSeen =
+    excludedBeforeSystemFirstSeenObsCount + excludedBeforeSystemFirstSeenNewsCount;
 
   const replayMetadata = Object.freeze({
     asOf: normalizedAsOf,
@@ -417,7 +502,10 @@ export function buildHistoricalEvidencePacket({
     reconstructedClaimsCount: reconstructedClaims.length,
     derivedSignalsCount: asOfSignals.length,
     excludedFutureEvidenceCount: totalExcludedFuture,
+    excludedBeforeSystemFirstSeenCount: totalExcludedBeforeSystemFirstSeen,
+    backfilledEvidenceExcludedCount: backfilledObsExcludedCount,
     excludedUnsafeTimestampCount: totalExcludedUnsafe,
+    excludedUnsafeVersionCount,
     limitations: Object.freeze([...limitations])
   });
 
@@ -426,6 +514,8 @@ export function buildHistoricalEvidencePacket({
     dataAsOf,
     policyVersion,
     observations: asOfObservations,
+    historicalObservations: asOfObservations,
+    latestFactSnapshot,
     news: asOfNews,
     claims: reconstructedClaims,
     derivedSignals: asOfSignals,
