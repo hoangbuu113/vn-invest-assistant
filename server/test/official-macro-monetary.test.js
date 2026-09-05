@@ -1,5 +1,8 @@
 import { describe, test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   parseNsoHeadlineCpi,
   parseNsoCoreCpi,
@@ -8,7 +11,8 @@ import {
   parseNsoMonthlyRetail,
   parseNsoDisbursedFdi,
   parseNsoSocioeconomicRelease,
-  normalizeNsoMacroFacts
+  normalizeNsoMacroFacts,
+  referencePeriodToEndDate
 } from '../src/context/providers/nsoMacro.js';
 import {
   parseSbvCentralFx,
@@ -16,7 +20,12 @@ import {
   parseSbvCreditGrowth,
   parseSbvM2Level,
   normalizeSbvMonetaryFacts,
-  isSbvWafBlocked
+  isSbvWafBlocked,
+  SBV_CANONICAL_URLS,
+  SBV_LEGACY_FALLBACK_URLS,
+  SBV_GUESSED_GENERIC_URLS,
+  isCanonicalSbvUrl,
+  isSbvGuessedGenericUrl
 } from '../src/context/providers/sbvMonetary.js';
 import {
   createMarketObservation,
@@ -41,7 +50,8 @@ import {
   calculateNextDueAt,
   clearCheckpoints,
   SOURCE_KEYS,
-  CHECKPOINT_STATUS
+  CHECKPOINT_STATUS,
+  VALID_CHECKPOINT_STATUSES
 } from '../src/context/collectorCheckpoints.js';
 import {
   normalizeMacroObservations,
@@ -749,6 +759,345 @@ describe('V1.3 Improvement 01A — Official Vietnam Macro & Monetary Core', () =
     assert.equal(lkgFx.publishedAt, '2026-09-04T02:00:00.000Z', 'Published timestamp must remain unchanged');
     assert.equal(lkgFx.observedAt, '2026-09-04T02:00:00.000Z', 'Observed timestamp must remain unchanged');
     assert.notEqual(lkgFx.publishedAt, failureTime.toISOString(), 'Failure time must NEVER overwrite historical evidence timestamp');
+  });
+
+  // 32. Runtime checkpoint status enum matches DB schema constraint
+  test('32. Runtime checkpoint status enum matches DB schema constraint', () => {
+    const migrationPath = path.resolve(
+      path.dirname(fileURLToPath(import.meta.url)),
+      '../../supabase/migrations/20260905010000_create_collector_checkpoints.sql'
+    );
+    const sql = fs.readFileSync(migrationPath, 'utf8');
+    const checkMatch = /status\s+IN\s*\(([^)]+)\)/i.exec(sql);
+    assert.notEqual(checkMatch, null, 'Migration must define status IN check constraint');
+    const dbStatuses = checkMatch[1]
+      .split(',')
+      .map((s) => s.trim().replace(/^['"]|['"]$/g, ''));
+
+    const runtimeStatuses = [...VALID_CHECKPOINT_STATUSES].sort();
+    const sortedDbStatuses = [...dbStatuses].sort();
+
+    assert.deepEqual(
+      runtimeStatuses,
+      sortedDbStatuses,
+      'Runtime CHECKPOINT_STATUS enum values must strictly match the database CHECK constraint'
+    );
+    assert.equal(runtimeStatuses.includes('blocked/access_denied'), true);
+  });
+
+  // 33. blocked/access_denied checkpoint persists in DB-like store
+  test('33. blocked/access_denied checkpoint persists in DB-like store', async () => {
+    const dbTable = new Map();
+    const mockDbClient = {
+      from(table) {
+        assert.equal(table, 'market_context_collector_checkpoints');
+        return {
+          upsert(checkpoint) {
+            if (!VALID_CHECKPOINT_STATUSES.includes(checkpoint.status)) {
+              return {
+                select: async () => ({
+                  data: null,
+                  error: { code: '23514', message: `new row violates check constraint for column "status"` }
+                })
+              };
+            }
+            dbTable.set(checkpoint.source_key, { ...checkpoint });
+            return {
+              select: async () => ({
+                data: [{ ...checkpoint }],
+                error: null
+              })
+            };
+          },
+          select() {
+            return {
+              eq(col, val) {
+                return {
+                  maybeSingle: async () => {
+                    const row = dbTable.get(val);
+                    return { data: row || null, error: null };
+                  }
+                };
+              }
+            };
+          }
+        };
+      }
+    };
+
+    const now = new Date('2026-09-05T10:00:00.000Z');
+    const res = await recordCheckpoint(SOURCE_KEYS.SBV_FX_CENTRAL, {
+      status: CHECKPOINT_STATUS.BLOCKED_ACCESS_DENIED,
+      client: mockDbClient,
+      now,
+      metadata: { reason: 'Government WAF challenge' }
+    });
+
+    assert.equal(res.isDurable, true);
+    assert.equal(dbTable.has(SOURCE_KEYS.SBV_FX_CENTRAL), true);
+    const persisted = dbTable.get(SOURCE_KEYS.SBV_FX_CENTRAL);
+    assert.equal(persisted.status, 'blocked/access_denied');
+    assert.equal(persisted.metadata?.reason, 'Government WAF challenge');
+
+    // Negative test: invalid status violates DB check constraint
+    const invalidRes = await recordCheckpoint(SOURCE_KEYS.SBV_FX_CENTRAL, {
+      status: 'unsupported_custom_status',
+      client: mockDbClient,
+      now
+    });
+    assert.equal(invalidRes.isDurable, false, 'Invalid status must fail DB check constraint');
+    assert.notEqual(invalidRes.error, null);
+  });
+
+  // 34. Blocked checkpoint survives reload and gates collector runs
+  test('34. Blocked checkpoint survives reload and gates collector runs', async () => {
+    const dbTable = new Map();
+    const mockDbClient = {
+      from(table) {
+        return {
+          upsert(checkpoint) {
+            dbTable.set(checkpoint.source_key, { ...checkpoint });
+            return {
+              select: async () => ({ data: [{ ...checkpoint }], error: null })
+            };
+          },
+          select() {
+            return {
+              eq(col, val) {
+                return {
+                  maybeSingle: async () => ({ data: dbTable.get(val) || null, error: null })
+                };
+              }
+            };
+          }
+        };
+      }
+    };
+
+    const t0 = new Date('2026-09-05T08:00:00.000Z');
+    await recordCheckpoint(SOURCE_KEYS.SBV_FX_CENTRAL, {
+      status: CHECKPOINT_STATUS.BLOCKED_ACCESS_DENIED,
+      client: mockDbClient,
+      now: t0
+    });
+
+    // Simulate process cold restart: wipe in-memory checkpoint store
+    clearCheckpoints();
+
+    // 15-minute cron check reading from DB client: should NOT be due
+    const tCron = new Date('2026-09-05T08:15:00.000Z');
+    const isDueAt15m = await isSourceDue(SOURCE_KEYS.SBV_FX_CENTRAL, { now: tCron, client: mockDbClient });
+    assert.equal(isDueAt15m, false, 'Blocked checkpoint loaded from DB must gate collection');
+
+    // 25 hours later: should become due after the 24h backoff
+    const tNextDay = new Date('2026-09-06T09:00:00.000Z');
+    const isDueNextDay = await isSourceDue(SOURCE_KEYS.SBV_FX_CENTRAL, { now: tNextDay, client: mockDbClient });
+    assert.equal(isDueNextDay, true, 'Source must become due after backoff interval expires');
+  });
+
+  // 35. Exact Astra SBV URLs are treated as canonical provenance
+  test('35. Exact Astra SBV URLs are treated as canonical provenance', () => {
+    assert.equal(SBV_CANONICAL_URLS.CENTRAL_FX, 'https://sbv.gov.vn/vi/tỷ-giá');
+    assert.equal(SBV_CANONICAL_URLS.INTERBANK_DAILY, 'https://sbv.gov.vn/vi/lãi-suất1');
+    assert.equal(SBV_CANONICAL_URLS.CREDIT_GROWTH, 'https://sbv.gov.vn/vi/du-no-tin-dung-doi-voi-nen-kt-dttktt');
+    assert.equal(SBV_CANONICAL_URLS.M2, 'https://sbv.gov.vn/vi/tổng-phương-tiện-thanh-toán-và-tiền-gửi-của-khách-hàng-tại-tctd');
+
+    assert.equal(isCanonicalSbvUrl('https://sbv.gov.vn/vi/tỷ-giá'), true);
+    assert.equal(isCanonicalSbvUrl('https://sbv.gov.vn/vi/lãi-suất1'), true);
+    assert.equal(isCanonicalSbvUrl('https://sbv.gov.vn/vi/du-no-tin-dung-doi-voi-nen-kt-dttktt'), true);
+    assert.equal(isCanonicalSbvUrl('https://sbv.gov.vn/vi/tổng-phương-tiện-thanh-toán-và-tiền-gửi-của-khách-hàng-tại-tctd'), true);
+
+    // Percent-encoded forms also identify canonical identity
+    assert.equal(isCanonicalSbvUrl(encodeURI('https://sbv.gov.vn/vi/tỷ-giá')), true);
+
+    const obs = normalizeSbvMonetaryFacts({
+      centralFx: { status: 'available', value: 24250, effectiveDate: '2026-09-05' },
+      dailyOvernight: { status: 'available', value: 4.15, sessionDate: '2026-09-04' },
+      creditGrowth: { status: 'available', value: 6.85, referencePeriod: '2026-07' },
+      m2Level: { status: 'available', value: 16500000, referencePeriod: '2026-06' }
+    });
+
+    const fxObs = obs.find((o) => o.factId === 'vn.monetary.fx.sbv_central.usd_vnd');
+    const ibObs = obs.find((o) => o.factId === 'vn.monetary.interbank.vnd.overnight.daily_avg_rate');
+    const crObs = obs.find((o) => o.factId === 'vn.monetary.credit.outstanding.ytd_growth');
+    const m2Obs = obs.find((o) => o.factId === 'vn.monetary.money_supply.m2.level');
+
+    assert.equal(fxObs.provenance.sourceUrl, 'https://sbv.gov.vn/vi/tỷ-giá');
+    assert.equal(ibObs.provenance.sourceUrl, 'https://sbv.gov.vn/vi/lãi-suất1');
+    assert.equal(crObs.provenance.sourceUrl, 'https://sbv.gov.vn/vi/du-no-tin-dung-doi-voi-nen-kt-dttktt');
+    assert.equal(m2Obs.provenance.sourceUrl, 'https://sbv.gov.vn/vi/tổng-phương-tiện-thanh-toán-và-tiền-gửi-của-khách-hàng-tại-tctd');
+  });
+
+  // 36. Guessed generic SBV URLs are rejected / not treated as canonical
+  test('36. Guessed generic SBV URLs are rejected / not treated as canonical', () => {
+    const guessedUrls = [
+      'https://sbv.gov.vn/vi/ty-gia-trung-tam',
+      'https://sbv.gov.vn/vi/lai-suat-lien-ngan-hang',
+      'https://sbv.gov.vn/vi/thong-ke-tien-te'
+    ];
+
+    for (const url of guessedUrls) {
+      assert.equal(isSbvGuessedGenericUrl(url), true, `${url} must be identified as guessed generic`);
+      assert.equal(isCanonicalSbvUrl(url), false, `${url} must NOT be treated as canonical provenance`);
+    }
+
+    // Legacy WebCenter URLs are historical fallbacks, NOT canonical
+    assert.equal(isCanonicalSbvUrl(SBV_LEGACY_FALLBACK_URLS.CENTRAL_FX), false);
+    assert.equal(isCanonicalSbvUrl(SBV_LEGACY_FALLBACK_URLS.INTERBANK_DAILY), false);
+
+    // Supplying a guessed generic URL to the parser results in quarantine
+    const parsed = parseSbvCentralFx(
+      'Tỷ giá trung tâm ngày 05/09/2026 là 24.250 VND',
+      'https://sbv.gov.vn/vi/ty-gia-trung-tam'
+    );
+    assert.equal(parsed.status, 'quarantined');
+    assert.equal(parsed.reason, 'NON_CANONICAL_GUESSED_URL');
+  });
+
+  // 37. Quarter period end (2026-09-30) is NOT treated as publication date
+  test('37. Quarter period end (2026-09-30) is NOT treated as publication date', () => {
+    const gdpText = 'Báo cáo tình hình kinh tế - xã hội quý III năm 2026. Tổng sản phẩm trong nước (GDP) quý III năm 2026 tăng 7.40% so với cùng kỳ năm trước nhờ sản xuất công nghiệp và xuất khẩu phục hồi mạnh.';
+    const parsedGdp = parseNsoQuarterlyGdp(gdpText);
+    assert.notEqual(parsedGdp, null);
+    assert.equal(parsedGdp.value, 7.4);
+    assert.equal(parsedGdp.referenceTime, '2026-Q3');
+    assert.equal(parsedGdp.periodEnd, '2026-09-30');
+
+    // Document contains no publication date statement
+    const sampleHtml = `<html><head><title>Kinh te xa hoi</title></head><body><p>${gdpText}</p></body></html>`;
+    const release = parseNsoSocioeconomicRelease(sampleHtml, 'https://www.nso.gov.vn/gdp-q3-2026/');
+    assert.equal(release.status, 'available');
+    assert.equal(release.publishedAt, null, 'Document without explicit publication date must have null publishedAt');
+
+    const observations = normalizeNsoMacroFacts(release);
+    const gdpObs = observations.find((o) => o.factId === 'vn.macro.gdp.real.quarter_yoy');
+
+    assert.notEqual(gdpObs, undefined);
+    assert.equal(gdpObs.publishedAt, null, 'Quarter period end (2026-09-30) must NOT be assigned to publishedAt');
+    assert.equal(gdpObs.periodEnd, '2026-09-30', 'Quarter period end must be preserved as periodEnd');
+    assert.equal(gdpObs.provenance.periodEnd, '2026-09-30');
+    assert.notEqual(gdpObs.publishedAt, gdpObs.periodEnd, 'publishedAt and periodEnd are distinct concepts');
+  });
+
+  // 38. Unknown publication date remains null (no fetchedAt substitution)
+  test('38. Unknown publication date remains null (no fetchedAt substitution)', () => {
+    const cpiText = 'Thông cáo báo chí tình hình giá cả. Chỉ số giá tiêu dùng (CPI) tháng 08/2026 tăng 3.45% so với cùng kỳ năm trước do nhóm lương thực và giáo dục điều chỉnh.';
+    const sampleHtml = `<html><head><title>CPI thang 8</title></head><body><p>${cpiText}</p></body></html>`;
+    const fetchTime = new Date('2026-09-05T14:30:00.000Z');
+
+    // Release URL contains a date path /2026/09/ which formerly was used to synthesize a -01 day
+    const release = parseNsoSocioeconomicRelease(sampleHtml, 'https://www.nso.gov.vn/tin-tuc/2026/09/cpi-thang-8/');
+    assert.equal(release.status, 'available');
+    assert.equal(release.publishedAt, null, 'Must NOT invent a -01 day from release URL date path');
+
+    const observations = normalizeNsoMacroFacts(release, fetchTime);
+    const cpiObs = observations.find((o) => o.factId === 'vn.macro.cpi.yoy');
+
+    assert.notEqual(cpiObs, undefined);
+    assert.equal(cpiObs.publishedAt, null, 'publishedAt must remain null');
+    assert.equal(cpiObs.fetchedAt, fetchTime.toISOString(), 'fetchedAt is the fetch timestamp');
+    assert.notEqual(cpiObs.publishedAt, cpiObs.fetchedAt, 'fetchedAt must NEVER be substituted for unknown publishedAt');
+  });
+
+  // 39. SBV WAF rejection preserves LKG timestamps
+  test('39. SBV WAF rejection preserves LKG timestamps', async () => {
+    const originalObs = createMarketObservation({
+      factId: 'vn.monetary.fx.sbv_central.usd_vnd',
+      pillar: PILLARS.MONETARY,
+      label: 'Tỷ giá trung tâm',
+      value: 24250,
+      unit: 'VND/USD',
+      unitType: UNIT_TYPES.CURRENCY_RATIO,
+      referenceTime: '2026-09-04',
+      publishedAt: null,
+      observedAt: '2026-09-04T02:00:00.000Z',
+      fetchedAt: '2026-09-04T03:00:00.000Z'
+    });
+    await persistMarketObservations([originalObs], null);
+
+    const wafBlockTime = new Date('2026-09-05T09:45:00.000Z');
+    await runMarketContextCollector({
+      now: wafBlockTime,
+      client: null,
+      fetchSbvMoneyMarketFn: async () => ({
+        status: 'blocked',
+        reason: 'PROVIDER_ACCESS_DENIED'
+      }),
+      fetchSbvOfficialFn: async () => ({
+        status: 'blocked',
+        reason: 'PROVIDER_ACCESS_DENIED'
+      }),
+      forceRefresh: true
+    });
+
+    const persisted = await fetchLatestPersistedObservations(null);
+    const lkgFx = persisted.find((o) => o.factId === 'vn.monetary.fx.sbv_central.usd_vnd');
+
+    assert.notEqual(lkgFx, undefined);
+    assert.equal(lkgFx.value, 24250);
+    assert.equal(lkgFx.observedAt, '2026-09-04T02:00:00.000Z', 'Observed timestamp must be identical');
+    assert.equal(lkgFx.fetchedAt, '2026-09-04T03:00:00.000Z', 'Fetched timestamp must be identical');
+    assert.notEqual(lkgFx.fetchedAt, wafBlockTime.toISOString(), 'WAF block time must not touch LKG timestamps');
+  });
+
+  // 40. Blocked SBV evidence produces no directional monetary stance
+  test('40. Blocked SBV evidence produces no directional monetary stance', () => {
+    const blockedMonetaryFacts = [
+      createUnavailableObservation('monetary.sbv_central_usd_vnd', PILLARS.MONETARY, 'Tỷ giá trung tâm', 'PROVIDER_ACCESS_DENIED', {
+        factId: 'vn.monetary.fx.sbv_central.usd_vnd'
+      }),
+      createUnavailableObservation('monetary.vnd_overnight_daily_avg_rate', PILLARS.MONETARY, 'Lãi suất qua đêm', 'PROVIDER_ACCESS_DENIED', {
+        factId: 'vn.monetary.interbank.vnd.overnight.daily_avg_rate'
+      }),
+      createUnavailableObservation('monetary.credit_ytd_growth', PILLARS.MONETARY, 'Tăng trưởng tín dụng', 'PROVIDER_ACCESS_DENIED', {
+        factId: 'vn.monetary.credit.outstanding.ytd_growth'
+      }),
+      createUnavailableObservation('monetary.m2_level', PILLARS.MONETARY, 'Cung tiền M2', 'PROVIDER_ACCESS_DENIED', {
+        factId: 'vn.monetary.money_supply.m2.level'
+      })
+    ];
+
+    const signals = deriveMarketSignals(
+      { macro: [], monetary: blockedMonetaryFacts, market: [], intermarket: [] },
+      new Date()
+    );
+
+    const monetaryStance = signals.find((s) => s.signalType === 'MONETARY_STANCE');
+    if (monetaryStance) {
+      assert.notEqual(monetaryStance.state, 'tightening', 'Blocked SBV facts must not produce directional tightening signal');
+      assert.notEqual(monetaryStance.state, 'easing', 'Blocked SBV facts must not produce directional easing signal');
+      assert.equal(monetaryStance.state, 'neutral', 'If signal emitted, stance must be strictly non-directional neutral');
+    } else {
+      // Abstaining from signal generation is also compliant
+      assert.equal(monetaryStance, undefined);
+    }
+  });
+
+  // 41. NSO release scheduler cadence has no day-of-month or day-30 assumptions
+  test('41. NSO release scheduler cadence has no day-of-month or day-30 assumptions', () => {
+    // Check various days across the month for NSO_MONTHLY: always schedules 24h daily cadence
+    const days = [1, 3, 10, 15, 25, 28, 31];
+    for (const d of days) {
+      const now = new Date(Date.UTC(2026, 7, d, 9, 0, 0)); // August 2026
+      const nextDue = calculateNextDueAt(SOURCE_KEYS.NSO_MONTHLY, now);
+      const diffHours = (Date.parse(nextDue) - now.getTime()) / (3600 * 1000);
+      assert.equal(diffHours, 24, `NSO_MONTHLY on day ${d} must use safe 24h daily cadence`);
+    }
+
+    // Check NSO_QUARTERLY in quarter-end month (September): uses 24h daily cadence without assuming day 30
+    const qDays = [5, 12, 20, 29, 30];
+    for (const d of qDays) {
+      const now = new Date(Date.UTC(2026, 8, d, 9, 0, 0)); // September 2026 (quarter-end)
+      const nextDue = calculateNextDueAt(SOURCE_KEYS.NSO_QUARTERLY, now);
+      const diffHours = (Date.parse(nextDue) - now.getTime()) / (3600 * 1000);
+      assert.equal(diffHours, 24, `NSO_QUARTERLY on day ${d} of quarter-end month must use safe 24h daily cadence`);
+    }
+
+    // If authoritative nextReleaseAt is observed, uses exact timestamp
+    const announcedTime = '2026-10-03T02:00:00.000Z';
+    const now = new Date('2026-09-05T10:00:00.000Z');
+    const scheduledDue = calculateNextDueAt(SOURCE_KEYS.NSO_MONTHLY, now, { nextReleaseAt: announcedTime });
+    assert.equal(scheduledDue, announcedTime);
   });
 
 });

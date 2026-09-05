@@ -94,6 +94,27 @@ function toQuarterKey(quarter, year) {
   return `${y}-Q${qNum}`;
 }
 
+export function referencePeriodToEndDate(ref) {
+  if (!ref || typeof ref !== 'string') return null;
+  const trimmed = ref.trim();
+  const qMatch = /^(\d{4})-Q([1-4])$/i.exec(trimmed);
+  if (qMatch) {
+    const year = Number(qMatch[1]);
+    const q = Number(qMatch[2]);
+    const endMonth = q * 3;
+    const lastDay = new Date(Date.UTC(year, endMonth, 0)).getUTCDate();
+    return `${year}-${String(endMonth).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+  }
+  const mMatch = /^(\d{4})-(\d{2})$/.exec(trimmed);
+  if (mMatch) {
+    const year = Number(mMatch[1]);
+    const month = Number(mMatch[2]);
+    const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+    return `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+  }
+  return null;
+}
+
 function extractDocumentYear(text, fallbackMonthKey = null) {
   if (fallbackMonthKey && typeof fallbackMonthKey === 'string') {
     const y = fallbackMonthKey.split('-')[0];
@@ -214,6 +235,7 @@ export function parseNsoQuarterlyGdp(text) {
       return {
         value: sign * val,
         referenceTime: refQuarter,
+        periodEnd: referencePeriodToEndDate(refQuarter),
         metric: 'Tăng trưởng GDP thực tế theo quý (so với cùng kỳ)'
       };
     }
@@ -327,6 +349,7 @@ export function parseNsoSocioeconomicRelease(html, releaseUrl = null) {
     return {
       status: 'quarantined',
       reason: 'UNOFFICIAL_HOST',
+      publishedAt: null,
       observations: []
     };
   }
@@ -336,6 +359,7 @@ export function parseNsoSocioeconomicRelease(html, releaseUrl = null) {
     return {
       status: 'quarantined',
       reason: 'EMPTY_OR_UNREADABLE_CONTENT',
+      publishedAt: null,
       observations: []
     };
   }
@@ -363,11 +387,6 @@ export function parseNsoSocioeconomicRelease(html, releaseUrl = null) {
   if (pubMatch) {
     const [_, d, m, y] = pubMatch;
     publishedAt = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}T00:00:00.000Z`;
-  } else if (releaseUrl) {
-    const urlDateMatch = /\/(\d{4})\/(\d{2})\//.exec(releaseUrl);
-    if (urlDateMatch) {
-      publishedAt = `${urlDateMatch[1]}-${urlDateMatch[2]}-01T00:00:00.000Z`;
-    }
   }
 
   const headlineCpi = parseNsoHeadlineCpi(text, referenceMonth);
@@ -473,11 +492,16 @@ export function normalizeNsoMacroFacts(parsedRelease, now = new Date()) {
       unit: '%',
       unitType: UNIT_TYPES.PERCENT,
       referenceTime: p.quarterlyGdp.referenceTime,
+      periodEnd: p.quarterlyGdp.periodEnd || null,
       publishedAt,
       fetchedAt,
       source: 'NSO',
       authorityLevel: AUTHORITY_LEVELS.PRIMARY_OFFICIAL,
-      provenance: { source: 'Cơ quan Thống kê Quốc gia (NSO)', releaseUrl }
+      provenance: {
+        source: 'Cơ quan Thống kê Quốc gia (NSO)',
+        releaseUrl,
+        periodEnd: p.quarterlyGdp.periodEnd || null
+      }
     }));
   } else {
     observations.push(createUnavailableObservation('macro.gdp_quarter_yoy', PILLARS.MACRO, 'Tăng trưởng GDP theo quý', 'QUARTERLY_GDP_UNAVAILABLE', {

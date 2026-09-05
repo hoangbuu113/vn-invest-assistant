@@ -33,12 +33,69 @@ import {
 } from '../factModel.js';
 
 export const SBV_HOST = 'sbv.gov.vn';
-export const SBV_CENTRAL_FX_URL = 'https://sbv.gov.vn/vi/ty-gia-trung-tam';
-export const SBV_CENTRAL_FX_PORTAL_URL = 'https://www.sbv.gov.vn/webcenter/portal/vi/menu/trangchu/ttnn/tgtw';
-export const SBV_DAILY_INTERBANK_URL = 'https://sbv.gov.vn/vi/lai-suat-lien-ngan-hang';
-export const SBV_DAILY_INTERBANK_PORTAL_URL = 'https://www.sbv.gov.vn/webcenter/portal/vi/menu/trangchu/ttnn/lslnh';
-export const SBV_MONETARY_STATS_URL = 'https://sbv.gov.vn/vi/thong-ke-tien-te';
-export const SBV_MONETARY_STATS_PORTAL_URL = 'https://www.sbv.gov.vn/webcenter/portal/vi/menu/trangchu/tk/tiente';
+
+// Astra-verified exact canonical SBV URLs
+export const SBV_CANONICAL_URLS = Object.freeze({
+  CENTRAL_FX: 'https://sbv.gov.vn/vi/tỷ-giá',
+  INTERBANK_DAILY: 'https://sbv.gov.vn/vi/lãi-suất1',
+  CREDIT_GROWTH: 'https://sbv.gov.vn/vi/du-no-tin-dung-doi-voi-nen-kt-dttktt',
+  M2: 'https://sbv.gov.vn/vi/tổng-phương-tiện-thanh-toán-và-tiền-gửi-của-khách-hàng-tại-tctd'
+});
+
+// Legacy WebCenter URLs retained strictly as historical fallbacks
+export const SBV_LEGACY_FALLBACK_URLS = Object.freeze({
+  CENTRAL_FX: 'https://www.sbv.gov.vn/webcenter/portal/vi/menu/trangchu/ttnn/tgtw',
+  INTERBANK_DAILY: 'https://www.sbv.gov.vn/webcenter/portal/vi/menu/trangchu/ttnn/lslnh',
+  MONETARY_STATS: 'https://www.sbv.gov.vn/webcenter/portal/vi/menu/trangchu/tk/tiente'
+});
+
+// Guessed generic URLs that must NOT be treated as canonical provenance
+export const SBV_GUESSED_GENERIC_URLS = Object.freeze([
+  'https://sbv.gov.vn/vi/ty-gia-trung-tam',
+  'https://sbv.gov.vn/vi/lai-suat-lien-ngan-hang',
+  'https://sbv.gov.vn/vi/thong-ke-tien-te'
+]);
+
+// Backward compatibility exports pointing to canonical Astra URLs
+export const SBV_CENTRAL_FX_URL = SBV_CANONICAL_URLS.CENTRAL_FX;
+export const SBV_CENTRAL_FX_PORTAL_URL = SBV_LEGACY_FALLBACK_URLS.CENTRAL_FX;
+export const SBV_DAILY_INTERBANK_URL = SBV_CANONICAL_URLS.INTERBANK_DAILY;
+export const SBV_DAILY_INTERBANK_PORTAL_URL = SBV_LEGACY_FALLBACK_URLS.INTERBANK_DAILY;
+export const SBV_CREDIT_GROWTH_URL = SBV_CANONICAL_URLS.CREDIT_GROWTH;
+export const SBV_M2_URL = SBV_CANONICAL_URLS.M2;
+export const SBV_MONETARY_STATS_URL = SBV_CANONICAL_URLS.CREDIT_GROWTH;
+export const SBV_MONETARY_STATS_PORTAL_URL = SBV_LEGACY_FALLBACK_URLS.MONETARY_STATS;
+
+/**
+ * Checks whether a given URL is one of the guessed generic non-canonical slugs.
+ */
+export function isSbvGuessedGenericUrl(url) {
+  if (!url || typeof url !== 'string') return false;
+  let decoded = url;
+  try {
+    decoded = decodeURI(url);
+  } catch {}
+  return SBV_GUESSED_GENERIC_URLS.some(g => g === url || g === decoded);
+}
+
+/**
+ * Validates whether a given URL represents canonical SBV provenance.
+ * Rejects guessed generic slugs, legacy fallbacks, or non-official hosts.
+ */
+export function isCanonicalSbvUrl(url, key = null) {
+  if (!url || typeof url !== 'string') return false;
+  if (isSbvGuessedGenericUrl(url)) return false;
+  let decoded = url;
+  try {
+    decoded = decodeURI(url);
+  } catch {}
+  if (key) {
+    const target = SBV_CANONICAL_URLS[key];
+    if (!target) return false;
+    return target === url || target === decoded;
+  }
+  return Object.values(SBV_CANONICAL_URLS).some(target => target === url || target === decoded);
+}
 
 /**
  * Detects whether an SBV response is a WAF / anti-bot rejection challenge.
@@ -80,12 +137,16 @@ function toMonthKey(month, year) {
  * - Detects government WAF access denials without crashing.
  */
 export function parseSbvCentralFx(rawHtmlOrText, sourceUrl = null) {
+  if (isSbvWafBlocked(rawHtmlOrText)) {
+    return { status: 'blocked', reason: 'PROVIDER_ACCESS_DENIED', value: null };
+  }
+
   if (sourceUrl && !isOfficialUrl(sourceUrl, SBV_HOST)) {
     return { status: 'quarantined', reason: 'UNOFFICIAL_HOST', value: null };
   }
 
-  if (isSbvWafBlocked(rawHtmlOrText)) {
-    return { status: 'blocked', reason: 'PROVIDER_ACCESS_DENIED', value: null };
+  if (sourceUrl && isSbvGuessedGenericUrl(sourceUrl)) {
+    return { status: 'quarantined', reason: 'NON_CANONICAL_GUESSED_URL', value: null };
   }
 
   const text = textFromHtml(rawHtmlOrText);
@@ -150,12 +211,16 @@ export function parseSbvCentralFx(rawHtmlOrText, sourceUrl = null) {
  * Distinct from weekly rate.
  */
 export function parseSbvDailyInterbankOvernight(rawHtmlOrText, sourceUrl = null) {
+  if (isSbvWafBlocked(rawHtmlOrText)) {
+    return { status: 'blocked', reason: 'PROVIDER_ACCESS_DENIED', value: null };
+  }
+
   if (sourceUrl && !isOfficialUrl(sourceUrl, SBV_HOST)) {
     return { status: 'quarantined', reason: 'UNOFFICIAL_HOST', value: null };
   }
 
-  if (isSbvWafBlocked(rawHtmlOrText)) {
-    return { status: 'blocked', reason: 'PROVIDER_ACCESS_DENIED', value: null };
+  if (sourceUrl && isSbvGuessedGenericUrl(sourceUrl)) {
+    return { status: 'quarantined', reason: 'NON_CANONICAL_GUESSED_URL', value: null };
   }
 
   const text = textFromHtml(rawHtmlOrText);
@@ -207,12 +272,16 @@ export function parseSbvDailyInterbankOvernight(rawHtmlOrText, sourceUrl = null)
  * Selects explicitly labelled reference period (not an arbitrary first row).
  */
 export function parseSbvCreditGrowth(rawHtmlOrText, targetPeriod = null, sourceUrl = null) {
+  if (isSbvWafBlocked(rawHtmlOrText)) {
+    return { status: 'blocked', reason: 'PROVIDER_ACCESS_DENIED', value: null };
+  }
+
   if (sourceUrl && !isOfficialUrl(sourceUrl, SBV_HOST)) {
     return { status: 'quarantined', reason: 'UNOFFICIAL_HOST', value: null };
   }
 
-  if (isSbvWafBlocked(rawHtmlOrText)) {
-    return { status: 'blocked', reason: 'PROVIDER_ACCESS_DENIED', value: null };
+  if (sourceUrl && isSbvGuessedGenericUrl(sourceUrl)) {
+    return { status: 'quarantined', reason: 'NON_CANONICAL_GUESSED_URL', value: null };
   }
 
   const text = textFromHtml(rawHtmlOrText);
@@ -291,12 +360,16 @@ export function parseSbvCreditGrowth(rawHtmlOrText, targetPeriod = null, sourceU
  * Invariant: Methodology boundary October 2025 (pre vs post 2025-10).
  */
 export function parseSbvM2Level(rawHtmlOrText, sourceUrl = null) {
+  if (isSbvWafBlocked(rawHtmlOrText)) {
+    return { status: 'blocked', reason: 'PROVIDER_ACCESS_DENIED', value: null };
+  }
+
   if (sourceUrl && !isOfficialUrl(sourceUrl, SBV_HOST)) {
     return { status: 'quarantined', reason: 'UNOFFICIAL_HOST', value: null };
   }
 
-  if (isSbvWafBlocked(rawHtmlOrText)) {
-    return { status: 'blocked', reason: 'PROVIDER_ACCESS_DENIED', value: null };
+  if (sourceUrl && isSbvGuessedGenericUrl(sourceUrl)) {
+    return { status: 'quarantined', reason: 'NON_CANONICAL_GUESSED_URL', value: null };
   }
 
   const text = textFromHtml(rawHtmlOrText);
@@ -383,7 +456,7 @@ export function normalizeSbvMonetaryFacts({
       provenance: {
         source: 'Ngân hàng Nhà nước Việt Nam (SBV)',
         effectiveDate: centralFx.effectiveDate || null,
-        sourceUrl: centralFx.sourceUrl || null
+        sourceUrl: centralFx.sourceUrl || SBV_CANONICAL_URLS.CENTRAL_FX
       }
     }));
   } else {
@@ -416,7 +489,7 @@ export function normalizeSbvMonetaryFacts({
       provenance: {
         source: 'Ngân hàng Nhà nước Việt Nam (SBV)',
         sessionDate: dailyOvernight.sessionDate || null,
-        sourceUrl: dailyOvernight.sourceUrl || null
+        sourceUrl: dailyOvernight.sourceUrl || SBV_CANONICAL_URLS.INTERBANK_DAILY
       }
     }));
   } else {
@@ -449,7 +522,7 @@ export function normalizeSbvMonetaryFacts({
       provenance: {
         source: 'Ngân hàng Nhà nước Việt Nam (SBV)',
         referencePeriod: creditGrowth.referencePeriod || null,
-        sourceUrl: creditGrowth.sourceUrl || null
+        sourceUrl: creditGrowth.sourceUrl || SBV_CANONICAL_URLS.CREDIT_GROWTH
       }
     }));
   } else {
@@ -484,7 +557,7 @@ export function normalizeSbvMonetaryFacts({
         source: 'Ngân hàng Nhà nước Việt Nam (SBV)',
         referencePeriod: m2Level.referencePeriod || null,
         methodologyBoundary: '2025-10',
-        sourceUrl: m2Level.sourceUrl || null
+        sourceUrl: m2Level.sourceUrl || SBV_CANONICAL_URLS.M2
       }
     }));
   } else {

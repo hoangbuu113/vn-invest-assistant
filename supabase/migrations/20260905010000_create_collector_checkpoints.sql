@@ -1,4 +1,4 @@
-﻿-- Migration: 20260905010000_create_collector_checkpoints.sql
+-- Migration: 20260905010000_create_collector_checkpoints.sql
 -- Description: Durable scheduling and checkpoint tracking for slow-moving official macro and monetary context data sources.
 -- Allows the Cloudflare 15-minute cron to skip sources that are not due, preventing excessive polling of NSO and SBV websites.
 
@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS public.market_context_collector_checkpoints (
     last_success_at TIMESTAMPTZ,
     next_due_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     status TEXT NOT NULL DEFAULT 'idle' CHECK (
-        status IN ('idle', 'in_progress', 'success', 'failed', 'quarantined')
+        status IN ('idle', 'in_progress', 'success', 'failed', 'quarantined', 'blocked/access_denied')
     ),
     metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),

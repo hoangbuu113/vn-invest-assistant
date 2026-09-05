@@ -21,11 +21,15 @@ export const SOURCE_KEYS = Object.freeze({
 });
 
 export const CHECKPOINT_STATUS = Object.freeze({
+  IDLE: 'idle',
+  IN_PROGRESS: 'in_progress',
   SUCCESS: 'success',
   FAILED: 'failed',
   QUARANTINED: 'quarantined',
   BLOCKED_ACCESS_DENIED: 'blocked/access_denied'
 });
+
+export const VALID_CHECKPOINT_STATUSES = Object.freeze(Object.values(CHECKPOINT_STATUS));
 
 /**
  * Calculates deterministic nextDueAt for each source key based on official release cadences,
