@@ -22,7 +22,15 @@ export const STANCE_CLASSES = Object.freeze({
 export const CONVICTION_LABELS = Object.freeze({
   low: 'Thấp',
   medium: 'Trung bình',
-  high: 'Cao'
+  high: 'Cao',
+  insufficient_evidence: 'Chưa đủ dữ liệu'
+});
+
+export const CONFIDENCE_LABELS = Object.freeze({
+  HIGH: 'Cao',
+  MEDIUM: 'Trung bình',
+  LOW: 'Thấp',
+  INSUFFICIENT_EVIDENCE: 'Chưa đủ dữ liệu'
 });
 
 export const ASSET_CLASS_LABELS = Object.freeze({
@@ -111,12 +119,17 @@ export function buildMarketStrategistViewModel(raw) {
 
   const generatedAt = data.generatedAt ? formatPublishedTime(data.generatedAt) : 'Vừa xong';
 
+  const confidence = data.executiveDecision?.confidence || (conviction === 'insufficient_evidence' ? 'INSUFFICIENT_EVIDENCE' : 'MEDIUM');
+  const confidenceLabel = CONFIDENCE_LABELS[confidence] || 'Trung bình';
+
   const executiveDecision = {
     stance,
     stanceLabel,
     stanceClass,
     conviction,
     convictionLabel,
+    confidence,
+    confidenceLabel,
     oneLineDecision: data.executiveDecision?.oneLineDecision || data.investmentOrientation?.rationale || '',
     actionNow: data.executiveDecision?.actionNow || data.investmentOrientation?.rationale || ''
   };

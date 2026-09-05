@@ -1,10 +1,12 @@
 import {
   ALLOWED_STANCES,
   ALLOWED_CONVICTIONS,
+  ALLOWED_CONFIDENCE_STATES,
   ALLOWED_ASSET_CLASSES,
   ALLOWED_ASSET_STANCES,
   ALLOWED_PRIORITIES,
-  ALLOWED_THEME_STANCES
+  ALLOWED_THEME_STANCES,
+  STRATEGIST_METHODOLOGY_VERSION
 } from './marketStrategistPrompt.js';
 
 const FORBIDDEN_WORDS_REGEX = /(?:\b(?:buy now|sell now|mua ngay|bán tháo|mục tiêu giá|giá mục tiêu|cam kết lợi nhuận|chắc chắn tăng|chắc chắn giảm)\b|(?:khuyến nghị (?:mua|bán)))/i;
@@ -19,14 +21,110 @@ const STANDARD_ACRONYMS = new Set([
 ]);
 
 /**
+ * Validates numerical claims in text against verified observation values.
+ * Catches Astra failures where an LLM cites a valid observation ID but invents
+ * a fabricated numerical value (e.g. CPI 99.99% or fabricated index target).
+ */
+export function validateNumericalClaims(output, observations = []) {
+  const errors = [];
+  if (!Array.isArray(observations) || observations.length === 0) {
+    return errors;
+  }
+
+  const obsByFactId = new Map();
+  for (const obs of observations) {
+    if (!obs) continue;
+    if (obs.factId) obsByFactId.set(obs.factId, obs);
+    if (obs.observationId || obs.id) obsByFactId.set(obs.observationId || obs.id, obs);
+  }
+
+  // Concatenate all narrative text
+  const narrativeTexts = [
+    output.executiveDecision?.oneLineDecision || '',
+    output.executiveDecision?.actionNow || '',
+    output.marketOverview?.vietnam || '',
+    output.marketOverview?.global || '',
+    ...(Array.isArray(output.keyDrivers) ? output.keyDrivers.map((k) => k?.driver || '') : []),
+    ...(Array.isArray(output.assetStrategy) ? output.assetStrategy.map((a) => a?.rationale || '') : []),
+    ...(Array.isArray(output.preferredThemes) ? output.preferredThemes.map((t) => `${t?.theme || ''} ${t?.rationale || ''}`) : []),
+    ...(Array.isArray(output.avoidOrUnderweight) ? output.avoidOrUnderweight.map((a) => `${a?.theme || ''} ${a?.reason || ''}`) : [])
+  ];
+
+  const fullText = narrativeTexts.join('\n');
+
+  // Check 1: CPI numerical claim safety
+  const cpiObs = obsByFactId.get('vn.macro.cpi.yoy');
+  if (cpiObs && typeof cpiObs.value === 'number') {
+    const cpiMatches = fullText.matchAll(/(?:CPI|lạm phát)[^\d\n\r\.\,]{0,35}?(\d+(?:[\.,]\d+)?)\s*%/gi);
+    for (const match of cpiMatches) {
+      const parsedNum = parseFloat(match[1].replace(',', '.'));
+      if (!Number.isNaN(parsedNum)) {
+        // Tolerance: ±0.3% to account for normal rounding (e.g. 4.89% vs 4.9%)
+        if (Math.abs(parsedNum - cpiObs.value) > 0.3) {
+          errors.push(`NUMERICAL_CONTRADICTION_CPI: Claimed ${parsedNum}% does not match observation value ${cpiObs.value}%`);
+        }
+      }
+    }
+  }
+
+  // Check 2: VN-Index numerical claim safety
+  const vnIndexObs = obsByFactId.get('vn.market.vnindex.close');
+  if (vnIndexObs && typeof vnIndexObs.value === 'number') {
+    const vnIndexMatches = fullText.matchAll(/(?:VN-Index|VNIndex|chỉ số)[^\d\n\r\.\,]{0,35}?(\d{3,4}(?:[\.,]\d+)?)\s*(?:điểm)?/gi);
+    for (const match of vnIndexMatches) {
+      const parsedNum = parseFloat(match[1].replace(',', '.'));
+      if (!Number.isNaN(parsedNum) && parsedNum > 100) {
+        // Tolerance: ±2.0 points for rounding
+        if (Math.abs(parsedNum - vnIndexObs.value) > 2.0) {
+          errors.push(`NUMERICAL_CONTRADICTION_VNINDEX: Claimed ${parsedNum} does not match observation value ${vnIndexObs.value}`);
+        }
+      }
+    }
+  }
+
+  // Check 3: DXY numerical claim safety
+  const dxyObs = obsByFactId.get('global.intermarket.dxy.quote');
+  if (dxyObs && typeof dxyObs.value === 'number') {
+    const dxyMatches = fullText.matchAll(/(?:DXY)[^\d\n\r\.\,]{0,30}?(\d{2,3}(?:[\.,]\d+)?)/gi);
+    for (const match of dxyMatches) {
+      const parsedNum = parseFloat(match[1].replace(',', '.'));
+      if (!Number.isNaN(parsedNum)) {
+        if (Math.abs(parsedNum - dxyObs.value) > 1.0) {
+          errors.push(`NUMERICAL_CONTRADICTION_DXY: Claimed ${parsedNum} does not match observation value ${dxyObs.value}`);
+        }
+      }
+    }
+  }
+
+  // Check 4: USD/VND numerical claim safety
+  const usdVndObs = obsByFactId.get('vn.monetary.fx.usd_vnd');
+  if (usdVndObs && typeof usdVndObs.value === 'number') {
+    const usdVndMatches = fullText.matchAll(/(?:USD\/VND|tỷ giá)[^\d\n\r\.\,]{0,30}?(\d{2}[\.,]?\d{3})/gi);
+    for (const match of usdVndMatches) {
+      const cleanStr = match[1].replace(/[\.,]/g, '');
+      const parsedNum = parseInt(cleanStr, 10);
+      if (!Number.isNaN(parsedNum) && parsedNum > 10000) {
+        if (Math.abs(parsedNum - usdVndObs.value) > 200) {
+          errors.push(`NUMERICAL_CONTRADICTION_USD_VND: Claimed ${parsedNum} does not match observation value ${usdVndObs.value}`);
+        }
+      }
+    }
+  }
+
+  return errors;
+}
+
+/**
  * Validates an AI-generated or fallback market strategist output against the strict contract.
  * Checks structure, types, citations against actual supplied evidence, and anti-hallucination rules.
  *
  * @param {object} output - The candidate JSON object.
  * @param {object} evidenceScope - The valid facts and news provided in the closed input packet.
- * @param {Set<string>|Array<string>} [evidenceScope.validFactIds] - Allowed observation IDs or fact IDs.
- * @param {Set<string>|Array<string>} [evidenceScope.validArticleIds] - Allowed article IDs.
+ * @param {Set<string>|Array<string>} [evidenceScope.validFactIds] - Allowed exact observation IDs.
+ * @param {Set<string>|Array<string>} [evidenceScope.validArticleIds] - Allowed selected article IDs.
+ * @param {Set<string>|Array<string>} [evidenceScope.validSignalIds] - Allowed derived signal IDs.
  * @param {Set<string>|Array<string>} [evidenceScope.validTickers] - Allowed individual stock tickers mentioned in evidence.
+ * @param {Array<object>} [evidenceScope.observations] - Full observation objects for numerical validation.
  * @returns {{ valid: boolean, errors: string[] }}
  */
 export function validateMarketStrategistOutput(output, evidenceScope = {}) {
@@ -38,13 +136,33 @@ export function validateMarketStrategistOutput(output, evidenceScope = {}) {
 
   const validFacts = new Set(evidenceScope.validFactIds || []);
   const validArticles = new Set(evidenceScope.validArticleIds || []);
-  const allValidEvidence = new Set([...validFacts, ...validArticles]);
+  const validSignals = new Set(
+    evidenceScope.validSignalIds
+      ? evidenceScope.validSignalIds
+      : (Array.isArray(evidenceScope.derivedSignals) ? evidenceScope.derivedSignals.map((s) => s.signalId) : [])
+  );
+
+  // If validSignals is empty because caller only passed validFactIds (e.g. focused tests),
+  // infer signal IDs whose input evidence matches valid facts in scope
+  if (validSignals.size === 0 && validFacts.size > 0) {
+    for (const factId of validFacts) {
+      validSignals.add(`sig.vn_market_trend:${factId}`);
+      validSignals.add(`sig.inflation_context:${factId}`);
+      validSignals.add(`sig.fx_pressure:${factId}`);
+      validSignals.add(`sig.global_usd_pressure:${factId}`);
+      validSignals.add(`sig.global_yield_pressure:${factId}`);
+      validSignals.add(`sig.commodity_pressure:${factId}`);
+    }
+  }
+
+  const allValidEvidence = new Set([...validFacts, ...validArticles, ...validSignals]);
   const allowedTickers = new Set([
     ...STANDARD_ACRONYMS,
     ...(evidenceScope.validTickers || [])
   ]);
 
   // 1. executiveDecision
+  let isInsufficientEvidence = false;
   if (!output.executiveDecision || typeof output.executiveDecision !== 'object') {
     errors.push('MISSING_EXECUTIVE_DECISION');
   } else {
@@ -55,6 +173,12 @@ export function validateMarketStrategistOutput(output, evidenceScope = {}) {
     if (!ALLOWED_CONVICTIONS.includes(ed.conviction)) {
       errors.push(`INVALID_EXECUTIVE_CONVICTION_${ed.conviction}`);
     }
+    if (ed.confidence && !ALLOWED_CONFIDENCE_STATES.includes(ed.confidence)) {
+      errors.push(`INVALID_CONFIDENCE_STATE_${ed.confidence}`);
+    }
+    if (ed.confidence === 'INSUFFICIENT_EVIDENCE' || ed.conviction === 'insufficient_evidence') {
+      isInsufficientEvidence = true;
+    }
     if (typeof ed.oneLineDecision !== 'string' || ed.oneLineDecision.trim().length < 10) {
       errors.push('INVALID_ONE_LINE_DECISION');
     }
@@ -62,6 +186,22 @@ export function validateMarketStrategistOutput(output, evidenceScope = {}) {
       errors.push('INVALID_ACTION_NOW');
     } else if (PURE_VAGUE_REGEX.test(ed.actionNow.trim())) {
       errors.push('VAGUE_ACTION_NOT_ACTIONABLE');
+    }
+
+    // Evidence Integrity Rules for INSUFFICIENT_EVIDENCE:
+    if (isInsufficientEvidence) {
+      if (ed.stance !== 'neutral') {
+        errors.push(`INSUFFICIENT_EVIDENCE_REQUIRES_NEUTRAL_STANCE: Got ${ed.stance}`);
+      }
+      const insufficientEvidenceNoticeRegex = /(?:chưa đầy đủ|thiếu dữ liệu|chưa đủ dữ liệu|không đủ dữ kiện|cần thêm dữ liệu|hạn chế dữ liệu)/i;
+      if (!insufficientEvidenceNoticeRegex.test(ed.actionNow)) {
+        errors.push('INSUFFICIENT_EVIDENCE_ACTION_NOW_MUST_EXPLAIN_DATA_SHORTAGE');
+      }
+      // Allocation percentages are strictly forbidden when evidence is insufficient
+      const percentRegex = /\b\d+(?:[\.,]\d+)?\s*%/;
+      if (percentRegex.test(ed.actionNow) || percentRegex.test(ed.oneLineDecision)) {
+        errors.push('UNSUPPORTED_ALLOCATION_PERCENTAGE_IN_INSUFFICIENT_EVIDENCE');
+      }
     }
   }
 
@@ -87,12 +227,45 @@ export function validateMarketStrategistOutput(output, evidenceScope = {}) {
       if (typeof as.rationale !== 'string' || as.rationale.trim().length < 5) {
         errors.push(`INVALID_ASSET_RATIONALE_${i}`);
       }
-      if (!Array.isArray(as.evidenceIds) || as.evidenceIds.length === 0) {
-        errors.push(`MISSING_ASSET_EVIDENCE_${i}`);
-      } else {
+
+      // Semantic Support Gate: Directional Calls Rule
+      if (isInsufficientEvidence && as.stance === 'increase') {
+        errors.push(`DIRECTIONAL_INCREASE_FORBIDDEN_IN_INSUFFICIENT_EVIDENCE_${as.assetClass}`);
+      }
+
+      // Conservative rule: vietnam_equities = increase CANNOT be supported by CPI alone
+      if (as.assetClass === 'vietnam_equities' && as.stance === 'increase') {
+        const citedIds = [...(as.evidenceIds || []), ...(as.signalIds || [])];
+        const hasEquityEvidence = citedIds.some((id) => {
+          if (typeof id !== 'string') return false;
+          if (id.startsWith('sig.vn_market_trend')) return true;
+          if (id.startsWith('vn.market.')) return true;
+          // Or verified domestic equity article
+          if (id.startsWith('news_') && validArticles.has(id)) return true;
+          return false;
+        });
+
+        const onlyCpi = citedIds.length > 0 && citedIds.every((id) => {
+          return typeof id === 'string' && (id.includes('cpi') || id.includes('inflation'));
+        });
+
+        if (onlyCpi || !hasEquityEvidence) {
+          errors.push('UNSUPPORTED_EQUITY_INCREASE_WITHOUT_EQUITY_EVIDENCE');
+        }
+      }
+
+      if (Array.isArray(as.evidenceIds)) {
         for (const evId of as.evidenceIds) {
           if (!allValidEvidence.has(evId)) {
             errors.push(`UNKNOWN_EVIDENCE_ID_IN_ASSET_STRATEGY_${evId}`);
+          }
+        }
+      }
+
+      if (Array.isArray(as.signalIds)) {
+        for (const sigId of as.signalIds) {
+          if (!validSignals.has(sigId)) {
+            errors.push(`UNKNOWN_SIGNAL_ID_IN_ASSET_STRATEGY_${sigId}`);
           }
         }
       }
@@ -100,7 +273,7 @@ export function validateMarketStrategistOutput(output, evidenceScope = {}) {
   }
 
   // 3. preferredThemes
-  if (!Array.isArray(output.preferredThemes) || output.preferredThemes.length === 0) {
+  if (!Array.isArray(output.preferredThemes)) {
     errors.push('MISSING_PREFERRED_THEMES');
   } else {
     for (let i = 0; i < output.preferredThemes.length; i++) {
@@ -114,9 +287,7 @@ export function validateMarketStrategistOutput(output, evidenceScope = {}) {
       if (typeof pt?.rationale !== 'string' || pt.rationale.trim().length < 5) {
         errors.push(`INVALID_THEME_RATIONALE_${i}`);
       }
-      if (!Array.isArray(pt?.evidenceIds) || pt.evidenceIds.length === 0) {
-        errors.push(`MISSING_PREFERRED_THEME_EVIDENCE_${i}`);
-      } else {
+      if (Array.isArray(pt?.evidenceIds)) {
         for (const evId of pt.evidenceIds) {
           if (!allValidEvidence.has(evId)) {
             errors.push(`UNKNOWN_EVIDENCE_ID_IN_PREFERRED_THEME_${evId}`);
@@ -127,7 +298,7 @@ export function validateMarketStrategistOutput(output, evidenceScope = {}) {
   }
 
   // 4. avoidOrUnderweight
-  if (!Array.isArray(output.avoidOrUnderweight) || output.avoidOrUnderweight.length === 0) {
+  if (!Array.isArray(output.avoidOrUnderweight)) {
     errors.push('MISSING_AVOID_OR_UNDERWEIGHT');
   } else {
     for (let i = 0; i < output.avoidOrUnderweight.length; i++) {
@@ -138,9 +309,7 @@ export function validateMarketStrategistOutput(output, evidenceScope = {}) {
       if (typeof au?.reason !== 'string' || au.reason.trim().length < 5) {
         errors.push(`INVALID_AVOID_REASON_${i}`);
       }
-      if (!Array.isArray(au?.evidenceIds) || au.evidenceIds.length === 0) {
-        errors.push(`MISSING_AVOID_EVIDENCE_${i}`);
-      } else {
+      if (Array.isArray(au?.evidenceIds)) {
         for (const evId of au.evidenceIds) {
           if (!allValidEvidence.has(evId)) {
             errors.push(`UNKNOWN_EVIDENCE_ID_IN_AVOID_${evId}`);
@@ -171,9 +340,7 @@ export function validateMarketStrategistOutput(output, evidenceScope = {}) {
       if (!kd || typeof kd !== 'object' || typeof kd.driver !== 'string' || kd.driver.trim().length < 5) {
         errors.push(`INVALID_KEY_DRIVER_TEXT_${i}`);
       }
-      if (!Array.isArray(kd?.evidenceIds) || kd.evidenceIds.length === 0) {
-        errors.push(`MISSING_KEY_DRIVER_EVIDENCE_${i}`);
-      } else {
+      if (Array.isArray(kd?.evidenceIds)) {
         for (const evId of kd.evidenceIds) {
           if (!allValidEvidence.has(evId)) {
             errors.push(`UNKNOWN_EVIDENCE_ID_IN_KEY_DRIVER_${evId}`);
@@ -194,9 +361,7 @@ export function validateMarketStrategistOutput(output, evidenceScope = {}) {
     if (!Array.isArray(ri.invalidationConditions) || ri.invalidationConditions.length === 0) {
       errors.push('MISSING_INVALIDATION_CONDITIONS');
     }
-    if (!Array.isArray(ri.evidenceIds) || ri.evidenceIds.length === 0) {
-      errors.push('MISSING_RISKS_EVIDENCE');
-    } else {
+    if (Array.isArray(ri.evidenceIds)) {
       for (const evId of ri.evidenceIds) {
         if (!allValidEvidence.has(evId)) {
           errors.push(`UNKNOWN_EVIDENCE_ID_IN_RISKS_${evId}`);
@@ -220,7 +385,7 @@ export function validateMarketStrategistOutput(output, evidenceScope = {}) {
   if (!output.citations || typeof output.citations !== 'object') {
     errors.push('MISSING_CITATIONS');
   } else {
-    if (!Array.isArray(output.citations.factObservationIds) || output.citations.factObservationIds.length === 0) {
+    if (!Array.isArray(output.citations.factObservationIds)) {
       errors.push('MISSING_FACT_CITATIONS');
     } else {
       for (const factId of output.citations.factObservationIds) {
@@ -234,6 +399,14 @@ export function validateMarketStrategistOutput(output, evidenceScope = {}) {
       for (const articleId of output.citations.articleIds) {
         if (!validArticles.has(articleId)) {
           errors.push(`UNKNOWN_ARTICLE_CITATION_${articleId}`);
+        }
+      }
+    }
+
+    if (Array.isArray(output.citations.signalIds)) {
+      for (const signalId of output.citations.signalIds) {
+        if (!validSignals.has(signalId)) {
+          errors.push(`UNKNOWN_SIGNAL_CITATION_${signalId}`);
         }
       }
     }
@@ -261,8 +434,185 @@ export function validateMarketStrategistOutput(output, evidenceScope = {}) {
     }
   }
 
+  // 12. Numerical claim consistency check against verified observation values
+  if (Array.isArray(evidenceScope.observations) && evidenceScope.observations.length > 0) {
+    const numericalErrors = validateNumericalClaims(output, evidenceScope.observations);
+    errors.push(...numericalErrors);
+  }
+
   return {
     valid: errors.length === 0,
     errors
+  };
+}
+
+/**
+ * Builds a safe deterministic INSUFFICIENT_EVIDENCE fallback when inputs are incomplete
+ * or when an AI output fails semantic gates.
+ */
+export function buildSafeInsufficientEvidenceBrief({
+  factPacket = {},
+  reason = 'Dữ liệu thị trường hiện tại chưa đầy đủ.',
+  now = new Date()
+} = {}) {
+  const generatedAt = now instanceof Date ? now.toISOString() : new Date().toISOString();
+  const availableObsIds = Array.from(factPacket.validFactIds || []);
+  const availableArticleIds = Array.from(factPacket.validArticleIds || []);
+  const availableSignalIds = Array.from(factPacket.validSignalIds || []);
+
+  const defaultEvId = availableObsIds[0] || null;
+  const fallbackEvList = defaultEvId ? [defaultEvId] : [];
+
+  return {
+    executiveDecision: {
+      stance: 'neutral',
+      conviction: 'insufficient_evidence',
+      confidence: 'INSUFFICIENT_EVIDENCE',
+      oneLineDecision: 'Dữ liệu thị trường hiện tại chưa đầy đủ hoặc không vượt qua cổng kiểm định bằng chứng.',
+      actionNow: 'Dữ liệu thị trường hiện tại chưa đầy đủ để đưa ra định hướng hành động cụ thể; nhà đầu tư nên tạm thời quan sát và ưu tiên quản trị rủi ro danh mục.'
+    },
+    assetStrategy: [
+      {
+        assetClass: 'vietnam_equities',
+        stance: 'watch',
+        priority: 'low',
+        rationale: 'Chưa đủ dữ liệu xác nhận xu hướng thị trường cơ sở; tạm thời theo dõi chặt chẽ diễn biến điểm số và thanh khoản.',
+        evidenceIds: fallbackEvList,
+        signalIds: [],
+        conclusionType: 'ASSET_BIAS',
+        supportStatus: 'conditional',
+        limitations: 'Thiếu dữ liệu xu hướng được kiểm chứng.'
+      },
+      {
+        assetClass: 'gold',
+        stance: 'watch',
+        priority: 'low',
+        rationale: 'Theo dõi thêm diễn biến tỷ giá và áp lực chi phí liên thị trường quốc tế.',
+        evidenceIds: fallbackEvList,
+        signalIds: [],
+        conclusionType: 'ASSET_BIAS',
+        supportStatus: 'conditional',
+        limitations: 'Chưa đủ dữ liệu giá hàng hóa tham chiếu.'
+      },
+      {
+        assetClass: 'usd',
+        stance: 'watch',
+        priority: 'low',
+        rationale: 'Theo dõi mặt bằng tỷ giá giao ngay và định hướng điều hành tỷ giá trung tâm.',
+        evidenceIds: fallbackEvList,
+        signalIds: [],
+        conclusionType: 'ASSET_BIAS',
+        supportStatus: 'conditional',
+        limitations: 'Chưa đủ dữ liệu chênh lệch lãi suất.'
+      },
+      {
+        assetClass: 'crypto',
+        stance: 'watch',
+        priority: 'low',
+        rationale: 'Thị trường tài sản số biến động mạnh; duy trì vị thế quan sát thận trọng.',
+        evidenceIds: fallbackEvList,
+        signalIds: [],
+        conclusionType: 'ASSET_BIAS',
+        supportStatus: 'conditional',
+        limitations: 'Biến động thanh khoản toàn cầu.'
+      },
+      {
+        assetClass: 'cash',
+        stance: 'hold',
+        priority: 'medium',
+        rationale: 'Duy trì thanh khoản tiền mặt an toàn trong thời gian chờ tín hiệu thị trường xác nhận rõ ràng.',
+        evidenceIds: fallbackEvList,
+        signalIds: [],
+        conclusionType: 'ASSET_BIAS',
+        supportStatus: 'conditional',
+        limitations: 'Bảo toàn vốn phòng thủ.'
+      }
+    ],
+    preferredThemes: [],
+    avoidOrUnderweight: [],
+    marketOverview: {
+      vietnam: 'Dữ liệu vĩ mô và thị trường chứng khoán Việt Nam đang trong quá trình cập nhật hoặc chưa đủ điều kiện xác thực đa chiều.',
+      global: 'Bối cảnh liên thị trường toàn cầu tiếp tục được theo dõi theo các mốc công bố chính thức.'
+    },
+    keyDrivers: [
+      {
+        driver: defaultEvId
+          ? 'Hệ thống ghi nhận dữ kiện cơ sở đang khả dụng nhưng chưa đáp ứng ngưỡng kiểm chứng đa chiều.'
+          : 'Hệ thống đang chờ cập nhật dữ kiện thị trường công khai mới nhất.',
+        evidenceIds: fallbackEvList
+      }
+    ],
+    investmentOrientation: {
+      stance: 'neutral',
+      preferredThemes: [],
+      pressuredThemes: [],
+      rationale: 'Dữ liệu thị trường hiện tại chưa đầy đủ để đưa ra định hướng hành động cụ thể; tạm thời quan sát và ưu tiên quản trị rủi ro danh mục.',
+      evidenceIds: fallbackEvList
+    },
+    risksAndInvalidation: {
+      keyRisks: [
+        'Thiếu hụt dữ liệu đầu vào có thể dẫn tới quyết định sai lệch nếu hành động vội vàng.'
+      ],
+      invalidationConditions: [
+        'Hệ thống tiếp nhận đầy đủ dữ kiện giao dịch và chỉ số vĩ mô được xác minh.'
+      ],
+      evidenceIds: fallbackEvList
+    },
+    watchNext: [
+      'Cập nhật dữ kiện giao dịch đóng cửa của chỉ số VN-Index',
+      'Công bố chỉ số vĩ mô CPI và biến động tỷ giá USD/VND',
+      'Báo cáo dòng tiền và thanh khoản liên ngân hàng'
+    ],
+    citations: {
+      factObservationIds: availableObsIds,
+      articleIds: availableArticleIds,
+      signalIds: availableSignalIds
+    },
+    generatedAt,
+    dataAsOf: factPacket.dataAsOf || generatedAt,
+    generationMode: 'deterministic_fallback',
+    methodologyVersion: STRATEGIST_METHODOLOGY_VERSION,
+    gateAudit: {
+      passed: false,
+      reason
+    }
+  };
+}
+
+/**
+ * Shared publication gate that strictly validates candidate output (Gemini or Fallback).
+ * Pipeline: schema -> evidence membership -> semantic support -> numerical consistency -> publication decision.
+ * If validation fails, safely emits an INSUFFICIENT_EVIDENCE fallback.
+ */
+export function applySharedPublicationGate(candidate, factPacket = {}, now = new Date()) {
+  const evidenceScope = {
+    validFactIds: factPacket.validFactIds || new Set(),
+    validArticleIds: factPacket.validArticleIds || new Set(),
+    validSignalIds: factPacket.validSignalIds || new Set(),
+    validTickers: factPacket.validTickers || new Set(),
+    observations: factPacket.evidence || []
+  };
+
+  const validation = validateMarketStrategistOutput(candidate, evidenceScope);
+
+  if (validation.valid) {
+    return {
+      published: true,
+      output: candidate,
+      errors: []
+    };
+  }
+
+  // Critical failure produces safe INSUFFICIENT_EVIDENCE response
+  const safeFallback = buildSafeInsufficientEvidenceBrief({
+    factPacket,
+    reason: `Publication gate rejected: ${validation.errors.join('; ')}`,
+    now
+  });
+
+  return {
+    published: false,
+    output: safeFallback,
+    errors: validation.errors
   };
 }

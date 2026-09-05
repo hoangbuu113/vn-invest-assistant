@@ -8,10 +8,14 @@ import {
   STRATEGIST_METHODOLOGY_VERSION,
   MARKET_STRATEGIST_SCHEMA,
   STRATEGIST_SYSTEM_INSTRUCTIONS,
-  ALLOWED_STANCES,
   toGeminiSchema
 } from './marketStrategistPrompt.js';
-import { validateMarketStrategistOutput } from './marketStrategistValidation.js';
+import {
+  validateMarketStrategistOutput,
+  applySharedPublicationGate,
+  buildSafeInsufficientEvidenceBrief
+} from './marketStrategistValidation.js';
+import { deriveMarketSignals } from './derivedSignals.js';
 
 export const STRATEGIST_CACHE_TTL_MS = 15 * 60 * 1000; // 15 minutes
 export const STRATEGIST_COOLDOWN_MS = 15 * 1000;       // 15 seconds
@@ -19,6 +23,9 @@ export const STRATEGIST_COOLDOWN_MS = 15 * 1000;       // 15 seconds
 /**
  * Builds the closed fact packet for AI Market Strategist.
  * Strictly guarantees ZERO private portfolio/user data enters the packet.
+ * Strictly enforces exact observation ID scope (no generic fact IDs).
+ * Strictly restricts news scope to bounded selection (excluded articles are rejected).
+ * Attaches explicit server-side derived signals.
  */
 export function buildMarketStrategistFactPacket({
   marketObservations = [],
@@ -52,11 +59,12 @@ export function buildMarketStrategistFactPacket({
     const observationId = obs.observationId || obs.id;
     if (!observationId) continue;
 
+    // EXACT SCOPE: Only exact observation ID is added. Generic factId is strictly prohibited as citation.
     validFactIds.add(observationId);
-    if (obs.factId) validFactIds.add(obs.factId);
 
     evidence.push({
       id: observationId,
+      observationId,
       factId: obs.factId || null,
       pillar: obs.pillar || 'market',
       label: obs.label || obs.metric || observationId,
@@ -68,11 +76,18 @@ export function buildMarketStrategistFactPacket({
       changeBasis: obs.changeBasis || null,
       status: obs.status || 'available',
       freshness: obs.freshness || 'fresh',
-      source: obs.source || obs.source_id || 'System'
+      source: obs.source || obs.source_id || 'System',
+      referenceTime: obs.referenceTime || obs.reference_time || null,
+      publishedTime: obs.publishedTime || obs.published_at || obs.recordedAt || null,
+      revision: obs.revision || obs.quality || 'verified',
+      limitations: obs.limitations || null
     });
   }
 
-  const validArticleIds = new Set();
+  // Derive explicit intermediate market signals deterministically on server
+  const derivedSignals = deriveMarketSignals({ observations: marketObservations, now });
+  const validSignalIds = new Set(derivedSignals.map((s) => s.signalId));
+
   const validTickers = new Set();
   const categorizedNews = {
     vnMacro: [],
@@ -86,8 +101,6 @@ export function buildMarketStrategistFactPacket({
     if (!article || typeof article !== 'object') continue;
     const articleId = article.articleId || article.id;
     if (!articleId) continue;
-
-    validArticleIds.add(articleId);
 
     const relatedAssets = Array.isArray(article.relatedAssets)
       ? article.relatedAssets.map((a) => ({ symbol: a.symbol, name: a.name })).filter((a) => a.symbol)
@@ -105,6 +118,7 @@ export function buildMarketStrategistFactPacket({
 
     const normalized = {
       articleId,
+      id: articleId,
       title: article.title || 'Untitled',
       excerpt: article.excerpt || article.summary || '',
       sourceName: article.sourceName || article.source || 'News Source',
@@ -147,33 +161,41 @@ export function buildMarketStrategistFactPacket({
     }
   }
 
+  // EXACT SCOPE: Only articles SELECTED into packet are valid citations.
+  // Excluded articles are strictly prohibited.
+  const validArticleIds = new Set(selectedNews.map((a) => a.articleId));
+
   const untrustedNews = selectedNews.length > 0 ? selectedNews : [];
-  const dataAsOf = now.toISOString();
+  const dataAsOf = now instanceof Date ? now.toISOString() : new Date().toISOString();
 
   return {
     now,
     dataAsOf,
     evidence,
     untrustedNews,
+    derivedSignals,
     validFactIds,
     validArticleIds,
+    validSignalIds,
     validTickers
   };
 }
 
 /**
  * Computes a deterministic SHA-256 fingerprint for caching.
- * Changes whenever any observation ID or news article ID changes.
+ * Changes whenever any observation ID, news article ID, or signal ID changes.
  */
 export function computeStrategistFingerprint({
   validFactIds = new Set(),
   validArticleIds = new Set(),
+  validSignalIds = new Set(),
   promptVersion = STRATEGIST_PROMPT_VERSION,
   schemaVersion = STRATEGIST_SCHEMA_VERSION
 } = {}) {
   const sortedFacts = Array.from(validFactIds).sort().join('|');
   const sortedNews = Array.from(validArticleIds).sort().join('|');
-  const rawKey = `${sortedFacts}::${sortedNews}::${promptVersion}::${schemaVersion}`;
+  const sortedSignals = Array.from(validSignalIds).sort().join('|');
+  const rawKey = `${sortedFacts}::${sortedNews}::${sortedSignals}::${promptVersion}::${schemaVersion}`;
   return createHash('sha256').update(rawKey).digest('hex');
 }
 
@@ -224,15 +246,27 @@ export const globalMarketStrategistRuntime = new MarketStrategistRuntime();
 
 /**
  * High-quality deterministic fallback engine.
- * Conforms 100% to MARKET_STRATEGIST_SCHEMA using verified facts and news.
+ * Conforms 100% to MARKET_STRATEGIST_SCHEMA and Evidence Integrity Core.
+ * Evaluates observation evidence and derived signals, respects confidence states,
+ * never fabricates allocation percentages or unevidenced themes.
  */
 export function generateDeterministicMarketStrategist({ factPacket, now = new Date() }) {
-  const { evidence, untrustedNews } = factPacket;
+  const { evidence = [], untrustedNews = [], derivedSignals = [] } = factPacket;
+
+  // If evidence is empty: return safe INSUFFICIENT_EVIDENCE brief immediately
+  if (evidence.length === 0) {
+    return buildSafeInsufficientEvidenceBrief({
+      factPacket,
+      reason: 'Không có dữ kiện quan sát thị trường.',
+      now
+    });
+  }
 
   const obsByFactId = new Map();
   for (const item of evidence) {
     if (item.factId) obsByFactId.set(item.factId, item);
     if (item.id) obsByFactId.set(item.id, item);
+    if (item.observationId) obsByFactId.set(item.observationId, item);
   }
 
   const vnIndexObs = obsByFactId.get('vn.market.vnindex.close');
@@ -242,6 +276,16 @@ export function generateDeterministicMarketStrategist({ factPacket, now = new Da
   const us10yObs = obsByFactId.get('global.intermarket.us10y.yield');
   const brentObs = obsByFactId.get('global.intermarket.brent.futures');
 
+  const signalsByType = new Map();
+  for (const s of derivedSignals) {
+    signalsByType.set(s.signalType, s);
+  }
+
+  const vnTrendSignal = signalsByType.get('VN_MARKET_TREND');
+  const inflationSignal = signalsByType.get('INFLATION_CONTEXT');
+  const fxSignal = signalsByType.get('FX_PRESSURE');
+  const dxySignal = signalsByType.get('GLOBAL_USD_PRESSURE');
+
   const citedFactIds = [];
   if (vnIndexObs) citedFactIds.push(vnIndexObs.id);
   if (cpiObs) citedFactIds.push(cpiObs.id);
@@ -250,17 +294,34 @@ export function generateDeterministicMarketStrategist({ factPacket, now = new Da
   if (us10yObs) citedFactIds.push(us10yObs.id);
   if (brentObs) citedFactIds.push(brentObs.id);
 
+  const citedSignalIds = derivedSignals.map((s) => s.signalId);
   const citedArticleIds = untrustedNews.slice(0, 3).map((a) => a.articleId);
 
-  // Determine market stance deterministically
+  // Confidence state derivation
+  let confidence = 'MEDIUM';
+  let conviction = 'medium';
   let stance = 'neutral';
+
   const cpiVal = typeof cpiObs?.value === 'number' ? cpiObs.value : null;
   const vnIndexChg = typeof vnIndexObs?.change === 'number' ? vnIndexObs.change : null;
 
-  if (vnIndexChg !== null && vnIndexChg > 0 && (cpiVal === null || cpiVal < 5.0)) {
+  // Case A: Missing VN-Index observation (cannot make directional equity calls)
+  if (!vnIndexObs) {
+    confidence = 'LOW';
+    conviction = 'low';
+    stance = 'neutral';
+  } else if (vnIndexChg !== null && vnIndexChg > 0 && (cpiVal === null || cpiVal < 4.5)) {
     stance = 'selective_risk_on';
-  } else if (cpiVal !== null && cpiVal >= 5.0) {
+    confidence = 'MEDIUM';
+    conviction = 'medium';
+  } else if (cpiVal !== null && cpiVal >= 4.5) {
     stance = 'defensive';
+    confidence = 'MEDIUM';
+    conviction = 'medium';
+  } else {
+    stance = 'neutral';
+    confidence = 'LOW';
+    conviction = 'low';
   }
 
   const vnIndexProse = vnIndexObs?.value
@@ -272,120 +333,164 @@ export function generateDeterministicMarketStrategist({ factPacket, now = new Da
     : 'Dữ liệu lạm phát chính thức tiếp tục được cập nhật theo kỳ công bố của cơ quan thống kê.';
 
   const globalProse = dxyObs?.value
-    ? `Trên thị trường quốc tế, chỉ số DXY đạt ${dxyObs.value} điểm và lợi suất Trái phiếu Mỹ 10 năm ở mức ${us10yObs?.value ?? 'hiện hành'}%, tác động đến mặt bằng tỷ giá và dòng vốn biên giới.`
+    ? `Trên thị trường quốc tế, chỉ số DXY đạt ${dxyObs.value} điểm${us10yObs?.value ? ` và lợi suất Trái phiếu Mỹ 10 năm ở mức ${us10yObs.value}%` : ''}, tác động đến mặt bằng tỷ giá và dòng vốn biên giới.`
     : 'Bối cảnh liên thị trường toàn cầu tiếp tục chịu ảnh hưởng từ định hướng lãi suất của các ngân hàng trung ương lớn.';
 
   const keyDrivers = [];
   if (vnIndexObs) {
     keyDrivers.push({
       driver: `Diễn biến chỉ số chứng khoán trong nước duy trì vùng vận động tại ${vnIndexObs.value} điểm.`,
-      evidenceIds: [vnIndexObs.id]
+      evidenceIds: [vnIndexObs.id],
+      signalIds: vnTrendSignal ? [vnTrendSignal.signalId] : []
     });
   }
   if (cpiObs) {
     keyDrivers.push({
       driver: `Lạm phát trong nước được ghi nhận ở mức ${cpiObs.value}%, định hình kỳ vọng chính sách tiền tệ.`,
-      evidenceIds: [cpiObs.id]
+      evidenceIds: [cpiObs.id],
+      signalIds: inflationSignal ? [inflationSignal.signalId] : []
     });
   }
   if (dxyObs || usdVndObs) {
     const ids = [];
+    const sigIds = [];
     if (dxyObs) ids.push(dxyObs.id);
     if (usdVndObs) ids.push(usdVndObs.id);
+    if (dxySignal) sigIds.push(dxySignal.signalId);
+    if (fxSignal) sigIds.push(fxSignal.signalId);
     keyDrivers.push({
       driver: `Áp lực tỷ giá và chỉ số sức mạnh USD (DXY: ${dxyObs?.value ?? 'N/A'}, USD/VND: ${usdVndObs?.value ?? 'N/A'}) chi phối dòng tiền đầu tư.`,
-      evidenceIds: ids
+      evidenceIds: ids,
+      signalIds: sigIds
     });
   }
   if (keyDrivers.length === 0 && evidence.length > 0) {
     keyDrivers.push({
       driver: `Dữ liệu thị trường cơ sở từ nguồn ${evidence[0].source} được ghi nhận ở trạng thái ${evidence[0].status}.`,
-      evidenceIds: [evidence[0].id]
+      evidenceIds: [evidence[0].id],
+      signalIds: []
     });
   }
 
   const defaultEvId = evidence[0]?.id || 'context';
 
+  // Strict: NO fabricated allocation percentages
   const executiveDecision = {
     stance,
-    conviction: 'medium',
+    conviction,
+    confidence,
     oneLineDecision: stance === 'selective_risk_on'
-      ? 'Thị trường vận động tích cực có chọn lọc; ưu tiên giải ngân từng phần vào nhóm doanh nghiệp hưởng lợi đầu tư công và dòng tiền mạnh.'
+      ? 'Thị trường vận động tích cực có chọn lọc; ưu tiên giải ngân từng phần vào nhóm doanh nghiệp có dòng tiền lành mạnh và kỷ luật rủi ro cao.'
       : (stance === 'defensive'
-        ? 'Áp lực vĩ mô và chi phí gia tăng; ưu tiên bảo toàn vốn, hạ đòn bẩy và duy trì thanh khoản tiền mặt.'
-        : 'Thị trường dao động tích lũy; duy trì vị thế cân bằng và chỉ tham gia theo các mốc hỗ trợ kỹ thuật rõ ràng.'),
+        ? 'Áp lực vĩ mô và chi phí gia tăng; ưu tiên bảo toàn vốn, kiểm soát đòn bẩy và duy trì thanh khoản tiền mặt an toàn.'
+        : 'Thị trường dao động tích lũy; duy trì vị thế cân bằng và chỉ giải ngân theo các mốc hỗ trợ kỹ thuật rõ ràng.'),
     actionNow: stance === 'selective_risk_on'
-      ? 'Không mua đuổi ở các nhịp hưng phấn; chia nhỏ các đợt giải ngân tại vùng hỗ trợ đối với nhóm hưởng lợi hạ tầng và kết quả kinh doanh quý III khởi sắc.'
+      ? 'Không mua đuổi ở các nhịp hưng phấn; chia nhỏ các đợt giải ngân tại vùng hỗ trợ đối với các nhóm có động lực dòng tiền thực tế.'
       : (stance === 'defensive'
-        ? 'Chủ động hạ tỷ trọng các nhóm nhạy cảm lãi suất và đòn bẩy cao; nâng tỷ trọng tiền mặt lên mức phòng thủ tối thiểu 30-40%.'
-        : 'Duy trì tỷ trọng danh mục ở mức trung bình 50-60%; kiên nhẫn chờ đợi tín hiệu dòng tiền lan tỏa trước khi mở rộng quy mô.')
+        ? 'Chủ động hạ tỷ trọng các nhóm nhạy cảm lãi suất và đòn bẩy cao; nâng tỷ trọng thanh khoản tiền mặt phòng thủ.'
+        : (confidence === 'LOW'
+          ? 'Dữ liệu chỉ số chứng khoán cơ sở hoặc vĩ mô còn hạn chế; tạm thời quan sát thận trọng và duy trì kỷ luật danh mục.'
+          : 'Duy trì tỷ trọng danh mục ở mức cân bằng thận trọng; kiên nhẫn chờ đợi tín hiệu dòng tiền lan tỏa trước khi mở rộng quy mô.'))
   };
+
+  // Directional asset calls strictly gated by evidence existence
+  const equityStance = (!vnIndexObs || confidence === 'LOW')
+    ? 'watch'
+    : (stance === 'selective_risk_on' ? 'increase' : 'hold');
 
   const assetStrategy = [
     {
       assetClass: 'vietnam_equities',
-      stance: stance === 'selective_risk_on' ? 'increase' : 'hold',
-      priority: 'high',
-      rationale: 'VN-Index duy trì vận động tích cực nhưng phân hóa, tập trung vào nhóm vốn hóa lớn và đầu tư công có câu chuyện riêng.',
-      evidenceIds: vnIndexObs ? [vnIndexObs.id] : [defaultEvId]
+      stance: equityStance,
+      priority: vnIndexObs ? 'high' : 'low',
+      rationale: vnIndexObs
+        ? 'VN-Index duy trì vùng vận động có sự phân hóa; ưu tiên quản trị điểm mua tại vùng giá hợp lý thay vì mua đuổi.'
+        : 'Chưa đủ dữ liệu xác nhận xu hướng VN-Index; tạm thời theo dõi diễn biến thanh khoản và dòng tiền.',
+      evidenceIds: vnIndexObs ? [vnIndexObs.id] : [defaultEvId],
+      signalIds: vnTrendSignal ? [vnTrendSignal.signalId] : [],
+      conclusionType: 'ASSET_BIAS',
+      supportStatus: vnIndexObs ? 'supported' : 'conditional',
+      limitations: 'Chưa bao gồm diễn biến độ rộng chi tiết của toàn bộ các sàn giao dịch.'
     },
     {
       assetClass: 'gold',
       stance: 'hold',
       priority: 'medium',
       rationale: 'Nắm giữ vị thế phòng thủ chiến lược trước biến số lạm phát quốc tế và bất ổn địa chính trị kéo dài.',
-      evidenceIds: brentObs ? [brentObs.id] : (dxyObs ? [dxyObs.id] : [defaultEvId])
+      evidenceIds: brentObs ? [brentObs.id] : (dxyObs ? [dxyObs.id] : [defaultEvId]),
+      signalIds: [],
+      conclusionType: 'ASSET_BIAS',
+      supportStatus: 'supported',
+      limitations: 'Tham chiếu thị trường giao ngay quốc tế.'
     },
     {
       assetClass: 'usd',
       stance: 'watch',
       priority: 'medium',
       rationale: 'Theo dõi chặt biến động chỉ số DXY và diễn biến tỷ giá trong nước để đánh giá dư địa chính sách tiền tệ.',
-      evidenceIds: usdVndObs ? [usdVndObs.id] : (dxyObs ? [dxyObs.id] : [defaultEvId])
+      evidenceIds: usdVndObs ? [usdVndObs.id] : (dxyObs ? [dxyObs.id] : [defaultEvId]),
+      signalIds: fxSignal ? [fxSignal.signalId] : [],
+      conclusionType: 'ASSET_BIAS',
+      supportStatus: 'supported',
+      limitations: 'Tỷ giá giao ngay tham chiếu.'
     },
     {
       assetClass: 'crypto',
       stance: 'watch',
       priority: 'low',
       rationale: 'Thị trường tài sản số biến động mạnh theo thanh khoản toàn cầu; hạn chế sử dụng đòn bẩy tài chính.',
-      evidenceIds: dxyObs ? [dxyObs.id] : [defaultEvId]
+      evidenceIds: dxyObs ? [dxyObs.id] : [defaultEvId],
+      signalIds: dxySignal ? [dxySignal.signalId] : [],
+      conclusionType: 'ASSET_BIAS',
+      supportStatus: 'supported',
+      limitations: 'Tài sản rủi ro cao nhạy cảm thanh khoản.'
     },
     {
       assetClass: 'cash',
       stance: 'hold',
       priority: 'high',
       rationale: 'Duy trì thanh khoản sẵn sàng để chủ động tận dụng các nhịp điều chỉnh giải ngân vào các cổ phiếu cơ bản tốt.',
-      evidenceIds: cpiObs ? [cpiObs.id] : [defaultEvId]
+      evidenceIds: cpiObs ? [cpiObs.id] : [defaultEvId],
+      signalIds: inflationSignal ? [inflationSignal.signalId] : [],
+      conclusionType: 'ASSET_BIAS',
+      supportStatus: 'supported',
+      limitations: 'Dự trữ thanh khoản phòng thủ.'
     }
   ];
 
-  const preferredThemes = [
-    {
-      theme: 'Đầu tư công và xây dựng hạ tầng',
-      stance: 'prefer',
-      rationale: 'Quyết tâm đẩy mạnh giải ngân vốn ngân sách quý III tạo động lực doanh thu và việc làm trực tiếp.',
-      evidenceIds: citedArticleIds.slice(0, 1).concat(vnIndexObs ? [vnIndexObs.id] : [defaultEvId])
-    },
-    {
+  // Preferred Themes: Only when supported by news or evidence
+  const preferredThemes = [];
+  if (citedArticleIds.length > 0 && vnIndexObs) {
+    preferredThemes.push({
       theme: 'Doanh nghiệp đầu ngành dòng tiền mạnh và nợ thấp',
       stance: 'prefer',
       rationale: 'Khả năng chống chịu tốt trước biến động chi phí đầu vào và lãi suất vay.',
-      evidenceIds: citedFactIds.slice(0, 2)
-    }
-  ];
+      evidenceIds: [vnIndexObs.id],
+      signalIds: vnTrendSignal ? [vnTrendSignal.signalId] : [],
+      conclusionType: 'THEME_PREFERENCE',
+      supportStatus: 'supported',
+      limitations: 'Yêu cầu thẩm định báo cáo tài chính từng quý.'
+    });
+  }
 
-  const avoidOrUnderweight = [
-    {
-      theme: 'Nhóm cổ phiếu đầu cơ sử dụng đòn bẩy tài chính cao',
-      reason: 'Biên an toàn thấp và dễ bị tổn thương khi thanh khoản thị trường chung phân hóa.',
-      evidenceIds: citedFactIds.slice(0, 2)
-    }
-  ];
+  // Avoid Themes: Only when supported
+  const avoidOrUnderweight = [];
+  if (usdVndObs || dxyObs) {
+    avoidOrUnderweight.push({
+      theme: 'Nhóm doanh nghiệp chịu chi phí nợ ngoại tệ cao hoặc đầu cơ đòn bẩy',
+      reason: 'Biên an toàn thấp và dễ bị tổn thương khi biến động tỷ giá và thanh khoản phân hóa.',
+      evidenceIds: [usdVndObs?.id || dxyObs?.id].filter(Boolean),
+      signalIds: fxSignal ? [fxSignal.signalId] : [],
+      conclusionType: 'THEME_UNDERWEIGHT',
+      supportStatus: 'supported',
+      limitations: 'Tác động theo từng chu kỳ tái cơ cấu nợ.'
+    });
+  }
 
   const orientationEvidenceIds = citedFactIds.slice(0, 4);
   const risksEvidenceIds = citedFactIds.slice(0, 3);
 
-  return {
+  const fallbackCandidate = {
     executiveDecision,
     assetStrategy,
     preferredThemes,
@@ -399,13 +504,11 @@ export function generateDeterministicMarketStrategist({ factPacket, now = new Da
     ],
     investmentOrientation: {
       stance,
-      preferredThemes: ['Doanh nghiệp dòng tiền mạnh', 'Nhóm hưởng lợi từ thương mại và xuất khẩu'],
-      pressuredThemes: ['Nhóm sử dụng đòn bẩy tài chính cao', 'Doanh nghiệp chịu chi phí nợ USD'],
-      rationale: 'Ưu tiên phân bổ thận trọng, tập trung vào doanh nghiệp có nền tảng cơ bản vững chắc và khả năng quản trị biến động dòng tiền tốt trong bối cảnh vĩ mô đan xen.',
       preferredThemes: preferredThemes.map((t) => t.theme),
       pressuredThemes: avoidOrUnderweight.map((t) => t.theme),
       rationale: executiveDecision.actionNow,
-      evidenceIds: orientationEvidenceIds.length > 0 ? orientationEvidenceIds : [evidence[0]?.id || 'context']
+      evidenceIds: orientationEvidenceIds.length > 0 ? orientationEvidenceIds : [evidence[0]?.id || 'context'],
+      signalIds: citedSignalIds.slice(0, 4)
     },
     risksAndInvalidation: {
       keyRisks: [
@@ -416,7 +519,8 @@ export function generateDeterministicMarketStrategist({ factPacket, now = new Da
         'DXY hạ nhiệt bền vững hoặc tỷ giá trong nước ổn định trở lại.',
         'Thanh khoản và độ rộng thị trường chứng khoán cải thiện đồng thuận.'
       ],
-      evidenceIds: risksEvidenceIds.length > 0 ? risksEvidenceIds : [evidence[0]?.id || 'context']
+      evidenceIds: risksEvidenceIds.length > 0 ? risksEvidenceIds : [evidence[0]?.id || 'context'],
+      signalIds: citedSignalIds.slice(0, 2)
     },
     watchNext: [
       'Công bố chỉ số giá tiêu dùng CPI kỳ tới của Tổng cục Thống kê',
@@ -425,18 +529,22 @@ export function generateDeterministicMarketStrategist({ factPacket, now = new Da
     ],
     citations: {
       factObservationIds: citedFactIds.length > 0 ? citedFactIds : [evidence[0]?.id || 'context'],
-      articleIds: citedArticleIds
+      articleIds: citedArticleIds,
+      signalIds: citedSignalIds
     },
-    generatedAt: now.toISOString(),
+    generatedAt: now instanceof Date ? now.toISOString() : new Date().toISOString(),
     dataAsOf: factPacket.dataAsOf,
     generationMode: 'deterministic_fallback',
     methodologyVersion: STRATEGIST_METHODOLOGY_VERSION
   };
+
+  return fallbackCandidate;
 }
 
 /**
  * Generates the AI Market Strategist synthesis.
  * Coordinates caching, LLM invocation with strict schema, validation, and deterministic fallback.
+ * Guaranteed: BOTH LLM and Fallback outputs pass through the same shared publication gate.
  */
 export async function generateMarketStrategist({
   factPacket,
@@ -451,8 +559,8 @@ export async function generateMarketStrategist({
   aiEnabled = true,
   allowLlm = true
 } = {}) {
-  const { validFactIds, validArticleIds, evidence } = factPacket;
-  const fingerprint = computeStrategistFingerprint({ validFactIds, validArticleIds });
+  const { validFactIds, validArticleIds, validSignalIds, evidence, derivedSignals } = factPacket;
+  const fingerprint = computeStrategistFingerprint({ validFactIds, validArticleIds, validSignalIds });
 
   // 1. Check runtime cache
   if (runtime) {
@@ -461,7 +569,8 @@ export async function generateMarketStrategist({
       return {
         ...cached,
         generationMode: 'cache',
-        evidence
+        evidence,
+        derivedSignals: derivedSignals || []
       };
     }
   }
@@ -499,7 +608,7 @@ export async function generateMarketStrategist({
           systemInstruction: {
             parts: [
               {
-                text: `${STRATEGIST_SYSTEM_INSTRUCTIONS}\n\nLƯU Ý QUAN TRỌNG: Bạn BẮT BUỘC phải trả về đúng định dạng JSON theo schema đã cho, không thêm bất kỳ văn bản ngoài JSON. Mọi evidenceId trong keyDrivers, investmentOrientation, risksAndInvalidation và citations PHẢI LẤY CHÍNH XÁC từ danh sách ID có sẵn (availableFactIds và availableArticleIds). Tuyệt đối không tự sửa hoặc rút ngắn ID.`
+                text: `${STRATEGIST_SYSTEM_INSTRUCTIONS}\n\nLƯU Ý QUAN TRỌNG: Bạn BẮT BUỘC phải trả về đúng định dạng JSON theo schema đã cho, không thêm bất kỳ văn bản ngoài JSON. Mọi evidenceId PHẢI LẤY CHÍNH XÁC từ danh sách ID có sẵn (availableObservationIds, availableArticleIds, availableSignalIds). Tuyệt đối không tự sửa, rút ngắn ID, hoặc sáng tạo số liệu.`
               }
             ]
           },
@@ -509,9 +618,11 @@ export async function generateMarketStrategist({
               parts: [
                 {
                   text: JSON.stringify({
-                    availableFactIds: Array.from(validFactIds),
+                    availableObservationIds: Array.from(validFactIds),
                     availableArticleIds: Array.from(validArticleIds),
+                    availableSignalIds: Array.from(validSignalIds),
                     marketContext: factPacket.evidence,
+                    derivedSignals: factPacket.derivedSignals || [],
                     marketNews: factPacket.untrustedNews,
                     now: factPacket.now
                   })
@@ -561,7 +672,6 @@ export async function generateMarketStrategist({
             if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
               cleaned = cleaned.slice(firstBrace, lastBrace + 1);
             }
-            rawLlmOutput = JSON.parse(cleaned);
             try {
               rawLlmOutput = JSON.parse(cleaned);
               if (finishReason) {
@@ -592,7 +702,11 @@ export async function generateMarketStrategist({
             reasoning: { effort: STRATEGIST_REASONING_EFFORT },
             instructions: STRATEGIST_SYSTEM_INSTRUCTIONS,
             input: JSON.stringify({
+              availableObservationIds: Array.from(validFactIds),
+              availableArticleIds: Array.from(validArticleIds),
+              availableSignalIds: Array.from(validSignalIds),
               marketContext: factPacket.evidence,
+              derivedSignals: factPacket.derivedSignals || [],
               marketNews: factPacket.untrustedNews,
               now: factPacket.now
             }),
@@ -635,16 +749,12 @@ export async function generateMarketStrategist({
       }
 
       if (rawLlmOutput && typeof rawLlmOutput === 'object') {
-        const validation = validateMarketStrategistOutput(rawLlmOutput, {
-          validFactIds,
-          validArticleIds,
-          validTickers: factPacket.validTickers
-        });
-
-        if (validation.valid) {
+        // Pass LLM output through shared publication gate
+        const publication = applySharedPublicationGate(rawLlmOutput, factPacket, now);
+        if (publication.published) {
           result = {
-            ...rawLlmOutput,
-            generatedAt: now.toISOString(),
+            ...publication.output,
+            generatedAt: now instanceof Date ? now.toISOString() : new Date().toISOString(),
             dataAsOf: factPacket.dataAsOf,
             generationMode: (rawLlmOutput.generationMode && rawLlmOutput.generationMode !== 'deterministic_fallback')
               ? rawLlmOutput.generationMode
@@ -653,7 +763,7 @@ export async function generateMarketStrategist({
             ...(rawLlmOutput.finishReason ? { finishReason: rawLlmOutput.finishReason } : {})
           };
         } else {
-          lastProviderError = `Validation errors: ${validation.errors.join(', ')}`;
+          lastProviderError = `Publication gate rejected LLM output: ${publication.errors.join(', ')}`;
         }
       }
     } catch (err) {
@@ -662,9 +772,11 @@ export async function generateMarketStrategist({
     }
   }
 
-  // 3. Fall back to deterministic synthesis if LLM was skipped, failed, or invalid
+  // 3. Fall back to deterministic synthesis if LLM was skipped, failed, or rejected by publication gate
   if (!result) {
-    result = generateDeterministicMarketStrategist({ factPacket, now });
+    const candidateFallback = generateDeterministicMarketStrategist({ factPacket, now });
+    const publication = applySharedPublicationGate(candidateFallback, factPacket, now);
+    result = publication.output;
     if (lastProviderError) {
       result.lastProviderError = lastProviderError;
     }
@@ -681,13 +793,14 @@ export async function generateMarketStrategist({
     };
   }
 
-  // 4. Cache valid output
+  // 4. Cache valid published output
   if (runtime && fingerprint) {
     runtime.set(fingerprint, result, now);
   }
 
   return {
     ...result,
-    evidence
+    evidence,
+    derivedSignals: derivedSignals || []
   };
 }

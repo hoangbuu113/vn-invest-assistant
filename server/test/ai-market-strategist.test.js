@@ -10,14 +10,24 @@ import {
 } from '../src/ai/marketStrategistEngine.js';
 import {
   MARKET_STRATEGIST_SCHEMA,
-  STRATEGIST_METHODOLOGY_VERSION
+  STRATEGIST_METHODOLOGY_VERSION,
+  ALLOWED_CONFIDENCE_STATES,
+  ALLOWED_CONCLUSION_TYPES,
+  ALLOWED_SUPPORT_STATUSES
 } from '../src/ai/marketStrategistPrompt.js';
-import { validateMarketStrategistOutput } from '../src/ai/marketStrategistValidation.js';
+import {
+  validateMarketStrategistOutput,
+  applySharedPublicationGate,
+  buildSafeInsufficientEvidenceBrief,
+  validateNumericalClaims
+} from '../src/ai/marketStrategistValidation.js';
+import { deriveMarketSignals, SIGNAL_TYPES } from '../src/ai/derivedSignals.js';
 import { getMarketStrategist } from '../src/marketStrategist.js';
 import {
   buildMarketStrategistViewModel,
   formatStrategistStance,
-  formatEvidenceValue
+  formatEvidenceValue,
+  CONFIDENCE_LABELS
 } from '../../client/src/utils/marketStrategistDisplay.js';
 import { buildInvestmentBriefViewModel } from '../../client/src/utils/investmentBriefDisplay.js';
 
@@ -638,5 +648,269 @@ test('V1.2 Improvement 04 — AI Market Strategist', async (t) => {
     assert.ok(Array.isArray(fallback.investmentOrientation.preferredThemes));
     assert.ok(Array.isArray(fallback.investmentOrientation.pressuredThemes));
     assert.ok(Array.isArray(fallback.investmentOrientation.evidenceIds));
+  });
+
+  await t.test('21. Empty packet produces INSUFFICIENT_EVIDENCE without allocation percentages', () => {
+    const emptyPacket = buildMarketStrategistFactPacket({
+      marketObservations: [],
+      newsArticles: [],
+      now: NOW
+    });
+
+    assert.equal(emptyPacket.evidence.length, 0);
+    assert.equal(emptyPacket.untrustedNews.length, 0);
+    assert.equal(emptyPacket.derivedSignals.length, 0);
+
+    const fallback = generateDeterministicMarketStrategist({ factPacket: emptyPacket, now: NOW });
+    assert.equal(fallback.executiveDecision.confidence, 'INSUFFICIENT_EVIDENCE');
+    assert.equal(fallback.executiveDecision.conviction, 'insufficient_evidence');
+    assert.equal(fallback.executiveDecision.stance, 'neutral');
+    assert.ok(/chưa đầy đủ|không đủ/i.test(fallback.executiveDecision.actionNow));
+    assert.deepEqual(fallback.preferredThemes, []);
+    assert.deepEqual(fallback.avoidOrUnderweight, []);
+
+    // No allocation percentages in actionNow or oneLineDecision
+    assert.equal(/\b\d+%\b/.test(fallback.executiveDecision.actionNow), false);
+    assert.equal(/\b\d+\s*-\s*\d+%\b/.test(fallback.executiveDecision.actionNow), false);
+
+    // All asset strategies are watch/hold
+    for (const asset of fallback.assetStrategy) {
+      assert.ok(['watch', 'hold'].includes(asset.stance));
+      assert.notEqual(asset.stance, 'increase');
+    }
+  });
+
+  await t.test('22. No allocation percentages or percentage ranges permitted in INSUFFICIENT_EVIDENCE', () => {
+    const emptyPacket = buildMarketStrategistFactPacket({
+      marketObservations: [],
+      newsArticles: [],
+      now: NOW
+    });
+
+    const fallback = generateDeterministicMarketStrategist({ factPacket: emptyPacket, now: NOW });
+    // Attempt to inject an unsupported allocation percentage
+    fallback.executiveDecision.actionNow = 'Dữ liệu chưa đầy đủ nhưng nâng tỷ trọng tiền mặt lên 30-40%.';
+
+    const validation = validateMarketStrategistOutput(fallback, emptyPacket);
+    assert.equal(validation.valid, false);
+    assert.ok(validation.errors.includes('UNSUPPORTED_ALLOCATION_PERCENTAGE_IN_INSUFFICIENT_EVIDENCE'));
+  });
+
+  await t.test('23. CPI-only evidence cannot support aggressive VN equity increase', () => {
+    const cpiOnlyObservation = [MOCK_OBSERVATIONS.find((o) => o.factId === 'vn.macro.cpi.yoy')];
+    const packet = buildMarketStrategistFactPacket({
+      marketObservations: cpiOnlyObservation,
+      newsArticles: [],
+      now: NOW
+    });
+
+    // Fallback must NOT recommend increasing VN equities with only CPI
+    const fallback = generateDeterministicMarketStrategist({ factPacket: packet, now: NOW });
+    const vnEquityAsset = fallback.assetStrategy.find((a) => a.assetClass === 'vietnam_equities');
+    assert.equal(vnEquityAsset.stance, 'watch');
+    assert.equal(fallback.executiveDecision.confidence, 'LOW');
+
+    // If an AI attempts to output 'increase' for VN equities while citing only CPI
+    const invalidAiCandidate = {
+      ...fallback,
+      assetStrategy: fallback.assetStrategy.map((a) => a.assetClass === 'vietnam_equities'
+        ? { ...a, stance: 'increase', evidenceIds: [cpiOnlyObservation[0].observationId] }
+        : a
+      )
+    };
+
+    const validation = validateMarketStrategistOutput(invalidAiCandidate, packet);
+    assert.equal(validation.valid, false);
+    assert.ok(validation.errors.includes('UNSUPPORTED_EQUITY_INCREASE_WITHOUT_EQUITY_EVIDENCE'));
+  });
+
+  await t.test('24. Valid citation with fabricated numerical value is rejected (Numerical Safety Gate)', () => {
+    const packet = buildMarketStrategistFactPacket({
+      marketObservations: MOCK_OBSERVATIONS,
+      newsArticles: MOCK_NEWS,
+      now: NOW
+    });
+
+    // MOCK_OBSERVATIONS has CPI YoY = 4.89%
+    const cpiObsId = 'vn.macro.cpi.yoy:2026-08:pub_1';
+    const candidate = generateDeterministicMarketStrategist({ factPacket: packet, now: NOW });
+
+    // Inject fabricated CPI number (Astra failure case: CPI 99.99%)
+    candidate.marketOverview.vietnam = `Chỉ số giá tiêu dùng CPI tháng này tăng vọt lên mức 99.99% so với cùng kỳ.`;
+    candidate.citations.factObservationIds = [cpiObsId];
+
+    const validation = validateMarketStrategistOutput(candidate, {
+      validFactIds: packet.validFactIds,
+      validArticleIds: packet.validArticleIds,
+      observations: packet.evidence
+    });
+
+    assert.equal(validation.valid, false);
+    assert.ok(validation.errors.some((e) => e.includes('NUMERICAL_CONTRADICTION_CPI')));
+
+    // Consistent numerical value (4.89%) passes validation
+    candidate.marketOverview.vietnam = `Chỉ số giá tiêu dùng CPI (YoY) duy trì ở mức 4.89%, kiểm soát tốt lạm phát.`;
+    const validCheck = validateMarketStrategistOutput(candidate, {
+      validFactIds: packet.validFactIds,
+      validArticleIds: packet.validArticleIds,
+      observations: packet.evidence
+    });
+    assert.equal(validCheck.errors.some((e) => e.includes('NUMERICAL_CONTRADICTION_CPI')), false);
+  });
+
+  await t.test('25. Excluded article cannot be cited (Exact Packet Scope)', () => {
+    // Generate 15 news articles
+    const manyNews = Array.from({ length: 15 }, (_, i) => ({
+      articleId: `news_extra_${i + 1}`,
+      title: `Bản tin tài chính vĩ mô số ${i + 1}`,
+      excerpt: `Nội dung vĩ mô số ${i + 1}`,
+      sourceName: 'CafeF',
+      publishedAt: '2026-09-04T12:00:00.000Z',
+      geography: 'vietnam'
+    }));
+
+    const packet = buildMarketStrategistFactPacket({
+      marketObservations: MOCK_OBSERVATIONS,
+      newsArticles: manyNews,
+      now: NOW
+    });
+
+    // Bounded packet contains max 12 articles
+    assert.equal(packet.untrustedNews.length, 12);
+    assert.equal(packet.validArticleIds.size, 12);
+
+    // Identify an excluded article ID
+    const excludedArticle = manyNews.find((a) => !packet.validArticleIds.has(a.articleId));
+    assert.ok(excludedArticle);
+
+    const candidate = generateDeterministicMarketStrategist({ factPacket: packet, now: NOW });
+    // Attempt to cite the excluded article
+    candidate.citations.articleIds.push(excludedArticle.articleId);
+
+    const validation = validateMarketStrategistOutput(candidate, packet);
+    assert.equal(validation.valid, false);
+    assert.ok(validation.errors.some((e) => e.includes(`UNKNOWN_ARTICLE_CITATION_${excludedArticle.articleId}`)));
+  });
+
+  await t.test('26. Exact observation ID required; generic factId citation is rejected', () => {
+    const packet = buildMarketStrategistFactPacket({
+      marketObservations: MOCK_OBSERVATIONS,
+      newsArticles: MOCK_NEWS,
+      now: NOW
+    });
+
+    const candidate = generateDeterministicMarketStrategist({ factPacket: packet, now: NOW });
+    // Inject generic factId instead of exact observationId
+    candidate.citations.factObservationIds = ['vn.market.vnindex.close'];
+
+    const validation = validateMarketStrategistOutput(candidate, packet);
+    assert.equal(validation.valid, false);
+    assert.ok(validation.errors.includes('UNKNOWN_FACT_CITATION_vn.market.vnindex.close'));
+  });
+
+  await t.test('27. Empty preferredThemes and avoidOrUnderweight arrays validate cleanly', () => {
+    const packet = buildMarketStrategistFactPacket({
+      marketObservations: MOCK_OBSERVATIONS,
+      newsArticles: MOCK_NEWS,
+      now: NOW
+    });
+
+    const candidate = generateDeterministicMarketStrategist({ factPacket: packet, now: NOW });
+    candidate.preferredThemes = [];
+    candidate.avoidOrUnderweight = [];
+
+    const validation = validateMarketStrategistOutput(candidate, packet);
+    assert.equal(validation.valid, true, `Errors: ${validation.errors.join(', ')}`);
+  });
+
+  await t.test('28. Low evidence produces WATCH/conditional output', () => {
+    // Only 1 intermarket observation (DXY)
+    const dxyOnly = [MOCK_OBSERVATIONS.find((o) => o.factId === 'global.intermarket.dxy.quote')];
+    const packet = buildMarketStrategistFactPacket({
+      marketObservations: dxyOnly,
+      newsArticles: [],
+      now: NOW
+    });
+
+    const fallback = generateDeterministicMarketStrategist({ factPacket: packet, now: NOW });
+    assert.equal(fallback.executiveDecision.confidence, 'LOW');
+    assert.equal(fallback.executiveDecision.stance, 'neutral');
+
+    // Equities must be in watch state
+    const equities = fallback.assetStrategy.find((a) => a.assetClass === 'vietnam_equities');
+    assert.equal(equities.stance, 'watch');
+  });
+
+  await t.test('29. Derived signals strictly require their respective input observations', () => {
+    // 1. Empty observations => 0 signals
+    assert.deepEqual(deriveMarketSignals({ observations: [] }), []);
+
+    // 2. CPI only => produces INFLATION_CONTEXT only
+    const cpiOnly = [MOCK_OBSERVATIONS.find((o) => o.factId === 'vn.macro.cpi.yoy')];
+    const cpiSignals = deriveMarketSignals({ observations: cpiOnly, now: NOW });
+    assert.equal(cpiSignals.length, 1);
+    assert.equal(cpiSignals[0].signalType, 'INFLATION_CONTEXT');
+    assert.equal(cpiSignals[0].inputEvidenceIds[0], cpiOnly[0].observationId);
+    assert.ok(cpiSignals[0].limitations);
+
+    // 3. VN-Index only => produces VN_MARKET_TREND only
+    const vnIndexOnly = [MOCK_OBSERVATIONS.find((o) => o.factId === 'vn.market.vnindex.close')];
+    const vnSignals = deriveMarketSignals({ observations: vnIndexOnly, now: NOW });
+    assert.equal(vnSignals.length, 1);
+    assert.equal(vnSignals[0].signalType, 'VN_MARKET_TREND');
+    assert.equal(vnSignals[0].state, 'positive'); // change > 0
+    assert.equal(vnSignals[0].inputEvidenceIds[0], vnIndexOnly[0].observationId);
+  });
+
+  await t.test('30. Shared publication gate executes identically for LLM and deterministic fallback', () => {
+    const packet = buildMarketStrategistFactPacket({
+      marketObservations: MOCK_OBSERVATIONS,
+      newsArticles: MOCK_NEWS,
+      now: NOW
+    });
+
+    const validDeterministic = generateDeterministicMarketStrategist({ factPacket: packet, now: NOW });
+    const pubValid = applySharedPublicationGate(validDeterministic, packet, NOW);
+    assert.equal(pubValid.published, true);
+    assert.equal(pubValid.errors.length, 0);
+
+    // Invalid candidate failing gate gets safely transformed into INSUFFICIENT_EVIDENCE
+    const corruptedCandidate = {
+      ...validDeterministic,
+      citations: { factObservationIds: ['vn.corrupted.fact:fake'], articleIds: [] }
+    };
+    const pubCorrupted = applySharedPublicationGate(corruptedCandidate, packet, NOW);
+    assert.equal(pubCorrupted.published, false);
+    assert.equal(pubCorrupted.output.executiveDecision.confidence, 'INSUFFICIENT_EVIDENCE');
+    assert.equal(pubCorrupted.output.executiveDecision.stance, 'neutral');
+    assert.ok(pubCorrupted.output.gateAudit.reason.includes('UNKNOWN_FACT_CITATION'));
+  });
+
+  await t.test('31. Zero private user or portfolio data strictly preserved across pipeline', () => {
+    assert.throws(() => {
+      buildMarketStrategistFactPacket({
+        marketObservations: [{ userId: 'usr_secret_123', metric: 'test' }],
+        newsArticles: [],
+        now: NOW
+      });
+    }, /FORBIDDEN_USER_DATA/);
+  });
+
+  await t.test('32. UI view model renders confidence states and insufficient evidence cleanly', () => {
+    const emptyPacket = buildMarketStrategistFactPacket({
+      marketObservations: [],
+      newsArticles: [],
+      now: NOW
+    });
+
+    const fallback = generateDeterministicMarketStrategist({ factPacket: emptyPacket, now: NOW });
+    const vm = buildMarketStrategistViewModel(fallback);
+
+    assert.equal(vm.executiveDecision.confidence, 'INSUFFICIENT_EVIDENCE');
+    assert.equal(vm.executiveDecision.confidenceLabel, 'Chưa đủ dữ liệu');
+    assert.equal(vm.executiveDecision.convictionLabel, 'Chưa đủ dữ liệu');
+    assert.equal(vm.badgeLabel, 'Chiến lược xác định');
+    assert.equal(vm.preferredThemes.length, 0);
+    assert.equal(vm.avoidOrUnderweight.length, 0);
   });
 });
