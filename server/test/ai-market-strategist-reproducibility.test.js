@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 
 import {
   PILLARS,
@@ -39,6 +40,7 @@ import {
   computeStrategistFingerprint,
   computeEvidenceDataAsOf,
   computeEvidenceCoverage,
+  resolveEvidenceCadenceCategory,
   generateMarketStrategist,
   generateDeterministicMarketStrategist,
   MarketStrategistRuntime,
@@ -766,6 +768,119 @@ test('V1.2 Improvement 05B — Evidence Versioning & Reproducibility (Astra Regr
     const hashEmpty = calculateArticleContentHash({});
     assert.equal(typeof hashEmpty, 'string');
     assert.equal(hashEmpty.length, 12);
+  });
+
+  await t.test('21. SQL ↔ JS News Version Hash Parity — Deterministic Backfill Equivalence', () => {
+    // Exact JavaScript reproduction of PostgreSQL public.calculate_article_content_hash:
+    // 1. Formats published_at at UTC with 3-digit milliseconds: YYYY-MM-DD"T"HH24:MI:SS.MS"Z"
+    // 2. Uses to_json for robust RFC 8259 JSON escaping on title, excerpt, and url
+    // 3. Encodes as UTF-8, digests with sha256, and slices first 12 hex characters
+    function simulateSqlCalculateArticleContentHash(title, excerpt, publishedAtIso, canonicalUrl) {
+      const formattedTime = new Date(publishedAtIso).toISOString();
+      const v_json = '{"excerpt":' + JSON.stringify(excerpt || '') +
+        ',"publishedAt":' + JSON.stringify(formattedTime) +
+        ',"title":' + JSON.stringify(title || '') +
+        ',"url":' + JSON.stringify(canonicalUrl || '') + '}';
+      return createHash('sha256').update(v_json, 'utf8').digest('hex').slice(0, 12);
+    }
+
+    const fixtures = [
+      {
+        article_id: 'news_78f6c37533019db07b797dc8bb78385b7fcf39876609ce675f1efe3ba1e35989',
+        title: 'Viconship lên kế hoạch tăng vốn điều lệ vượt 5.800 tỷ đồng',
+        excerpt: 'Viconship dự kiến phát hành hơn 18,7 triệu cổ phiếu trả cổ tức năm 2025 và chào bán thêm gần 187,2 triệu cổ phiếu cho cổ đông hiện hữu nhằm mục đích tăng vốn điều lệ lên gần 5.803 tỷ đồng.',
+        published_at: '2026-09-04T12:53:00.000Z',
+        canonical_url: 'https://cafef.vn/viconship-len-ke-hoach-tang-von-dieu-le-vuot-5800-ty-dong-188260904195310927.chn'
+      },
+      {
+        article_id: 'news_quotes_punctuation_test_123',
+        title: 'Chính phủ chỉ đạo: "Ưu tiên thúc đẩy tăng trưởng kinh tế"',
+        excerpt: 'Phấn đấu GDP đạt mức "6,5 - 7%" theo kế hoạch, giải ngân vốn đầu tư công đạt 95%.',
+        published_at: '2026-09-04T08:15:30.000Z',
+        canonical_url: 'https://cafef.vn/chinh-phu-chi-dao.chn'
+      },
+      {
+        article_id: 'news_null_excerpt_test_456',
+        title: 'Bản tin nhanh thị trường chứng khoán phiên chiều',
+        excerpt: null,
+        published_at: '2026-09-04T15:00:00.000Z',
+        canonical_url: 'https://cafef.vn/ban-tin-nhanh.chn'
+      },
+      {
+        article_id: 'news_subsecond_precision_789',
+        title: 'Ngân hàng Nhà nước hút ròng 10.000 tỷ đồng qua kênh tín phiếu',
+        excerpt: 'Lãi suất trúng thầu tín phiếu duy trì ở mức 3,85%/năm.',
+        published_at: '2026-09-04T11:20:45.123Z',
+        canonical_url: 'https://cafef.vn/sbv-tin-phieu.chn'
+      }
+    ];
+
+    for (const item of fixtures) {
+      const jsHash = calculateArticleContentHash(item);
+      const sqlHash = simulateSqlCalculateArticleContentHash(item.title, item.excerpt, item.published_at, item.canonical_url);
+
+      assert.equal(jsHash, sqlHash, `Hash mismatch for article "${item.title}"`);
+      assert.equal(jsHash.length, 12);
+
+      const jsVersionId = `${item.article_id}:v_${jsHash}`;
+      const sqlVersionId = `${item.article_id}:v_${sqlHash}`;
+      assert.equal(jsVersionId, sqlVersionId, `VersionId mismatch for article "${item.title}"`);
+    }
+  });
+
+  await t.test('22. hasMixedCadence Semantics — True Cadence Diversity vs Same-Cadence Intraday Dispersion', () => {
+    // 1. Category resolution helper
+    assert.equal(resolveEvidenceCadenceCategory({ pillar: 'macro' }), 'MACRO_PERIODIC');
+    assert.equal(resolveEvidenceCadenceCategory({ factId: 'vn.market.vnindex.close', pillar: 'market' }), 'DAILY_EQUITY');
+    assert.equal(resolveEvidenceCadenceCategory({ factId: 'vn.monetary.usdvnd', pillar: 'monetary' }), 'INTRADAY_MARKET');
+    assert.equal(resolveEvidenceCadenceCategory({ pillar: 'news' }), 'STREAMING_NEWS');
+
+    // 2. Same-cadence observations with differing timestamps must NOT trigger hasMixedCadence
+    const vnIndexObs = createMarketObservation({
+      factId: 'vn.market.vnindex.close',
+      pillar: PILLARS.MARKET,
+      value: 1845.2,
+      unit: 'điểm',
+      referenceTime: '2026-09-04',
+      observedAt: '2026-09-04T15:00:00.000Z'
+    });
+
+    const vn30Obs = createMarketObservation({
+      factId: 'vn.market.vn30.close',
+      pillar: PILLARS.MARKET,
+      value: 1910.5,
+      unit: 'điểm',
+      referenceTime: '2026-09-04',
+      observedAt: '2026-09-04T15:00:05.000Z' // 5 seconds later
+    });
+
+    const homogeneousCoverage = computeEvidenceCoverage({
+      evidence: [vnIndexObs, vn30Obs],
+      now: new Date('2026-09-04T15:10:00.000Z')
+    });
+
+    assert.equal(homogeneousCoverage.hasMixedCadence, false, 'Same-cadence series must not trigger hasMixedCadence');
+    assert.equal(homogeneousCoverage.hasTimestampDispersion, true, 'Minor timestamp dispersion must be preserved');
+    assert.equal(homogeneousCoverage.cadenceLimitations.length, 0);
+
+    // 3. Genuine cadence diversity (Monthly Macro + Daily Session) DOES trigger hasMixedCadence
+    const cpiObs = createMarketObservation({
+      factId: 'vn.macro.cpi.yoy',
+      pillar: PILLARS.MACRO,
+      value: 3.45,
+      unit: '%',
+      referenceTime: '2026-08',
+      observedAt: '2026-08-29T02:00:00.000Z'
+    });
+
+    const mixedCoverage = computeEvidenceCoverage({
+      evidence: [cpiObs, vnIndexObs],
+      now: new Date('2026-09-04T15:10:00.000Z')
+    });
+
+    assert.equal(mixedCoverage.hasMixedCadence, true, 'Different cadences must trigger hasMixedCadence');
+    assert.equal(mixedCoverage.hasTimestampDispersion, true);
+    assert.ok(mixedCoverage.cadenceLimitations.length > 0);
   });
 
 });

@@ -373,6 +373,11 @@ test('V1.2 Improvement 04 — AI Market Strategist', async (t) => {
     assert.equal(vmFallback.marketOverview.vietnam, fallbackData.marketOverview.vietnam);
     assert.equal(vmFallback.executiveDecision.oneLineDecision, fallbackData.executiveDecision.oneLineDecision);
     assert.equal(vmFallback.assetStrategy.length, 5);
+    assert.ok(vmFallback.dataAsOfLabel.startsWith('Dữ liệu mới nhất:'));
+    assert.equal(vmFallback.hasMixedCadence, fallbackData.evidenceCoverage.hasMixedCadence);
+    if (vmFallback.hasMixedCadence) {
+      assert.equal(vmFallback.mixedCadenceNotice, 'Nguồn có độ trễ khác nhau');
+    }
 
     // LLM state view model
     const llmData = { ...fallbackData, generationMode: 'llm' };

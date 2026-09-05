@@ -4276,6 +4276,19 @@ body {
   color: var(--color-slate-500, #64748b);
 }
 
+.market-brief-cadence-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.68rem;
+  padding: 0.12rem 0.45rem;
+  border-radius: 9999px;
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  color: #b45309;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+}
+
 .market-brief-title,
 .investment-brief-header h3 {
   margin: 0.2rem 0;
@@ -4404,6 +4417,25 @@ body {
 
 .market-brief-details-body {
   margin-top: 0.55rem;
+}
+
+.strategist-cadence-limitations {
+  margin-bottom: 0.65rem;
+  padding: 0.45rem 0.65rem;
+  background: rgba(254, 243, 199, 0.4);
+  border-left: 3px solid #f59e0b;
+  border-radius: 4px;
+}
+
+.strategist-cadence-limit-item {
+  margin: 0;
+  font-size: 0.73rem;
+  color: #78350f;
+  line-height: 1.45;
+}
+
+.strategist-cadence-limit-item + .strategist-cadence-limit-item {
+  margin-top: 0.25rem;
 }
 
 .market-brief-evidence-grid {

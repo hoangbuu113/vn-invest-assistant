@@ -70,9 +70,18 @@ export function InvestmentBriefPanel() {
             <span className="market-brief-badge">
               {view?.badgeLabel || 'Tóm tắt dữ liệu'}
             </span>
-            {view?.generatedAt && (
+            {view?.dataAsOfLabel ? (
+              <span className="market-brief-timestamp" title={view.generatedAt ? `Khởi tạo: ${view.generatedAt}` : undefined}>
+                {view.dataAsOfLabel}
+              </span>
+            ) : view?.generatedAt ? (
               <span className="market-brief-timestamp">
                 Cập nhật: {view.generatedAt}
+              </span>
+            ) : null}
+            {view?.hasMixedCadence && (
+              <span className="market-brief-cadence-badge" title={view.cadenceLimitations?.join('\n') || 'Các nguồn dữ liệu có chu kỳ công bố khác nhau'}>
+                {view.mixedCadenceNotice || 'Nguồn có độ trễ khác nhau'}
               </span>
             )}
           </div>
@@ -320,6 +329,13 @@ export function InvestmentBriefPanel() {
                 <span>Bằng chứng & nguồn kiểm chứng ({strategistView.evidence.length})</span>
               </summary>
               <div className="market-brief-details-body">
+                {strategistView.cadenceLimitations?.length > 0 && (
+                  <div className="strategist-cadence-limitations">
+                    {strategistView.cadenceLimitations.map((limit, idx) => (
+                      <p key={idx} className="strategist-cadence-limit-item">{limit}</p>
+                    ))}
+                  </div>
+                )}
                 <ul className="market-brief-evidence-grid">
                   {strategistView.evidence.map((item) => (
                     <li key={item.id} className="market-brief-evidence-tag">

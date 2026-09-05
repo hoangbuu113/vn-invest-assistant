@@ -19,6 +19,7 @@ import { deriveMarketSignals } from './derivedSignals.js';
 import { normalizeReferencePeriodKey } from '../context/factModel.js';
 import { persistRunManifest } from './marketStrategistManifest.js';
 import { calculateArticleContentHash } from '../news/contract.js';
+import { FACT_POLICY_MAP, CADENCE_POLICIES } from '../context/freshnessPolicy.js';
 
 export const STRATEGIST_CACHE_TTL_MS = 15 * 60 * 1000; // 15 minutes
 export const STRATEGIST_COOLDOWN_MS = 15 * 1000;       // 15 seconds
@@ -196,6 +197,35 @@ export function buildMarketStrategistFactPacket({
 }
 
 /**
+ * Resolves an observation or news item to its standardized reporting cadence category.
+ * Used to distinguish genuine cadence disparity from harmless same-cadence intraday timestamp dispersion.
+ */
+export function resolveEvidenceCadenceCategory(obs) {
+  if (!obs) return 'UNKNOWN';
+  if (obs.pillar === 'news' || obs.sourceAuthority === 'FINANCIAL_MEDIA' || obs.sourceAuthority === 'NEWS_AGGREGATOR') {
+    return 'STREAMING_NEWS';
+  }
+  const factId = obs.factId || obs.id;
+  const policy = obs.cadencePolicy || (factId ? FACT_POLICY_MAP[factId] : null);
+  if (policy === CADENCE_POLICIES.MONTHLY_MACRO || policy === CADENCE_POLICIES.QUARTERLY_MACRO || obs.pillar === 'macro') {
+    return 'MACRO_PERIODIC';
+  }
+  if (policy === CADENCE_POLICIES.DAILY_VN_EQUITY || obs.pillar === 'market') {
+    return 'DAILY_EQUITY';
+  }
+  if (
+    policy === CADENCE_POLICIES.CURRENT_MARKET_FX ||
+    policy === CADENCE_POLICIES.DAILY_MONETARY ||
+    policy === CADENCE_POLICIES.WEEKLY_MONETARY ||
+    obs.pillar === 'monetary' ||
+    obs.pillar === 'intermarket'
+  ) {
+    return 'INTRADAY_MARKET';
+  }
+  return obs.pillar ? obs.pillar.toUpperCase() : 'UNKNOWN';
+}
+
+/**
  * Computes comprehensive evidence coverage and cadence limitations across all selected facts and news.
  * Guarantees that public strategist consumers are never misled into believing older monthly macro facts
  * share the intraday timestamp of real-time indicators.
@@ -205,9 +235,11 @@ export function computeEvidenceCoverage({ evidence = [], untrustedNews = [], now
   let oldestMs = Infinity;
   let limitingEvidence = null;
   const cadenceBreakdown = {};
+  const cadenceCategories = new Set();
 
   for (const obs of Array.isArray(evidence) ? evidence : []) {
     if (!obs) continue;
+    cadenceCategories.add(resolveEvidenceCadenceCategory(obs));
     let obsTimeMs = null;
     let foundExact = false;
     const timeCandidates = [obs.publishedTime, obs.publishedAt, obs.observedAt];
@@ -258,6 +290,7 @@ export function computeEvidenceCoverage({ evidence = [], untrustedNews = [], now
 
   for (const article of Array.isArray(untrustedNews) ? untrustedNews : []) {
     if (!article) continue;
+    cadenceCategories.add('STREAMING_NEWS');
     if (typeof article.publishedAt === 'string' && article.publishedAt.trim()) {
       const ms = Date.parse(article.publishedAt.trim());
       if (Number.isFinite(ms)) {
@@ -291,13 +324,19 @@ export function computeEvidenceCoverage({ evidence = [], untrustedNews = [], now
     }
   }
 
+  // hasMixedCadence is derived from actual cadence category diversity across evidence,
+  // not merely minor timestamp variance between same-cadence series.
+  const hasMixedCadence = cadenceCategories.size > 1 && (oldestMs !== newestMs || cadenceLimitations.length > 0);
+  const hasTimestampDispersion = oldestIso !== newestIso;
+
   return {
     dataAsOf: newestIso,
     newestEvidenceAt: newestIso,
     oldestEvidenceAt: oldestIso,
     limitingEvidence,
     cadenceLimitations,
-    hasMixedCadence: oldestIso !== newestIso
+    hasMixedCadence,
+    hasTimestampDispersion
   };
 }
 

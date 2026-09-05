@@ -5,22 +5,59 @@
 
 BEGIN;
 
+-- Ensure schema and pgcrypto extension for SHA-256 digest
+CREATE SCHEMA IF NOT EXISTS extensions;
+CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA extensions;
+
+-- Helper function to derive article content hash matching JavaScript contract
+CREATE OR REPLACE FUNCTION public.calculate_article_content_hash(
+    p_title TEXT,
+    p_excerpt TEXT,
+    p_published_at TIMESTAMPTZ,
+    p_canonical_url TEXT
+)
+RETURNS TEXT
+LANGUAGE plpgsql
+IMMUTABLE
+AS $$
+DECLARE
+    v_json TEXT;
+    v_digest BYTEA;
+BEGIN
+    v_json := concat(
+        '{"excerpt":', to_json(COALESCE(p_excerpt, '')::text)::text,
+        ',"publishedAt":', to_json(to_char(p_published_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')::text)::text,
+        ',"title":', to_json(COALESCE(p_title, '')::text)::text,
+        ',"url":', to_json(COALESCE(p_canonical_url, '')::text)::text,
+        '}'
+    );
+    BEGIN
+        v_digest := extensions.digest(convert_to(v_json, 'UTF8'), 'sha256');
+    EXCEPTION WHEN undefined_function THEN
+        v_digest := digest(convert_to(v_json, 'UTF8'), 'sha256');
+    END;
+    RETURN SUBSTRING(encode(v_digest, 'hex') FROM 1 FOR 12);
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.calculate_article_content_hash(TEXT, TEXT, TIMESTAMPTZ, TEXT) TO anon, authenticated, service_role;
+
 -- Add versioning columns to market_news_articles if missing
 ALTER TABLE IF EXISTS public.market_news_articles
     ADD COLUMN IF NOT EXISTS content_hash TEXT,
     ADD COLUMN IF NOT EXISTS version_id TEXT;
 
 -- Safe deterministic backfill for existing legacy rows lacking version_id or content_hash.
--- Derives content_hash using SHA-256 of canonical fields, preserving exact article_id identity.
+-- Uses public.calculate_article_content_hash to guarantee 100% parity with JavaScript calculateArticleContentHash().
 UPDATE public.market_news_articles
 SET
     content_hash = COALESCE(
         content_hash,
-        SUBSTRING(encode(sha256(convert_to(concat_ws('|', COALESCE(title, ''), COALESCE(excerpt, ''), COALESCE(published_at::text, ''), COALESCE(canonical_url, '')), 'UTF8')), 'hex') FROM 1 FOR 12)
+        public.calculate_article_content_hash(title, excerpt, published_at, canonical_url)
     ),
     version_id = COALESCE(
         version_id,
-        article_id || ':v_' || SUBSTRING(encode(sha256(convert_to(concat_ws('|', COALESCE(title, ''), COALESCE(excerpt, ''), COALESCE(published_at::text, ''), COALESCE(canonical_url, '')), 'UTF8')), 'hex') FROM 1 FOR 12)
+        article_id || ':v_' || public.calculate_article_content_hash(title, excerpt, published_at, canonical_url)
     )
 WHERE version_id IS NULL OR content_hash IS NULL;
 

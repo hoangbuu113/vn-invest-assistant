@@ -161,11 +161,22 @@ export function buildMarketStrategistViewModel(raw) {
     )
     : [];
 
+  const evidenceCoverage = data.evidenceCoverage || null;
+  const dataAsOf = data.dataAsOf || evidenceCoverage?.dataAsOf || null;
+  const hasMixedCadence = Boolean(evidenceCoverage?.hasMixedCadence);
+  const dataAsOfLabel = dataAsOf ? `Dữ liệu mới nhất: ${formatPublishedTime(dataAsOf)}` : null;
+  const mixedCadenceNotice = hasMixedCadence ? 'Nguồn có độ trễ khác nhau' : null;
+  const cadenceLimitations = Array.isArray(evidenceCoverage?.cadenceLimitations) ? evidenceCoverage.cadenceLimitations : [];
+
   return {
     isStrategist: true,
     runId: data.runId || null,
-    dataAsOf: data.dataAsOf || null,
-    evidenceCoverage: data.evidenceCoverage || null,
+    dataAsOf,
+    dataAsOfLabel,
+    hasMixedCadence,
+    mixedCadenceNotice,
+    cadenceLimitations,
+    evidenceCoverage,
     badgeLabel,
     modeLabel,
     fallbackNotice,
