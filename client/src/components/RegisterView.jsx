@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { supabase } from '../utils/supabase.js';
+import { setActiveAccessToken, supabase } from '../utils/supabase.js';
 import { mapAuthErrorToVietnamese } from '../utils/authErrors.js';
 
 export function RegisterView({ onSuccess, onToggleLogin }) {
@@ -45,14 +45,18 @@ export function RegisterView({ onSuccess, onToggleLogin }) {
 
       // Check if session was issued immediately or if email confirmation is required
       if (data?.session) {
+        if (data.session.access_token) {
+          setActiveAccessToken(data.session.access_token);
+        }
         onSuccess?.(data.session);
+        return;
       } else {
         // Confirmation required
         setNotice('Đã tạo tài khoản. Hãy kiểm tra email để xác nhận trước khi đăng nhập.');
+        setLoading(false);
       }
     } catch {
       setError('Không thể kết nối máy chủ. Vui lòng thử lại.');
-    } finally {
       setLoading(false);
     }
   };

@@ -54,3 +54,11 @@ export async function getAccessToken() {
 export function clearCachedAccessToken() {
   activeAccessToken = null;
 }
+
+/**
+ * Explicitly sets or updates the cached token reference immediately upon login/session receipt.
+ * @param {string|null} token
+ */
+export function setActiveAccessToken(token) {
+  activeAccessToken = typeof token === 'string' && token.trim() ? token.trim() : null;
+}

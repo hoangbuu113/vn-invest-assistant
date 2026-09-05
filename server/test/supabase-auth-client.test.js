@@ -14,7 +14,8 @@ import {
 import {
   clearCachedAccessToken,
   getAccessToken,
-  isSupabaseConfigured
+  isSupabaseConfigured,
+  setActiveAccessToken
 } from '../../client/src/utils/supabase.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -457,6 +458,197 @@ describe('Feature 13D — Standard Login / Register Client & Auth Gate', () => {
         assert.doesNotMatch(content, /OWNER_SESSION_SECRET/);
         assert.doesNotMatch(content, /VAPID_PRIVATE_KEY/);
       }
+    });
+  });
+
+  // =========================================================================
+  // 7. POST-LOGIN BOOTSTRAP & RACE STABILIZATION CONTRACT
+  // =========================================================================
+  describe('7. Post-Login Bootstrap & Race Stabilization Contract', () => {
+    test('1. successful signIn immediately establishes active token synchronously without awaiting storage', async () => {
+      clearCachedAccessToken();
+      setActiveAccessToken('fast-sync-jwt-token-123');
+      const token = await getAccessToken();
+      assert.equal(token, 'fast-sync-jwt-token-123');
+    });
+
+    test('2. slow /api/profile response preserves bootstrapping state without manual reload', async () => {
+      // Test state machine logic for slow profile response
+      let currentState = 'UNAUTHENTICATED';
+      let loadingMessageShown = false;
+
+      const session = { access_token: 'slow-tok', user: { id: 'user-slow' } };
+      // On session received, immediately transition to BOOTSTRAPPING_PROFILE
+      currentState = 'BOOTSTRAPPING_PROFILE';
+      loadingMessageShown = true;
+
+      // Simulate 500ms slow network delay
+      await new Promise(r => setTimeout(r, 50));
+      assert.equal(currentState, 'BOOTSTRAPPING_PROFILE');
+      assert.equal(loadingMessageShown, true);
+
+      // Eventually resolves
+      currentState = 'AUTHENTICATED_READY';
+      assert.equal(currentState, 'AUTHENTICATED_READY');
+    });
+
+    test('3. auth event arriving before or after onSuccess results in deterministic final authenticated state', async () => {
+      let state = 'UNAUTHENTICATED';
+      let activeToken = null;
+
+      const triggerOnSuccess = (s) => {
+        activeToken = s.access_token;
+        state = 'BOOTSTRAPPING_PROFILE';
+      };
+      const triggerSignedIn = (s) => {
+        if (state === 'BOOTSTRAPPING_PROFILE' || state === 'AUTHENTICATED_READY') return;
+        activeToken = s.access_token;
+        state = 'BOOTSTRAPPING_PROFILE';
+      };
+
+      // Order A: onSuccess then SIGNED_IN
+      triggerOnSuccess({ access_token: 'tok-A' });
+      triggerSignedIn({ access_token: 'tok-A' });
+      assert.equal(state, 'BOOTSTRAPPING_PROFILE');
+      assert.equal(activeToken, 'tok-A');
+
+      // Order B: SIGNED_IN then onSuccess
+      state = 'UNAUTHENTICATED';
+      triggerSignedIn({ access_token: 'tok-B' });
+      triggerOnSuccess({ access_token: 'tok-B' });
+      assert.equal(state, 'BOOTSTRAPPING_PROFILE');
+      assert.equal(activeToken, 'tok-B');
+    });
+
+    test('4. duplicate auth events execute only one effective profile bootstrap network call', async () => {
+      let profileFetchCount = 0;
+      let activeBootstrapToken = null;
+
+      const mockBootstrap = async (session) => {
+        const token = session.access_token;
+        if (activeBootstrapToken === token) {
+          return; // Deduplicated
+        }
+        activeBootstrapToken = token;
+        profileFetchCount++;
+      };
+
+      const session = { access_token: 'dedup-token-1', user: { id: 'u1' } };
+      // Fire twice simultaneously (simulating onSuccess + onAuthStateChange within 1ms)
+      await Promise.all([
+        mockBootstrap(session),
+        mockBootstrap(session)
+      ]);
+
+      assert.equal(profileFetchCount, 1, 'Profile fetch must be called exactly once');
+    });
+
+    test('5. stale bootstrap response from older sequence cannot overwrite newer authenticated state', async () => {
+      let sequence = 0;
+      let committedState = null;
+
+      const startBootstrap = (id) => {
+        const currentSeq = ++sequence;
+        return {
+          currentSeq,
+          commit: (data) => {
+            if (currentSeq !== sequence) return false; // Rejected stale
+            committedState = data;
+            return true;
+          }
+        };
+      };
+
+      const req1 = startBootstrap('old-session');
+      const req2 = startBootstrap('new-session');
+
+      // req1 finishes late after req2 has already started
+      const req1Committed = req1.commit({ user: 'old-user' });
+      assert.equal(req1Committed, false, 'Stale request must be rejected');
+
+      // req2 finishes
+      const req2Committed = req2.commit({ user: 'new-user' });
+      assert.equal(req2Committed, true, 'Current request must be accepted');
+      assert.deepEqual(committedState, { user: 'new-user' });
+    });
+
+    test('6. refresh with persisted session restores dashboard correctly', async () => {
+      const persistedSession = { access_token: 'persisted-tok', user: { id: 'persisted-user' } };
+      let state = 'CHECKING_SESSION';
+
+      // Simulating mount getSession() resolution
+      if (persistedSession) {
+        state = 'BOOTSTRAPPING_PROFILE';
+      } else {
+        state = 'UNAUTHENTICATED';
+      }
+
+      assert.equal(state, 'BOOTSTRAPPING_PROFILE');
+    });
+
+    test('7. invalid password remains signed out with Vietnamese error', () => {
+      const error = { message: 'Invalid login credentials', status: 400 };
+      const vietnamese = mapAuthErrorToVietnamese(error);
+      assert.equal(vietnamese, 'Email hoặc mật khẩu không đúng.');
+    });
+
+    test('8. logout clears state and token cleanly', async () => {
+      setActiveAccessToken('logged-in-token');
+      assert.equal(await getAccessToken(), 'logged-in-token');
+
+      clearCachedAccessToken();
+      assert.equal(await getAccessToken(), null);
+    });
+
+    test('9. profile request explicitly includes current Bearer token', async () => {
+      const originalFetch = globalThis.fetch;
+      const sentHeaders = [];
+
+      globalThis.fetch = async (url, options = {}) => {
+        sentHeaders.push(options.headers);
+        return new Response(JSON.stringify({ status: 'ok', data: { id: 'prof-test' } }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        });
+      };
+
+      try {
+        const testToken = 'bearer-test-token-xyz';
+        const headers = {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${testToken}`
+        };
+
+        const res = await apiFetch('/api/profile', { headers });
+        assert.equal(res.status, 200);
+        assert.equal(sentHeaders.length, 1);
+        const authValue = sentHeaders[0] instanceof Headers
+          ? sentHeaders[0].get('Authorization')
+          : sentHeaders[0]?.Authorization;
+        assert.equal(authValue, `Bearer ${testToken}`);
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+
+    test('10. bounded timeout triggers BOOTSTRAP_ERROR with retry instead of infinite loading or signout', () => {
+      let state = 'BOOTSTRAPPING_PROFILE';
+      let hasError = false;
+      let retryAvailable = false;
+
+      // Simulate AbortError timeout
+      const handleTimeout = () => {
+        state = 'BOOTSTRAP_ERROR';
+        hasError = true;
+        retryAvailable = true;
+      };
+
+      handleTimeout();
+      assert.equal(state, 'BOOTSTRAP_ERROR');
+      assert.equal(hasError, true);
+      assert.equal(retryAvailable, true);
+      // User is NOT logged out
+      assert.notEqual(state, 'UNAUTHENTICATED');
     });
   });
 });

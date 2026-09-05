@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { supabase } from '../utils/supabase.js';
+import { setActiveAccessToken, supabase } from '../utils/supabase.js';
 import { mapAuthErrorToVietnamese } from '../utils/authErrors.js';
 
 export { mapAuthErrorToVietnamese };
@@ -34,11 +34,15 @@ export function LoginView({ onSuccess, onToggleRegister }) {
       }
 
       if (data?.session) {
+        if (data.session.access_token) {
+          setActiveAccessToken(data.session.access_token);
+        }
         onSuccess?.(data.session);
+        return;
       }
+      setLoading(false);
     } catch {
       setError('Không thể kết nối máy chủ. Vui lòng thử lại.');
-    } finally {
       setLoading(false);
     }
   };
