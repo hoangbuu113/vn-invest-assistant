@@ -50,7 +50,8 @@ export const UNIT_TYPES = Object.freeze({
   PERCENT: 'percent',
   PERCENTAGE_POINT: 'percentage_point',
   CURRENCY_RATIO: 'currency_ratio',
-  PRICE_USD: 'price_usd'
+  PRICE_USD: 'price_usd',
+  CURRENCY_AMOUNT: 'currency_amount'
 });
 
 function finiteOrNull(val) {
@@ -108,6 +109,16 @@ export function calculateSourceContentHash(payload = {}) {
 export function normalizeReferencePeriodKey(ref) {
   if (!ref || typeof ref !== 'string') return '';
   const trimmed = ref.trim();
+  const quarterMatch = /^(\d{4})-Q([1-4])$/i.exec(trimmed);
+  if (quarterMatch) {
+    const year = Number(quarterMatch[1]);
+    const q = Number(quarterMatch[2]);
+    const endMonth = q * 3;
+    const lastDay = new Date(Date.UTC(year, endMonth, 0)).getUTCDate();
+    const monthStr = String(endMonth).padStart(2, '0');
+    const dayStr = String(lastDay).padStart(2, '0');
+    return `${year}-${monthStr}-${dayStr}T23:59:59.999Z`;
+  }
   if (/^\d{4}-\d{2}$/.test(trimmed)) {
     const [y, m] = trimmed.split('-').map(Number);
     // Use last day of that month in UTC

@@ -18,16 +18,42 @@ import { normalizeReferencePeriodKey } from './factModel.js';
 
 export const CADENCE_POLICIES = Object.freeze({
   MONTHLY_MACRO: 'MONTHLY_MACRO',
+  NSO_MONTHLY_RELEASE: 'NSO_MONTHLY_RELEASE',
   QUARTERLY_MACRO: 'QUARTERLY_MACRO',
+  NSO_QUARTERLY_RELEASE: 'NSO_QUARTERLY_RELEASE',
   WEEKLY_MONETARY: 'WEEKLY_MONETARY',
   DAILY_VN_EQUITY: 'DAILY_VN_EQUITY',
   DAILY_MONETARY: 'DAILY_MONETARY',
-  CURRENT_MARKET_FX: 'CURRENT_MARKET_FX'
+  CURRENT_MARKET_FX: 'CURRENT_MARKET_FX',
+  SBV_EFFECTIVE_FX: 'SBV_EFFECTIVE_FX',
+  SBV_INTERBANK_LAGGED: 'SBV_INTERBANK_LAGGED',
+  SBV_MONTHLY_LAGGED: 'SBV_MONTHLY_LAGGED'
 });
 
 export const FACT_POLICY_MAP = Object.freeze({
-  'vn.macro.cpi.yoy': CADENCE_POLICIES.MONTHLY_MACRO,
-  'macro.cpi_yoy': CADENCE_POLICIES.MONTHLY_MACRO,
+  'vn.macro.cpi.yoy': CADENCE_POLICIES.NSO_MONTHLY_RELEASE,
+  'macro.cpi_yoy': CADENCE_POLICIES.NSO_MONTHLY_RELEASE,
+  'vn.macro.core_cpi.yoy': CADENCE_POLICIES.NSO_MONTHLY_RELEASE,
+  'macro.core_cpi_yoy': CADENCE_POLICIES.NSO_MONTHLY_RELEASE,
+  'vn.macro.gdp.real.quarter_yoy': CADENCE_POLICIES.NSO_QUARTERLY_RELEASE,
+  'macro.gdp_quarter_yoy': CADENCE_POLICIES.NSO_QUARTERLY_RELEASE,
+  'vn.macro.gdp.growth_rate': CADENCE_POLICIES.NSO_QUARTERLY_RELEASE,
+  'macro.gdp_growth': CADENCE_POLICIES.NSO_QUARTERLY_RELEASE,
+  'vn.macro.iip.month_yoy': CADENCE_POLICIES.NSO_MONTHLY_RELEASE,
+  'macro.iip_month_yoy': CADENCE_POLICIES.NSO_MONTHLY_RELEASE,
+  'vn.macro.retail.nominal.month_yoy': CADENCE_POLICIES.NSO_MONTHLY_RELEASE,
+  'macro.retail_nominal_month_yoy': CADENCE_POLICIES.NSO_MONTHLY_RELEASE,
+  'vn.macro.fdi.disbursed.ytd_usd': CADENCE_POLICIES.NSO_MONTHLY_RELEASE,
+  'macro.fdi_disbursed_ytd_usd': CADENCE_POLICIES.NSO_MONTHLY_RELEASE,
+  'vn.monetary.fx.sbv_central.usd_vnd': CADENCE_POLICIES.SBV_EFFECTIVE_FX,
+  'monetary.sbv_central_usd_vnd': CADENCE_POLICIES.SBV_EFFECTIVE_FX,
+  'vn.monetary.rate.sbv_ref_rate': CADENCE_POLICIES.SBV_EFFECTIVE_FX,
+  'vn.monetary.interbank.vnd.overnight.daily_avg_rate': CADENCE_POLICIES.SBV_INTERBANK_LAGGED,
+  'monetary.vnd_overnight_daily_avg_rate': CADENCE_POLICIES.SBV_INTERBANK_LAGGED,
+  'vn.monetary.credit.outstanding.ytd_growth': CADENCE_POLICIES.SBV_MONTHLY_LAGGED,
+  'monetary.credit_ytd_growth': CADENCE_POLICIES.SBV_MONTHLY_LAGGED,
+  'vn.monetary.money_supply.m2.level': CADENCE_POLICIES.SBV_MONTHLY_LAGGED,
+  'monetary.m2_level': CADENCE_POLICIES.SBV_MONTHLY_LAGGED,
   'vn.monetary.rate.vnd_overnight': CADENCE_POLICIES.WEEKLY_MONETARY,
   'monetary.vnd_overnight_rate': CADENCE_POLICIES.WEEKLY_MONETARY,
   'vn.monetary.fx.usd_vnd': CADENCE_POLICIES.CURRENT_MARKET_FX,
@@ -87,7 +113,8 @@ export function evaluateObservationFreshness(obs, now = new Date()) {
   const obsTimeMs = parseObservationTimestamp(obs);
 
   switch (policy) {
-    case CADENCE_POLICIES.MONTHLY_MACRO: {
+    case CADENCE_POLICIES.MONTHLY_MACRO:
+    case CADENCE_POLICIES.NSO_MONTHLY_RELEASE: {
       if (typeof obs.referenceTime === 'string' && /^\d{4}-\d{2}$/.test(obs.referenceTime)) {
         const [yearStr, monthStr] = obs.referenceTime.split('-');
         const refYear = Number(yearStr);
@@ -99,6 +126,17 @@ export function evaluateObservationFreshness(obs, now = new Date()) {
         }
         return { freshness: 'fresh', isStale: false, status: 'available', policy };
       }
+      if (typeof obs.referenceTime === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(obs.referenceTime)) {
+        const refKey = normalizeReferencePeriodKey(obs.referenceTime);
+        const refMs = Date.parse(refKey);
+        if (Number.isFinite(refMs)) {
+          const ageDays = (nowMs - refMs) / (24 * 3600 * 1000);
+          if (ageDays > 45) {
+            return { freshness: 'stale', isStale: true, status: 'stale', policy, reason: 'MONTHLY_CADENCE_EXPIRED' };
+          }
+          return { freshness: 'fresh', isStale: false, status: 'available', policy };
+        }
+      }
       if (obsTimeMs) {
         const ageDays = (nowMs - obsTimeMs) / (24 * 3600 * 1000);
         if (ageDays > 45) {
@@ -108,11 +146,94 @@ export function evaluateObservationFreshness(obs, now = new Date()) {
       return { freshness: 'fresh', isStale: false, status: 'available', policy };
     }
 
-    case CADENCE_POLICIES.QUARTERLY_MACRO: {
+    case CADENCE_POLICIES.QUARTERLY_MACRO:
+    case CADENCE_POLICIES.NSO_QUARTERLY_RELEASE: {
+      if (typeof obs.referenceTime === 'string' && /^(\d{4})-Q([1-4])$/i.test(obs.referenceTime)) {
+        const refKey = normalizeReferencePeriodKey(obs.referenceTime);
+        const refEndMs = Date.parse(refKey);
+        if (Number.isFinite(refEndMs)) {
+          const ageDays = (nowMs - refEndMs) / (24 * 3600 * 1000);
+          if (ageDays > 105) {
+            return { freshness: 'stale', isStale: true, status: 'stale', policy, reason: 'QUARTERLY_CADENCE_EXPIRED' };
+          }
+          return { freshness: 'fresh', isStale: false, status: 'available', policy };
+        }
+      }
       if (obsTimeMs) {
         const ageDays = (nowMs - obsTimeMs) / (24 * 3600 * 1000);
         if (ageDays > 105) {
           return { freshness: 'stale', isStale: true, status: 'stale', policy, reason: 'QUARTERLY_AGE_EXCEEDED' };
+        }
+      }
+      return { freshness: 'fresh', isStale: false, status: 'available', policy };
+    }
+
+    case CADENCE_POLICIES.SBV_EFFECTIVE_FX: {
+      const sessionDateStr = typeof obs.referenceTime === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(obs.referenceTime)
+        ? obs.referenceTime
+        : (obsTimeMs ? new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' }).format(new Date(obsTimeMs)) : null);
+
+      if (sessionDateStr) {
+        const [y, m, d] = sessionDateStr.split('-').map(Number);
+        const effectiveEndUtc = new Date(Date.UTC(y, m - 1, d, 23, 59, 59));
+        // Grace period: 48 hours from end of effective date
+        const deadlineMs = effectiveEndUtc.getTime() + (48 * 3600 * 1000);
+        if (nowMs > deadlineMs) {
+          return { freshness: 'stale', isStale: true, status: 'stale', policy, reason: 'SBV_FX_CADENCE_EXPIRED' };
+        }
+        return { freshness: 'fresh', isStale: false, status: 'available', policy };
+      }
+
+      if (obsTimeMs) {
+        const ageHours = (nowMs - obsTimeMs) / (3600 * 1000);
+        if (ageHours > 48) {
+          return { freshness: 'stale', isStale: true, status: 'stale', policy, reason: 'SBV_FX_AGE_EXCEEDED' };
+        }
+      }
+      return { freshness: 'fresh', isStale: false, status: 'available', policy };
+    }
+
+    case CADENCE_POLICIES.SBV_INTERBANK_LAGGED: {
+      const sessionDateStr = typeof obs.referenceTime === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(obs.referenceTime)
+        ? obs.referenceTime
+        : (obsTimeMs ? new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' }).format(new Date(obsTimeMs)) : null);
+
+      if (sessionDateStr) {
+        const [y, m, d] = sessionDateStr.split('-').map(Number);
+        const sessionDateUtc = new Date(Date.UTC(y, m - 1, d, 23, 59, 59));
+        // Grace period: 72 hours from end of reference date
+        const deadlineMs = sessionDateUtc.getTime() + (72 * 3600 * 1000);
+        if (nowMs > deadlineMs) {
+          return { freshness: 'stale', isStale: true, status: 'stale', policy, reason: 'SBV_INTERBANK_CADENCE_EXPIRED' };
+        }
+        return { freshness: 'fresh', isStale: false, status: 'available', policy };
+      }
+
+      if (obsTimeMs) {
+        const ageHours = (nowMs - obsTimeMs) / (3600 * 1000);
+        if (ageHours > 72) {
+          return { freshness: 'stale', isStale: true, status: 'stale', policy, reason: 'SBV_INTERBANK_AGE_EXCEEDED' };
+        }
+      }
+      return { freshness: 'fresh', isStale: false, status: 'available', policy };
+    }
+
+    case CADENCE_POLICIES.SBV_MONTHLY_LAGGED: {
+      if (typeof obs.referenceTime === 'string' && /^\d{4}-\d{2}$/.test(obs.referenceTime)) {
+        const [yearStr, monthStr] = obs.referenceTime.split('-');
+        const refYear = Number(yearStr);
+        const refMonth = Number(monthStr);
+        const refEndMs = new Date(Date.UTC(refYear, refMonth, 0, 23, 59, 59)).getTime();
+        const ageDays = (nowMs - refEndMs) / (24 * 3600 * 1000);
+        if (ageDays > 90) {
+          return { freshness: 'stale', isStale: true, status: 'stale', policy, reason: 'SBV_MONTHLY_CADENCE_EXPIRED' };
+        }
+        return { freshness: 'fresh', isStale: false, status: 'available', policy };
+      }
+      if (obsTimeMs) {
+        const ageDays = (nowMs - obsTimeMs) / (24 * 3600 * 1000);
+        if (ageDays > 90) {
+          return { freshness: 'stale', isStale: true, status: 'stale', policy, reason: 'SBV_MONTHLY_AGE_EXCEEDED' };
         }
       }
       return { freshness: 'fresh', isStale: false, status: 'available', policy };

@@ -82,8 +82,20 @@ export function buildVietnamRegimeViewModel(payload) {
 }
 
 export function formatReferencePeriod(period) {
-  const match = /^(\d{4})-(\d{2})$/.exec(period || '');
-  return match ? `Tháng ${Number(match[2])}/${match[1]}` : 'Chưa xác định';
+  if (!period || typeof period !== 'string') return 'Chưa xác định';
+  const qMatch = /^(\d{4})-Q([1-4])$/i.exec(period);
+  if (qMatch) {
+    return `Quý ${qMatch[2]}/${qMatch[1]}`;
+  }
+  const match = /^(\d{4})-(\d{2})$/.exec(period);
+  if (match) {
+    return `Tháng ${Number(match[2])}/${match[1]}`;
+  }
+  const dayMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(period);
+  if (dayMatch) {
+    return `${dayMatch[3]}/${dayMatch[2]}/${dayMatch[1]}`;
+  }
+  return period;
 }
 
 export function formatDateKey(dateKey) {
@@ -114,6 +126,25 @@ export function formatMetricValue(value, unit = '') {
     return new Intl.NumberFormat('vi-VN', {
       maximumFractionDigits: 0
     }).format(value) + ' VND';
+  }
+
+  if (cleanUnit === 'VND/USD') {
+    return new Intl.NumberFormat('vi-VN', {
+      maximumFractionDigits: 0
+    }).format(value) + ' VND/USD';
+  }
+
+  if (cleanUnit === 'tỷ VND') {
+    return new Intl.NumberFormat('vi-VN', {
+      maximumFractionDigits: 0
+    }).format(value) + ' tỷ VND';
+  }
+
+  if (cleanUnit === 'tỷ USD') {
+    return new Intl.NumberFormat('vi-VN', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    }).format(value) + ' tỷ USD';
   }
 
   if (cleanUnit === 'điểm') {
