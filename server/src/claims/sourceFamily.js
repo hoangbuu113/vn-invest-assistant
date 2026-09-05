@@ -17,11 +17,12 @@ export const DEPENDENCY_GROUPS = Object.freeze({
   OFFICIAL_NSO: 'OFFICIAL_NSO',
   OFFICIAL_CUSTOMS: 'OFFICIAL_CUSTOMS',
   ISSUER_IR: 'ISSUER_IR',
+  MARKET_DATA: 'MARKET_DATA',
+  INDEPENDENT_RESEARCH: 'INDEPENDENT_RESEARCH',
   CAFEF: 'CAFEF',
   COINDESK: 'COINDESK',
   ALPHA_VANTAGE: 'ALPHA_VANTAGE',
   REUTERS: 'REUTERS',
-  MARKET_DATA: 'MARKET_DATA',
   UNKNOWN_DEPENDENCY: 'UNKNOWN_DEPENDENCY'
 });
 
@@ -30,24 +31,53 @@ const INDEPENDENT_PRIMARY_FAMILIES = new Set([
   SOURCE_FAMILIES.OFFICIAL_NSO,
   SOURCE_FAMILIES.OFFICIAL_CUSTOMS,
   SOURCE_FAMILIES.ISSUER_IR,
-  SOURCE_FAMILIES.CAFEF,
-  SOURCE_FAMILIES.COINDESK,
-  SOURCE_FAMILIES.ALPHA_VANTAGE,
-  SOURCE_FAMILIES.REUTERS,
   SOURCE_FAMILIES.MARKET_DATA
 ]);
 
-const INDEPENDENT_DEPENDENCY_GROUPS = new Set([
+export const INDEPENDENT_DEPENDENCY_GROUPS = Object.freeze(new Set([
   DEPENDENCY_GROUPS.OFFICIAL_SBV,
   DEPENDENCY_GROUPS.OFFICIAL_NSO,
   DEPENDENCY_GROUPS.OFFICIAL_CUSTOMS,
   DEPENDENCY_GROUPS.ISSUER_IR,
-  DEPENDENCY_GROUPS.CAFEF,
-  DEPENDENCY_GROUPS.COINDESK,
-  DEPENDENCY_GROUPS.ALPHA_VANTAGE,
-  DEPENDENCY_GROUPS.REUTERS,
-  DEPENDENCY_GROUPS.MARKET_DATA
-]);
+  DEPENDENCY_GROUPS.MARKET_DATA,
+  DEPENDENCY_GROUPS.INDEPENDENT_RESEARCH
+]));
+
+export const CANONICAL_OFFICIAL_NSO_METRICS = Object.freeze(new Set([
+  'vn.macro.cpi.yoy',
+  'vn.macro.core_cpi.yoy',
+  'vn.macro.gdp.real.quarter_yoy',
+  'vn.macro.iip.month_yoy',
+  'vn.macro.retail.month_yoy',
+  'vn.macro.fdi.disbursed.month_usd'
+]));
+
+export const CANONICAL_OFFICIAL_SBV_METRICS = Object.freeze(new Set([
+  'vn.monetary.fx.sbv_central.usd_vnd',
+  'vn.monetary.rate.overnight',
+  'vn.monetary.rate.refinancing',
+  'vn.monetary.rate.discount',
+  'vn.monetary.credit.growth.ytd',
+  'vn.monetary.m2.growth.ytd'
+]));
+
+export const CANONICAL_OFFICIAL_CUSTOMS_METRICS = Object.freeze(new Set([
+  'vn.trade.goods.exports.month_usd',
+  'vn.trade.goods.imports.month_usd',
+  'vn.trade.goods.balance.month_usd'
+]));
+
+export const CANONICAL_MARKET_METRICS = Object.freeze(new Set([
+  'vn.market.vnindex.close',
+  'vn.market.vn30.close',
+  'vn.market.hnx.close',
+  'vn.market.upcom.close',
+  'vn.monetary.fx.usd_vnd',
+  'vn.monetary.fx.commercial.usd_vnd',
+  'global.intermarket.dxy.quote',
+  'global.intermarket.brent.futures',
+  'global.intermarket.sp500.close'
+]));
 
 function normalizeText(val) {
   return typeof val === 'string' ? val.trim().toLowerCase() : '';
@@ -285,6 +315,9 @@ export function resolveClaimDependency({
   publisherFamily = SOURCE_FAMILIES.UNKNOWN,
   subject = '',
   claimType = '',
+  scope = '',
+  methodology = '',
+  isPrimaryResearch = false,
   url = '',
   sourceId = '',
   publisher = '',
@@ -296,47 +329,90 @@ export function resolveClaimDependency({
   const normFamily =
     publisherFamily || classifySourceFamily({ url, sourceId, publisher, title, summary, text });
 
-  // 1. Direct official observation and market sources
+  // 1. Direct official observation and verified primary publisher
   if (normFamily === SOURCE_FAMILIES.OFFICIAL_NSO) return DEPENDENCY_GROUPS.OFFICIAL_NSO;
   if (normFamily === SOURCE_FAMILIES.OFFICIAL_SBV) return DEPENDENCY_GROUPS.OFFICIAL_SBV;
   if (normFamily === SOURCE_FAMILIES.OFFICIAL_CUSTOMS) return DEPENDENCY_GROUPS.OFFICIAL_CUSTOMS;
   if (normFamily === SOURCE_FAMILIES.ISSUER_IR) return DEPENDENCY_GROUPS.ISSUER_IR;
   if (normFamily === SOURCE_FAMILIES.MARKET_DATA) return DEPENDENCY_GROUPS.MARKET_DATA;
 
-  // 2. Claim-specific explicit attribution in snippet or text
-  const narrative = `${snippet} ${title} ${summary} ${text}`;
-  const attributed = detectSyndicatedOrigin(narrative);
-  if (attributed) {
-    return attributed;
-  }
-
-  // 3. Conservative official numeric facts policy:
-  // Secondary media reporting national official figures derive from the respective official release.
-  const normSubject = normalizeText(subject);
-  if (normSubject.startsWith('vn.macro.cpi') || normSubject.startsWith('vn.macro.gdp') || normSubject.startsWith('vn.macro.iip')) {
-    return DEPENDENCY_GROUPS.OFFICIAL_NSO;
-  }
-  if (normSubject.startsWith('vn.monetary.fx.sbv') || normSubject.startsWith('vn.monetary.policy')) {
-    return DEPENDENCY_GROUPS.OFFICIAL_SBV;
-  }
-  if (normSubject.startsWith('vn.trade.goods')) {
-    return DEPENDENCY_GROUPS.OFFICIAL_CUSTOMS;
-  }
+  // 2. Explicit independent primary research / survey
   if (
-    normSubject.startsWith('vn.market.') ||
-    normSubject.startsWith('global.intermarket.') ||
-    normSubject.startsWith('vn.monetary.fx.usd_vnd') ||
-    normSubject.startsWith('vn.monetary.fx.commercial')
+    isPrimaryResearch === true ||
+    methodology === 'independent_survey' ||
+    methodology === 'primary_research'
   ) {
-    return DEPENDENCY_GROUPS.MARKET_DATA;
+    return DEPENDENCY_GROUPS.INDEPENDENT_RESEARCH;
   }
 
-  // 4. Recognized original media reporting non-official independent events
-  if (normFamily === SOURCE_FAMILIES.CAFEF) return DEPENDENCY_GROUPS.CAFEF;
-  if (normFamily === SOURCE_FAMILIES.COINDESK) return DEPENDENCY_GROUPS.COINDESK;
-  if (normFamily === SOURCE_FAMILIES.ALPHA_VANTAGE) return DEPENDENCY_GROUPS.ALPHA_VANTAGE;
-  if (normFamily === SOURCE_FAMILIES.REUTERS) return DEPENDENCY_GROUPS.REUTERS;
+  // 3. Claim-specific localized attribution scoping:
+  // Inspect ONLY localized claim text (snippet or title), NEVER the full article body text.
+  // This prevents cross-claim contamination from other paragraphs in the same article.
+  const localText = snippet && typeof snippet === 'string' && snippet.trim()
+    ? snippet.trim()
+    : (title && typeof title === 'string' ? title.trim() : '');
 
+  if (localText) {
+    const attributed = detectSyndicatedOrigin(localText);
+    if (attributed) {
+      return attributed;
+    }
+
+    // Explicit corporate disclosure / announcement attribution in localized text
+    if (
+      /(?:theo|nguồn[:\s]+|trích từ[:\s]+|công bố của|thông báo từ|đại diện|hđqt|bctc|nghị quyết)\s*(?:doanh nghiệp|công ty|tập đoàn|báo cáo tài chính|ban lãnh đạo)/i.test(localText) ||
+      /(?:công bố|thông báo|ban hành)\s+(?:phương án|kế hoạch|nghị quyết|bctc|tái cấu trúc|kết quả kinh doanh)/i.test(localText)
+    ) {
+      if (
+        claimType === 'CORPORATE_EVENT' ||
+        (typeof subject === 'string' && (subject.startsWith('vn.issuer.') || subject.startsWith('corporate.')))
+      ) {
+        return DEPENDENCY_GROUPS.ISSUER_IR;
+      }
+    }
+  }
+
+  // 4. Strict canonical metric allowlists:
+  // Guard against private estimates, surveys, forecasts, and alternative methodologies
+  const normMethodology = normalizeText(methodology);
+  const normScope = normalizeText(scope);
+  const isAlternativeOrSurvey =
+    normMethodology === 'survey' ||
+    normMethodology === 'forecast' ||
+    normMethodology === 'private_estimate' ||
+    normMethodology === 'bank_forecast' ||
+    normScope === 'private_survey' ||
+    normScope === 'forecast' ||
+    normScope === 'estimate';
+
+  const normSubject = normalizeText(subject);
+
+  if (!isAlternativeOrSurvey && normSubject) {
+    if (CANONICAL_OFFICIAL_NSO_METRICS.has(normSubject)) {
+      return DEPENDENCY_GROUPS.OFFICIAL_NSO;
+    }
+    if (CANONICAL_OFFICIAL_SBV_METRICS.has(normSubject)) {
+      return DEPENDENCY_GROUPS.OFFICIAL_SBV;
+    }
+    if (CANONICAL_OFFICIAL_CUSTOMS_METRICS.has(normSubject)) {
+      return DEPENDENCY_GROUPS.OFFICIAL_CUSTOMS;
+    }
+    if (CANONICAL_MARKET_METRICS.has(normSubject)) {
+      return DEPENDENCY_GROUPS.MARKET_DATA;
+    }
+  }
+
+  // 5. Corporate actions and events collapse to issuer IR dependency
+  if (
+    claimType === 'CORPORATE_EVENT' ||
+    (normSubject && (normSubject.startsWith('vn.issuer.') || normSubject.startsWith('corporate.')))
+  ) {
+    return DEPENDENCY_GROUPS.ISSUER_IR;
+  }
+
+  // 6. Fallback: Unknown underlying origin
+  // Commercial media (Reuters, CafeF, CoinDesk, AlphaVantage) without positively established provenance
+  // MUST resolve to UNKNOWN_DEPENDENCY (isIndependent = false)
   return DEPENDENCY_GROUPS.UNKNOWN_DEPENDENCY;
 }
 
@@ -353,7 +429,7 @@ export function resolveDependencyGroup(params = {}) {
  * independence (independentDependencyGroups).
  *
  * @param {Array} evidenceItems
- * @param {Object} context - Optional claim context { subject, claimType }
+ * @param {Object} context - Optional claim context { subject, claimType, scope, methodology, isPrimaryResearch }
  * @returns {Object} { sourceCount, independentSourceCount, sourceFamilies, dependencyGroups, independentFamilies }
  */
 export function aggregateEvidenceSources(evidenceItems = [], context = {}) {
@@ -382,6 +458,9 @@ export function aggregateEvidenceSources(evidenceItems = [], context = {}) {
         publisherFamily: directFamily,
         subject: item.subject || context.subject || item.factId,
         claimType: item.claimType || context.claimType,
+        scope: item.scope || context.scope,
+        methodology: item.methodology || context.methodology,
+        isPrimaryResearch: item.isPrimaryResearch || context.isPrimaryResearch,
         url: item.url,
         sourceId: item.sourceId || item.source,
         publisher: item.publisher,

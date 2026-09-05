@@ -85,16 +85,26 @@ export function reconcileClaims(candidateClaims = [], evidenceItems = []) {
       if (rawSupportingEvidence.length > 0) {
         const agg = aggregateEvidenceSources(rawSupportingEvidence, {
           subject: claim.subject,
-          claimType: claim.claimType
+          claimType: claim.claimType,
+          scope: claim.scope,
+          methodology: claim.methodology
         });
         sourceCount = agg.sourceCount;
         independentSourceCount = agg.independentSourceCount;
         sourceFamilies = agg.sourceFamilies;
         independentFamilies = agg.independentFamilies;
 
-        // Annotate each supporting evidence item with resolved dependencyGroup and truthful isIndependent flag
-        const seenIndependentGroups = new Set();
-        supportingEvidence = rawSupportingEvidence.map((ev) => {
+        // Step 1: Resolve every item's dependencyGroup and authority metadata
+        const authorityRankMap = {
+          [CLAIM_AUTHORITY_LEVELS.PRIMARY_OFFICIAL]: 1,
+          [CLAIM_AUTHORITY_LEVELS.REGULATORY_OFFICIAL]: 2,
+          [CLAIM_AUTHORITY_LEVELS.MARKET_REFERENCE]: 3,
+          [CLAIM_AUTHORITY_LEVELS.FINANCIAL_MEDIA]: 4,
+          [CLAIM_AUTHORITY_LEVELS.NEWS_AGGREGATOR]: 5,
+          [CLAIM_AUTHORITY_LEVELS.UNVERIFIED_MEDIA]: 6
+        };
+
+        const annotated = rawSupportingEvidence.map((ev) => {
           const directFamily = ev.sourceFamily || classifySourceFamily(ev);
           const depGroup =
             ev.dependencyGroup ||
@@ -102,6 +112,9 @@ export function reconcileClaims(candidateClaims = [], evidenceItems = []) {
               publisherFamily: directFamily,
               subject: ev.subject || claim.subject || ev.factId,
               claimType: ev.claimType || claim.claimType,
+              scope: ev.scope || claim.scope,
+              methodology: ev.methodology || claim.methodology,
+              isPrimaryResearch: ev.isPrimaryResearch,
               url: ev.url,
               sourceId: ev.sourceId || ev.source,
               publisher: ev.publisher,
@@ -110,14 +123,49 @@ export function reconcileClaims(candidateClaims = [], evidenceItems = []) {
               text: ev.text,
               snippet: ev.snippet || ''
             });
+          const isObs = !!(ev.factId || ev.observationId);
+          const authorityRank = authorityRankMap[ev.authorityLevel] || 99;
+          const evidenceId = ev.evidenceId || ev.id || '';
+          return { ev, directFamily, depGroup, isObs, authorityRank, evidenceId };
+        });
 
-          const isDepIndep = isDependencyIndependent(depGroup);
-          let isItemIndependent = false;
-          if (isDepIndep && !seenIndependentGroups.has(depGroup)) {
-            seenIndependentGroups.add(depGroup);
-            isItemIndependent = true;
+        // Step 2: For each independent dependency group, deterministically pick ONE representative.
+        // Sort by: observation > article, then authorityRank ASC (lower = higher authority), then evidenceId lexicographic ASC
+        const representativeByGroup = new Map();
+        for (const item of annotated) {
+          if (!isDependencyIndependent(item.depGroup)) continue;
+          const existing = representativeByGroup.get(item.depGroup);
+          if (!existing) {
+            representativeByGroup.set(item.depGroup, item);
+          } else {
+            // Compare: prefer observation over article
+            const existIsObs = existing.isObs ? 0 : 1;
+            const itemIsObs = item.isObs ? 0 : 1;
+            if (itemIsObs < existIsObs) {
+              representativeByGroup.set(item.depGroup, item);
+            } else if (itemIsObs === existIsObs) {
+              // prefer higher authority (lower rank number)
+              if (item.authorityRank < existing.authorityRank) {
+                representativeByGroup.set(item.depGroup, item);
+              } else if (item.authorityRank === existing.authorityRank) {
+                // stable lexicographic tie-breaker on evidenceId
+                if (item.evidenceId.localeCompare(existing.evidenceId) < 0) {
+                  representativeByGroup.set(item.depGroup, item);
+                }
+              }
+            }
           }
+        }
 
+        // Step 3: Assign isIndependent = true ONLY to the chosen representative of each independent group
+        const representativeIds = new Set(
+          Array.from(representativeByGroup.values()).map((r) => r.evidenceId)
+        );
+        supportingEvidence = annotated.map(({ ev, directFamily, depGroup, evidenceId }) => {
+          const isItemIndependent =
+            isDependencyIndependent(depGroup) &&
+            representativeIds.has(evidenceId) &&
+            representativeByGroup.get(depGroup)?.evidenceId === evidenceId;
           return {
             ...ev,
             sourceFamily: directFamily,
@@ -125,6 +173,7 @@ export function reconcileClaims(candidateClaims = [], evidenceItems = []) {
             isIndependent: isItemIndependent
           };
         });
+
       } else {
         sourceCount = claim.sourceCount || 1;
         independentSourceCount = claim.independentSourceCount !== undefined

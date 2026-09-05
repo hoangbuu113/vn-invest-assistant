@@ -45,36 +45,40 @@ import {
   applySharedPublicationGate
 } from '../src/ai/marketStrategistValidation.js';
 
-test('1. Identical claim from same source family counts once for independence', () => {
+test('1. Two CafeF articles with unknown origin do NOT produce independent sources', () => {
   const ev1 = {
     evidenceId: 'art_1',
     sourceFamily: SOURCE_FAMILIES.CAFEF,
     url: 'https://cafef.vn/bai-1.chn'
+    // No subject, no snippet, no provenance → UNKNOWN_DEPENDENCY
   };
   const ev2 = {
     evidenceId: 'art_2',
     sourceFamily: SOURCE_FAMILIES.CAFEF,
     url: 'https://cafef.vn/bai-2.chn'
+    // No subject, no snippet, no provenance → UNKNOWN_DEPENDENCY
   };
 
   const agg = aggregateEvidenceSources([ev1, ev2]);
   assert.equal(agg.sourceCount, 2, 'Total evidence items is 2');
-  assert.equal(agg.independentSourceCount, 1, 'Only 1 independent source family');
-  assert.deepEqual(agg.independentFamilies, [SOURCE_FAMILIES.CAFEF]);
+  assert.equal(agg.independentSourceCount, 0, 'CafeF with no provenance = UNKNOWN_DEPENDENCY = 0 independent');
+  assert.deepEqual(agg.independentFamilies, [], 'No independent families when origin is unknown');
 });
 
-test('2. Three articles copying same family do not become 3 corroborations', () => {
+test('2. Three articles: two CafeF + one syndication header → 0 independent (all unknown origin)', () => {
   const art1 = {
     evidenceId: 'art_1',
     url: 'https://cafef.vn/cpi-tang.chn',
     sourceId: 'cafef',
     title: 'CPI tháng 8 tăng 4.89%'
+    // No explicit NSO attribution, no subject → UNKNOWN_DEPENDENCY
   };
   const art2 = {
     evidenceId: 'art_2',
     url: 'https://cafef.vn/phan-tich-cpi.chn',
     sourceId: 'cafef',
     title: 'Phân tích CPI tháng 8 tăng 4.89%'
+    // No explicit NSO attribution, no subject → UNKNOWN_DEPENDENCY
   };
   const art3 = {
     evidenceId: 'art_3',
@@ -82,12 +86,13 @@ test('2. Three articles copying same family do not become 3 corroborations', () 
     sourceId: 'aggregator',
     title: 'Theo CafeF: CPI tháng 8 tăng 4.89%',
     summary: 'Nguồn: CafeF'
+    // Attributing CafeF → DEPENDENCY_GROUPS.CAFEF → also not independent
   };
 
   const agg = aggregateEvidenceSources([art1, art2, art3]);
   assert.equal(agg.sourceCount, 3, 'Total sources is 3');
-  assert.equal(agg.independentSourceCount, 1, 'Syndicated aggregator collapses into CafeF dependency group');
-  assert.deepEqual(agg.independentFamilies, [SOURCE_FAMILIES.CAFEF]);
+  assert.equal(agg.independentSourceCount, 0, 'No independent sources: CafeF is not an independent dependency group');
+  assert.deepEqual(agg.independentFamilies, []);
 });
 
 test('3. Secondary media reporting official statistics collapses to official dependency group (not corroborated)', () => {
@@ -155,7 +160,8 @@ test('3. Secondary media reporting official statistics collapses to official dep
   assert.equal(reutersLink.isIndependent, false, 'Derivative media evidence in same dependency group is NOT independent');
 });
 
-test('3B. Two genuinely independent source families corroborate', () => {
+test('3B. Issuer IR + article merely reporting issuer announcement collapses to ONE issuer origin', () => {
+  // The article reports ON the issuer announcement — its underlying origin is ISSUER_IR, not a second primary origin.
   const issuerClaim = createMarketClaim({
     claimType: CLAIM_TYPES.CORPORATE_EVENT,
     subject: 'vn.issuer.vnm.restructuring',
@@ -165,7 +171,7 @@ test('3B. Two genuinely independent source families corroborate', () => {
     authorityLevel: CLAIM_AUTHORITY_LEVELS.PRIMARY_OFFICIAL
   });
 
-  const ev1 = {
+  const evIR = {
     evidenceId: 'ir_release_1',
     subject: 'vn.issuer.vnm.restructuring',
     sourceFamily: SOURCE_FAMILIES.ISSUER_IR,
@@ -173,19 +179,62 @@ test('3B. Two genuinely independent source families corroborate', () => {
     title: 'Vinamilk công bố phương án tái cấu trúc'
   };
 
-  const ev2 = {
-    evidenceId: 'market_investigation_1',
+  // CafeF article reporting on the SAME issuer announcement — no positively established independent origin
+  const evCafeF = {
+    evidenceId: 'cafef_art_vnm',
     subject: 'vn.issuer.vnm.restructuring',
     sourceFamily: SOURCE_FAMILIES.CAFEF,
-    dependencyGroup: DEPENDENCY_GROUPS.CAFEF,
-    title: 'CafeF độc quyền: Chi tiết lộ trình tái cấu trúc của Vinamilk'
+    // dependencyGroup NOT explicitly set → will be resolved via resolveClaimDependency
+    // corporate_action subject + no explicit independent survey → ISSUER_IR or UNKNOWN_DEPENDENCY
+    title: 'CafeF: Vinamilk công bố tái cấu trúc'
+    // No snippet/snippet is empty, no explicit attribution of an independent second primary origin
   };
 
-  const reconciled = reconcileClaims([issuerClaim], [ev1, ev2]);
-  assert.equal(reconciled[0].claim.independentSourceCount, 2, 'Two genuinely independent primary sources yield count = 2');
-  assert.equal(reconciled[0].claim.supportStatus, CLAIM_STATUS.CORROBORATED, 'Independent sources corroborate');
-  assert.deepEqual(reconciled[0].independentFamilies, [DEPENDENCY_GROUPS.CAFEF, DEPENDENCY_GROUPS.ISSUER_IR]);
+  const reconciled = reconcileClaims([issuerClaim], [evIR, evCafeF]);
+  const result = reconciled[0];
+  assert.ok(result, 'Reconciled claim exists');
+  // CafeF article reporting on an issuer announcement without independent provenance must NOT yield 2 independent origins
+  assert.equal(result.claim.independentSourceCount, 1, 'Issuer IR + media reporting that IR = 1 issuer origin, NOT 2 independent');
+  assert.equal(result.claim.supportStatus, CLAIM_STATUS.SUPPORTED, 'Must be SUPPORTED, not CORROBORATED from media reporting alone');
 });
+
+test('3C. Genuine two-origin corroboration via ISSUER_IR + explicit independent regulatory filing', () => {
+  // A regulatory filing (SSC or HOSE official disclosure) constitutes a SECOND independent primary origin
+  const issuerClaim = createMarketClaim({
+    claimType: CLAIM_TYPES.CORPORATE_EVENT,
+    subject: 'vn.issuer.vnm.restructuring',
+    predicate: 'ANNOUNCED',
+    valueText: 'Approved restructuring plan',
+    scope: 'corporate_action',
+    authorityLevel: CLAIM_AUTHORITY_LEVELS.PRIMARY_OFFICIAL
+  });
+
+  const evIR = {
+    evidenceId: 'ir_release_1',
+    subject: 'vn.issuer.vnm.restructuring',
+    sourceFamily: SOURCE_FAMILIES.ISSUER_IR,
+    dependencyGroup: DEPENDENCY_GROUPS.ISSUER_IR,
+    title: 'Vinamilk công bố phương án tái cấu trúc'
+  };
+
+  // Explicit independent primary research / survey with positively established provenance
+  const evIndependentSurvey = {
+    evidenceId: 'independent_research_1',
+    subject: 'vn.issuer.vnm.restructuring',
+    sourceFamily: SOURCE_FAMILIES.MARKET_DATA,
+    dependencyGroup: DEPENDENCY_GROUPS.MARKET_DATA,
+    isPrimaryResearch: true,
+    methodology: 'independent_survey',
+    title: 'SSC independent filing verification confirms restructuring plan'
+  };
+
+  const reconciled = reconcileClaims([issuerClaim], [evIR, evIndependentSurvey]);
+  const result = reconciled[0];
+  assert.ok(result, 'Reconciled claim exists');
+  assert.equal(result.claim.independentSourceCount, 2, 'Two distinct independent primary origins yield count = 2');
+  assert.equal(result.claim.supportStatus, CLAIM_STATUS.CORROBORATED, 'Two genuinely independent origins = CORROBORATED');
+});
+
 
 test('4. Official source outranks secondary report for numeric fact', () => {
   const officialClaim = createMarketClaim({
@@ -753,4 +802,333 @@ test('26. 01D historical replay architectural boundary is documented in reposito
   assert.ok(repoContent.includes('ARCHITECTURAL BOUNDARY (01D Historical Replay)'), 'Boundary header must be present');
   assert.ok(repoContent.includes('point-in-time') || repoContent.includes('Point-in-time'), 'Point-in-time replay documentation must be present');
   assert.ok(repoContent.includes('claim_evidence_links'), 'Evidence links replay foundation must be mentioned');
+});
+
+// ============================================================
+// NEW 01C.2 TESTS — Evidence Independence Correction
+// ============================================================
+
+import { resolveClaimDependency, isDependencyIndependent, INDEPENDENT_DEPENDENCY_GROUPS, CANONICAL_OFFICIAL_NSO_METRICS } from '../src/claims/sourceFamily.js';
+
+test('27. Reuters unknown-origin + CafeF unknown-origin → NOT 2 independent sources', () => {
+  const reutersEv = {
+    evidenceId: 'art_reuters_uk',
+    sourceFamily: SOURCE_FAMILIES.REUTERS,
+    url: 'https://reuters.com/markets/vietnam-outlook',
+    title: 'Vietnam market outlook for September'
+    // No subject, no snippet, no explicit official attribution → UNKNOWN_DEPENDENCY
+  };
+  const cafefEv = {
+    evidenceId: 'art_cafef_uk',
+    sourceFamily: SOURCE_FAMILIES.CAFEF,
+    url: 'https://cafef.vn/thi-truong.chn',
+    title: 'Thị trường Việt Nam tháng 9'
+    // No subject, no snippet, no explicit official attribution → UNKNOWN_DEPENDENCY
+  };
+  const agg = aggregateEvidenceSources([reutersEv, cafefEv]);
+  assert.equal(agg.independentSourceCount, 0, 'Reuters unknown + CafeF unknown = 0 independent, NOT 2');
+  assert.deepEqual(agg.independentFamilies, [], 'No independent dependency groups');
+});
+
+test('28. Recognized publisher alone → isIndependent=false when no provenance established', () => {
+  const depGroup = resolveClaimDependency({
+    publisherFamily: SOURCE_FAMILIES.REUTERS,
+    subject: '',
+    snippet: '',
+    title: 'Vietnam market outlook'
+  });
+  assert.equal(depGroup, DEPENDENCY_GROUPS.UNKNOWN_DEPENDENCY, 'Reuters with no subject/snippet = UNKNOWN_DEPENDENCY');
+  assert.equal(isDependencyIndependent(depGroup), false, 'isIndependent must be false for UNKNOWN_DEPENDENCY');
+});
+
+test('29. NSO + Reuters citing NSO + CafeF citing NSO → only one OFFICIAL_NSO dependency', () => {
+  const evidence = [
+    {
+      evidenceId: 'obs_nso',
+      factId: 'vn.macro.cpi.yoy',
+      observationId: 'obs_nso_cpi_aug',
+      value: 4.89,
+      referenceTime: '2026-08',
+      sourceFamily: SOURCE_FAMILIES.OFFICIAL_NSO,
+      dependencyGroup: DEPENDENCY_GROUPS.OFFICIAL_NSO
+    },
+    {
+      evidenceId: 'art_reuters_nso',
+      sourceFamily: SOURCE_FAMILIES.REUTERS,
+      snippet: 'Theo Tổng cục Thống kê, CPI tháng 8 tăng 4.89%',
+      title: 'Vietnam CPI 4.89% per NSO'
+    },
+    {
+      evidenceId: 'art_cafef_nso',
+      sourceFamily: SOURCE_FAMILIES.CAFEF,
+      snippet: 'Theo GSO, CPI tháng 8/2026 tăng 4.89% so với cùng kỳ',
+      title: 'CPI tháng 8 tăng theo số liệu GSO'
+    }
+  ];
+  const agg = aggregateEvidenceSources(evidence, { subject: 'vn.macro.cpi.yoy' });
+  assert.equal(agg.independentSourceCount, 1, 'All three collapse to single OFFICIAL_NSO dependency group');
+  assert.deepEqual(agg.independentFamilies, [DEPENDENCY_GROUPS.OFFICIAL_NSO]);
+});
+
+test('30. Commercial publisher with explicit NSO attribution collapses to OFFICIAL_NSO (not commercial dep)', () => {
+  const dep = resolveClaimDependency({
+    publisherFamily: SOURCE_FAMILIES.CAFEF,
+    subject: 'vn.macro.cpi.yoy',
+    snippet: 'Theo Tổng cục Thống kê, CPI tháng 8 tăng 4.89%'
+  });
+  assert.equal(dep, DEPENDENCY_GROUPS.OFFICIAL_NSO, 'Explicit NSO attribution in snippet collapses to OFFICIAL_NSO');
+});
+
+test('31. Commercial publisher without attribution and non-official subject stays UNKNOWN_DEPENDENCY', () => {
+  const dep = resolveClaimDependency({
+    publisherFamily: SOURCE_FAMILIES.CAFEF,
+    subject: 'vn.news.general.market_sentiment',  // non-canonical, non-corporate, non-official
+    snippet: '',
+    title: 'CafeF: Thị trường chứng khoán hôm nay'
+  });
+  assert.equal(dep, DEPENDENCY_GROUPS.UNKNOWN_DEPENDENCY, 'CafeF with non-official subject and no provenance = UNKNOWN_DEPENDENCY');
+  assert.equal(isDependencyIndependent(dep), false, 'Must not be independent');
+});
+
+test('32. Full article with NSO mention in unrelated paragraph does NOT make corporate claim OFFICIAL_NSO', () => {
+  // Article paragraph 1 mentions NSO CPI; paragraph 4 is about corporate restructuring
+  // Only the snippet (claim-local text) is used for dependency resolution
+  const dep = resolveClaimDependency({
+    publisherFamily: SOURCE_FAMILIES.CAFEF,
+    subject: 'vn.issuer.abc.restructuring',
+    claimType: 'CORPORATE_EVENT',
+    // snippet is about the corporate claim specifically, NOT the NSO paragraph
+    snippet: 'Công ty ABC công bố kế hoạch tái cơ cấu trong Q3/2026',
+    title: 'ABC đẩy mạnh tái cơ cấu',
+    // text contains NSO reference in an unrelated paragraph - must NOT contaminate this claim
+    text: 'According to NSO, CPI was 4.89% in August. ... In other news, ABC announced restructuring.'
+  });
+  // Corporate claim must NOT be assigned OFFICIAL_NSO just because article mentions NSO elsewhere
+  assert.notEqual(dep, DEPENDENCY_GROUPS.OFFICIAL_NSO, 'NSO mention in unrelated text must NOT contaminate corporate claim dependency');
+  // The corporate subject should map to ISSUER_IR
+  assert.equal(dep, DEPENDENCY_GROUPS.ISSUER_IR, 'Corporate event with corporate snippet must map to ISSUER_IR');
+});
+
+test('33. Claim-local NSO attribution in snippet correctly assigns CPI claim to OFFICIAL_NSO', () => {
+  const dep = resolveClaimDependency({
+    publisherFamily: SOURCE_FAMILIES.REUTERS,
+    subject: 'vn.macro.cpi.yoy',
+    snippet: 'Theo GSO (General Statistics Office), CPI tháng 8/2026 tăng 4.89%',
+    title: 'Vietnam August CPI'
+  });
+  assert.equal(dep, DEPENDENCY_GROUPS.OFFICIAL_NSO, 'Claim-local snippet with GSO attribution → OFFICIAL_NSO');
+});
+
+test('34. Private CPI survey does NOT map to OFFICIAL_NSO', () => {
+  const dep = resolveClaimDependency({
+    publisherFamily: SOURCE_FAMILIES.CAFEF,
+    subject: 'vn.macro.cpi.yoy',
+    methodology: 'private_estimate',
+    scope: 'private_survey',
+    snippet: ''
+  });
+  assert.notEqual(dep, DEPENDENCY_GROUPS.OFFICIAL_NSO, 'Private estimate scope must NOT map to OFFICIAL_NSO');
+  assert.equal(dep, DEPENDENCY_GROUPS.UNKNOWN_DEPENDENCY, 'Private estimate must yield UNKNOWN_DEPENDENCY');
+});
+
+test('35. Private-bank inflation estimate does NOT map to OFFICIAL_NSO', () => {
+  const dep = resolveClaimDependency({
+    publisherFamily: SOURCE_FAMILIES.CAFEF,
+    subject: 'vn.macro.cpi.yoy',
+    methodology: 'bank_forecast',
+    snippet: ''
+  });
+  assert.notEqual(dep, DEPENDENCY_GROUPS.OFFICIAL_NSO, 'Bank forecast must not map to OFFICIAL_NSO');
+  assert.equal(dep, DEPENDENCY_GROUPS.UNKNOWN_DEPENDENCY, 'Bank forecast must yield UNKNOWN_DEPENDENCY');
+});
+
+test('36. Canonical official CPI observation maps correctly to OFFICIAL_NSO', () => {
+  assert.ok(CANONICAL_OFFICIAL_NSO_METRICS.has('vn.macro.cpi.yoy'), 'Canonical CPI metric must be in allowlist');
+  const dep = resolveClaimDependency({
+    publisherFamily: SOURCE_FAMILIES.OFFICIAL_NSO,
+    subject: 'vn.macro.cpi.yoy'
+  });
+  assert.equal(dep, DEPENDENCY_GROUPS.OFFICIAL_NSO, 'Official NSO publisher + canonical metric = OFFICIAL_NSO');
+});
+
+test('37. Same evidence array in different orders produces identical independence counts and per-link assignments', () => {
+  const evNSO = {
+    evidenceId: 'obs_nso_37',
+    factId: 'vn.macro.cpi.yoy',
+    observationId: 'obs_nso_cpi_aug_37',
+    value: 4.89,
+    referenceTime: '2026-08',
+    sourceFamily: SOURCE_FAMILIES.OFFICIAL_NSO,
+    dependencyGroup: DEPENDENCY_GROUPS.OFFICIAL_NSO,
+    subject: 'vn.macro.cpi.yoy'
+  };
+  // Reuters article explicitly subject-tagged with numericValue + referencePeriod so doesEvidenceSupportClaim matches
+  const evReuters = {
+    evidenceId: 'art_reuters_37',
+    sourceFamily: SOURCE_FAMILIES.REUTERS,
+    dependencyGroup: DEPENDENCY_GROUPS.OFFICIAL_NSO, // explicitly set: citing NSO
+    snippet: 'Theo Tổng cục Thống kê, CPI tháng 8 tăng 4.89%',
+    subject: 'vn.macro.cpi.yoy',
+    referencePeriod: '2026-08',
+    numericValue: 4.89
+  };
+
+  const claim = createMarketClaim({
+    claimType: CLAIM_TYPES.MACRO_NUMERIC,
+    subject: 'vn.macro.cpi.yoy',
+    numericValue: 4.89,
+    unit: '%',
+    referencePeriod: '2026-08',
+    scope: 'monthly'
+  });
+
+  const r1 = reconcileClaims([claim], [evNSO, evReuters]);
+  const r2 = reconcileClaims([claim], [evReuters, evNSO]);
+
+  // Independence counts must be identical regardless of input order
+  assert.equal(r1[0].claim.independentSourceCount, r2[0].claim.independentSourceCount, 'Order-invariant independent source count');
+
+  // Per-link isIndependent assignments must be identical regardless of input order
+  const nsoPosR1 = r1[0].supportingEvidence.find(e => e.evidenceId === 'obs_nso_37');
+  const nsoPosR2 = r2[0].supportingEvidence.find(e => e.evidenceId === 'obs_nso_37');
+  const reutersPosR1 = r1[0].supportingEvidence.find(e => e.evidenceId === 'art_reuters_37');
+  const reutersPosR2 = r2[0].supportingEvidence.find(e => e.evidenceId === 'art_reuters_37');
+
+  assert.ok(nsoPosR1, 'NSO evidence must be in supportingEvidence (ordering 1)');
+  assert.ok(nsoPosR2, 'NSO evidence must be in supportingEvidence (ordering 2)');
+  assert.ok(reutersPosR1, 'Reuters evidence must be in supportingEvidence (ordering 1)');
+  assert.ok(reutersPosR2, 'Reuters evidence must be in supportingEvidence (ordering 2)');
+
+  assert.equal(nsoPosR1.isIndependent, nsoPosR2.isIndependent, 'NSO link isIndependent must be same in both orderings');
+  assert.equal(reutersPosR1.isIndependent, reutersPosR2.isIndependent, 'Reuters link isIndependent must be same in both orderings');
+
+  // Observation always wins over article as representative (both map to OFFICIAL_NSO)
+  assert.equal(nsoPosR1.isIndependent, true, 'Observation is always representative over article');
+  assert.equal(reutersPosR1.isIndependent, false, 'Article citing same official origin is NOT the representative');
+});
+
+test('38. Official observation wins representative selection over secondary article in same dependency group', () => {
+  const evArticle = {
+    evidenceId: 'art_reuters_38',
+    sourceFamily: SOURCE_FAMILIES.REUTERS,
+    dependencyGroup: DEPENDENCY_GROUPS.OFFICIAL_NSO, // explicitly set: citing NSO
+    snippet: 'Theo Tổng cục Thống kê, CPI tháng 8 tăng 4.89%',
+    subject: 'vn.macro.cpi.yoy',
+    referencePeriod: '2026-08',
+    numericValue: 4.89
+  };
+  const evObs = {
+    evidenceId: 'obs_nso_official_38',
+    factId: 'vn.macro.cpi.yoy',
+    observationId: 'obs_nso_aug_official_38',
+    value: 4.89,
+    referenceTime: '2026-08',
+    sourceFamily: SOURCE_FAMILIES.OFFICIAL_NSO,
+    dependencyGroup: DEPENDENCY_GROUPS.OFFICIAL_NSO,
+    subject: 'vn.macro.cpi.yoy'
+  };
+
+  const claim = createMarketClaim({
+    claimType: CLAIM_TYPES.MACRO_NUMERIC,
+    subject: 'vn.macro.cpi.yoy',
+    numericValue: 4.89,
+    unit: '%',
+    referencePeriod: '2026-08',
+    scope: 'monthly'
+  });
+
+  // Article comes first in array — but obs must still win as representative
+  const reconciled = reconcileClaims([claim], [evArticle, evObs]);
+  const obsLink = reconciled[0].supportingEvidence.find(e => e.evidenceId === 'obs_nso_official_38');
+  const artLink = reconciled[0].supportingEvidence.find(e => e.evidenceId === 'art_reuters_38');
+
+  assert.ok(obsLink, 'Observation evidence must be in supportingEvidence');
+  assert.ok(artLink, 'Article evidence must be in supportingEvidence');
+  assert.equal(obsLink.isIndependent, true, 'Observation is the deterministic representative (wins over article)');
+  assert.equal(artLink.isIndependent, false, 'Article is NOT the representative even when it appears first in array');
+});
+
+test('39. null article numeric value does not support numeric zero claim', () => {
+  const zeroClaim = createMarketClaim({
+    claimType: CLAIM_TYPES.TRADE_NUMERIC,
+    subject: 'vn.trade.goods.balance.month_usd',
+    numericValue: 0,
+    unit: 'USD',
+    referencePeriod: '2026-07',
+    scope: 'monthly'
+  });
+
+  const evNull = {
+    evidenceId: 'art_null_val',
+    subject: 'vn.trade.goods.balance.month_usd',
+    referencePeriod: '2026-07',
+    numericValue: null
+  };
+  assert.equal(doesEvidenceSupportClaim(evNull, zeroClaim), false, 'null numeric value must NOT coerce to 0 and support zero claim');
+});
+
+test('40. undefined numeric value does not support numeric claim', () => {
+  const claim = createMarketClaim({
+    claimType: CLAIM_TYPES.MACRO_NUMERIC,
+    subject: 'vn.macro.cpi.yoy',
+    numericValue: 4.89,
+    unit: '%',
+    referencePeriod: '2026-08',
+    scope: 'monthly_yoy'
+  });
+
+  const evUndef = {
+    evidenceId: 'obs_undef',
+    factId: 'vn.macro.cpi.yoy',
+    observationId: 'obs_undef_1',
+    value: undefined,
+    referenceTime: '2026-08'
+  };
+  assert.equal(doesEvidenceSupportClaim(evUndef, claim), false, 'undefined numeric value must NOT support numeric claim');
+});
+
+test('41. Valid finite zero supports zero claim when all semantics match', () => {
+  const zeroClaim = createMarketClaim({
+    claimType: CLAIM_TYPES.TRADE_NUMERIC,
+    subject: 'vn.trade.goods.balance.month_usd',
+    numericValue: 0,
+    unit: 'USD',
+    referencePeriod: '2026-07',
+    scope: 'monthly'
+  });
+
+  const evZero = {
+    evidenceId: 'obs_zero',
+    factId: 'vn.trade.goods.balance.month_usd',
+    observationId: 'obs_zero_balance',
+    value: 0,
+    referenceTime: '2026-07'
+  };
+  assert.equal(doesEvidenceSupportClaim(evZero, zeroClaim), true, 'Explicit numeric 0 supports zero-valued claim when all semantics match');
+});
+
+test('42. Duplicate links are deduplicated in memory store on second persist call', async () => {
+  const claim = createMarketClaim({
+    claimType: CLAIM_TYPES.NEWS_ASSERTION,
+    subject: 'vn.issuer.dedup_test',
+    predicate: 'REPORTED',
+    valueText: 'Deduplication test event'
+  });
+
+  const ev = {
+    evidenceId: 'ev_dedup_42',
+    evidenceType: 'article',
+    sourceFamily: SOURCE_FAMILIES.UNKNOWN,
+    dependencyGroup: DEPENDENCY_GROUPS.UNKNOWN_DEPENDENCY,
+    isIndependent: false
+  };
+
+  await persistClaims([{ claim, supportingEvidence: [ev] }], null);
+  // Second call with same evidence should NOT duplicate in memory
+  await persistClaims([{ claim, supportingEvidence: [ev] }], null);
+
+  const { getEvidenceLinksForClaim } = await import('../src/claims/claimRepository.js');
+  const links = getEvidenceLinksForClaim(claim.claimId);
+  const dedupLinks = links.filter(l => l.evidenceId === 'ev_dedup_42');
+  assert.equal(dedupLinks.length, 1, 'Same evidence link must not be duplicated in memory store');
 });

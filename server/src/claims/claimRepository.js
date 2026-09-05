@@ -101,7 +101,11 @@ export async function persistClaims(reconciledList = [], client = privateSupabas
       memoryEvidenceLinks.set(claim.claimId, []);
     }
     const currentLinks = memoryEvidenceLinks.get(claim.claimId);
+    const existingLinkKeys = new Set(currentLinks.map((l) => `${l.evidenceType}:${l.evidenceId}`));
     for (const ev of links) {
+      const linkKey = `${ev.evidenceType || 'observation'}:${ev.evidenceId || ev.id}`;
+      if (existingLinkKeys.has(linkKey)) continue;
+      existingLinkKeys.add(linkKey);
       currentLinks.push({
         claimId: claim.claimId,
         evidenceType: ev.evidenceType || 'observation',

@@ -483,11 +483,22 @@ export function doesEvidenceSupportClaim(evidenceItem, claim) {
     // Strict numeric check: topic mention != support for exact number
     if (claim.numericValue !== null && claim.numericValue !== undefined) {
       const evVal = evidenceItem.numericValue ?? evidenceItem.value;
-      if (evVal === null || evVal === undefined || !Number.isFinite(Number(evVal))) {
+      if (
+        evVal === null ||
+        evVal === undefined ||
+        typeof evVal === 'boolean' ||
+        evVal === '' ||
+        !Number.isFinite(Number(evVal))
+      ) {
+        return false;
+      }
+      const numClaim = Number(claim.numericValue);
+      const numEv = Number(evVal);
+      if (!Number.isFinite(numClaim) || !Number.isFinite(numEv)) {
         return false;
       }
       const tolerance = claim.unit === '%' ? EPSILON_PERCENT : EPSILON_CURRENCY;
-      if (Math.abs(Number(evVal) - Number(claim.numericValue)) > tolerance) {
+      if (Math.abs(numEv - numClaim) > tolerance) {
         return false;
       }
     }
@@ -506,11 +517,22 @@ export function doesEvidenceSupportClaim(evidenceItem, claim) {
     // Strict numeric check
     if (claim.numericValue !== null && claim.numericValue !== undefined) {
       const obsVal = evidenceItem.value ?? evidenceItem.numericValue;
-      if (obsVal === null || obsVal === undefined || !Number.isFinite(Number(obsVal))) {
+      if (
+        obsVal === null ||
+        obsVal === undefined ||
+        typeof obsVal === 'boolean' ||
+        obsVal === '' ||
+        !Number.isFinite(Number(obsVal))
+      ) {
+        return false;
+      }
+      const numClaim = Number(claim.numericValue);
+      const numObs = Number(obsVal);
+      if (!Number.isFinite(numClaim) || !Number.isFinite(numObs)) {
         return false;
       }
       const tolerance = claim.unit === '%' ? EPSILON_PERCENT : EPSILON_CURRENCY;
-      if (Math.abs(Number(obsVal) - Number(claim.numericValue)) > tolerance) {
+      if (Math.abs(numObs - numClaim) > tolerance) {
         return false;
       }
     }
@@ -528,9 +550,30 @@ export function doesEvidenceSupportClaim(evidenceItem, claim) {
   for (const { claim: articleClaim } of extractedFromArticle) {
     if (articleClaim.subject === claim.subject && articleClaim.scope === claim.scope) {
       if (!claim.referencePeriod || articleClaim.referencePeriod === claim.referencePeriod) {
-        const tolerance = claim.unit === '%' ? EPSILON_PERCENT : EPSILON_CURRENCY;
-        if (Math.abs(Number(articleClaim.numericValue) - Number(claim.numericValue)) <= tolerance) {
-          return true;
+        if (claim.numericValue !== null && claim.numericValue !== undefined) {
+          if (
+            articleClaim.numericValue === null ||
+            articleClaim.numericValue === undefined ||
+            typeof articleClaim.numericValue === 'boolean' ||
+            articleClaim.numericValue === '' ||
+            !Number.isFinite(Number(articleClaim.numericValue))
+          ) {
+            continue;
+          }
+          const numClaim = Number(claim.numericValue);
+          const numArt = Number(articleClaim.numericValue);
+          if (!Number.isFinite(numClaim) || !Number.isFinite(numArt)) {
+            continue;
+          }
+          const tolerance = claim.unit === '%' ? EPSILON_PERCENT : EPSILON_CURRENCY;
+          if (Math.abs(numArt - numClaim) <= tolerance) {
+            return true;
+          }
+        } else {
+          // If claim has no numeric value, ensure articleClaim also has no numeric value
+          if (articleClaim.numericValue === null || articleClaim.numericValue === undefined) {
+            return true;
+          }
         }
       }
     }
