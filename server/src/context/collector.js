@@ -41,12 +41,6 @@ export function normalizeMacroObservations(inflationResult, now = new Date()) {
     observations.push(createMarketObservation({
       id: 'macro.cpi_yoy',
       factId,
-      observationId: buildObservationId({
-        factId,
-        referenceTime: refPeriod,
-        publishedAt,
-        methodologyVersion: 'v1.2'
-      }),
       pillar: PILLARS.MACRO,
       label: 'Lạm phát CPI (YoY)',
       metric: 'Chỉ số giá tiêu dùng CPI (so với cùng kỳ)',
@@ -132,12 +126,6 @@ export function normalizeMonetaryObservations(sbvResult, usdVndResult, now = new
     observations.push(createMarketObservation({
       id: 'monetary.vnd_overnight_rate',
       factId: onFactId,
-      observationId: buildObservationId({
-        factId: onFactId,
-        referenceTime: onRef,
-        publishedAt: null,
-        methodologyVersion: 'v1.2'
-      }),
       pillar: PILLARS.MONETARY,
       label: 'Lãi suất VND qua đêm',
       metric: 'Lãi suất bình quân liên ngân hàng kỳ hạn qua đêm (SBV)',
@@ -149,7 +137,8 @@ export function normalizeMonetaryObservations(sbvResult, usdVndResult, now = new
       changeUnitType: UNIT_TYPES.PERCENTAGE_POINT,
       changeBasis: 'FOUR_WEEK_TREND',
       referenceTime: onRef,
-      observedAt: onRef ? `${onRef}T00:00:00.000Z` : null,
+      observedAt: null,
+      publishedAt: null,
       fetchedAt: now.toISOString(),
       source: sbvResult.provenance?.source || 'SBV',
       authorityLevel: AUTHORITY_LEVELS.REGULATORY_OFFICIAL,
@@ -219,9 +208,15 @@ export function normalizeMonetaryObservations(sbvResult, usdVndResult, now = new
  * 3. Entirely omitted provider facts in current batch are preserved from LKG.
  * 4. Runtime freshness is evaluated dynamically without mutating immutable LKG provenance.
  */
-export function mergeWithLastKnownGood(currentObservations, lastKnownGoodObservations = [], now = new Date()) {
+export function mergeWithLastKnownGood(currentObservations, lastKnownGoodObservations = [], now = new Date(), pillar = null) {
   const currList = Array.isArray(currentObservations) ? currentObservations : [];
-  const lkgList = Array.isArray(lastKnownGoodObservations) ? lastKnownGoodObservations : [];
+  let lkgList = Array.isArray(lastKnownGoodObservations) ? lastKnownGoodObservations : [];
+
+  // Scoped isolation: If pillar is specified, isolate LKG strictly to that pillar.
+  // A macro failure must never import market, monetary, or intermarket facts.
+  if (pillar) {
+    lkgList = lkgList.filter((obs) => obs && obs.pillar === pillar);
+  }
 
   const lkgMap = new Map();
   for (const obs of lkgList) {
@@ -330,11 +325,11 @@ export async function runMarketContextCollector({
   // 4. Persist newly fetched observations to DB with visible failure reporting
   const persistResult = await persistMarketObservations(validToPersist, client);
 
-  // 5. Merge raw observations with persisted last-known-good for cache and response
-  const mergedMacro = mergeWithLastKnownGood(rawMacro, lastKnownGood, now);
-  const mergedMonetary = mergeWithLastKnownGood(rawMonetary, lastKnownGood, now);
-  const mergedMarket = mergeWithLastKnownGood(rawMarket, lastKnownGood, now);
-  const mergedIntermarket = mergeWithLastKnownGood(rawIntermarket, lastKnownGood, now);
+  // 5. Merge raw observations with persisted last-known-good with strict pillar isolation
+  const mergedMacro = mergeWithLastKnownGood(rawMacro, lastKnownGood, now, PILLARS.MACRO);
+  const mergedMonetary = mergeWithLastKnownGood(rawMonetary, lastKnownGood, now, PILLARS.MONETARY);
+  const mergedMarket = mergeWithLastKnownGood(rawMarket, lastKnownGood, now, PILLARS.MARKET);
+  const mergedIntermarket = mergeWithLastKnownGood(rawIntermarket, lastKnownGood, now, PILLARS.INTERMARKET);
 
   const allObservations = [
     ...mergedMacro,

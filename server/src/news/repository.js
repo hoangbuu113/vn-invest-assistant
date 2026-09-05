@@ -9,6 +9,8 @@ export function articleToRow(article) {
   if (!article?.articleId) return null;
   return {
     article_id: article.articleId,
+    version_id: article.versionId || null,
+    content_hash: article.contentHash || null,
     source_id: article.sourceId,
     source_name: article.sourceName,
     title: article.title,
@@ -51,6 +53,8 @@ export function rowToArticle(row) {
     ...article,
     articleId: row.article_id,
     id: row.article_id,
+    versionId: row.version_id || article.versionId,
+    contentHash: row.content_hash || article.contentHash,
     geography: row.geography || article.geography,
     sourceAuthority: row.source_authority || article.sourceAuthority,
     quality: row.quality || article.quality,
@@ -62,9 +66,10 @@ export function rowToArticle(row) {
 
 export function applyNewsFreshness(article, now = new Date()) {
   if (!article) return null;
-  const fetchedMs = Date.parse(article.fetchedAt);
+  // News freshness evaluated by source publication age, never fetch age
+  const publishedMs = Date.parse(article.publishedAt);
   const ttl = article.sourceId === 'alphavantage-news' ? ALPHA_FRESH_MS : RSS_FRESH_MS;
-  const stale = !Number.isFinite(fetchedMs) || now.getTime() - fetchedMs > ttl;
+  const stale = !Number.isFinite(publishedMs) || now.getTime() - publishedMs > ttl;
   return stale
     ? Object.freeze({ ...article, status: 'stale', freshness: 'stale' })
     : article;

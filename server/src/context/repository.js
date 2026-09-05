@@ -1,6 +1,7 @@
 import {
   createMarketObservation,
   compareObservationVintages,
+  selectLatestObservationPerFact,
   OBSERVATION_FRESHNESS,
   OBSERVATION_STATUS,
   PILLARS,
@@ -199,23 +200,13 @@ export async function fetchLatestPersistedObservations(client = privateSupabase,
       const { data, error } = await client
         .from('market_context_observations')
         .select('*')
+        .order('reference_time', { ascending: false, nullsFirst: false })
         .order('published_at', { ascending: false, nullsFirst: false })
         .order('observed_at', { ascending: false, nullsFirst: false })
-        .order('fetched_at', { ascending: false })
-        .order('reference_time', { ascending: false });
+        .order('fetched_at', { ascending: false });
 
       if (!error && Array.isArray(data) && data.length > 0) {
-        const latestByFactId = new Map();
-        for (const row of data) {
-          const obs = rowToObservation(row);
-          if (obs) {
-            const existing = latestByFactId.get(obs.factId);
-            if (!existing || compareObservationVintages(obs, existing) < 0) {
-              latestByFactId.set(obs.factId, obs);
-            }
-          }
-        }
-        observations = Array.from(latestByFactId.values());
+        observations = selectLatestObservationPerFact(data.map(rowToObservation).filter(Boolean));
       }
     } catch {
       // Fallback to in-process memory store if DB unreachable
@@ -224,14 +215,7 @@ export async function fetchLatestPersistedObservations(client = privateSupabase,
 
   // Fallback to in-memory store if DB query returned nothing
   if (observations.length === 0 && memoryStore.size > 0) {
-    const latestByFactId = new Map();
-    for (const obs of memoryStore.values()) {
-      const existing = latestByFactId.get(obs.factId);
-      if (!existing || compareObservationVintages(obs, existing) < 0) {
-        latestByFactId.set(obs.factId, obs);
-      }
-    }
-    observations = Array.from(latestByFactId.values());
+    observations = selectLatestObservationPerFact(Array.from(memoryStore.values()));
   }
 
   // Dynamically recalculate runtime freshness relative to `now`

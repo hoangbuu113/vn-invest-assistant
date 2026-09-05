@@ -21,11 +21,11 @@ export async function fetchUsdVndObservation({ now = new Date(), fetchFn = fetch
     const isAvailable = fx && (fx.availability === 'available' || fx.status === 'available');
     if (isAvailable && typeof fx.rate === 'number' && Number.isFinite(fx.rate) && fx.rate > 0) {
       const roundedRate = Math.round(fx.rate);
-      const refTime = typeof fx.asOf === 'string' ? fx.asOf.slice(0, 10) : now.toISOString().slice(0, 10);
+      const observedAt = typeof fx.asOf === 'string' && fx.asOf.trim() ? fx.asOf.trim() : null;
+      const refTime = observedAt ? observedAt.slice(0, 10) : null;
       return createMarketObservation({
         id,
         factId,
-        observationId: `${factId}:${refTime}`,
         pillar: PILLARS.MONETARY,
         label,
         metric,
@@ -34,7 +34,8 @@ export async function fetchUsdVndObservation({ now = new Date(), fetchFn = fetch
         unitType: UNIT_TYPES.CURRENCY_RATIO,
         quoteDirection: 'VND_PER_USD',
         referenceTime: refTime,
-        observedAt: fx.asOf || now.toISOString(),
+        observedAt,
+        publishedAt: null,
         fetchedAt: now.toISOString(),
         source: 'Twelve Data',
         authorityLevel: AUTHORITY_LEVELS.MARKET_DIRECT,

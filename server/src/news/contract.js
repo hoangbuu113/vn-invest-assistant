@@ -43,6 +43,21 @@ export function normalizeRelatedAssets(relationships = []) {
   return Array.from(byAssetId.values()).sort((left, right) => left.assetId.localeCompare(right.assetId));
 }
 
+/**
+ * Calculates a deterministic content hash of the article's material content.
+ * Distinguishes article versions when content is corrected or updated.
+ */
+export function calculateArticleContentHash({ title, excerpt, summary, publishedAt, url } = {}) {
+  const content = {
+    title: cleanPlainText(title) || '',
+    excerpt: cleanPlainText(summary || excerpt) || '',
+    publishedAt: normalizePublishedAt(publishedAt) || '',
+    url: normalizeUrl(url) || ''
+  };
+  const canonicalJson = JSON.stringify(content, Object.keys(content).sort());
+  return createHash('sha256').update(canonicalJson).digest('hex').slice(0, 12);
+}
+
 export function normalizeCanonicalArticle(rawArticle, { fetchedAt, sourceStatus = 'ok' } = {}) {
   if (!rawArticle || typeof rawArticle !== 'object') return null;
   const sourceId = normalizedString(rawArticle.sourceId)?.toLowerCase() || null;
@@ -63,10 +78,14 @@ export function normalizeCanonicalArticle(rawArticle, { fetchedAt, sourceStatus 
     : sourceDefaults.geography;
   const sourceName = normalizedString(rawArticle.sourceName || rawArticle.source) || sourceDefaults.name;
   const freshness = sourceStatus === 'stale' ? 'stale' : 'fresh';
+  const contentHash = calculateArticleContentHash({ title, excerpt, summary: excerpt, publishedAt, url });
+  const versionId = `${articleId}:v_${contentHash}`;
 
   return Object.freeze({
     articleId,
     id: articleId,
+    versionId,
+    contentHash,
     sourceId,
     sourceName,
     source: sourceName,

@@ -136,6 +136,7 @@ export function validateMarketStrategistOutput(output, evidenceScope = {}) {
 
   const validFacts = new Set(evidenceScope.validFactIds || []);
   const validArticles = new Set(evidenceScope.validArticleIds || []);
+  const validArticleVersions = new Set(evidenceScope.validArticleVersionIds || []);
   const validSignals = new Set(
     evidenceScope.validSignalIds
       ? evidenceScope.validSignalIds
@@ -155,7 +156,7 @@ export function validateMarketStrategistOutput(output, evidenceScope = {}) {
     }
   }
 
-  const allValidEvidence = new Set([...validFacts, ...validArticles, ...validSignals]);
+  const allValidEvidence = new Set([...validFacts, ...validArticles, ...validArticleVersions, ...validSignals]);
   const allowedTickers = new Set([
     ...STANDARD_ACRONYMS,
     ...(evidenceScope.validTickers || [])
@@ -397,7 +398,20 @@ export function validateMarketStrategistOutput(output, evidenceScope = {}) {
 
     if (Array.isArray(output.citations.articleIds)) {
       for (const articleId of output.citations.articleIds) {
-        if (!validArticles.has(articleId)) {
+        const isVersioned = typeof articleId === 'string' && articleId.includes(':v_');
+        let isValid = false;
+
+        if (isVersioned) {
+          if (validArticleVersions.size > 0) {
+            isValid = validArticleVersions.has(articleId);
+          } else {
+            isValid = validArticles.has(articleId.split(':v_')[0]) || validArticles.has(articleId);
+          }
+        } else {
+          isValid = validArticles.has(articleId);
+        }
+
+        if (!isValid) {
           errors.push(`UNKNOWN_ARTICLE_CITATION_${articleId}`);
         }
       }

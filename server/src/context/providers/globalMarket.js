@@ -129,11 +129,9 @@ export function parseYahooQuote(data, def, now = new Date()) {
   const changePercent = rawChangePercent !== null ? Math.round(rawChangePercent * 100) / 100 : null;
 
   const marketTimeSec = meta.regularMarketTime;
-  const refDate = typeof marketTimeSec === 'number' && Number.isFinite(marketTimeSec) && marketTimeSec > 0
-    ? new Date(marketTimeSec * 1000).toISOString()
-    : now.toISOString();
-
-  const refDay = refDate.slice(0, 10);
+  const hasMarketTime = typeof marketTimeSec === 'number' && Number.isFinite(marketTimeSec) && marketTimeSec > 0;
+  const observedAt = hasMarketTime ? new Date(marketTimeSec * 1000).toISOString() : null;
+  const refDay = observedAt ? observedAt.slice(0, 10) : null;
 
   return createMarketObservation({
     id: def.id,
@@ -152,14 +150,15 @@ export function parseYahooQuote(data, def, now = new Date()) {
     previousValue,
     quoteDirection: def.quoteDirection || null,
     referenceTime: refDay,
-    observedAt: refDate,
+    observedAt,
+    publishedAt: null,
     fetchedAt: now.toISOString(),
     source: def.source,
     authorityLevel: AUTHORITY_LEVELS.MARKET_REFERENCE,
     provenance: {
       source: 'Yahoo Finance Chart API',
       symbol: def.symbol,
-      quoteTime: refDate,
+      quoteTime: observedAt,
       disclaimer: 'Chỉ số tham chiếu liên thị trường'
     },
     freshness: OBSERVATION_FRESHNESS.DELAYED
@@ -263,7 +262,8 @@ export async function fetchCanonicalGoldSpot({ now = new Date(), fetchFn = fetch
     );
 
     if (snapshot && typeof snapshot.price === 'number' && Number.isFinite(snapshot.price) && snapshot.price > 0) {
-      const refTime = snapshot.priceAsOf ? snapshot.priceAsOf.slice(0, 10) : now.toISOString().slice(0, 10);
+      const observedAt = snapshot.priceAsOf || null;
+      const refTime = observedAt ? observedAt.slice(0, 10) : null;
       return createMarketObservation({
         id,
         factId,
@@ -280,7 +280,8 @@ export async function fetchCanonicalGoldSpot({ now = new Date(), fetchFn = fetch
         changeBasis: 'PREVIOUS_CLOSE',
         previousValue: snapshot.previousClose,
         referenceTime: refTime,
-        observedAt: snapshot.priceAsOf || now.toISOString(),
+        observedAt,
+        publishedAt: null,
         fetchedAt: now.toISOString(),
         source: 'Alpha Vantage (Spot)',
         authorityLevel: AUTHORITY_LEVELS.MARKET_DIRECT,

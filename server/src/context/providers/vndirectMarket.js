@@ -181,7 +181,7 @@ export function parseVndirectIndexQuote(data, indexDef, now = new Date()) {
     volumeUnit: 'cổ phiếu',
     referenceTime: sessionDate,
     observedAt: refDate.toISOString(),
-    publishedAt: refDate.toISOString(),
+    publishedAt: null,
     fetchedAt: now.toISOString(),
     source: 'VNDIRECT',
     authorityLevel: AUTHORITY_LEVELS.MARKET_DIRECT,

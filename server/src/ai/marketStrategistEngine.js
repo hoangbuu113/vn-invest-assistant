@@ -16,9 +16,12 @@ import {
   buildSafeInsufficientEvidenceBrief
 } from './marketStrategistValidation.js';
 import { deriveMarketSignals } from './derivedSignals.js';
+import { normalizeReferencePeriodKey } from '../context/factModel.js';
+import { persistRunManifest } from './marketStrategistManifest.js';
 
 export const STRATEGIST_CACHE_TTL_MS = 15 * 60 * 1000; // 15 minutes
 export const STRATEGIST_COOLDOWN_MS = 15 * 1000;       // 15 seconds
+export const STRATEGIST_SELECTION_POLICY_VERSION = 'v1.2';
 
 /**
  * Builds the closed fact packet for AI Market Strategist.
@@ -78,6 +81,8 @@ export function buildMarketStrategistFactPacket({
       freshness: obs.freshness || 'fresh',
       source: obs.source || obs.source_id || 'System',
       referenceTime: obs.referenceTime || obs.reference_time || null,
+      observedAt: obs.observedAt || obs.observed_at || null,
+      publishedAt: obs.publishedAt || obs.published_at || null,
       publishedTime: obs.publishedTime || obs.published_at || obs.recordedAt || null,
       revision: obs.revision || obs.quality || 'verified',
       limitations: obs.limitations || null
@@ -116,9 +121,12 @@ export function buildMarketStrategistFactPacket({
     const excerptLower = (article.excerpt || article.summary || '').toLowerCase();
     const text = `${titleLower} ${excerptLower}`;
 
+    const versionId = article.versionId || `${articleId}:v_${article.contentHash || '1'}`;
     const normalized = {
       articleId,
       id: articleId,
+      versionId,
+      contentHash: article.contentHash || null,
       title: article.title || 'Untitled',
       excerpt: article.excerpt || article.summary || '',
       sourceName: article.sourceName || article.source || 'News Source',
@@ -164,9 +172,10 @@ export function buildMarketStrategistFactPacket({
   // EXACT SCOPE: Only articles SELECTED into packet are valid citations.
   // Excluded articles are strictly prohibited.
   const validArticleIds = new Set(selectedNews.map((a) => a.articleId));
+  const validArticleVersionIds = new Set(selectedNews.map((a) => a.versionId).filter(Boolean));
 
   const untrustedNews = selectedNews.length > 0 ? selectedNews : [];
-  const dataAsOf = now instanceof Date ? now.toISOString() : new Date().toISOString();
+  const dataAsOf = computeEvidenceDataAsOf({ evidence, untrustedNews, now });
 
   return {
     now,
@@ -176,26 +185,108 @@ export function buildMarketStrategistFactPacket({
     derivedSignals,
     validFactIds,
     validArticleIds,
+    validArticleVersionIds,
     validSignalIds,
     validTickers
   };
 }
 
 /**
+ * Computes dataAsOf from the actual timestamps of selected evidence and news.
+ * Guarantees that dataAsOf is historically truthful and does not advance simply because request time changed.
+ */
+export function computeEvidenceDataAsOf({ evidence = [], untrustedNews = [], now = new Date() } = {}) {
+  let maxTimeMs = 0;
+
+  for (const obs of Array.isArray(evidence) ? evidence : []) {
+    if (!obs) continue;
+    let foundExact = false;
+    const timeCandidates = [obs.publishedTime, obs.publishedAt, obs.observedAt];
+    for (const cand of timeCandidates) {
+      if (typeof cand === 'string' && cand.trim()) {
+        const ms = Date.parse(cand.trim());
+        if (Number.isFinite(ms)) {
+          if (ms > maxTimeMs) {
+            maxTimeMs = ms;
+          }
+          foundExact = true;
+        }
+      }
+    }
+    // Only fall back to referenceTime if no exact timestamp was present on this observation
+    if (!foundExact && typeof obs.referenceTime === 'string' && obs.referenceTime.trim()) {
+      const trimmed = obs.referenceTime.trim();
+      const ms = Date.parse(trimmed) || Date.parse(`${trimmed}T00:00:00.000Z`);
+      if (Number.isFinite(ms) && ms > maxTimeMs) {
+        maxTimeMs = ms;
+      }
+    }
+  }
+
+  for (const article of Array.isArray(untrustedNews) ? untrustedNews : []) {
+    if (!article) continue;
+    if (typeof article.publishedAt === 'string' && article.publishedAt.trim()) {
+      const ms = Date.parse(article.publishedAt.trim());
+      if (Number.isFinite(ms) && ms > maxTimeMs) {
+        maxTimeMs = ms;
+      }
+    }
+  }
+
+  if (maxTimeMs > 0) {
+    return new Date(maxTimeMs).toISOString();
+  }
+
+  return (now instanceof Date ? now : new Date()).toISOString();
+}
+
+/**
  * Computes a deterministic SHA-256 fingerprint for caching.
- * Changes whenever any observation ID, news article ID, or signal ID changes.
+ * Changes whenever any decision-relevant input changes:
+ * - observation vintage, status, or freshness
+ * - article version or ID
+ * - derived signal ID, state, or status
+ * - selection policy, model, prompt, or schema
+ * Excludes volatile request times.
  */
 export function computeStrategistFingerprint({
   validFactIds = new Set(),
   validArticleIds = new Set(),
   validSignalIds = new Set(),
+  evidence = [],
+  untrustedNews = [],
+  derivedSignals = [],
+  selectionPolicyVersion = STRATEGIST_SELECTION_POLICY_VERSION,
+  model = STRATEGIST_MODEL,
   promptVersion = STRATEGIST_PROMPT_VERSION,
   schemaVersion = STRATEGIST_SCHEMA_VERSION
 } = {}) {
-  const sortedFacts = Array.from(validFactIds).sort().join('|');
-  const sortedNews = Array.from(validArticleIds).sort().join('|');
-  const sortedSignals = Array.from(validSignalIds).sort().join('|');
-  const rawKey = `${sortedFacts}::${sortedNews}::${sortedSignals}::${promptVersion}::${schemaVersion}`;
+  let factTokens = [];
+  if (Array.isArray(evidence) && evidence.length > 0) {
+    factTokens = evidence.map((e) => `${e.observationId || e.id}:${e.status || 'available'}:${e.freshness || 'fresh'}`);
+  } else {
+    factTokens = Array.from(validFactIds);
+  }
+
+  let newsTokens = [];
+  if (Array.isArray(untrustedNews) && untrustedNews.length > 0) {
+    newsTokens = untrustedNews.map((a) => a.versionId || a.articleId || a.id);
+  } else {
+    newsTokens = Array.from(validArticleIds);
+  }
+
+  let signalTokens = [];
+  if (Array.isArray(derivedSignals) && derivedSignals.length > 0) {
+    signalTokens = derivedSignals.map((s) => `${s.signalId}:${s.state || 'neutral'}:${s.status || 'active'}`);
+  } else {
+    signalTokens = Array.from(validSignalIds);
+  }
+
+  const sortedFacts = Array.from(new Set(factTokens)).sort().join('|');
+  const sortedNews = Array.from(new Set(newsTokens)).sort().join('|');
+  const sortedSignals = Array.from(new Set(signalTokens)).sort().join('|');
+
+  const rawKey = `${sortedFacts}::${sortedNews}::${sortedSignals}::${selectionPolicyVersion}::${model}::${promptVersion}::${schemaVersion}`;
   return createHash('sha256').update(rawKey).digest('hex');
 }
 
@@ -559,8 +650,17 @@ export async function generateMarketStrategist({
   aiEnabled = true,
   allowLlm = true
 } = {}) {
-  const { validFactIds, validArticleIds, validSignalIds, evidence, derivedSignals } = factPacket;
-  const fingerprint = computeStrategistFingerprint({ validFactIds, validArticleIds, validSignalIds });
+  const { validFactIds, validArticleIds, validSignalIds, evidence, untrustedNews, derivedSignals } = factPacket;
+  const effectiveModel = geminiModel || STRATEGIST_MODEL;
+  const fingerprint = computeStrategistFingerprint({
+    validFactIds,
+    validArticleIds,
+    validSignalIds,
+    evidence,
+    untrustedNews,
+    derivedSignals,
+    model: effectiveModel
+  });
 
   // 1. Check runtime cache
   if (runtime) {
@@ -793,13 +893,39 @@ export async function generateMarketStrategist({
     };
   }
 
-  // 4. Cache valid published output
+  // 4. Record run manifest
+  const manifest = {
+    runId: `run_${Date.now()}_${createHash('sha256').update(fingerprint + (result.generatedAt || now.toISOString())).digest('hex').slice(0, 12)}`,
+    packetFingerprint: fingerprint,
+    selectedObservationIds: (evidence || []).map((e) => e.observationId || e.id),
+    selectedArticleIds: (untrustedNews || []).map((a) => a.versionId || a.articleId),
+    signalIds: (derivedSignals || []).map((s) => s.signalId),
+    promptVersion: STRATEGIST_PROMPT_VERSION,
+    schemaVersion: STRATEGIST_SCHEMA_VERSION,
+    selectionPolicyVersion: STRATEGIST_SELECTION_POLICY_VERSION,
+    model: result.generationMode === 'live_ai' ? effectiveModel : 'deterministic_fallback',
+    generationMode: result.generationMode,
+    generatedAt: result.generatedAt || (now instanceof Date ? now.toISOString() : new Date().toISOString()),
+    dataAsOf: result.dataAsOf,
+    validationResult: result.gateAudit || { valid: true }
+  };
+
+  try {
+    await persistRunManifest(manifest);
+  } catch {
+    // Non-blocking manifest persistence
+  }
+
+  result.runId = manifest.runId;
+
+  // 5. Cache valid published output
   if (runtime && fingerprint) {
     runtime.set(fingerprint, result, now);
   }
 
   return {
     ...result,
+    runId: manifest.runId,
     evidence,
     derivedSignals: derivedSignals || []
   };

@@ -14,9 +14,12 @@
  * 3. Pure function: does not mutate observation identity or provenance.
  */
 
+import { normalizeReferencePeriodKey } from './factModel.js';
+
 export const CADENCE_POLICIES = Object.freeze({
   MONTHLY_MACRO: 'MONTHLY_MACRO',
   QUARTERLY_MACRO: 'QUARTERLY_MACRO',
+  WEEKLY_MONETARY: 'WEEKLY_MONETARY',
   DAILY_VN_EQUITY: 'DAILY_VN_EQUITY',
   DAILY_MONETARY: 'DAILY_MONETARY',
   CURRENT_MARKET_FX: 'CURRENT_MARKET_FX'
@@ -25,8 +28,8 @@ export const CADENCE_POLICIES = Object.freeze({
 export const FACT_POLICY_MAP = Object.freeze({
   'vn.macro.cpi.yoy': CADENCE_POLICIES.MONTHLY_MACRO,
   'macro.cpi_yoy': CADENCE_POLICIES.MONTHLY_MACRO,
-  'vn.monetary.rate.vnd_overnight': CADENCE_POLICIES.DAILY_MONETARY,
-  'monetary.vnd_overnight_rate': CADENCE_POLICIES.DAILY_MONETARY,
+  'vn.monetary.rate.vnd_overnight': CADENCE_POLICIES.WEEKLY_MONETARY,
+  'monetary.vnd_overnight_rate': CADENCE_POLICIES.WEEKLY_MONETARY,
   'vn.monetary.fx.usd_vnd': CADENCE_POLICIES.CURRENT_MARKET_FX,
   'monetary.usd_vnd': CADENCE_POLICIES.CURRENT_MARKET_FX,
   'vn.market.vnindex.close': CADENCE_POLICIES.DAILY_VN_EQUITY,
@@ -51,10 +54,18 @@ export const FACT_POLICY_MAP = Object.freeze({
 
 function parseObservationTimestamp(obs) {
   if (!obs) return null;
-  const raw = obs.publishedAt || obs.observedAt || obs.fetchedAt;
-  if (!raw) return null;
-  const ms = Date.parse(raw);
-  return Number.isFinite(ms) ? ms : null;
+  // Source time semantics: Use actual publishedAt or observedAt, never substitute fetchedAt as source time
+  const raw = obs.publishedAt || obs.observedAt;
+  if (raw) {
+    const ms = Date.parse(raw);
+    if (Number.isFinite(ms)) return ms;
+  }
+  if (obs.referenceTime) {
+    const refKey = normalizeReferencePeriodKey(obs.referenceTime);
+    const ms = Date.parse(refKey);
+    if (Number.isFinite(ms)) return ms;
+  }
+  return null;
 }
 
 function getVietnamDayOfWeek(d) {
@@ -102,6 +113,30 @@ export function evaluateObservationFreshness(obs, now = new Date()) {
         const ageDays = (nowMs - obsTimeMs) / (24 * 3600 * 1000);
         if (ageDays > 105) {
           return { freshness: 'stale', isStale: true, status: 'stale', policy, reason: 'QUARTERLY_AGE_EXCEEDED' };
+        }
+      }
+      return { freshness: 'fresh', isStale: false, status: 'available', policy };
+    }
+
+    case CADENCE_POLICIES.WEEKLY_MONETARY: {
+      const refWeekStr = typeof obs.referenceTime === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(obs.referenceTime)
+        ? obs.referenceTime
+        : (obsTimeMs ? new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' }).format(new Date(obsTimeMs)) : null);
+
+      if (refWeekStr) {
+        const [y, m, d] = refWeekStr.split('-').map(Number);
+        const weekStartUtc = new Date(Date.UTC(y, m - 1, d, 0, 0, 0));
+        const deadlineMs = weekStartUtc.getTime() + (14 * 24 * 3600 * 1000);
+        if (nowMs > deadlineMs) {
+          return { freshness: 'stale', isStale: true, status: 'stale', policy, reason: 'WEEKLY_CADENCE_EXPIRED' };
+        }
+        return { freshness: 'fresh', isStale: false, status: 'available', policy };
+      }
+
+      if (obsTimeMs) {
+        const ageHours = (nowMs - obsTimeMs) / (3600 * 1000);
+        if (ageHours > (14 * 24)) {
+          return { freshness: 'stale', isStale: true, status: 'stale', policy, reason: 'WEEKLY_AGE_EXCEEDED' };
         }
       }
       return { freshness: 'fresh', isStale: false, status: 'available', policy };
