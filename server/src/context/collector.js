@@ -20,7 +20,7 @@ import { fetchVietnamMarketPillar } from './providers/vndirectMarket.js';
 import { fetchGlobalMarketPillar, fetchUsdVndObservation } from './providers/globalMarket.js';
 import { normalizeNsoMacroFacts } from './providers/nsoMacro.js';
 import { normalizeSbvMonetaryFacts } from './providers/sbvMonetary.js';
-import { isSourceDue, recordCheckpoint, SOURCE_KEYS } from './collectorCheckpoints.js';
+import { isSourceDue, recordCheckpoint, SOURCE_KEYS, CHECKPOINT_STATUS } from './collectorCheckpoints.js';
 import { privateSupabase } from '../supabase.js';
 
 /**
@@ -449,17 +449,41 @@ export async function runMarketContextCollector({
   // Record checkpoints if due sources ran
   if (macroDue) {
     if (macroRes.status === 'fulfilled' && macroRes.value) {
-      await recordCheckpoint(SOURCE_KEYS.NSO_MONTHLY, { status: 'success', client, now });
+      const nextReleaseAt = macroRes.value?.nextReleaseAt || macroRes.value?.metadata?.nextReleaseAt || null;
+      const isQuarantined = macroRes.value?.status === 'quarantined';
+      const status = isQuarantined ? CHECKPOINT_STATUS.QUARANTINED : CHECKPOINT_STATUS.SUCCESS;
+      await recordCheckpoint(SOURCE_KEYS.NSO_MONTHLY, {
+        status,
+        client,
+        now,
+        metadata: { nextReleaseAt, ...(isQuarantined ? { reason: macroRes.value?.reason } : {}) }
+      });
     } else if (macroRes.status === 'rejected') {
-      await recordCheckpoint(SOURCE_KEYS.NSO_MONTHLY, { status: 'failed', client, now, metadata: { error: String(macroRes.reason) } });
+      await recordCheckpoint(SOURCE_KEYS.NSO_MONTHLY, { status: CHECKPOINT_STATUS.FAILED, client, now, metadata: { error: String(macroRes.reason) } });
     }
   }
 
   if (sbvDue) {
-    if ((sbvRes.status === 'fulfilled' && sbvRes.value) || (sbvOfficialRes.status === 'fulfilled' && sbvOfficialRes.value)) {
-      await recordCheckpoint(SOURCE_KEYS.SBV_FX_CENTRAL, { status: 'success', client, now });
-    } else if (sbvRes.status === 'rejected') {
-      await recordCheckpoint(SOURCE_KEYS.SBV_FX_CENTRAL, { status: 'failed', client, now, metadata: { error: String(sbvRes.reason) } });
+    const isSbvAccessDenied =
+      (sbvRes.status === 'fulfilled' && (sbvRes.value?.reason === 'PROVIDER_ACCESS_DENIED' || sbvRes.value?.status === 'blocked')) ||
+      (sbvOfficialRes.status === 'fulfilled' && (sbvOfficialRes.value?.status === 'blocked' || sbvOfficialRes.value?.reason === 'PROVIDER_ACCESS_DENIED')) ||
+      (sbvRes.status === 'rejected' && (sbvRes.reason?.code === 'PROVIDER_ACCESS_DENIED' || String(sbvRes.reason).includes('Request Rejected'))) ||
+      (sbvOfficialRes.status === 'rejected' && (sbvOfficialRes.reason?.code === 'PROVIDER_ACCESS_DENIED' || String(sbvOfficialRes.reason).includes('Request Rejected')));
+
+    if (isSbvAccessDenied) {
+      await recordCheckpoint(SOURCE_KEYS.SBV_FX_CENTRAL, {
+        status: CHECKPOINT_STATUS.BLOCKED_ACCESS_DENIED,
+        client,
+        now,
+        metadata: { error: 'PROVIDER_ACCESS_DENIED', reason: 'SBV government WAF rejected automated access' }
+      });
+    } else if ((sbvRes.status === 'fulfilled' && sbvRes.value && sbvRes.value.status !== 'unavailable') || (sbvOfficialRes.status === 'fulfilled' && sbvOfficialRes.value && sbvOfficialRes.value.length > 0)) {
+      await recordCheckpoint(SOURCE_KEYS.SBV_FX_CENTRAL, { status: CHECKPOINT_STATUS.SUCCESS, client, now });
+    } else if (sbvRes.status === 'rejected' || sbvOfficialRes.status === 'rejected') {
+      const err = sbvRes.status === 'rejected' ? sbvRes.reason : sbvOfficialRes.reason;
+      await recordCheckpoint(SOURCE_KEYS.SBV_FX_CENTRAL, { status: CHECKPOINT_STATUS.FAILED, client, now, metadata: { error: String(err) } });
+    } else if (sbvRes.status === 'fulfilled' && sbvRes.value) {
+      await recordCheckpoint(SOURCE_KEYS.SBV_FX_CENTRAL, { status: CHECKPOINT_STATUS.FAILED, client, now, metadata: { reason: sbvRes.value?.reason || 'OFFICIAL_DATA_UNAVAILABLE' } });
     }
   }
 

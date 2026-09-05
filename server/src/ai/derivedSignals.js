@@ -32,8 +32,12 @@ export const SIGNAL_TYPES = Object.freeze([
  * @param {Date} [params.now] - Current timestamp.
  * @returns {Array<object>} Array of valid derived signal objects.
  */
-export function deriveMarketSignals({ observations = [], now = new Date() } = {}) {
-  if (!Array.isArray(observations) || observations.length === 0) {
+export function deriveMarketSignals({ observations = [], marketObservations = null, now = new Date() } = {}) {
+  const obsList = Array.isArray(observations) && observations.length > 0
+    ? observations
+    : (Array.isArray(marketObservations) ? marketObservations : (observations || []));
+
+  if (!Array.isArray(obsList) || obsList.length === 0) {
     return [];
   }
 
@@ -42,7 +46,7 @@ export function deriveMarketSignals({ observations = [], now = new Date() } = {}
 
   // Group observations by factId and id
   const obsMap = new Map();
-  for (const obs of observations) {
+  for (const obs of obsList) {
     if (!obs || typeof obs !== 'object') continue;
     const observationId = obs.observationId || obs.id;
     if (!observationId) continue;
@@ -128,30 +132,38 @@ export function deriveMarketSignals({ observations = [], now = new Date() } = {}
     });
   }
 
+  // Helper to check if an observation has finite numerical value and is not unavailable
+  const isUsable = (o) => Boolean(o && typeof o.value === 'number' && Number.isFinite(o.value) && o.status !== 'unavailable');
+
   // 3. DOMESTIC_GROWTH_MOMENTUM: requires GDP, IIP, or Retail observation
   const gdpObs = findObs('vn.macro.gdp.real.quarter_yoy') || findObs('vn.macro.gdp.growth_rate');
   const iipObs = findObs('vn.macro.iip.month_yoy');
   const retailObs = findObs('vn.macro.retail.nominal.month_yoy');
 
-  if ((gdpObs && typeof gdpObs.value === 'number') ||
-      (iipObs && typeof iipObs.value === 'number') ||
-      (retailObs && typeof retailObs.value === 'number')) {
-    const primary = gdpObs || iipObs || retailObs;
+  const usableGdp = isUsable(gdpObs) ? gdpObs : null;
+  const usableIip = isUsable(iipObs) ? iipObs : null;
+  const usableRetail = isUsable(retailObs) ? retailObs : null;
+
+  if (usableGdp || usableIip || usableRetail) {
+    const primary = usableGdp || usableIip || usableRetail;
     const obsId = primary.observationId || primary.id;
     const inputEvidenceIds = [
-      gdpObs?.observationId || gdpObs?.id,
-      iipObs?.observationId || iipObs?.id,
-      retailObs?.observationId || retailObs?.id
+      usableGdp?.observationId || usableGdp?.id,
+      usableIip?.observationId || usableIip?.id,
+      usableRetail?.observationId || usableRetail?.id
     ].filter(Boolean);
 
+    const isStale = (primary.status === 'stale' || primary.freshness === 'stale');
     let state = 'moderate';
-    if (gdpObs && typeof gdpObs.value === 'number') {
-      if (gdpObs.value >= 6.5) state = 'expansion';
-      else if (gdpObs.value < 5.0) state = 'slowing';
+    if (isStale) {
+      state = 'neutral';
+    } else if (usableGdp) {
+      if (usableGdp.value >= 6.5) state = 'expansion';
+      else if (usableGdp.value < 5.0) state = 'slowing';
       else state = 'moderate';
-    } else if (iipObs && typeof iipObs.value === 'number') {
-      if (iipObs.value >= 8.0) state = 'expansion';
-      else if (iipObs.value < 3.0) state = 'slowing';
+    } else if (usableIip) {
+      if (usableIip.value >= 8.0) state = 'expansion';
+      else if (usableIip.value < 3.0) state = 'slowing';
       else state = 'moderate';
     }
 
@@ -165,7 +177,9 @@ export function deriveMarketSignals({ observations = [], now = new Date() } = {}
       methodologyVersion: SIGNAL_METHODOLOGY_VERSION,
       generatedAt,
       status: 'active',
-      limitations: 'Chỉ báo tăng trưởng kinh tế tổng hợp từ dữ liệu NSO (GDP quý, IIP tháng, doanh thu bán lẻ); phản ánh chu kỳ hoạt động sản xuất và tiêu dùng thực tế.'
+      limitations: isStale
+        ? 'Dữ liệu vĩ mô đã quá hạn (stale); tín hiệu duy trì trạng thái trung tính/không định hướng cho tới kỳ công bố mới.'
+        : 'Chỉ báo tăng trưởng kinh tế tổng hợp từ dữ liệu NSO (GDP quý, IIP tháng, doanh thu bán lẻ); phản ánh chu kỳ hoạt động sản xuất và tiêu dùng thực tế.'
     });
   }
 
@@ -177,28 +191,30 @@ export function deriveMarketSignals({ observations = [], now = new Date() } = {}
   const m2Obs = findObs('vn.monetary.money_supply.m2.level');
   const centralFxObs = findObs('vn.monetary.fx.sbv_central.usd_vnd');
 
-  if ((onObs && typeof onObs.value === 'number') ||
-      (creditObs && typeof creditObs.value === 'number') ||
-      (m2Obs && typeof m2Obs.value === 'number') ||
-      (centralFxObs && typeof centralFxObs.value === 'number')) {
-    const primary = onObs || creditObs || m2Obs || centralFxObs;
+  const usableOn = isUsable(onObs) ? onObs : null;
+  const usableCredit = isUsable(creditObs) ? creditObs : null;
+  const usableM2 = isUsable(m2Obs) ? m2Obs : null;
+  const usableCentralFx = isUsable(centralFxObs) ? centralFxObs : null;
+
+  if (usableOn || usableCredit || usableM2 || usableCentralFx) {
+    const primary = usableOn || usableCredit || usableM2 || usableCentralFx;
     const obsId = primary.observationId || primary.id;
     const inputEvidenceIds = [
-      dailyOnObs?.observationId || dailyOnObs?.id,
-      weeklyOnObs?.observationId || weeklyOnObs?.id,
-      creditObs?.observationId || creditObs?.id,
-      m2Obs?.observationId || m2Obs?.id,
-      centralFxObs?.observationId || centralFxObs?.id
+      usableOn?.observationId || usableOn?.id,
+      usableCredit?.observationId || usableCredit?.id,
+      usableM2?.observationId || usableM2?.id,
+      usableCentralFx?.observationId || usableCentralFx?.id
     ].filter(Boolean);
 
+    const isStale = (primary.status === 'stale' || primary.freshness === 'stale');
     let state = 'neutral';
-    if (onObs && typeof onObs.value === 'number') {
-      if (onObs.value >= 5.0) state = 'tightening';
-      else if (onObs.value <= 2.0) state = 'accommodative';
+    if (!isStale && usableOn) {
+      if (usableOn.value >= 5.0) state = 'tightening';
+      else if (usableOn.value <= 2.0) state = 'accommodative';
       else state = 'neutral';
     }
 
-    const hasM2Boundary = m2Obs && m2Obs.methodologyVersion === 'sbv_m2_post_202510';
+    const hasM2Boundary = usableM2 && usableM2.methodologyVersion === 'sbv_m2_post_202510';
 
     signals.push({
       signalId: `sig.monetary_stance:${obsId}`,
@@ -210,7 +226,9 @@ export function deriveMarketSignals({ observations = [], now = new Date() } = {}
       methodologyVersion: SIGNAL_METHODOLOGY_VERSION,
       generatedAt,
       status: 'active',
-      limitations: `Dữ liệu điều hành tiền tệ từ NHNN (SBV); theo dõi thanh khoản liên ngân hàng, tăng trưởng tín dụng và cung tiền M2${hasM2Boundary ? ' (áp dụng ranh giới phương pháp M2 từ 10/2025)' : ''}.`
+      limitations: isStale
+        ? 'Dữ liệu tiền tệ SBV đã quá hạn (stale); tín hiệu duy trì trạng thái trung tính (không định hướng) cho tới khi có dữ liệu mới.'
+        : `Dữ liệu điều hành tiền tệ từ NHNN (SBV); theo dõi thanh khoản liên ngân hàng, tăng trưởng tín dụng và cung tiền M2${hasM2Boundary ? ' (áp dụng ranh giới phương pháp M2 từ 10/2025)' : ''}.`
     });
   }
 

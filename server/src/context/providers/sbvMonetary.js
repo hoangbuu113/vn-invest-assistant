@@ -33,9 +33,24 @@ import {
 } from '../factModel.js';
 
 export const SBV_HOST = 'sbv.gov.vn';
-export const SBV_CENTRAL_FX_URL = 'https://www.sbv.gov.vn/webcenter/portal/vi/menu/trangchu/ttnn/tgtw';
-export const SBV_DAILY_INTERBANK_URL = 'https://www.sbv.gov.vn/webcenter/portal/vi/menu/trangchu/ttnn/lslnh';
-export const SBV_MONETARY_STATS_URL = 'https://www.sbv.gov.vn/webcenter/portal/vi/menu/trangchu/tk/tiente';
+export const SBV_CENTRAL_FX_URL = 'https://sbv.gov.vn/vi/ty-gia-trung-tam';
+export const SBV_CENTRAL_FX_PORTAL_URL = 'https://www.sbv.gov.vn/webcenter/portal/vi/menu/trangchu/ttnn/tgtw';
+export const SBV_DAILY_INTERBANK_URL = 'https://sbv.gov.vn/vi/lai-suat-lien-ngan-hang';
+export const SBV_DAILY_INTERBANK_PORTAL_URL = 'https://www.sbv.gov.vn/webcenter/portal/vi/menu/trangchu/ttnn/lslnh';
+export const SBV_MONETARY_STATS_URL = 'https://sbv.gov.vn/vi/thong-ke-tien-te';
+export const SBV_MONETARY_STATS_PORTAL_URL = 'https://www.sbv.gov.vn/webcenter/portal/vi/menu/trangchu/tk/tiente';
+
+/**
+ * Detects whether an SBV response is a WAF / anti-bot rejection challenge.
+ */
+export function isSbvWafBlocked(rawHtmlOrText) {
+  if (typeof rawHtmlOrText !== 'string') return false;
+  return (
+    rawHtmlOrText.includes('Request Rejected') ||
+    rawHtmlOrText.includes('The requested URL was rejected') ||
+    rawHtmlOrText.includes('Your support ID is')
+  );
+}
 
 function toDateKey(day, month, year) {
   const y = Number(year);
@@ -62,10 +77,15 @@ function toMonthKey(month, year) {
  * Strict rules:
  * - Rejects commercial bank rates, interbank FX, SBV buying rate ("mua vào"), or SBV selling rate ("bán ra").
  * - Extracts exact effective date.
+ * - Detects government WAF access denials without crashing.
  */
 export function parseSbvCentralFx(rawHtmlOrText, sourceUrl = null) {
   if (sourceUrl && !isOfficialUrl(sourceUrl, SBV_HOST)) {
     return { status: 'quarantined', reason: 'UNOFFICIAL_HOST', value: null };
+  }
+
+  if (isSbvWafBlocked(rawHtmlOrText)) {
+    return { status: 'blocked', reason: 'PROVIDER_ACCESS_DENIED', value: null };
   }
 
   const text = textFromHtml(rawHtmlOrText);
@@ -134,6 +154,10 @@ export function parseSbvDailyInterbankOvernight(rawHtmlOrText, sourceUrl = null)
     return { status: 'quarantined', reason: 'UNOFFICIAL_HOST', value: null };
   }
 
+  if (isSbvWafBlocked(rawHtmlOrText)) {
+    return { status: 'blocked', reason: 'PROVIDER_ACCESS_DENIED', value: null };
+  }
+
   const text = textFromHtml(rawHtmlOrText);
   if (!text) {
     return { status: 'quarantined', reason: 'EMPTY_CONTENT', value: null };
@@ -185,6 +209,10 @@ export function parseSbvDailyInterbankOvernight(rawHtmlOrText, sourceUrl = null)
 export function parseSbvCreditGrowth(rawHtmlOrText, targetPeriod = null, sourceUrl = null) {
   if (sourceUrl && !isOfficialUrl(sourceUrl, SBV_HOST)) {
     return { status: 'quarantined', reason: 'UNOFFICIAL_HOST', value: null };
+  }
+
+  if (isSbvWafBlocked(rawHtmlOrText)) {
+    return { status: 'blocked', reason: 'PROVIDER_ACCESS_DENIED', value: null };
   }
 
   const text = textFromHtml(rawHtmlOrText);
@@ -265,6 +293,10 @@ export function parseSbvCreditGrowth(rawHtmlOrText, targetPeriod = null, sourceU
 export function parseSbvM2Level(rawHtmlOrText, sourceUrl = null) {
   if (sourceUrl && !isOfficialUrl(sourceUrl, SBV_HOST)) {
     return { status: 'quarantined', reason: 'UNOFFICIAL_HOST', value: null };
+  }
+
+  if (isSbvWafBlocked(rawHtmlOrText)) {
+    return { status: 'blocked', reason: 'PROVIDER_ACCESS_DENIED', value: null };
   }
 
   const text = textFromHtml(rawHtmlOrText);

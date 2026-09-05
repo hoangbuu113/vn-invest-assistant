@@ -45,6 +45,14 @@ export const AUTHORITY_LEVELS = Object.freeze({
   MARKET_REFERENCE: 'MARKET_REFERENCE'        // e.g. Yahoo Finance reference quote
 });
 
+export const FACT_LIFECYCLE_STATUS = Object.freeze({
+  IMPLEMENTED_SCHEMA: 'IMPLEMENTED_SCHEMA',
+  IMPLEMENTED_PARSER: 'IMPLEMENTED_PARSER',
+  LIVE_AUTOMATED: 'LIVE_AUTOMATED',
+  LIVE_MANUAL: 'LIVE_MANUAL',
+  BLOCKED_SOURCE: 'BLOCKED_SOURCE'
+});
+
 export const UNIT_TYPES = Object.freeze({
   INDEX_POINT: 'index_point',
   PERCENT: 'percent',

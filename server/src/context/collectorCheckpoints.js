@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Collector Checkpoints — Durable due-gating and checkpoint management for official context sources.
  *
  * Invariant:
@@ -20,11 +20,32 @@ export const SOURCE_KEYS = Object.freeze({
   SBV_MONTHLY_MONETARY: 'sbv_monthly_monetary'
 });
 
+export const CHECKPOINT_STATUS = Object.freeze({
+  SUCCESS: 'success',
+  FAILED: 'failed',
+  QUARANTINED: 'quarantined',
+  BLOCKED_ACCESS_DENIED: 'blocked/access_denied'
+});
+
 /**
- * Calculates deterministic nextDueAt for each source key based on official release cadences.
+ * Calculates deterministic nextDueAt for each source key based on official release cadences,
+ * observed release metadata, and backoff states.
  */
-export function calculateNextDueAt(sourceKey, now = new Date()) {
+export function calculateNextDueAt(sourceKey, now = new Date(), { nextReleaseAt = null, status = 'success' } = {}) {
   const nowMs = now.getTime();
+
+  // 1. If provider was blocked or access denied by WAF, apply conservative long backoff (>= 24h)
+  if (status === CHECKPOINT_STATUS.BLOCKED_ACCESS_DENIED || status === 'blocked/access_denied') {
+    return new Date(nowMs + 24 * 3600 * 1000).toISOString();
+  }
+
+  // 2. If authoritative next release date is known and in the future, schedule next check at that date
+  if (nextReleaseAt) {
+    const nextMs = Date.parse(nextReleaseAt);
+    if (Number.isFinite(nextMs) && nextMs > nowMs) {
+      return new Date(nextMs).toISOString();
+    }
+  }
 
   // Helper to format ICT time
   const ictFormatter = new Intl.DateTimeFormat('en-US', {
@@ -40,7 +61,6 @@ export function calculateNextDueAt(sourceKey, now = new Date()) {
   const partMap = {};
   for (const p of parts) partMap[p.type] = p.value;
 
-  const day = Number(partMap.day);
   const month = Number(partMap.month);
   const hour = Number(partMap.hour);
   const weekday = partMap.weekday; // Mon, Tue, Wed, Thu, Fri, Sat, Sun
@@ -48,17 +68,18 @@ export function calculateNextDueAt(sourceKey, now = new Date()) {
 
   switch (sourceKey) {
     case SOURCE_KEYS.NSO_MONTHLY: {
-      // NSO monthly socioeconomic / CPI report window: 25th - 31st of the month
-      const isInReleaseWindow = day >= 25;
-      const intervalMs = isInReleaseWindow ? 6 * 3600 * 1000 : 24 * 3600 * 1000;
-      return new Date(nowMs + intervalMs).toISOString();
+      // Conservative release-aware strategy:
+      // Astra research established releases vary (e.g. Aug published Sep 3, next Oct 3).
+      // Daily low-cost cadence (24h) avoids 15m polling and hardcoded window assumptions.
+      return new Date(nowMs + 24 * 3600 * 1000).toISOString();
     }
 
     case SOURCE_KEYS.NSO_QUARTERLY: {
-      // Quarterly GDP window: end of Mar, Jun, Sep, Dec (months 3, 6, 9, 12, days 25-31)
+      // Conservative quarterly cadence:
+      // Daily check during quarter-end/reporting months (3, 6, 9, 12), weekly otherwise.
+      // Avoids guessing fixed day 25-31 windows.
       const isQuarterEndMonth = month === 3 || month === 6 || month === 9 || month === 12;
-      const isInWindow = isQuarterEndMonth && day >= 25;
-      const intervalMs = isInWindow ? 12 * 3600 * 1000 : 7 * 24 * 3600 * 1000;
+      const intervalMs = isQuarterEndMonth ? 24 * 3600 * 1000 : 7 * 24 * 3600 * 1000;
       return new Date(nowMs + intervalMs).toISOString();
     }
 
@@ -139,7 +160,10 @@ export async function recordCheckpoint(sourceKey, {
   client = privateSupabase,
   now = new Date()
 } = {}) {
-  const resolvedNextDue = nextDueAt || calculateNextDueAt(sourceKey, now);
+  const resolvedNextDue = nextDueAt || calculateNextDueAt(sourceKey, now, {
+    nextReleaseAt: metadata?.nextReleaseAt,
+    status
+  });
   const checkpoint = {
     source_key: sourceKey,
     last_attempted_at: now.toISOString(),

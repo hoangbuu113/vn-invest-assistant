@@ -35,8 +35,47 @@ import {
 export const NSO_HOST = 'nso.gov.vn';
 export const NSO_SOCIOECONOMIC_INDEX_URL = 'https://www.nso.gov.vn/tinh-hinh-kinh-te-xa-hoi/';
 
+export const VIETNAMESE_MONTH_WORDS = Object.freeze({
+  'một': 1,
+  'mot': 1,
+  'hai': 2,
+  'ba': 3,
+  'bốn': 4,
+  'bon': 4,
+  'tư': 4,
+  'tu': 4,
+  'năm': 5,
+  'nam': 5,
+  'sáu': 6,
+  'sau': 6,
+  'bảy': 7,
+  'bay': 7,
+  'tám': 8,
+  'tam': 8,
+  'chín': 9,
+  'chin': 9,
+  'mười': 10,
+  'muoi': 10,
+  'mười một': 11,
+  'muoi mot': 11,
+  'mười hai': 12,
+  'muoi hai': 12
+});
+
+export const MONTH_TOKEN_PATTERN = '(?:mười\\s+một|mười\\s+hai|mười|một|hai|ba|bốn|tư|năm|sáu|bảy|tám|chín|\\d{1,2})';
+
+export function parseVietnameseMonth(raw) {
+  if (!raw) return null;
+  const str = String(raw).trim().toLowerCase();
+  if (/^\d{1,2}$/.test(str)) {
+    const num = Number(str);
+    return num >= 1 && num <= 12 ? num : null;
+  }
+  return VIETNAMESE_MONTH_WORDS[str] || null;
+}
+
 function toMonthKey(month, year) {
-  const m = Number(month);
+  const m = typeof month === 'number' ? month : parseVietnameseMonth(month);
   const y = Number(year);
   if (!Number.isInteger(m) || m < 1 || m > 12 || !Number.isInteger(y) || y < 2000) return null;
   return `${String(y).padStart(4, '0')}-${String(m).padStart(2, '0')}`;
@@ -55,20 +94,39 @@ function toQuarterKey(quarter, year) {
   return `${y}-Q${qNum}`;
 }
 
+function extractDocumentYear(text, fallbackMonthKey = null) {
+  if (fallbackMonthKey && typeof fallbackMonthKey === 'string') {
+    const y = fallbackMonthKey.split('-')[0];
+    if (/^\d{4}$/.test(y)) return y;
+  }
+  if (typeof text === 'string') {
+    const m = /năm\s*(\d{4})/iu.exec(text);
+    if (m) return m[1];
+  }
+  return null;
+}
+
 /**
  * Parses headline monthly CPI YoY from text.
  * Requires explicit monthly reference, not cumulative/YTD average.
+ * Supports digits and Vietnamese month words (e.g. tháng Tám -> 08).
  */
 export function parseNsoHeadlineCpi(text, referenceMonth = null) {
   if (typeof text !== 'string') return null;
 
   // Monthly pattern: Chỉ số giá tiêu dùng (CPI) tháng X... tăng/giảm Y% so với cùng kỳ
-  const monthRegex = /Chỉ số giá tiêu dùng\s*(?:\(CPI\))?\s*tháng\s*(\d{1,2})(?:\/(\d{4}))?[^.;\n]{0,250}?(tăng|giảm)\s*(\d+(?:[,.]\d+)?)\s*%\s*(?:so với cùng kỳ|so với tháng \d+ năm trước)/iu;
+  const monthRegex = new RegExp(
+    'Chỉ số giá tiêu dùng\\s*(?:\\(CPI\\))?\\s*tháng\\s*(' +
+    MONTH_TOKEN_PATTERN +
+    ')(?:\\/(\\d{4}))?[^.\\n]{0,250}?(tăng|giảm)\\s*(\\d+(?:[,.]\\d+)?)\\s*%\\s*(?:so với cùng kỳ|so với tháng \\d+ năm trước)',
+    'iu'
+  );
   const match = monthRegex.exec(text);
   if (match) {
     const val = parseDecimal(match[4]);
     const sign = match[3].toLowerCase() === 'giảm' ? -1 : 1;
-    const ref = match[2] ? toMonthKey(match[1], match[2]) : (referenceMonth || null);
+    const docYear = match[2] || extractDocumentYear(text, referenceMonth);
+    const ref = toMonthKey(match[1], docYear) || (referenceMonth || null);
     if (val !== null && val >= 0) {
       return {
         value: sign * val,
@@ -79,12 +137,18 @@ export function parseNsoHeadlineCpi(text, referenceMonth = null) {
   }
 
   // Secondary single-month pattern
-  const singleMonthRegex = /CPI tháng\s*(\d{1,2})(?:\/(\d{4}))?[^.;\n]{0,150}?(tăng|giảm)\s*(\d+(?:[,.]\d+)?)\s*%\s*so với cùng kỳ/iu;
+  const singleMonthRegex = new RegExp(
+    'CPI tháng\\s*(' +
+    MONTH_TOKEN_PATTERN +
+    ')(?:\\/(\\d{4}))?[^.\\n]{0,150}?(tăng|giảm)\\s*(\\d+(?:[,.]\\d+)?)\\s*%\\s*so với cùng kỳ',
+    'iu'
+  );
   const match2 = singleMonthRegex.exec(text);
   if (match2) {
     const val = parseDecimal(match2[4]);
     const sign = match2[3].toLowerCase() === 'giảm' ? -1 : 1;
-    const ref = match2[2] ? toMonthKey(match2[1], match2[2]) : (referenceMonth || null);
+    const docYear = match2[2] || extractDocumentYear(text, referenceMonth);
+    const ref = toMonthKey(match2[1], docYear) || (referenceMonth || null);
     if (val !== null && val >= 0) {
       return {
         value: sign * val,
@@ -105,12 +169,18 @@ export function parseNsoCoreCpi(text, referenceMonth = null) {
   if (typeof text !== 'string') return null;
 
   // Must match single-month core inflation: "Lạm phát cơ bản tháng MM... tăng X% so với cùng kỳ"
-  const monthRegex = /Lạm phát cơ bản\s*tháng\s*(\d{1,2})(?:\/(\d{4}))?[^.;\n]{0,200}?(tăng|giảm)\s*(\d+(?:[,.]\d+)?)\s*%\s*so với cùng kỳ/iu;
+  const monthRegex = new RegExp(
+    'Lạm phát cơ bản\\s*tháng\\s*(' +
+    MONTH_TOKEN_PATTERN +
+    ')(?:\\/(\\d{4}))?[^.\\n]{0,200}?(tăng|giảm)\\s*(\\d+(?:[,.]\\d+)?)\\s*%\\s*so với cùng kỳ',
+    'iu'
+  );
   const match = monthRegex.exec(text);
   if (match) {
     const val = parseDecimal(match[4]);
     const sign = match[3].toLowerCase() === 'giảm' ? -1 : 1;
-    const ref = match[2] ? toMonthKey(match[1], match[2]) : (referenceMonth || null);
+    const docYear = match[2] || extractDocumentYear(text, referenceMonth);
+    const ref = toMonthKey(match[1], docYear) || (referenceMonth || null);
     if (val !== null && val >= 0) {
       return {
         value: sign * val,
@@ -160,12 +230,18 @@ export function parseNsoMonthlyIip(text, referenceMonth = null) {
   if (typeof text !== 'string') return null;
 
   // Match: Chỉ số sản xuất toàn ngành công nghiệp (IIP) tháng MM... tăng/giảm X% so với cùng kỳ
-  const iipRegex = /(?:Chỉ số sản xuất công nghiệp|Chỉ số sản xuất toàn ngành công nghiệp|IIP)(?:\s*\(IIP\))?\s*tháng\s*(\d{1,2})(?:\/(\d{4}))?[^.;\n]{0,250}?(tăng|giảm)\s*(\d+(?:[,.]\d+)?)\s*%\s*so với cùng kỳ/iu;
+  const iipRegex = new RegExp(
+    '(?:Chỉ số sản xuất công nghiệp|Chỉ số sản xuất toàn ngành công nghiệp|IIP)(?:\\s*\\(IIP\\))?\\s*tháng\\s*(' +
+    MONTH_TOKEN_PATTERN +
+    ')(?:\\/(\\d{4}))?[^.\\n]{0,250}?(tăng|giảm)\\s*(\\d+(?:[,.]\\d+)?)\\s*%\\s*so với cùng kỳ',
+    'iu'
+  );
   const match = iipRegex.exec(text);
   if (match) {
     const val = parseDecimal(match[4]);
     const sign = match[3].toLowerCase() === 'giảm' ? -1 : 1;
-    const ref = match[2] ? toMonthKey(match[1], match[2]) : (referenceMonth || null);
+    const docYear = match[2] || extractDocumentYear(text, referenceMonth);
+    const ref = toMonthKey(match[1], docYear) || (referenceMonth || null);
     if (val !== null && val >= 0) {
       return {
         value: sign * val,
@@ -186,7 +262,12 @@ export function parseNsoMonthlyRetail(text, referenceMonth = null) {
   if (typeof text !== 'string') return null;
 
   // Pattern: "Tổng mức bán lẻ hàng hóa và doanh thu dịch vụ tiêu dùng tháng MM... tăng X% so với cùng kỳ"
-  const retailRegex = /(?:Tổng mức bán lẻ hàng hóa và doanh thu dịch vụ tiêu dùng|Doanh thu bán lẻ|Bán lẻ hàng hóa)\s*tháng\s*(\d{1,2})(?:\/(\d{4}))?[^.;\n]{0,300}?(tăng|giảm)\s*(\d+(?:[,.]\d+)?)\s*%\s*so với cùng kỳ/iu;
+  const retailRegex = new RegExp(
+    '(?:Tổng mức bán lẻ hàng hóa và doanh thu dịch vụ tiêu dùng|Doanh thu bán lẻ|Bán lẻ hàng hóa)\\s*tháng\\s*(' +
+    MONTH_TOKEN_PATTERN +
+    ')(?:\\/(\\d{4}))?[^.\\n]{0,300}?(tăng|giảm)\\s*(\\d+(?:[,.]\\d+)?)\\s*%\\s*so với cùng kỳ',
+    'iu'
+  );
   const match = retailRegex.exec(text);
   if (match) {
     const matchedSnippet = match[0];
@@ -196,7 +277,8 @@ export function parseNsoMonthlyRetail(text, referenceMonth = null) {
     }
     const val = parseDecimal(match[4]);
     const sign = match[3].toLowerCase() === 'giảm' ? -1 : 1;
-    const ref = match[2] ? toMonthKey(match[1], match[2]) : (referenceMonth || null);
+    const docYear = match[2] || extractDocumentYear(text, referenceMonth);
+    const ref = toMonthKey(match[1], docYear) || (referenceMonth || null);
     if (val !== null && val >= 0) {
       return {
         value: sign * val,
@@ -218,7 +300,7 @@ export function parseNsoDisbursedFdi(text, referencePeriod = null) {
   if (typeof text !== 'string') return null;
 
   // Pattern: "Vốn đầu tư trực tiếp nước ngoài thực hiện... ước đạt X tỷ USD"
-  const fdiRegex = /(?:Vốn đầu tư trực tiếp nước ngoài thực hiện|Vốn FDI thực hiện|FDI thực hiện)[^.;\n]{0,250}?(?:ước đạt|đạt)\s*(\d+(?:[,.]\d+)?)\s*(?:tỷ USD|tỷ đô la Mỹ)/iu;
+  const fdiRegex = /(?:Vốn đầu tư trực tiếp nước ngoài thực hiện|Vốn FDI thực hiện|FDI thực hiện)[^.\n]{0,250}?(?:ước đạt|đạt)\s*(\d+(?:[,.]\d+)?)\s*(?:tỷ USD|tỷ đô la Mỹ)/iu;
   const match = fdiRegex.exec(text);
   if (match) {
     const val = parseDecimal(match[1]);
@@ -259,14 +341,21 @@ export function parseNsoSocioeconomicRelease(html, releaseUrl = null) {
   }
 
   // Extract reference period and publication date from official document
-  const periodMatch = /Tình hình kinh tế\s*-\s*xã hội\s*(?:tháng\s*(\d{1,2})(?:\s*và\s*\d+\s*tháng)?|quý\s*(I{1,3}|IV|[1-4]))\s*năm\s*(\d{4})/iu.exec(text)
-    || /tháng\s*(\d{1,2})\s*năm\s*(\d{4})/iu.exec(text);
+  const periodMatch = new RegExp(
+    '(?:Tình hình kinh tế\\s*-\\s*xã hội|Chỉ số giá tiêu dùng|Báo cáo tình hình kinh tế)\\s*(?:tháng\\s*(' +
+    MONTH_TOKEN_PATTERN +
+    ')(?:\\s*và\\s*\\d+\\s*tháng)?|quý\\s*(I{1,3}|IV|[1-4]))\\s*năm\\s*(\\d{4})',
+    'iu'
+  ).exec(text)
+    || new RegExp('tháng\\s*(' + MONTH_TOKEN_PATTERN + ')(?:\\s*và\\s*\\d+\\s*tháng)?\\s*năm\\s*(\\d{4})', 'iu').exec(text);
 
   let referenceMonth = null;
-  if (periodMatch && periodMatch[1] && periodMatch[3]) {
-    referenceMonth = toMonthKey(periodMatch[1], periodMatch[3]);
-  } else if (periodMatch && periodMatch[1] && periodMatch[2]) {
-    referenceMonth = toMonthKey(periodMatch[1], periodMatch[2]);
+  if (periodMatch && periodMatch[1]) {
+    const monthVal = parseVietnameseMonth(periodMatch[1]);
+    const yearVal = periodMatch[3] || periodMatch[2] || extractDocumentYear(text);
+    if (monthVal && yearVal) {
+      referenceMonth = toMonthKey(monthVal, yearVal);
+    }
   }
 
   const pubMatch = /(?:Ngày đăng|Hà Nội,\s*ngày)\s*(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})/iu.exec(text);
@@ -274,6 +363,11 @@ export function parseNsoSocioeconomicRelease(html, releaseUrl = null) {
   if (pubMatch) {
     const [_, d, m, y] = pubMatch;
     publishedAt = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}T00:00:00.000Z`;
+  } else if (releaseUrl) {
+    const urlDateMatch = /\/(\d{4})\/(\d{2})\//.exec(releaseUrl);
+    if (urlDateMatch) {
+      publishedAt = `${urlDateMatch[1]}-${urlDateMatch[2]}-01T00:00:00.000Z`;
+    }
   }
 
   const headlineCpi = parseNsoHeadlineCpi(text, referenceMonth);

@@ -15,15 +15,18 @@ import {
   parseSbvDailyInterbankOvernight,
   parseSbvCreditGrowth,
   parseSbvM2Level,
-  normalizeSbvMonetaryFacts
+  normalizeSbvMonetaryFacts,
+  isSbvWafBlocked
 } from '../src/context/providers/sbvMonetary.js';
 import {
   createMarketObservation,
+  createUnavailableObservation,
   buildObservationId,
   PILLARS,
   UNIT_TYPES,
   OBSERVATION_STATUS,
   OBSERVATION_FRESHNESS,
+  FACT_LIFECYCLE_STATUS,
   normalizeReferencePeriodKey,
   compareObservationVintages
 } from '../src/context/factModel.js';
@@ -37,7 +40,8 @@ import {
   recordCheckpoint,
   calculateNextDueAt,
   clearCheckpoints,
-  SOURCE_KEYS
+  SOURCE_KEYS,
+  CHECKPOINT_STATUS
 } from '../src/context/collectorCheckpoints.js';
 import {
   normalizeMacroObservations,
@@ -497,6 +501,254 @@ describe('V1.3 Improvement 01A — Official Vietnam Macro & Monetary Core', () =
     const serializedEvidence = JSON.stringify(factPacket);
     assert.equal(serializedEvidence.includes('user-secret-1234'), false, 'Private userId must NOT enter evidence');
     assert.equal(serializedEvidence.includes('500000000'), false, 'Private portfolio equity must NOT enter evidence');
+  });
+
+  // 24. NSO scheduler does not assume day 25–31
+  test('24. NSO scheduler does not assume day 25–31', () => {
+    const day05 = new Date('2026-09-05T09:00:00.000Z');
+    const day15 = new Date('2026-09-15T09:00:00.000Z');
+    const day28 = new Date('2026-09-28T09:00:00.000Z');
+
+    const due05 = calculateNextDueAt(SOURCE_KEYS.NSO_MONTHLY, day05);
+    const due15 = calculateNextDueAt(SOURCE_KEYS.NSO_MONTHLY, day15);
+    const due28 = calculateNextDueAt(SOURCE_KEYS.NSO_MONTHLY, day28);
+
+    const diffHours05 = (Date.parse(due05) - day05.getTime()) / (3600 * 1000);
+    const diffHours15 = (Date.parse(due15) - day15.getTime()) / (3600 * 1000);
+    const diffHours28 = (Date.parse(due28) - day28.getTime()) / (3600 * 1000);
+
+    assert.equal(diffHours05, 24, 'Day 5 uses 24h cadence');
+    assert.equal(diffHours15, 24, 'Day 15 uses 24h cadence');
+    assert.equal(diffHours28, 24, 'Day 28 uses 24h cadence (does not assume arbitrary 6h day 25-31 window)');
+  });
+
+  // 25. Release metadata updates nextDueAt
+  test('25. Release metadata updates nextDueAt', async () => {
+    const now = new Date('2026-09-03T09:00:00.000Z');
+    const announcedNext = '2026-10-03T00:00:00.000Z';
+
+    const calculated = calculateNextDueAt(SOURCE_KEYS.NSO_MONTHLY, now, { nextReleaseAt: announcedNext });
+    assert.equal(calculated, announcedNext, 'calculateNextDueAt must honor authoritative nextReleaseAt');
+
+    const { checkpoint } = await recordCheckpoint(SOURCE_KEYS.NSO_MONTHLY, {
+      status: CHECKPOINT_STATUS.SUCCESS,
+      metadata: { nextReleaseAt: announcedNext },
+      client: null,
+      now
+    });
+    assert.equal(checkpoint.next_due_at, announcedNext, 'Durable checkpoint must store nextReleaseAt in next_due_at');
+
+    const isDue = await isSourceDue(SOURCE_KEYS.NSO_MONTHLY, {
+      now: new Date('2026-09-20T00:00:00.000Z'),
+      client: null
+    });
+    assert.equal(isDue, false, 'Source must not be due before nextReleaseAt date');
+  });
+
+  // 26. Inaccessible SBV source enters safe blocked/backoff state
+  test('26. Inaccessible SBV source enters safe blocked/backoff state', async () => {
+    const wafHtml = '<html><head><title>Request Rejected</title></head><body>The requested URL was rejected. Your support ID is: 12345</body></html>';
+    assert.equal(isSbvWafBlocked(wafHtml), true);
+
+    const parsed = parseSbvCentralFx(wafHtml, 'https://sbv.gov.vn/vi/ty-gia-trung-tam');
+    assert.equal(parsed.status, 'blocked');
+    assert.equal(parsed.reason, 'PROVIDER_ACCESS_DENIED');
+
+    const now = new Date('2026-09-05T10:00:00.000Z');
+    await runMarketContextCollector({
+      now,
+      client: null,
+      fetchSbvMoneyMarketFn: async () => ({
+        status: 'unavailable',
+        reason: 'PROVIDER_ACCESS_DENIED'
+      }),
+      forceRefresh: true
+    });
+
+    const isDueImmediately = await isSourceDue(SOURCE_KEYS.SBV_FX_CENTRAL, { now, client: null });
+    assert.equal(isDueImmediately, false, 'Blocked source must back off and not be due immediately');
+  });
+
+  // 27. Blocked source is not repeatedly polled every cron tick
+  test('27. Blocked source is not repeatedly polled every cron tick', async () => {
+    const t0 = new Date('2026-09-05T10:00:00.000Z');
+
+    // Record blocked checkpoint
+    await recordCheckpoint(SOURCE_KEYS.SBV_FX_CENTRAL, {
+      status: CHECKPOINT_STATUS.BLOCKED_ACCESS_DENIED,
+      metadata: { error: 'PROVIDER_ACCESS_DENIED' },
+      client: null,
+      now: t0
+    });
+
+    // Tick 1: 15 minutes later (typical Cloudflare cron tick)
+    const tick15m = new Date('2026-09-05T10:15:00.000Z');
+    const isDue15m = await isSourceDue(SOURCE_KEYS.SBV_FX_CENTRAL, { now: tick15m, client: null });
+    assert.equal(isDue15m, false, 'Blocked source must NOT wake at 15m cron tick');
+
+    // Tick 2: 1 hour later
+    const tick60m = new Date('2026-09-05T11:00:00.000Z');
+    const isDue60m = await isSourceDue(SOURCE_KEYS.SBV_FX_CENTRAL, { now: tick60m, client: null });
+    assert.equal(isDue60m, false, 'Blocked source must NOT wake at 1h mark');
+
+    // Tick 3: 12 hours later
+    const tick12h = new Date('2026-09-05T22:00:00.000Z');
+    const isDue12h = await isSourceDue(SOURCE_KEYS.SBV_FX_CENTRAL, { now: tick12h, client: null });
+    assert.equal(isDue12h, false, 'Blocked source must NOT wake at 12h mark');
+
+    // Tick 4: 25 hours later (after backoff expires)
+    const tick25h = new Date('2026-09-06T11:05:00.000Z');
+    const isDue25h = await isSourceDue(SOURCE_KEYS.SBV_FX_CENTRAL, { now: tick25h, client: null });
+    assert.equal(isDue25h, true, 'Blocked source may only retry after 24h backoff window expires');
+  });
+
+  // 28. Parser-only fact cannot masquerade as live evidence
+  test('28. Parser-only fact cannot masquerade as live evidence', () => {
+    // August 2026 official report text only contained 8-month cumulative core CPI average
+    const augustReleaseText = `
+      Chỉ số giá tiêu dùng (CPI) tháng Tám tăng 0,47% so với tháng trước; tăng 3,57% so với tháng 12/2025 và tăng 4,89% so với cùng kỳ năm trước.
+      Bình quân tám tháng năm 2026, CPI tăng 4,45% so với cùng kỳ năm trước; lạm phát cơ bản tăng 4,24%.
+    `;
+
+    const parsedCore = parseNsoCoreCpi(augustReleaseText);
+    assert.equal(parsedCore, null, 'Cumulative 8M core inflation must not be extracted as monthly core CPI');
+
+    const observations = normalizeNsoMacroFacts({ parsed: { coreCpi: parsedCore } });
+    const coreObs = observations.find((o) => o.factId === 'vn.macro.core_cpi.yoy');
+
+    assert.equal(coreObs.status, OBSERVATION_STATUS.UNAVAILABLE);
+    assert.equal(coreObs.value, null);
+    assert.equal(coreObs.statusReason, 'MONTHLY_CORE_CPI_UNAVAILABLE');
+
+    // Must not be usable as active evidence in strategist fact packet
+    const factPacket = buildMarketStrategistFactPacket({
+      marketObservations: [coreObs],
+      newsArticles: [],
+      portfolio: null,
+      now: new Date()
+    });
+    const serialized = JSON.stringify(factPacket.evidence);
+    assert.equal(serialized.includes('4.24'), false, 'Cumulative core CPI must NOT appear in evidence packet');
+    assert.equal(FACT_LIFECYCLE_STATUS.IMPLEMENTED_PARSER, 'IMPLEMENTED_PARSER');
+  });
+
+  // 29. Unavailable SBV facts do not create unsupported monetary stance
+  test('29. Unavailable SBV facts do not create unsupported monetary stance', () => {
+    const unavailableSbvFacts = [
+      createUnavailableObservation('monetary.sbv_central_usd_vnd', PILLARS.MONETARY, 'Tỷ giá trung tâm SBV', 'PROVIDER_ACCESS_DENIED', {
+        factId: 'vn.monetary.fx.sbv_central.usd_vnd',
+        value: null
+      }),
+      createUnavailableObservation('monetary.vnd_overnight_daily_avg_rate', PILLARS.MONETARY, 'Lãi suất VND qua đêm', 'PROVIDER_ACCESS_DENIED', {
+        factId: 'vn.monetary.interbank.vnd.overnight.daily_avg_rate',
+        value: null
+      }),
+      createUnavailableObservation('monetary.credit_ytd_growth', PILLARS.MONETARY, 'Tăng trưởng tín dụng', 'PROVIDER_ACCESS_DENIED', {
+        factId: 'vn.monetary.credit.outstanding.ytd_growth',
+        value: null
+      }),
+      createUnavailableObservation('monetary.m2_level', PILLARS.MONETARY, 'Cung tiền M2', 'PROVIDER_ACCESS_DENIED', {
+        factId: 'vn.monetary.money_supply.m2.level',
+        value: null
+      })
+    ];
+
+    const signals = deriveMarketSignals({
+      marketObservations: unavailableSbvFacts,
+      newsArticles: [],
+      now: new Date('2026-09-05T10:00:00.000Z')
+    });
+
+    const stanceSignal = signals.find((s) => s.signalType === 'MONETARY_STANCE');
+    assert.equal(stanceSignal, undefined, 'Monetary stance MUST abstain when SBV facts are unavailable');
+
+    // When an observation exists but is stale, stance must remain strictly neutral (non-directional)
+    const staleOvernightObs = createMarketObservation({
+      factId: 'vn.monetary.interbank.vnd.overnight.daily_avg_rate',
+      pillar: PILLARS.MONETARY,
+      label: 'Lãi suất qua đêm',
+      value: 6.5, // tightening value if fresh
+      referenceTime: '2026-07-01',
+      status: 'stale',
+      freshness: 'stale'
+    });
+
+    const staleSignals = deriveMarketSignals({
+      marketObservations: [staleOvernightObs],
+      newsArticles: [],
+      now: new Date('2026-09-05T10:00:00.000Z')
+    });
+
+    const staleStance = staleSignals.find((s) => s.signalType === 'MONETARY_STANCE');
+    assert.notEqual(staleStance, undefined);
+    assert.equal(staleStance.state, 'neutral', 'Stale monetary fact must produce non-directional neutral stance, not tightening');
+  });
+
+  // 30. Live NSO facts retain exact official source URL
+  test('30. Live NSO facts retain exact official source URL', () => {
+    const officialUrl = 'https://www.nso.gov.vn/tin-tuc-thong-ke/2026/09/chi-so-gia-tieu-dung-cpi-chi-so-gia-vang-va-chi-so-gia-do-la-my-thang-tam-va-8-thang-nam-2026/';
+    const sampleHtml = `
+      <html>
+        <head><title>Chỉ số giá tiêu dùng (CPI) tháng Tám và 8 tháng năm 2026</title></head>
+        <body>
+          <p>Chỉ số giá tiêu dùng (CPI) tháng Tám tăng 0,47% so với tháng trước; tăng 3,57% so với tháng 12/2025 và tăng 4,89% so với cùng kỳ năm trước. Bình quân tám tháng năm 2026, CPI tăng 4,45% so với cùng kỳ năm trước; lạm phát cơ bản tăng 4,24%.</p>
+        </body>
+      </html>
+    `;
+
+    const parsedRelease = parseNsoSocioeconomicRelease(sampleHtml, officialUrl);
+    assert.equal(parsedRelease.status, 'available');
+    assert.equal(parsedRelease.releaseUrl, officialUrl);
+    assert.equal(parsedRelease.referenceMonth, '2026-08');
+    assert.notEqual(parsedRelease.parsed.headlineCpi, null);
+    assert.equal(parsedRelease.parsed.headlineCpi.value, 4.89);
+
+    const observations = normalizeNsoMacroFacts(parsedRelease);
+    const cpiObs = observations.find((o) => o.factId === 'vn.macro.cpi.yoy');
+
+    assert.notEqual(cpiObs, undefined);
+    assert.equal(cpiObs.value, 4.89);
+    assert.equal(cpiObs.referenceTime, '2026-08');
+    assert.equal(cpiObs.provenance.releaseUrl, officialUrl, 'Provenance must retain the exact live official release URL');
+  });
+
+  // 31. Source access failure preserves LKG without changing evidence timestamp
+  test('31. Source access failure preserves LKG without changing evidence timestamp', async () => {
+    const historicalObs = createMarketObservation({
+      factId: 'vn.monetary.fx.sbv_central.usd_vnd',
+      pillar: PILLARS.MONETARY,
+      label: 'Tỷ giá trung tâm',
+      value: 24250,
+      unit: 'VND/USD',
+      unitType: UNIT_TYPES.CURRENCY_RATIO,
+      referenceTime: '2026-09-04',
+      publishedAt: '2026-09-04T02:00:00.000Z',
+      observedAt: '2026-09-04T02:00:00.000Z',
+      fetchedAt: '2026-09-04T03:00:00.000Z'
+    });
+    await persistMarketObservations([historicalObs], null);
+
+    const failureTime = new Date('2026-09-05T12:00:00.000Z');
+    await runMarketContextCollector({
+      now: failureTime,
+      client: null,
+      fetchSbvMoneyMarketFn: async () => {
+        const err = new Error('OFFICIAL_SOURCE_UNAVAILABLE');
+        err.code = 'PROVIDER_ACCESS_DENIED';
+        throw err;
+      },
+      forceRefresh: true
+    });
+
+    const persisted = await fetchLatestPersistedObservations(null);
+    const lkgFx = persisted.find((o) => o.factId === 'vn.monetary.fx.sbv_central.usd_vnd');
+
+    assert.notEqual(lkgFx, undefined, 'LKG must be preserved');
+    assert.equal(lkgFx.value, 24250);
+    assert.equal(lkgFx.referenceTime, '2026-09-04', 'Reference time must remain unchanged');
+    assert.equal(lkgFx.publishedAt, '2026-09-04T02:00:00.000Z', 'Published timestamp must remain unchanged');
+    assert.equal(lkgFx.observedAt, '2026-09-04T02:00:00.000Z', 'Observed timestamp must remain unchanged');
+    assert.notEqual(lkgFx.publishedAt, failureTime.toISOString(), 'Failure time must NEVER overwrite historical evidence timestamp');
   });
 
 });
