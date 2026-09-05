@@ -6,19 +6,27 @@ import {
   globalMarketStrategistRuntime,
   MarketStrategistRuntime
 } from './ai/marketStrategistEngine.js';
+import { evaluateAndApplyStrategyStability } from './ai/strategyStabilityService.js';
+import {
+  getCurrentPublishedStrategy,
+  getLatestStrategyAssessment
+} from './ai/strategyStabilityRepository.js';
 
 export {
   buildMarketStrategistFactPacket,
   generateMarketStrategist,
   globalMarketStrategistRuntime,
-  MarketStrategistRuntime
+  MarketStrategistRuntime,
+  evaluateAndApplyStrategyStability,
+  getCurrentPublishedStrategy,
+  getLatestStrategyAssessment
 };
 
 /**
- * Top-level facade for AI Market Strategist.
+ * Top-level facade for AI Market Strategist with Strategy Stability (Two Clocks).
  * Gathers validated public market observations from context fabric,
  * normalized news articles from news reader, builds closed fact packet,
- * and synthesizes the strategist output with safety guards.
+ * evaluates pre-AI stability gate, and synthesizes or reuses published strategy.
  *
  * GUARANTEE: Operates strictly on public context and news; ZERO user/portfolio data is consumed.
  */
@@ -34,7 +42,8 @@ export async function getMarketStrategist({
   generateLlmFn = null,
   fetchFn = globalThis.fetch,
   aiEnabled = process.env.AI_BRIEF_ENABLED !== 'false',
-  allowLlm = true
+  allowLlm = true,
+  client = undefined
 } = {}) {
   // 1. Fetch validated market context facts from the fabric (L1 cache / persistence only)
   let marketObservations = [];
@@ -65,10 +74,11 @@ export async function getMarketStrategist({
     now
   });
 
-  // 4. Generate structured strategist brief
-  return generateMarketStrategist({
+  // 4. Evaluate Strategy Stability lifecycle
+  return evaluateAndApplyStrategyStability({
     factPacket,
     now,
+    allowLlm,
     geminiApiKey,
     geminiModel,
     openAiApiKey,
@@ -77,6 +87,6 @@ export async function getMarketStrategist({
     generateLlmFn,
     fetchFn,
     aiEnabled,
-    allowLlm
+    client
   });
 }
