@@ -774,7 +774,7 @@ export async function generateMarketStrategist({
   // 1. Check runtime cache
   if (runtime) {
     const cached = runtime.get(fingerprint, now);
-    if (cached) {
+    if (cached && !(allowLlm && cached.generationMode === 'deterministic_fallback')) {
       return {
         ...cached,
         generationMode: 'cache',
