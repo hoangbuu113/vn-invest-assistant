@@ -43,6 +43,11 @@ const VERSION_SOURCE_PUBLICATION_FIELDS = Object.freeze([
   'source_updated_at'
 ]);
 
+const EXPLICIT_SOURCE_AVAILABILITY_FIELDS = Object.freeze([
+  'sourceAvailableAt',
+  'source_available_at'
+]);
+
 const GENERAL_SOURCE_PUBLICATION_FIELDS = Object.freeze([
   'publishedAt',
   'releasedAt',
@@ -187,6 +192,7 @@ export function resolveEvidenceAvailabilityTime(evidenceItem, {
   let parsedSource = null;
   let sourceField = null;
   let hasInvalidSourceTimestamp = false;
+  let hasExplicitSourceAvailabilityCandidate = false;
 
   // Check version-specific source publication fields first
   for (const field of VERSION_SOURCE_PUBLICATION_FIELDS) {
@@ -202,9 +208,30 @@ export function resolveEvidenceAvailabilityTime(evidenceItem, {
     }
   }
 
-  // Fall back to general source publication fields
-  let articlePublishedAt = null;
+  // Prefer an explicit canonical source-availability timestamp over the
+  // publication timestamp. This lets trusted normalized evidence (including
+  // VN equity vintages) preserve a later source-availability boundary without
+  // trusting its stored/derived systemKnowableAt value.
   if (!parsedSource) {
+    for (const field of EXPLICIT_SOURCE_AVAILABILITY_FIELDS) {
+      if (field in evidenceItem && evidenceItem[field] !== undefined && evidenceItem[field] !== null) {
+        hasExplicitSourceAvailabilityCandidate = true;
+        const parsed = parseTimestampSafely(evidenceItem[field]);
+        if (parsed.valid) {
+          parsedSource = parsed;
+          sourceField = field;
+          break;
+        } else {
+          hasInvalidSourceTimestamp = true;
+        }
+      }
+    }
+  }
+
+  // Fall back to general source publication fields only when no explicit
+  // source-availability timestamp was resolved.
+  let articlePublishedAt = null;
+  if (!parsedSource && !hasExplicitSourceAvailabilityCandidate) {
     for (const field of GENERAL_SOURCE_PUBLICATION_FIELDS) {
       if (field in evidenceItem && evidenceItem[field] !== undefined && evidenceItem[field] !== null) {
         const parsed = parseTimestampSafely(evidenceItem[field]);
@@ -219,7 +246,8 @@ export function resolveEvidenceAvailabilityTime(evidenceItem, {
       }
     }
   } else {
-    // If version-specific source was found, also check if original article publication is available
+    // Preserve the original publication timestamp separately when a more
+    // authoritative version/source-availability timestamp was selected.
     for (const field of GENERAL_SOURCE_PUBLICATION_FIELDS) {
       if (field in evidenceItem && evidenceItem[field] !== undefined && evidenceItem[field] !== null) {
         const parsed = parseTimestampSafely(evidenceItem[field]);

@@ -277,6 +277,84 @@ test('5A. 01D replay excludes an equity vintage before firstSeenAt and includes 
   assert.equal(after.observations[0].value, 123456.75);
 });
 
+test('5B. 01D replay uses later sourceAvailableAt when it follows firstSeenAt', () => {
+  const item = evidence({
+    sourceAvailableAt: '2026-09-04T10:00:00.000Z',
+    fetchedAt: '2026-09-04T09:00:00.000Z',
+    firstSeenAt: '2026-09-04T09:00:00.000Z'
+  });
+  const replayObservation = toReplayCompatibleEquityObservation(item);
+  const availability = resolveEvidenceAvailabilityTime(replayObservation);
+  assert.equal(item.systemKnowableAt, '2026-09-04T10:00:00.000Z');
+  assert.equal(availability.sourceField, 'sourceAvailableAt');
+  assert.equal(availability.systemField, 'firstSeenAt');
+  assert.equal(availability.availabilityTime, '2026-09-04T10:00:00.000Z');
+
+  const beforeSourceAvailability = buildHistoricalEvidencePacket({
+    asOf: '2026-09-04T09:59:59.999Z',
+    observations: [replayObservation],
+    includeDerived: false
+  });
+  const atSourceAvailability = buildHistoricalEvidencePacket({
+    asOf: '2026-09-04T10:00:00.000Z',
+    observations: [replayObservation],
+    includeDerived: false
+  });
+  assert.equal(beforeSourceAvailability.observations.length, 0);
+  assert.equal(atSourceAvailability.observations.length, 1);
+});
+
+test('5C. 01D replay uses later firstSeenAt when it follows sourceAvailableAt', () => {
+  const replayObservation = toReplayCompatibleEquityObservation(evidence({
+    sourceAvailableAt: '2026-09-04T09:00:00.000Z',
+    fetchedAt: '2026-09-04T10:00:00.000Z',
+    firstSeenAt: '2026-09-04T10:00:00.000Z'
+  }));
+  const availability = resolveEvidenceAvailabilityTime(replayObservation);
+  assert.equal(availability.availabilityTime, '2026-09-04T10:00:00.000Z');
+});
+
+test('5D. stored or caller-supplied systemKnowableAt is never replay authority', () => {
+  const canonical = toReplayCompatibleEquityObservation(evidence({
+    sourceAvailableAt: '2026-09-04T10:00:00.000Z',
+    fetchedAt: '2026-09-04T09:00:00.000Z',
+    firstSeenAt: '2026-09-04T09:00:00.000Z'
+  }));
+  const tampered = {
+    ...canonical,
+    systemKnowableAt: '2026-09-04T07:00:00.000Z',
+    assumeInstantIngestion: true
+  };
+  const availability = resolveEvidenceAvailabilityTime(tampered);
+  assert.equal(availability.availabilityTime, '2026-09-04T10:00:00.000Z');
+
+  const packet = buildHistoricalEvidencePacket({
+    asOf: '2026-09-04T09:30:00.000Z',
+    observations: [tampered],
+    includeDerived: false
+  });
+  assert.equal(packet.observations.length, 0);
+});
+
+test('5E. earlier publication timestamp cannot bypass trusted equity availability', () => {
+  const replayObservation = toReplayCompatibleEquityObservation(evidence({
+    publishedAt: '2026-09-04T08:00:00.000Z',
+    sourceAvailableAt: '2026-09-04T10:00:00.000Z',
+    fetchedAt: '2026-09-04T09:00:00.000Z',
+    firstSeenAt: '2026-09-04T09:00:00.000Z'
+  }));
+  const availability = resolveEvidenceAvailabilityTime(replayObservation);
+  assert.equal(availability.articlePublishedAt, '2026-09-04T08:00:00.000Z');
+  assert.equal(availability.availabilityTime, '2026-09-04T10:00:00.000Z');
+
+  const packet = buildHistoricalEvidencePacket({
+    asOf: '2026-09-04T09:30:00.000Z',
+    observations: [replayObservation],
+    includeDerived: false
+  });
+  assert.equal(packet.observations.length, 0);
+});
+
 test('6. provider failure retains last-known-good evidence and records a failed refresh', async () => {
   clearEquityEvidenceMemory();
   clearDataHealthMemoryStore();
