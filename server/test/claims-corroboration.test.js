@@ -1132,3 +1132,115 @@ test('42. Duplicate links are deduplicated in memory store on second persist cal
   const dedupLinks = links.filter(l => l.evidenceId === 'ev_dedup_42');
   assert.equal(dedupLinks.length, 1, 'Same evidence link must not be duplicated in memory store');
 });
+
+test('43. MARKET_DIRECT observation maps to valid MARKET_REFERENCE claim', () => {
+  const obs = {
+    factId: 'vn.market.vnindex.close',
+    observationId: 'vn.market.vnindex.close:2026-09-04',
+    pillar: 'market',
+    value: 1853.08,
+    unit: 'điểm',
+    referenceTime: '2026-09-04',
+    authorityLevel: 'MARKET_DIRECT',
+    methodologyVersion: 'v1.3'
+  };
+
+  const extracted = extractClaimsFromObservation(obs);
+  assert.equal(extracted.length, 1);
+  assert.equal(extracted[0].claim.authorityLevel, CLAIM_AUTHORITY_LEVELS.MARKET_REFERENCE, 'MARKET_DIRECT must map to MARKET_REFERENCE');
+  assert.equal(extracted[0].claim.subject, 'vn.market.vnindex.close');
+  assert.equal(extracted[0].claim.numericValue, 1853.08);
+});
+
+test('44. Standard observation authority levels (PRIMARY_OFFICIAL, REGULATORY_OFFICIAL, MARKET_REFERENCE) remain unchanged', () => {
+  for (const auth of [CLAIM_AUTHORITY_LEVELS.PRIMARY_OFFICIAL, CLAIM_AUTHORITY_LEVELS.REGULATORY_OFFICIAL, CLAIM_AUTHORITY_LEVELS.MARKET_REFERENCE]) {
+    const obs = {
+      factId: 'vn.macro.indicator',
+      observationId: `obs_${auth}`,
+      pillar: 'macro',
+      value: 5.5,
+      unit: '%',
+      referenceTime: '2026-08',
+      authorityLevel: auth,
+      methodologyVersion: 'v1.3'
+    };
+    const extracted = extractClaimsFromObservation(obs);
+    assert.equal(extracted[0].claim.authorityLevel, auth, `${auth} must remain unchanged`);
+  }
+});
+
+test('45. Unknown unsupported authority is rejected and NOT silently upgraded', () => {
+  const obs = {
+    factId: 'vn.market.unknown',
+    observationId: 'obs_unknown_auth',
+    pillar: 'market',
+    value: 100,
+    unit: 'points',
+    referenceTime: '2026-09-04',
+    authorityLevel: 'BOGUS_UNSUPPORTED_AUTHORITY',
+    methodologyVersion: 'v1.3'
+  };
+
+  assert.throws(() => {
+    extractClaimsFromObservation(obs);
+  }, /INVALID_AUTHORITY_LEVEL: "BOGUS_UNSUPPORTED_AUTHORITY"/, 'Unknown authority must fail closed and never silently map to MARKET_REFERENCE');
+
+  assert.throws(() => {
+    createMarketClaim({
+      claimType: CLAIM_TYPES.MARKET_EVENT,
+      subject: 'test',
+      numericValue: 100,
+      authorityLevel: 'FABRICATED_LEVEL'
+    });
+  }, /INVALID_AUTHORITY_LEVEL: "FABRICATED_LEVEL"/, 'createMarketClaim must reject fabricated authority');
+});
+
+test('46. buildMarketStrategistFactPacket succeeds with real-shaped MARKET_DIRECT VN-Index/HNX observations', () => {
+  const marketObservations = [
+    {
+      id: 'vn.market.vnindex.close',
+      factId: 'vn.market.vnindex.close',
+      observationId: 'vn.market.vnindex.close:2026-09-04:pub_2026-09-04T000000000Z',
+      pillar: 'market',
+      label: 'VN-Index',
+      metric: 'Chỉ số VN-Index (đóng cửa phiên)',
+      value: 1853.08,
+      unit: 'điểm',
+      referenceTime: '2026-09-04',
+      observedAt: '2026-09-04T00:00:00.000Z',
+      publishedAt: '2026-09-04T00:00:00.000Z',
+      source: 'VNDIRECT',
+      authorityLevel: 'MARKET_DIRECT',
+      methodologyVersion: 'v1.2'
+    },
+    {
+      id: 'vn.market.hnx.close',
+      factId: 'vn.market.hnx.close',
+      observationId: 'vn.market.hnx.close:2026-09-04:pub_2026-09-04T000000000Z',
+      pillar: 'market',
+      label: 'HNX-Index',
+      metric: 'Chỉ số HNX-Index (đóng cửa phiên)',
+      value: 282.53,
+      unit: 'điểm',
+      referenceTime: '2026-09-04',
+      observedAt: '2026-09-04T00:00:00.000Z',
+      publishedAt: '2026-09-04T00:00:00.000Z',
+      source: 'VNDIRECT',
+      authorityLevel: 'MARKET_DIRECT',
+      methodologyVersion: 'v1.2'
+    }
+  ];
+
+  const packet = buildMarketStrategistFactPacket({
+    marketObservations,
+    newsArticles: [],
+    now: new Date('2026-09-06T09:00:00.000Z')
+  });
+
+  assert.ok(packet, 'Fact packet must build successfully');
+  assert.equal(packet.evidence.length, 2, 'Must include both observations in evidence');
+  assert.equal(packet.claims.length, 2, 'Must extract 2 claims from observations');
+  for (const claim of packet.claims) {
+    assert.equal(claim.authorityLevel, CLAIM_AUTHORITY_LEVELS.MARKET_REFERENCE, 'All extracted market claims must have valid authorityLevel');
+  }
+});

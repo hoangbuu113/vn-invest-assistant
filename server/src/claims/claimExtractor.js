@@ -2,7 +2,8 @@ import {
   CLAIM_TYPES,
   CLAIM_AUTHORITY_LEVELS,
   CLAIM_STATUS,
-  createMarketClaim
+  createMarketClaim,
+  resolveClaimAuthorityFromObservationAuthority
 } from './claimModel.js';
 import {
   SOURCE_FAMILIES,
@@ -230,7 +231,7 @@ export function extractClaimsFromObservation(obs) {
     scope: 'market_quote',
     methodology: obs.methodologyVersion || 'v1.3',
     revisionMarker,
-    authorityLevel: obs.authorityLevel || CLAIM_AUTHORITY_LEVELS.MARKET_REFERENCE,
+    authorityLevel: resolveClaimAuthorityFromObservationAuthority(obs.authorityLevel) || obs.authorityLevel || CLAIM_AUTHORITY_LEVELS.MARKET_REFERENCE,
     supportStatus: CLAIM_STATUS.SUPPORTED,
     publishedAt
   });

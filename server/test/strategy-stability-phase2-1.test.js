@@ -1079,4 +1079,80 @@ describe('V1.3 Strategy Stability — Phase 2.1 Production Integrity Suite (32 S
     assert.ok(!gateSrc.includes('MATERIALITY_THRESHOLD'), 'No materiality score threshold');
     assert.ok(!gateSrc.includes('REGIME_SCORE'), 'No regime numeric score');
   });
+
+  test('33. strategyVersionToRow: shockOverride undefined omits shock_override property', () => {
+    const version = createStrategyVersion({
+      strategyId: 'strat_test_undef',
+      evidenceFingerprint: 'fp_1',
+      decisionFingerprint: 'dfp_1',
+      confidence: 'HIGH'
+    });
+    const row = strategyVersionToRow(version);
+    assert.equal(Object.prototype.hasOwnProperty.call(row, 'shock_override'), false, 'shock_override must be omitted when undefined/null');
+    assert.equal(JSON.stringify(row).includes('shock_override'), false, 'JSON serialized row must not contain shock_override key');
+  });
+
+  test('34. strategyVersionToRow: shockOverride null omits shock_override property', () => {
+    const version = createStrategyVersion({
+      strategyId: 'strat_test_null',
+      evidenceFingerprint: 'fp_1',
+      decisionFingerprint: 'dfp_1',
+      confidence: 'HIGH',
+      shockOverride: null
+    });
+    const row = strategyVersionToRow(version);
+    assert.equal(Object.prototype.hasOwnProperty.call(row, 'shock_override'), false, 'shock_override must be omitted when null');
+    assert.equal(JSON.stringify(row).includes('shock_override'), false, 'JSON serialized row must not contain shock_override key');
+  });
+
+  test('35. strategyVersionToRow: valid shockOverride object is preserved on row', () => {
+    const validOverride = {
+      scope: 'MARKET_WIDE',
+      status: 'ACTIVE',
+      reason: 'Geopolitical event confirmed',
+      triggerEvidence: ['obs_geo_1']
+    };
+    const version = createStrategyVersion({
+      strategyId: 'strat_test_valid_shock',
+      evidenceFingerprint: 'fp_1',
+      decisionFingerprint: 'dfp_1',
+      confidence: 'HIGH',
+      shockOverride: validOverride
+    });
+    const row = strategyVersionToRow(version);
+    assert.equal(Object.prototype.hasOwnProperty.call(row, 'shock_override'), true, 'shock_override must be present when valid object');
+    assert.deepEqual(row.shock_override, validOverride, 'shock_override object must match');
+  });
+
+  test('36. strategyVersionToRow: invalid primitive shockOverride throws TypeError', () => {
+    assert.throws(() => {
+      strategyVersionToRow({
+        strategyId: 'strat_bad_primitive',
+        evidenceFingerprint: 'fp_1',
+        decisionFingerprint: 'dfp_1',
+        confidence: 'HIGH',
+        shockOverride: 'INVALID_STRING_PRIMITIVE'
+      });
+    }, /TypeError.*strategyVersionToRow.*shockOverride must be a valid non-array object/);
+
+    assert.throws(() => {
+      strategyVersionToRow({
+        strategyId: 'strat_bad_number',
+        evidenceFingerprint: 'fp_1',
+        decisionFingerprint: 'dfp_1',
+        confidence: 'HIGH',
+        shockOverride: 12345
+      });
+    }, /TypeError.*strategyVersionToRow.*shockOverride must be a valid non-array object/);
+
+    assert.throws(() => {
+      strategyVersionToRow({
+        strategyId: 'strat_bad_array',
+        evidenceFingerprint: 'fp_1',
+        decisionFingerprint: 'dfp_1',
+        confidence: 'HIGH',
+        shockOverride: ['not', 'an', 'object']
+      });
+    }, /TypeError.*strategyVersionToRow.*shockOverride must be a valid non-array object/);
+  });
 });

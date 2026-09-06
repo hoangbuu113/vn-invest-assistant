@@ -92,7 +92,7 @@ export function strategyVersionToRow(version) {
   if (!version) return null;
   assertZeroPrivateData(version, 'STRATEGY_VERSION_ROW');
 
-  return {
+  const row = {
     strategy_id: version.strategyId,
     previous_strategy_id: version.previousStrategyId || null,
     generated_at: version.generatedAt,
@@ -115,13 +115,21 @@ export function strategyVersionToRow(version) {
     lifecycle_state: version.lifecycleState,
     data_quality_state: version.dataQualityState,
     watch_reasons: version.watchReasons || [],
-    shock_override: version.shockOverride || null,
     policy_version: version.policyVersion,
     run_manifest_id: version.runManifestId || null,
     next_review_due_at: version.nextReviewDueAt || null,
     limitations: version.limitations || null,
     created_at: version.createdAt
   };
+
+  if (version.shockOverride !== undefined && version.shockOverride !== null) {
+    if (typeof version.shockOverride !== 'object' || Array.isArray(version.shockOverride)) {
+      throw new TypeError('strategyVersionToRow: shockOverride must be a valid non-array object when provided');
+    }
+    row.shock_override = version.shockOverride;
+  }
+
+  return row;
 }
 
 /**
@@ -356,8 +364,10 @@ export async function supersedeStrategyVersion(strategyId, client = privateSupab
  */
 export async function publishStrategyVersionAtomic({
   newVersion,
-  expectedCurrentStrategyId = null
+  expectedCurrentStrategyId = null,
+  client: clientOption
 } = {}, client = undefined) {
+  const effectiveClient = client !== undefined ? client : clientOption;
   if (!newVersion || !newVersion.strategyId) {
     throw new Error('publishStrategyVersionAtomic requires a valid newVersion with strategyId');
   }
@@ -421,12 +431,12 @@ export async function publishStrategyVersionAtomic({
   };
 
   // 1. Explicit client === null: memory mode allowed only for intentional offline/test usage
-  if (client === null) {
+  if (effectiveClient === null) {
     return executeMemoryAtomic();
   }
 
   // 2. Test environment with undefined client: existing test contract remains supported
-  if (client === undefined && isTestEnvironment()) {
+  if (effectiveClient === undefined && isTestEnvironment()) {
     return executeMemoryAtomic();
   }
 
@@ -434,7 +444,7 @@ export async function publishStrategyVersionAtomic({
   // MUST throw deterministic error STRATEGY_PUBLICATION_CLIENT_UNCONFIGURED.
   // Never fall back to executeMemoryAtomic() in production.
   const activePrivateSupabase = getPrivateSupabase();
-  const targetClient = client !== undefined ? client : activePrivateSupabase;
+  const targetClient = effectiveClient !== undefined ? effectiveClient : activePrivateSupabase;
   if (!targetClient) {
     const unconfiguredErr = new Error(
       'STRATEGY_PUBLICATION_CLIENT_UNCONFIGURED: Database client (privateSupabase) is unconfigured or unavailable in production. Durable publication cannot proceed.'

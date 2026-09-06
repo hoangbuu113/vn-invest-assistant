@@ -29,6 +29,27 @@ export const CLAIM_AUTHORITY_LEVELS = Object.freeze({
   UNVERIFIED_MEDIA: 'UNVERIFIED_MEDIA'
 });
 
+export const OBSERVATION_TO_CLAIM_AUTHORITY_MAP = Object.freeze({
+  PRIMARY_OFFICIAL: CLAIM_AUTHORITY_LEVELS.PRIMARY_OFFICIAL,
+  REGULATORY_OFFICIAL: CLAIM_AUTHORITY_LEVELS.REGULATORY_OFFICIAL,
+  MARKET_DIRECT: CLAIM_AUTHORITY_LEVELS.MARKET_REFERENCE,
+  MARKET_REFERENCE: CLAIM_AUTHORITY_LEVELS.MARKET_REFERENCE
+});
+
+export function resolveClaimAuthorityFromObservationAuthority(authority) {
+  if (typeof authority !== 'string' || !authority.trim()) {
+    return null;
+  }
+  const trimmed = authority.trim();
+  if (OBSERVATION_TO_CLAIM_AUTHORITY_MAP[trimmed]) {
+    return OBSERVATION_TO_CLAIM_AUTHORITY_MAP[trimmed];
+  }
+  if (Object.values(CLAIM_AUTHORITY_LEVELS).includes(trimmed)) {
+    return trimmed;
+  }
+  return trimmed;
+}
+
 export const CONFIDENCE_RECENCY = Object.freeze({
   CURRENT: 'CURRENT',
   STALE: 'STALE',
@@ -203,7 +224,11 @@ export function createMarketClaim(payload = {}) {
   const methodology = normalizeString(payload.methodology) || 'v1.3';
   const revisionMarker = normalizeString(payload.revisionMarker);
 
-  const authorityLevel = normalizeString(payload.authorityLevel) || CLAIM_AUTHORITY_LEVELS.UNVERIFIED_MEDIA;
+  const rawAuthority = normalizeString(payload.authorityLevel);
+  const resolvedAuthority = rawAuthority
+    ? resolveClaimAuthorityFromObservationAuthority(rawAuthority)
+    : CLAIM_AUTHORITY_LEVELS.UNVERIFIED_MEDIA;
+  const authorityLevel = resolvedAuthority || CLAIM_AUTHORITY_LEVELS.UNVERIFIED_MEDIA;
   if (!Object.values(CLAIM_AUTHORITY_LEVELS).includes(authorityLevel)) {
     throw new Error(`INVALID_AUTHORITY_LEVEL: "${payload.authorityLevel}"`);
   }
