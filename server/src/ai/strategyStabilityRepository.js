@@ -11,13 +11,31 @@ import {
 const memoryStrategyVersions = new Map();
 const memoryStrategyAssessments = new Map();
 
-const isTestEnvironment = process.env.NODE_ENV === 'test' ||
-  process.execArgv.some(a => typeof a === 'string' && a.includes('--test')) ||
-  process.argv.some(a => typeof a === 'string' && (a.includes('test') || a.includes('node:test')));
+export function isTestEnvironment() {
+  if (process.env.NODE_ENV === 'production') return false;
+  return Boolean(
+    process.env.NODE_ENV === 'test' ||
+    process.execArgv.some(a => typeof a === 'string' && a.includes('--test')) ||
+    process.argv.some(a => typeof a === 'string' && (a.includes('test') || a.includes('node:test')))
+  );
+}
+
+let testPrivateSupabaseOverride = undefined;
+
+export function setPrivateSupabaseOverrideForTest(client) {
+  testPrivateSupabaseOverride = client;
+}
+
+function getPrivateSupabase() {
+  if (testPrivateSupabaseOverride !== undefined) {
+    return testPrivateSupabaseOverride;
+  }
+  return privateSupabase;
+}
 
 export function resolveStabilityClient(client) {
   if (client !== undefined) return client;
-  return isTestEnvironment ? null : privateSupabase;
+  return isTestEnvironment() ? null : getPrivateSupabase();
 }
 
 /**
@@ -26,6 +44,7 @@ export function resolveStabilityClient(client) {
 export function clearStabilityMemoryStore() {
   memoryStrategyVersions.clear();
   memoryStrategyAssessments.clear();
+  testPrivateSupabaseOverride = undefined;
 }
 
 /**
@@ -345,8 +364,6 @@ export async function publishStrategyVersionAtomic({
 
   assertZeroPrivateData(newVersion, 'PUBLISH_STRATEGY_VERSION_ATOMIC');
 
-  const targetClient = resolveStabilityClient(client);
-
   // In-memory atomic execution helper with rollback snapshot
   const executeMemoryAtomic = () => {
     const prevVersionsSnapshot = new Map(memoryStrategyVersions);
@@ -403,8 +420,28 @@ export async function publishStrategyVersionAtomic({
     }
   };
 
-  if (!targetClient) {
+  // 1. Explicit client === null: memory mode allowed only for intentional offline/test usage
+  if (client === null) {
     return executeMemoryAtomic();
+  }
+
+  // 2. Test environment with undefined client: existing test contract remains supported
+  if (client === undefined && isTestEnvironment()) {
+    return executeMemoryAtomic();
+  }
+
+  // 3. Production with undefined client and privateSupabase unavailable/null:
+  // MUST throw deterministic error STRATEGY_PUBLICATION_CLIENT_UNCONFIGURED.
+  // Never fall back to executeMemoryAtomic() in production.
+  const activePrivateSupabase = getPrivateSupabase();
+  const targetClient = client !== undefined ? client : activePrivateSupabase;
+  if (!targetClient) {
+    const unconfiguredErr = new Error(
+      'STRATEGY_PUBLICATION_CLIENT_UNCONFIGURED: Database client (privateSupabase) is unconfigured or unavailable in production. Durable publication cannot proceed.'
+    );
+    unconfiguredErr.code = 'STRATEGY_PUBLICATION_CLIENT_UNCONFIGURED';
+    unconfiguredErr.isClientUnconfigured = true;
+    throw unconfiguredErr;
   }
 
   const row = strategyVersionToRow(newVersion);

@@ -9,7 +9,8 @@ import {
   clearStabilityMemoryStore,
   getCurrentPublishedStrategy,
   publishStrategyVersionAtomic,
-  strategyVersionToRow
+  strategyVersionToRow,
+  setPrivateSupabaseOverrideForTest
 } from '../src/ai/strategyStabilityRepository.js';
 import {
   createStrategyVersion,
@@ -700,5 +701,223 @@ describe('V1.3 Strategy Stability — Phase 2.2 Production Memory Fallback Remov
     // Ensure persistStrategyVersion is not called in strategyStabilityService
     const persistVersionMatches = content.match(/persistStrategyVersion\(/g) || [];
     assert.equal(persistVersionMatches.length, 0, 'persistStrategyVersion must NOT be called in strategyStabilityService');
+  });
+
+  // 11. test environment undefined client -> existing test contract works
+  test('11. test environment undefined client -> existing test contract works', async () => {
+    const { version: v1, packet } = await seedPublishedStrategy();
+    const candidate2 = createValidCandidate(packet);
+    const v2 = createStrategyVersion({
+      strategyId: 'strat_p2_3_test_env_undef',
+      previousStrategyId: v1.strategyId,
+      generatedAt: '2026-09-02T10:00:00.000Z',
+      publishedAt: '2026-09-02T10:00:00.000Z',
+      dataAsOf: '2026-09-02T10:00:00.000Z',
+      evidenceFingerprint: 'fp_v2',
+      decisionFingerprint: computeDecisionFingerprint(candidate2),
+      triggerReason: { type: 'UPDATE' },
+      materialChanges: ['UPDATE'],
+      confidence: 'MEDIUM',
+      regime: candidate2.regime,
+      executiveDecision: candidate2.executiveDecision,
+      assetStrategy: candidate2.assetStrategy,
+      preferredThemes: candidate2.preferredThemes,
+      avoidOrUnderweight: candidate2.avoidOrUnderweight,
+      riskOverlay: candidate2.riskOverlay,
+      horizon: candidate2.horizon,
+      invalidationConditions: candidate2.invalidationConditions,
+      status: 'published',
+      lifecycleState: STRATEGY_LIFECYCLE_STATES.STABLE,
+      dataQualityState: DATA_QUALITY_STATES.HEALTHY
+    });
+
+    // client parameter is omitted / undefined in test environment
+    const result = await publishStrategyVersionAtomic({
+      newVersion: v2,
+      expectedCurrentStrategyId: v1.strategyId
+    });
+
+    assert.equal(result.isDurable, false, 'In test environment, omitting client must fall back to memory with isDurable: false');
+    assert.equal(result.strategy.strategyId, 'strat_p2_3_test_env_undef');
+
+    const current = await getCurrentPublishedStrategy(null);
+    assert.equal(current.strategyId, 'strat_p2_3_test_env_undef');
+  });
+
+  // 12. production-like undefined client + privateSupabase unavailable -> throws STRATEGY_PUBLICATION_CLIENT_UNCONFIGURED
+  test('12. production-like undefined client + privateSupabase unavailable -> throws STRATEGY_PUBLICATION_CLIENT_UNCONFIGURED', async () => {
+    const { version: v1, packet } = await seedPublishedStrategy();
+    const candidate2 = createValidCandidate(packet);
+    const v2 = createStrategyVersion({
+      strategyId: 'strat_p2_3_prod_phantom',
+      previousStrategyId: v1.strategyId,
+      generatedAt: '2026-09-02T10:00:00.000Z',
+      publishedAt: '2026-09-02T10:00:00.000Z',
+      dataAsOf: '2026-09-02T10:00:00.000Z',
+      evidenceFingerprint: 'fp_v2',
+      decisionFingerprint: computeDecisionFingerprint(candidate2),
+      triggerReason: { type: 'UPDATE' },
+      materialChanges: ['UPDATE'],
+      confidence: 'MEDIUM',
+      regime: candidate2.regime,
+      executiveDecision: candidate2.executiveDecision,
+      assetStrategy: candidate2.assetStrategy,
+      preferredThemes: candidate2.preferredThemes,
+      avoidOrUnderweight: candidate2.avoidOrUnderweight,
+      riskOverlay: candidate2.riskOverlay,
+      horizon: candidate2.horizon,
+      invalidationConditions: candidate2.invalidationConditions,
+      status: 'published',
+      lifecycleState: STRATEGY_LIFECYCLE_STATES.STABLE,
+      dataQualityState: DATA_QUALITY_STATES.HEALTHY
+    });
+
+    const prevEnv = process.env.NODE_ENV;
+    try {
+      process.env.NODE_ENV = 'production';
+      setPrivateSupabaseOverrideForTest(null);
+      await assert.rejects(async () => {
+        await publishStrategyVersionAtomic({
+          newVersion: v2,
+          expectedCurrentStrategyId: v1.strategyId
+        }, undefined);
+      }, (err) => {
+        assert.equal(err.code, 'STRATEGY_PUBLICATION_CLIENT_UNCONFIGURED');
+        assert.equal(err.isClientUnconfigured, true);
+        assert.ok(err.message.includes('STRATEGY_PUBLICATION_CLIENT_UNCONFIGURED'));
+        return true;
+      });
+    } finally {
+      process.env.NODE_ENV = prevEnv;
+      setPrivateSupabaseOverrideForTest(undefined);
+    }
+  });
+
+  // 13. production-like unconfigured client does not mutate memory strategy store
+  test('13. production-like unconfigured client does not mutate memory strategy store', async () => {
+    const { version: v1, packet } = await seedPublishedStrategy();
+    const candidate2 = createValidCandidate(packet);
+    const v2 = createStrategyVersion({
+      strategyId: 'strat_p2_3_no_mutation',
+      previousStrategyId: v1.strategyId,
+      generatedAt: '2026-09-02T10:00:00.000Z',
+      publishedAt: '2026-09-02T10:00:00.000Z',
+      dataAsOf: '2026-09-02T10:00:00.000Z',
+      evidenceFingerprint: 'fp_v2',
+      decisionFingerprint: computeDecisionFingerprint(candidate2),
+      triggerReason: { type: 'UPDATE' },
+      materialChanges: ['UPDATE'],
+      confidence: 'MEDIUM',
+      regime: candidate2.regime,
+      executiveDecision: candidate2.executiveDecision,
+      assetStrategy: candidate2.assetStrategy,
+      preferredThemes: candidate2.preferredThemes,
+      avoidOrUnderweight: candidate2.avoidOrUnderweight,
+      riskOverlay: candidate2.riskOverlay,
+      horizon: candidate2.horizon,
+      invalidationConditions: candidate2.invalidationConditions,
+      status: 'published',
+      lifecycleState: STRATEGY_LIFECYCLE_STATES.STABLE,
+      dataQualityState: DATA_QUALITY_STATES.HEALTHY
+    });
+
+    const prevEnv = process.env.NODE_ENV;
+    try {
+      process.env.NODE_ENV = 'production';
+      setPrivateSupabaseOverrideForTest(null);
+      try {
+        await publishStrategyVersionAtomic({
+          newVersion: v2,
+          expectedCurrentStrategyId: v1.strategyId
+        }, undefined);
+      } catch {
+        // Expected
+      }
+    } finally {
+      process.env.NODE_ENV = prevEnv;
+      setPrivateSupabaseOverrideForTest(undefined);
+    }
+
+    const current = await getCurrentPublishedStrategy(null);
+    assert.equal(current.strategyId, v1.strategyId, 'v1 must remain published in memory');
+    assert.equal(current.status, 'published');
+
+    const repo = await import('../src/ai/strategyStabilityRepository.js');
+    const phantom = await repo.getStrategyVersionById(v2.strategyId, null);
+    assert.equal(phantom, null, 'Unconfigured production call must NOT create version in memory store');
+  });
+
+  // 14. service does not report PUBLISH_NEW success when production client unconfigured
+  test('14. service does not report PUBLISH_NEW success when production client unconfigured', async () => {
+    const { version: v1 } = await seedPublishedStrategy();
+
+    // Material change trigger via revised observation
+    const factPacket = buildValidPacket([{ ...baseFact, revision: 'revised' }]);
+
+    const prevEnv = process.env.NODE_ENV;
+    let stateTransitions = [];
+    try {
+      process.env.NODE_ENV = 'production';
+      setPrivateSupabaseOverrideForTest(null);
+      const result = await evaluateAndApplyStrategyStability({
+        factPacket,
+        allowLlm: true,
+        currentStrategy: v1,
+        client: undefined, // unconfigured production client
+        generateLlmFn: async () => {
+          const c = generateDeterministicMarketStrategist({ factPacket });
+          const newStance = c.executiveDecision.stance === 'defensive' ? 'risk_on' : 'defensive';
+          return {
+            ...c,
+            executiveDecision: {
+              ...c.executiveDecision,
+              stance: newStance
+            }
+          };
+        },
+        onStateTransition: (st) => stateTransitions.push(st)
+      });
+
+      assert.notEqual(result.latestAssessmentResult, ASSESSMENT_RESULTS.PUBLISH_NEW, 'Must NOT report PUBLISH_NEW');
+      assert.equal(result.latestAssessmentResult, null, 'latestAssessmentResult must be null on publication failure');
+      assert.equal(result.latestAssessmentStatus, EVALUATION_STATUSES.FAILED, 'latestAssessmentStatus must be FAILED');
+      assert.equal(result.strategyId, v1.strategyId, 'Old strategy must remain authoritative');
+      assert.equal(result.lifecycleState, STRATEGY_LIFECYCLE_STATES.REVIEW_REQUIRED, 'lifecycleState must be REVIEW_REQUIRED');
+      assert.equal(result.reviewPending, true, 'reviewPending must be true');
+      assert.ok(result.publicationError?.includes('STRATEGY_PUBLICATION_CLIENT_UNCONFIGURED'), 'Error must be captured in publicationError');
+    } finally {
+      process.env.NODE_ENV = prevEnv;
+      setPrivateSupabaseOverrideForTest(undefined);
+    }
+  });
+
+  // 15. cold start with production unconfigured client throws and does not publish to memory
+  test('15. cold start with production unconfigured client throws and does not publish to memory', async () => {
+    const packet = buildValidPacket();
+    const candidate = createValidCandidate(packet);
+
+    const prevEnv = process.env.NODE_ENV;
+    try {
+      process.env.NODE_ENV = 'production';
+      setPrivateSupabaseOverrideForTest(null);
+      await assert.rejects(async () => {
+        await evaluateAndApplyStrategyStability({
+          factPacket: packet,
+          candidateOutput: candidate,
+          currentStrategy: null,
+          client: undefined,
+          allowLlm: false
+        });
+      }, (err) => {
+        assert.equal(err.code, 'STRATEGY_PUBLICATION_CLIENT_UNCONFIGURED');
+        return true;
+      });
+    } finally {
+      process.env.NODE_ENV = prevEnv;
+      setPrivateSupabaseOverrideForTest(undefined);
+    }
+
+    const current = await getCurrentPublishedStrategy(null);
+    assert.equal(current, null, 'No published strategy in memory after cold start failure');
   });
 });
