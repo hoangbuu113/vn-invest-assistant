@@ -1,111 +1,114 @@
 # Current Project Status
 
 ## LATEST VERIFIED CHECKPOINT
-- **Release Status**: V1.1 COMPLETE / PRODUCTION VERIFIED
+- **Release Status**: V1.3 CLOSED LOCALLY (READY FOR MIGRATION & DEPLOYMENT)
+- **Production Status**: Production runs V1.1/V1.2 baseline (`origin/main` at commit `b998e10`). V1.3 changes are staged and verified locally across 27 commits ahead of `origin/main`. No remote push or deployment has been performed.
+- **Final Local Baseline**: `356d5c2 fix: separate opportunity health and explanation grounding`
 - **Branch**: `main`
-- **Architecture**: Cloudflare Workers Static Assets frontend + Render Node.js Express backend + Supabase PostgreSQL database
-- **Security & Multi-User Authorization**:
-  - Authoritative authentication: Supabase Auth (email/password) is the sole browser authentication mechanism.
-  - Completely retired: `OwnerGate`, `OWNER_ACCESS_TOKEN` browser auth, HMAC session tokens, and session cookies (`vn_invest_owner_session`).
-  - Strict multi-user profile model: Each authenticated user has an isolated `investor_profile` (`user_id UUID NOT NULL UNIQUE REFERENCES auth.users(id)`).
-  - Clean onboarding: New profiles start empty with `cash_available = 0`, 0 holdings, 0 transactions, and 0 synthetic records.
-  - Direct Supabase `anon` and `authenticated` roles have NO direct SELECT/INSERT/UPDATE/DELETE access to private financial tables (`investor_profile`, `holdings`, `position_opening_baselines`, `portfolio_transactions`, `cash_ledger_entries`, `watchlist_items`, `price_alerts`, `push_subscriptions`, `alert_notification_deliveries`); access is guarded exclusively through backend Express API using Supabase Bearer JWT and backend `service_role`.
-  - Public canonical metadata (`assets`, `asset_provider_mappings`) remains accessible for public showcase browsing.
-  - Background alert scheduler is protected via `ALERT_SCHEDULER_TOKEN` (cron trigger `*/15 * * * *` on Cloudflare Worker to `POST /api/internal/alerts/evaluate`).
-  - Service-role key (`SUPABASE_SECRET_KEY`) is strictly backend-only and never exposed to the client bundle.
-- **Web Push Alert Delivery Engine (PRODUCTION ACTIVE & VERIFIED)**:
-  - First-party Web Push delivery engine (`web-push`, RFC 8291 / RFC 8292) with per-device subscriptions (`public.push_subscriptions`) and per-device delivery jobs (`public.alert_notification_deliveries`).
-  - Evaluated on background schedule (Cloudflare Worker cron `*/15 * * * *` -> Render backend `POST /api/internal/alerts/evaluate`), not refresh-only.
-  - Delivery model: Bounded retry, best-effort per device delivery (max 3 attempts, 15-minute backoff, automatic cleanup of 404/410 expired subscriptions). Push service acceptance (`sent`) is verified; notification display is subject to OS/browser delivery semantics without guaranteed display claims.
-  - Service Worker (`client/public/sw.js`): Strictly handles push display and same-origin window focus/navigation; no offline caching or financial logic.
-  - Web App Manifest (`client/public/manifest.webmanifest`): Standalone display and Apple mobile web app metadata for iOS Home Screen support.
-- **Multi-Asset Architecture & Financial Foundations**:
-  - Project Purpose: Public multi-asset market intelligence and tracking showcase application; portfolio accounting is a supporting capability.
-  - Dual-settlement VND-basis accounting: Base currency remains VND. Crypto and Gold spot current VND valuations work through current USD/VND FX authority.
-  - Historical non-VND portfolio performance remains truthful unavailable when historical FX authority is missing.
-  - Feature 27 Vietnam Market Regime: CPI reliability improvement active (NSO CPI). SBV money-market rates remain truthful unavailable under WAF (`OFFICIAL_DATA_UNAVAILABLE`) without fabricating rates. Market breadth remains `NOT_DEFENSIBLE_FOR_V1.1` (`status: 'unavailable'`, `reason: 'SOURCE_NOT_PROVISIONED'`).
-  - Disposable test data cleanup: The legacy 20,000,000 VND test profile and its child rows were permanently purged; no stale 20M baseline exists in production.
-- **Production Endpoints**:
-  - Frontend: `https://vn-invest-assistant.vn-invest-assistant.workers.dev` (Cloudflare Workers Static Assets + API Proxy + 15m Cron)
-  - Backend: `https://vn-invest-assistant-api.onrender.com` (Render Node.js Express, health `ok`, db-health `ok`)
+- **Architecture**: Cloudflare Workers Static Assets frontend (with API proxy and 15m scheduled cron) + Render Node.js Express backend + Supabase PostgreSQL database
 - **Automated Test Suite**:
-  - Full Backend & Client Contract Regression: 853/853 PASS across 148 test suites
-  - Dependencies: `npm audit` 0 vulnerabilities on both server and client
-  - Client Build: PASS (~186ms, 0 errors, 0 warnings)
-  - Git Diff & Formatting: `git diff --check` PASS
-- **Working Tree**: CLEAN
+  - Full Backend & Integration Regression: **1,327 / 1,327 PASS** across **163 test suites** (`npm test --prefix server`)
+  - Focused Critical Suites:
+    - Historical As-Of Replay (`historical-as-of-replay.test.js`): 30/30 PASS
+    - Strategy Stability Production Integrity (`strategy-stability-phase2-1.test.js`): 32/32 PASS
+    - Strategy Stability Memory Fallback Removal (`strategy-stability-phase2-2.test.js`): 15/15 PASS
+    - Strategy Shadow Replay (`strategy-shadow-replay.test.js`): 16/16 PASS
+    - Observability & Data Health (`data-health-observability.test.js`): 22/22 PASS
+    - Vietnam Equity Evidence (`equity-evidence.test.js`): 18/18 PASS
+    - Deterministic Equity Opportunity Engine (`equity-opportunity-engine.test.js`): 24/24 PASS
+  - Client Build: PASS (Vite production bundle & Cloudflare SSR worker built in ~250ms, 0 errors, 0 warnings)
+  - Git Diff & Formatting: `git diff --check` PASS (clean)
+- **Working Tree**: CLEAN (with untracked `server/artifacts/` preserved untouched)
 
 ---
 
 ## CURRENT PHASE
-V1.2 Improvement 01B — Market Intelligence UX/UI Redesign (LOCAL COMPLETE)
-
-## RELEASE STATUS
-V1.1 PRODUCTION VERIFIED — V1.2 IMPROVEMENT 01B LOCAL COMPLETE (NO NEW DATA FABRIC — NO LIVE AI YET)
+V1.3 — Advanced Market Intelligence, Evidence Replay & Stability Engine (LOCAL COMPLETE)
 
 ---
 
-## PRODUCTION & LIVE PROVIDER VERIFIED PATHS
-- **Yahoo Finance**: Vietnamese listed equities & exchange-traded ETFs (`VCB`, `FPT`, `HPG`, `VNM`, `E1VFVN30`, `FUEVFVND`, `FUESSVFL`). Completed daily OHLCV history with `Asia/Ho_Chi_Minh` timezone semantics.
-- **CoinGecko**: Canonical `USD` valuation-snapshot authority for all 40 Crypto assets. Feeds portfolio/accounting valuation and canonical snapshot consumers.
-- **Binance Spot**: Native `USDT` authority for realtime reference, completed daily OHLCV history, and Analysis V2 across 40 explicit Spot mappings. Realtime uses shared miniTicker WebSocket; history uses multiplexed Binance WebSocket API for completed UTC daily klines. Binance `USDT` is never treated as canonical `USD` accounting quote.
-- **Current VND Reference**: Asset Detail displays `≈VND` computed server-side from Binance `USDT` and explicit `USD/VND` rate. Marked approximate, reference-only, non-accounting, and non-historical.
-- **Alpha Vantage**:
-  - Gold Spot snapshot and completed daily close-only history (`XAU/USD`) via `GOLD_SILVER_SPOT`.
-  - Multi-asset global news acquisition (`NEWS_SENTIMENT`).
-- **Twelve Data**: Direct `USD -> VND` FX exchange rate resolution. Current snapshot supported; history intentionally unsupported.
-- **CafeF**: Official public RSS feeds for Vietnamese stock, company, macroeconomic, and international market news.
-- **CoinDesk**: Official public RSS feed for cryptocurrency news.
+## V1.3 COMPLETED FEATURES SUMMARY
+
+### 1. Strategy Stability & Publication Safety (01C)
+- **Two-Clock Lifecycle**: Decoupled continuous fast-clock evidence evaluation from patient slow-clock strategy publication. Lifecycle state machine: `STABLE`, `WATCH`, `REVIEW_REQUIRED`, `EVALUATING`.
+- **Deterministic Materiality**: State changes occur strictly upon evaluated evidence changes, verified shocks, or confirmed multi-source consensus. Unchanged evidence or identical evaluations yield deterministic `KEEP`.
+- **Atomic Publication RPC**: Created `publish_strategy_version_atomic(p_new_version, p_expected_current_strategy_id)` in PostgreSQL. Guarantees transactional supersession of the expected current strategy and insertion of the new version with zero-published prevention, concurrency locking (`FOR UPDATE`), and automatic rollback on failure.
+- **Production Memory Fallback Removal**: Database failure (`PGRST202` or connection error) in production throws explicit errors and halts; never silently seeds or falls back to in-memory strategy publication.
+- **Shadow Replay & Calibration Framework**: Replay harness simulates chronological evidence sequences with zero lookahead bias.
+- **Hysteresis Thresholds Policy**: Numeric hysteresis thresholds were intentionally **NOT** calibrated due to partial historical coverage across complete economic cycles; quantitative stability is governed deterministically without arbitrary fabricated thresholds.
+
+### 2. Historical As-Of Evidence Replay (01D)
+- **Replay Safety Contract**: Implemented historical as-of evidence projection engine. All evidence evaluations evaluate state strictly as-of an explicit timestamp $T$ with zero lookahead bias.
+- **System-Knowable Timestamp Authority**: An observation is knowable to the system strictly when `asOf >= max(sourceAvailableAt, firstSeenAt)`. Publication timestamps alone cannot bypass system ingestion time, and future corrections or backfills never alter prior historical fingerprints.
+- **Claim Corroboration & Contradiction**: Structured claims track independent corroboration and contradictory evidence without discarding minority sources.
+
+### 3. Observability & Data Health (01E)
+- **Deterministic Health States**: `HEALTHY`, `DEGRADED`, `FAILED`, `UNKNOWN` with strict precedence (`FAILED` > `DEGRADED` > `UNKNOWN` > `HEALTHY`).
+- **Core Observed Pipelines (9 jobs)**:
+  1. `vn_market_context_collector`
+  2. `official_macro_monetary_collector`
+  3. `customs_trade_collector`
+  4. `news_refresh_collector`
+  5. `claims_reconciliation`
+  6. `market_strategist_refresh`
+  7. `alert_scheduler`
+  8. `vn_equity_evidence_refresh`
+  9. `vn_opportunity_engine_refresh`
+- **Domain vs Operational Health Invariant**: `job execution health != domain / data conclusion`. A collector or engine completing valid evaluation reporting empty or insufficient data is operationally `HEALTHY`. `DEGRADED` is strictly reserved for operational anomalies (partial persistence, WAF quarantine). `FAILED` is reserved for pipeline crashes, unhandled exceptions, or fatal DB failures.
+- **Durable Checkpoints**: State persists to `public.market_context_collector_checkpoints`. Production DB is strictly authoritative; memory store is used only in explicit offline/test mode.
+- **Public Observability Route**: `GET /api/system/data-health` reads durable checkpoints without external provider calls and returns HTTP 200 (or 503 if system status is `FAILED`), exposing zero secrets.
+
+### 4. Vietnam Equity Evidence (01F)
+- **Canonical Stock Evidence Foundation**: Model and repository (`public.vn_equity_evidence_observations`) storing immutable evidence vintages for canonical Vietnam equities (`VCB`, `FPT`, `HPG`, `VNM`, `E1VFVN30`, `FUEVFVND`, `FUESSVFL`).
+- **Replay-Safe Timestamp Invariants**: Enforces `system_knowable_at >= first_seen_at` and `system_knowable_at >= source_available_at`.
+- **Market Price Evidence**: Completed daily OHLCV bars ingested via backend collector with delayed freshness provenance.
+- **Unprovisioned Domains**: Stock fundamentals and official corporate disclosures remain truthfully declared as `SOURCE_NOT_PROVISIONED` without fabricating missing data.
+- **Public Route**: `GET /api/equity-evidence/:symbol` provides read-only access to persisted evidence vintages.
+
+### 5. Deterministic Equity Opportunity Engine (01G)
+- **Deterministic Authority**: Evaluates Vietnam equity universe against persisted evidence into explicit categories: `QUALIFIED`, `WATCH`, `INSUFFICIENT_EVIDENCE`, `REJECTED`.
+- **Policy Invariant**: Because no calibrated numeric qualification policy exists, `QUALIFIED` remains intentionally unused/reserved; current valid completed closes support `WATCH` only. Inactive assets evaluate to `REJECTED`.
+- **No Opaque Opportunity Scores**: Zero opaque numerical scoring, zero buy/sell/hold ratings, zero price targets, and zero probability estimates.
+- **AI Explanation Boundary**: AI generates explanations bounded strictly by candidate evidence. Any ungrounded numbers, schema violations, speculative language, or forbidden actions (`buy`, `sell`, `hold`, `mua`, `bán`, `giữ`, `target price`, `giá mục tiêu`, `probability`, `xác suất`, `confidence`, `expected return`) are deterministically rejected and fall back to evidence-linked deterministic prose.
+- **Qualification Immutability**: AI explanation failure or rejection never alters or promotes `candidate.qualificationStatus`.
+- **Route Namespace Preservation**: Public deterministic engine operates on `GET /api/equity-opportunities` and `GET /api/equity-opportunities/:symbol`. The existing private portfolio-aware `GET /api/opportunities` is fully preserved without modification.
 
 ---
 
-## CANONICAL UNIVERSE & INITIAL FINANCIAL BASELINE
-- **Canonical Universe**: 49 assets (40 crypto, 7 VN stocks/ETFs, 1 gold spot, 1 FX context) across 5 verified providers (89 provider mappings).
-- **Initial State per User**:
-  - Authoritative Holdings: 0 rows (clean first-use state)
-  - Authoritative Transactions: 0 rows
-  - Authoritative Position Opening Baselines: 0 rows
-  - Authoritative Cash Ledger: 0 rows (opening balance: 0 VND)
-  - Authoritative Current Cash: 0 VND
-  - Authoritative Watchlist: 0 rows
-  - Authoritative Price Alerts: 0 rows
+## UNAPPLIED MIGRATION AUDIT (LOCAL SEQUENCE)
+The following 6 migrations are created, verified, and committed locally, but remain **UNAPPLIED** on the remote Supabase database:
+
+1. `20260905010000_create_collector_checkpoints.sql`
+   - Creates `public.market_context_collector_checkpoints` for pipeline observability and due-gating.
+2. `20260905020000_create_market_claims_and_evidence_links.sql`
+   - Creates `public.market_claims` and `public.claim_evidence_links` for claim corroboration.
+3. `20260906000000_create_strategy_stability_foundation.sql`
+   - Creates `public.strategy_versions` and append-only `public.strategy_assessments`.
+4. `20260906010000_harden_strategy_stability_publication.sql`
+   - Creates atomic RPC function `public.publish_strategy_version_atomic(p_new_version, p_expected_current_strategy_id)`.
+5. `20260906020000_create_vn_equity_evidence.sql`
+   - Creates `public.vn_equity_evidence_observations` for immutable equity evidence vintages.
+6. `20260906030000_create_vn_equity_opportunities.sql`
+   - Creates `public.vn_equity_opportunity_evaluations` for deterministic opportunity evaluations.
 
 ---
 
-## COMPLETED FEATURES SUMMARY (01–30) & V1.1 IMPROVEMENTS
+## KNOWN BLOCKERS & LIMITATIONS
+1. **Remote Migrations Pending**: Backend code in V1.3 requires the 6 migrations above. Migrations must be applied to Supabase before deploying backend code to Render.
+2. **Equity Fundamentals & Disclosures Unprovisioned**: No official provider for Vietnamese corporate financial statements (balance sheet, income statement) or regulatory filings is provisioned. Candidates report `OFFICIAL_FUNDAMENTALS_SOURCE_NOT_PROVISIONED`.
+3. **Strategy Stability Hysteresis Thresholds Uncalibrated**: Numeric thresholds remain intentionally uncalibrated; the engine enforces structural state machine stability without fabricating numeric thresholds.
+4. **USD/VND Historical Bars**: Daily history remains intentionally unsupported pending verified timezone boundary reconciliation.
+5. **Gold Spot History**: Remains close-only; OHLC metrics remain unavailable.
 
-### V1 Core Features (01–30)
-- **Features 01–03**: Asset Browser (`/api/assets`), Market Snapshot (`/api/market/:symbol`), News Feed (`/api/news`).
-- **Feature 04**: Investor Profile (`/api/profile`).
-- **Feature 05**: Portfolio Overview (`/api/portfolio/overview`), full precision valuation, partial valuation handling.
-- **Feature 06**: Historical Price & Trend (`/api/market/:symbol/history`).
-- **Feature 07**: Deterministic Asset Analysis (`/api/analysis/:symbol`).
-- **Feature 08**: Watchlist / Danh sách theo dõi (`/api/watchlist`).
-- **Feature 09**: Personal Investment Dashboard / Tổng quan.
-- **Feature 10**: Portfolio Composition & Concentration (`/api/portfolio/composition`).
-- **Feature 11**: Asset Comparison / So sánh tài sản (`base100.series`).
-- **Feature 12**: Price Alerts V1 / Cảnh báo giá (`/api/alerts`).
-- **Feature 13**: Personalized Relevant News / Tin của tôi (`/api/news/personalized`).
-- **Feature 14**: Transaction Ledger / Sổ lệnh giao dịch (`/api/transactions`), immutable log, atomic RPCs, weighted-average cost, realized P/L.
-- **Feature 15**: Cash / Capital Ledger / Sổ dòng tiền (`/api/cash/*`), atomic cash ledger, opening baseline.
-- **Feature 16**: Canonical Multi-Asset Foundation (authoritative asset UUID, decoupled provider mapping schema, VND transaction guard).
-- **Feature 17**: Ledger Authority & Position Integrity (opening-position baselines without synthetic BUYs, locking upon subsequent trade).
-- **Feature 18**: Market Provider Abstraction (provider-neutral snapshot/history boundary).
-- **Feature 19**: FX & Cross-Currency Valuation Foundation (VND universal reporting currency).
-- **Feature 20**: Real Multi-Asset Providers & Controlled Universe (49 assets: 40 crypto, 7 VN stocks/ETFs, 1 gold spot, 1 FX context).
-- **Feature 21**: Asset-Class Market & Historical Semantics (`VN_EXCHANGE`, `CONTINUOUS_24_7`, `GLOBAL_24_5`).
-- **Feature 22**: Deterministic Analysis V2 (`methodologyVersion = "v2"`).
-- **Feature 23**: Multi-Asset News Foundation (CafeF, CoinDesk, Alpha Vantage).
-- **Feature 24**: Existing Feature Multi-Asset Integration (Centralized formatting, Base 100 comparison, capability badges).
-- **Feature 25**: Portfolio Performance & Benchmarking.
-- **Feature 26**: Crypto Market Data Reliability & Hybrid Quote Authority (CoinGecko USD valuation + Binance USDT realtime/history).
-- **Feature 27**: Vietnam Market Regime Foundation (NSO CPI, SBV money market, unprovisioned market breadth).
-- **Feature 28**: Deterministic Opportunity Engine (`GET /api/opportunities`).
-- **Feature 29**: Guarded AI Investment Brief (`POST /api/investment-brief`).
-- **Feature 30**: Release Hardening & Production Gate.
+---
 
-### V1.1 Production Improvements
-- **V1.1 Improvement 12 (Web Push Alerts Engine)**: First-party Web Push delivery via `web-push`, per-device subscriptions, background scheduler evaluation (`*/15 * * * *`), multi-device fanout, and bounded retry.
-- **V1.1 Improvement 13 (Public Multi-User Supabase Auth)**: Cutover from single-owner model to public multi-user Supabase Auth (email/password). Independent isolated `investor_profile` per user initialized with `cash = 0`. Permanent retirement of `OwnerGate`, `OWNER_ACCESS_TOKEN`, and owner session cookies.
-- **V1.1 Improvement 19/25 (Dual-Settlement Accounting Foundation)**: VND-basis dual-settlement cross-currency accounting foundation in PostgreSQL and portfolio performance models.
-- **V1.1 Test Data Cleanup**: Purged unowned legacy 20M test data and enforced `investor_profile.user_id UUID NOT NULL UNIQUE`.
+## NEXT RELEASE STEPS
+When ready to release V1.3 to production:
+1. Apply the 6 migrations to Supabase production in exact chronological order (010000 -> 020000 -> 000000 -> 010000 -> 020000 -> 030000).
+2. Verify created database tables, unique constraints, append-only triggers, RLS policies, and RPC function `publish_strategy_version_atomic`.
+3. Push local commits to remote `origin/main` (`git push origin main`).
+4. Trigger or observe Render backend deployment; verify health at `https://vn-invest-assistant-api.onrender.com/api/health`, `/api/db-health`, and `/api/system/data-health`.
+5. Deploy Cloudflare Worker frontend (`npx wrangler deploy`); verify static assets and API proxy.
+6. Execute production smoke tests against public routes (`/api/system/data-health`, `/api/equity-opportunities`, `/api/market-context/vietnam`).
+7. Verify background scheduler evaluation runs cleanly via Cloudflare Worker cron (`*/15 * * * *`).
+8. Mark V1.3 production checkpoint complete.

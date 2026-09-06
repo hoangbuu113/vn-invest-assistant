@@ -377,3 +377,38 @@ $$\text{Source Adapter} \longrightarrow \text{Canonical Validation / Sanitizatio
 - **Strict Profile Scoping & Anti-Spoofing**: All private financial endpoints resolve the profile strictly via `WHERE user_id = req.user.id`. Any client-supplied `profileId` in query params or body is completely ignored and cannot spoof other users' data.
 - **Database Authority & Permission Model**: Private tables and financial RPCs are accessible exclusively by the backend's server-only Supabase `service_role` client. `anon` and `authenticated` Supabase roles have zero direct access to private tables.
 - **Background Alert Scheduler & Web Push Delivery**: Price alerts evaluate on a 15-minute background cron schedule (`POST /api/internal/alerts/evaluate`), independently authenticated via `ALERT_SCHEDULER_TOKEN`. Web Push delivers notifications on a best-effort per-device model (`public.push_subscriptions`, `public.alert_notification_deliveries`) with bounded retry (max 3 attempts, 15-minute backoff).
+
+---
+
+## 14. V1.3 Market Intelligence, Evidence & Stability Architecture (Features 01C–01G)
+
+### A. Strategy Stability & Publication Safety (Feature 01C)
+- **Two-Clock Lifecycle**: Decoupled continuous fast-clock evidence evaluation from patient slow-clock strategy publication. Lifecycle state machine: `STABLE`, `WATCH`, `REVIEW_REQUIRED`, `EVALUATING`.
+- **Deterministic Materiality**: State mutations occur strictly upon evaluated evidence changes, verified shocks, or confirmed multi-source consensus. Unchanged evidence or identical evaluations yield deterministic `KEEP`.
+- **Atomic Publication RPC**: Transactional RPC `publish_strategy_version_atomic(p_new_version, p_expected_current_strategy_id)` in PostgreSQL guarantees transactional supersession and insertion with zero-published prevention, concurrency locking (`FOR UPDATE`), and automatic rollback on failure.
+- **Production Safety**: Silent fallback to in-memory strategy storage in production is removed. Unavailability of database or RPC halts with an explicit error.
+- **Hysteresis Thresholds Policy**: Numeric hysteresis thresholds remain intentionally uncalibrated due to partial historical coverage across complete economic cycles; quantitative stability is governed deterministically without arbitrary fabricated thresholds.
+
+### B. Historical As-Of Evidence Replay (Feature 01D)
+- **Replay Safety Contract**: Implemented historical as-of evidence projection engine. All evidence evaluations evaluate state strictly as-of an explicit timestamp $T$ with zero lookahead bias.
+- **System-Knowable Timestamp Authority**: An observation is knowable to the system strictly when `asOf >= max(sourceAvailableAt, firstSeenAt)`. Publication timestamps alone cannot bypass system ingestion time, and future corrections or backfills never alter prior historical fingerprints.
+- **Claim Corroboration & Contradiction**: Structured claims track independent corroboration and contradictory evidence without discarding minority sources.
+
+### C. Observability & Data Health (Feature 01E)
+- **Deterministic Health States**: `HEALTHY`, `DEGRADED`, `FAILED`, `UNKNOWN` with strict precedence (`FAILED` > `DEGRADED` > `UNKNOWN` > `HEALTHY`).
+- **Domain vs Operational Health Invariant**: `job execution health != domain / data conclusion`. A collector or engine completing valid evaluation reporting empty or insufficient data is operationally `HEALTHY`. `DEGRADED` is strictly reserved for operational anomalies (partial persistence, WAF quarantine). `FAILED` is reserved for pipeline crashes, unhandled exceptions, or fatal DB failures.
+- **Durable Checkpoints**: State persists to `public.market_context_collector_checkpoints`. Production DB is strictly authoritative; memory store is used only in explicit offline/test mode.
+- **Public Observability Route**: `GET /api/system/data-health` reads durable checkpoints without external provider calls and returns HTTP 200 (or 503 if system status is `FAILED`), exposing zero secrets.
+
+### D. Vietnam Equity Evidence (Feature 01F)
+- **Canonical Stock Evidence Foundation**: Model and repository (`public.vn_equity_evidence_observations`) storing immutable evidence vintages for canonical Vietnam equities.
+- **Replay-Safe Timestamp Invariants**: Enforces `system_knowable_at >= first_seen_at` and `system_knowable_at >= source_available_at`.
+- **Scope Boundary**: Completed daily OHLCV bars ingested via backend collector with delayed freshness provenance. Stock fundamentals and official corporate disclosures remain truthfully declared as `SOURCE_NOT_PROVISIONED`.
+
+### E. Deterministic Equity Opportunity Engine (Feature 01G)
+- **Deterministic Authority**: Evaluates Vietnam equity universe against persisted evidence into explicit categories: `QUALIFIED`, `WATCH`, `INSUFFICIENT_EVIDENCE`, `REJECTED`.
+- **Policy Invariant**: Because no calibrated numeric qualification policy exists, `QUALIFIED` remains intentionally unused/reserved; current valid completed closes support `WATCH` only. Inactive assets evaluate to `REJECTED`.
+- **No Opaque Opportunity Scores**: Zero opaque numerical scoring, zero buy/sell/hold ratings, zero price targets, and zero probability estimates.
+- **AI Explanation Boundary**: AI generates explanations bounded strictly by candidate evidence. Any ungrounded numbers, schema violations, speculative language, or forbidden actions (`buy`, `sell`, `hold`, `mua`, `bán`, `giữ`, `target price`, `giá mục tiêu`, `probability`, `xác suất`, `confidence`, `expected return`) are deterministically rejected and fall back to evidence-linked deterministic prose.
+- **Qualification Immutability**: AI explanation failure or rejection never alters or promotes `candidate.qualificationStatus`.
+- **Route Namespace Preservation**: Public deterministic engine operates on `GET /api/equity-opportunities` and `GET /api/equity-opportunities/:symbol`. The existing private portfolio-aware `GET /api/opportunities` is fully preserved without modification.

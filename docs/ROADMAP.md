@@ -85,7 +85,44 @@ Post-V1 engineering is structured as targeted **V1.1 Improvements** (NOT Feature
 
 ---
 
-## 4. Product Purpose & Non-Goals
+## 4. V1.3 Market Intelligence & Evidence Architecture Upgrades (LOCAL COMPLETE)
+
+V1.3 delivers institutional-grade market intelligence, historical evidence replay, strategy stability, data health observability, and deterministic opportunity screening:
+
+### Feature 01C: Strategy Stability & Publication Safety
+- **Two-Clock Lifecycle**: Decoupled continuous fast-clock evidence evaluation from patient slow-clock strategy publication (`STABLE`, `WATCH`, `REVIEW_REQUIRED`, `EVALUATING`).
+- **Deterministic Materiality**: State mutations occur only on evaluated evidence changes or multi-source consensus; identical evidence produces deterministic `KEEP`.
+- **Atomic Publication RPC**: Transactional RPC `publish_strategy_version_atomic` in PostgreSQL with concurrency locks and rollback protection.
+- **Production Safety**: Silent fallback to in-memory strategy storage in production is removed.
+- **Shadow Replay**: Evaluates historical strategy stability without lookahead bias.
+- **Hysteresis Thresholds Policy**: Numeric hysteresis thresholds were intentionally not calibrated due to partial historical coverage across complete economic cycles; quantitative stability is governed deterministically without arbitrary fabricated thresholds.
+
+### Feature 01D: Historical As-Of Evidence Replay & Claim Corroboration
+- **Replay Safety Contract**: Time-travel evidence projection strictly as-of timestamp $T$.
+- **System-Knowable Authority**: Ingestion authority enforces `asOf >= max(sourceAvailableAt, firstSeenAt)`.
+- **Claim Corroboration**: Evidence links track multi-source independent corroboration and contradiction preservation.
+
+### Feature 01E: Observability & Data Health
+- **Deterministic Health States**: `HEALTHY`, `DEGRADED`, `FAILED`, `UNKNOWN` with strict precedence (`FAILED` > `DEGRADED` > `UNKNOWN` > `HEALTHY`).
+- **Domain Invariant**: `job execution health != domain / data conclusion`.
+- **Durable Checkpoints**: Checkpoints persist to `public.market_context_collector_checkpoints`. Production DB is strictly authoritative.
+- **Public Observability Route**: `GET /api/system/data-health` reads durable checkpoints without external provider dependencies.
+
+### Feature 01F: Vietnam Equity Evidence Foundation
+- **Canonical Evidence Model**: `public.vn_equity_evidence_observations` stores immutable evidence vintages for Vietnamese equities.
+- **Replay Timestamps**: Enforces `system_knowable_at >= first_seen_at` and `system_knowable_at >= source_available_at`.
+- **Scope Boundary**: Price evidence is supported; fundamentals and disclosures remain truthfully declared as `SOURCE_NOT_PROVISIONED`.
+
+### Feature 01G: Deterministic Equity Opportunity Engine
+- **Deterministic Screening**: Categorizes Vietnam equities into `QUALIFIED`, `WATCH`, `INSUFFICIENT_EVIDENCE`, `REJECTED`.
+- **Policy Invariant**: `QUALIFIED` is currently reserved pending calibrated valuation/liquidity policies; valid closes evaluate to `WATCH`.
+- **No Opaque Scores**: Zero opaque numerical scores, recommendations, price targets, or probabilities.
+- **AI Explanation Boundary**: AI explanations are bounded strictly by cited candidate evidence; ungrounded numbers and forbidden action/speculative terms trigger deterministic fallback.
+- **Qualification Immutability**: AI explanation failure never promotes, demotes, or mutates candidate qualification status.
+
+---
+
+## 5. Product Purpose & Non-Goals
 
 - **Core Product Purpose**: Public multi-asset market intelligence and tracking showcase application.
 - **Supporting Role**: Portfolio accounting is a supporting capability within the broader market intelligence workflow.
@@ -97,7 +134,7 @@ Post-V1 engineering is structured as targeted **V1.1 Improvements** (NOT Feature
 
 ---
 
-## 5. Token & Cost Efficiency Policy
+## 6. Token & Cost Efficiency Policy
 
 ### Verification Tiers
 - **LOW RISK**: Targeted UI checks, client build (`npm run build`).
