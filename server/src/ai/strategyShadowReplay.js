@@ -55,7 +55,155 @@ import {
 } from './strategyStabilityModel.js';
 
 export const SHADOW_REPLAY_POLICY_VERSION = 'strategy-stability-v2-shadow-01D';
-export const DEFAULT_WHIPSAW_THRESHOLD_MS = 14 * 24 * 3600 * 1000; // 14 days
+
+/**
+ * Resolves the specific material trigger evidence items and determines when the full
+ * trigger set became system-knowable according to 01D semantics:
+ *   systemKnowableAt = max(sourceAvailableAt, systemFirstSeenAt)
+ *
+ * For multiple required trigger items:
+ *   materialEventKnowableAt = max(systemKnowableAt of required trigger items)
+ *
+ * If any required trigger evidence item is missing a trustworthy timestamp or
+ * cannot be resolved:
+ *   reactionDelay = 'UNKNOWN'
+ */
+export function resolveMaterialTriggerEvidence({
+  triggerReasons = [],
+  observations = [],
+  news = [],
+  claims = [],
+  allObservations = [],
+  allNews = [],
+  allClaims = [],
+  assessmentTimeIso
+} = {}) {
+  const targetIds = new Set();
+  const targetClaimIds = new Set();
+
+  for (const r of triggerReasons) {
+    if (!r || typeof r !== 'object') continue;
+
+    if (r.observationId) targetIds.add(r.observationId);
+    if (r.evidenceId) targetIds.add(r.evidenceId);
+    if (Array.isArray(r.evidenceIds)) {
+      for (const id of r.evidenceIds) if (id) targetIds.add(id);
+    }
+    if (r.articleId) targetIds.add(r.articleId);
+    if (r.factId && !r.observationId) targetIds.add(r.factId);
+
+    if (r.claimId) targetClaimIds.add(r.claimId);
+
+    if (r.condition && r.condition.metric) {
+      targetIds.add(r.condition.metric);
+    }
+
+    if (Array.isArray(r.confirmationKeys)) {
+      for (const k of r.confirmationKeys) if (k) targetIds.add(k);
+    }
+  }
+
+  // Resolve claims to underlying evidence items
+  for (const claimId of targetClaimIds) {
+    const claimObj =
+      (claims || []).find((c) => c && c.claimId === claimId) ||
+      (allClaims || []).find((c) => c && c.claimId === claimId);
+
+    let foundUnderlyingEvidence = false;
+    if (claimObj && claimObj.subject) {
+      for (const obs of observations) {
+        if (obs && (obs.factId === claimObj.subject || obs.observationId === claimObj.subject || obs.id === claimObj.subject)) {
+          targetIds.add(obs.observationId || obs.id);
+          foundUnderlyingEvidence = true;
+        }
+      }
+      for (const art of news) {
+        if (art && (art.subject === claimObj.subject || art.articleId === claimObj.subject || art.id === claimObj.subject)) {
+          targetIds.add(art.articleId || art.id);
+          foundUnderlyingEvidence = true;
+        }
+      }
+    }
+
+    if (!foundUnderlyingEvidence) {
+      targetIds.add(claimId);
+    }
+  }
+
+  const triggerEvidenceIds = Array.from(targetIds).sort();
+
+  if (triggerEvidenceIds.length === 0) {
+    return {
+      triggerEvidenceIds: [],
+      materialEventKnowableAt: null,
+      materialEventKnowableAtMs: null,
+      reactionDelayMs: 'UNKNOWN',
+      reactionDelayStatus: 'UNKNOWN'
+    };
+  }
+
+  const combinedObs = [...observations, ...allObservations];
+  const combinedNews = [...news, ...allNews];
+  const combinedClaims = [...claims, ...allClaims];
+
+  const knowableTimestampsMs = [];
+  let hasUntrustworthyOrMissing = false;
+
+  for (const id of triggerEvidenceIds) {
+    let item = combinedObs.find((o) => o && (o.observationId === id || o.id === id));
+    if (!item) {
+      item = combinedObs.find((o) => o && o.factId === id);
+    }
+    if (!item) {
+      item = combinedNews.find((n) => n && (n.articleId === id || n.id === id));
+    }
+    if (!item) {
+      item = combinedClaims.find((c) => c && c.claimId === id);
+    }
+
+    if (!item) {
+      hasUntrustworthyOrMissing = true;
+      break;
+    }
+
+    const avail = resolveEvidenceAvailabilityTime(item);
+    if (!avail.replaySafe || avail.availabilityTimestampMs === null) {
+      hasUntrustworthyOrMissing = true;
+      break;
+    }
+
+    knowableTimestampsMs.push(avail.availabilityTimestampMs);
+  }
+
+  if (hasUntrustworthyOrMissing || knowableTimestampsMs.length === 0) {
+    return {
+      triggerEvidenceIds,
+      materialEventKnowableAt: null,
+      materialEventKnowableAtMs: null,
+      reactionDelayMs: 'UNKNOWN',
+      reactionDelayStatus: 'UNKNOWN'
+    };
+  }
+
+  const maxKnowableMs = Math.max(...knowableTimestampsMs);
+  const materialEventKnowableAt = new Date(maxKnowableMs).toISOString();
+
+  let reactionDelayMs = 'UNKNOWN';
+  if (assessmentTimeIso) {
+    const assessMs = new Date(assessmentTimeIso).getTime();
+    if (Number.isFinite(assessMs)) {
+      reactionDelayMs = Math.max(0, assessMs - maxKnowableMs);
+    }
+  }
+
+  return {
+    triggerEvidenceIds,
+    materialEventKnowableAt,
+    materialEventKnowableAtMs: maxKnowableMs,
+    reactionDelayMs,
+    reactionDelayStatus: typeof reactionDelayMs === 'number' ? 'RESOLVED' : 'UNKNOWN'
+  };
+}
 
 /**
  * Extracts and sorts distinct chronological as-of timestamps from historical evidence or window parameters.
@@ -141,7 +289,7 @@ export function extractHistoricalTimelinePoints({
  * @param {object} [params.window=null] - { from, to, stepMs }
  * @param {Array<string|Date>} [params.asOfPoints=null]
  * @param {object} [params.initialStrategy=null]
- * @param {number} [params.whipsawThresholdMs=DEFAULT_WHIPSAW_THRESHOLD_MS]
+ * @param {number|null} [params.whipsawThresholdMs=null]
  * @param {string} [params.policyVersion=STABILITY_POLICY_VERSION]
  * @returns {object} Machine-readable shadow replay report
  */
@@ -152,7 +300,7 @@ export function runStrategyShadowReplay({
   window = null,
   asOfPoints = null,
   initialStrategy = null,
-  whipsawThresholdMs = DEFAULT_WHIPSAW_THRESHOLD_MS,
+  whipsawThresholdMs = null,
   policyVersion = STABILITY_POLICY_VERSION
 } = {}) {
   // 1. Security assertion
@@ -244,7 +392,11 @@ export function runStrategyShadowReplay({
           includedObservationsCount: 0,
           includedNewsCount: 0,
           excludedFutureEvidenceCount: historicalPacket.replayMetadata.excludedFutureEvidenceCount,
-          isColdStartBootstrap: true
+          isColdStartBootstrap: true,
+          triggerEvidenceIds: [],
+          materialEventKnowableAt: null,
+          reactionDelayMs: null,
+          reactionDelayStatus: 'NOT_APPLICABLE'
         });
         continue;
       }
@@ -326,7 +478,11 @@ export function runStrategyShadowReplay({
         includedObservationsCount: historicalPacket.observations.length,
         includedNewsCount: historicalPacket.news.length,
         excludedFutureEvidenceCount: historicalPacket.replayMetadata.excludedFutureEvidenceCount,
-        isColdStartBootstrap: true
+        isColdStartBootstrap: true,
+        triggerEvidenceIds: [],
+        materialEventKnowableAt: null,
+        reactionDelayMs: null,
+        reactionDelayStatus: 'NOT_APPLICABLE'
       });
       continue;
     }
@@ -383,13 +539,28 @@ export function runStrategyShadowReplay({
         shockOverride: gateResult.shockOverride,
         includedObservationsCount: historicalPacket.observations.length,
         includedNewsCount: historicalPacket.news.length,
-        excludedFutureEvidenceCount: historicalPacket.replayMetadata.excludedFutureEvidenceCount
+        excludedFutureEvidenceCount: historicalPacket.replayMetadata.excludedFutureEvidenceCount,
+        triggerEvidenceIds: (gateResult.watchReasons || []).flatMap((r) => r.confirmationKeys || []),
+        materialEventKnowableAt: null,
+        reactionDelayMs: null,
+        reactionDelayStatus: 'WATCH'
       });
       continue;
     }
 
     // Path B: REVIEW_REQUIRED state
     if (gateResult.lifecycleState === STRATEGY_LIFECYCLE_STATES.REVIEW_REQUIRED) {
+      const triggerEvidenceInfo = resolveMaterialTriggerEvidence({
+        triggerReasons: gateResult.reasons,
+        observations: historicalPacket.observations,
+        news: historicalPacket.news,
+        claims: historicalPacket.claims,
+        allObservations: historicalObservations,
+        allNews: historicalNews,
+        allClaims: customClaims,
+        assessmentTimeIso: asOfIso
+      });
+
       // Deterministic candidate synthesis (provider-free)
       const candidate = generateDeterministicMarketStrategist({ factPacket, now });
       const candidateDecisionFingerprint = computeDecisionFingerprint(candidate);
@@ -449,7 +620,11 @@ export function runStrategyShadowReplay({
           shockOverride: gateResult.shockOverride,
           includedObservationsCount: historicalPacket.observations.length,
           includedNewsCount: historicalPacket.news.length,
-          excludedFutureEvidenceCount: historicalPacket.replayMetadata.excludedFutureEvidenceCount
+          excludedFutureEvidenceCount: historicalPacket.replayMetadata.excludedFutureEvidenceCount,
+          triggerEvidenceIds: triggerEvidenceInfo.triggerEvidenceIds,
+          materialEventKnowableAt: triggerEvidenceInfo.materialEventKnowableAt,
+          reactionDelayMs: triggerEvidenceInfo.reactionDelayMs,
+          reactionDelayStatus: triggerEvidenceInfo.reactionDelayStatus
         });
         continue;
       }
@@ -543,7 +718,11 @@ export function runStrategyShadowReplay({
         shockOverride: gateResult.shockOverride,
         includedObservationsCount: historicalPacket.observations.length,
         includedNewsCount: historicalPacket.news.length,
-        excludedFutureEvidenceCount: historicalPacket.replayMetadata.excludedFutureEvidenceCount
+        excludedFutureEvidenceCount: historicalPacket.replayMetadata.excludedFutureEvidenceCount,
+        triggerEvidenceIds: triggerEvidenceInfo.triggerEvidenceIds,
+        materialEventKnowableAt: triggerEvidenceInfo.materialEventKnowableAt,
+        reactionDelayMs: triggerEvidenceInfo.reactionDelayMs,
+        reactionDelayStatus: triggerEvidenceInfo.reactionDelayStatus
       });
       continue;
     }
@@ -591,7 +770,11 @@ export function runStrategyShadowReplay({
       shockOverride: gateResult.shockOverride,
       includedObservationsCount: historicalPacket.observations.length,
       includedNewsCount: historicalPacket.news.length,
-      excludedFutureEvidenceCount: historicalPacket.replayMetadata.excludedFutureEvidenceCount
+      excludedFutureEvidenceCount: historicalPacket.replayMetadata.excludedFutureEvidenceCount,
+      triggerEvidenceIds: [],
+      materialEventKnowableAt: null,
+      reactionDelayMs: null,
+      reactionDelayStatus: 'NOT_APPLICABLE'
     });
   }
 
@@ -646,7 +829,7 @@ export function computeShadowReplayMetrics({
   timeline = [],
   shadowVersions = [],
   shadowAssessments = [],
-  whipsawThresholdMs = DEFAULT_WHIPSAW_THRESHOLD_MS,
+  whipsawThresholdMs = null,
   historicalObservations = [],
   historicalNews = []
 } = {}) {
@@ -675,8 +858,11 @@ export function computeShadowReplayMetrics({
     }
   }
 
-  // B. Whipsaws (A -> B -> A rapid reversal within whipsawThresholdMs)
+  // B. Whipsaws (A -> B -> A rapid reversal within caller-provided whipsawThresholdMs)
+  const isWhipsawConfigured = Number.isFinite(whipsawThresholdMs) && whipsawThresholdMs > 0;
+  const rawReversals = [];
   const whipsaws = [];
+
   for (let i = 0; i < strategyFlips.length - 1; i++) {
     const flip1 = strategyFlips[i];
     const flip2 = strategyFlips[i + 1];
@@ -686,19 +872,28 @@ export function computeShadowReplayMetrics({
       const t2 = new Date(flip2.timestamp).getTime();
       const elapsedMs = t2 - t1;
 
-      if (elapsedMs <= whipsawThresholdMs) {
+      const reversalEntry = {
+        reversalIndex: rawReversals.length + 1,
+        stanceA: flip1.fromStance,
+        stanceB: flip1.toStance,
+        flip1Timestamp: flip1.timestamp,
+        flip2Timestamp: flip2.timestamp,
+        elapsedMs,
+        elapsedDays: Number((elapsedMs / (1000 * 3600 * 24)).toFixed(2))
+      };
+      rawReversals.push(reversalEntry);
+
+      if (isWhipsawConfigured && elapsedMs <= whipsawThresholdMs) {
         whipsaws.push({
           whipsawIndex: whipsaws.length + 1,
-          stanceA: flip1.fromStance,
-          stanceB: flip1.toStance,
-          flip1Timestamp: flip1.timestamp,
-          flip2Timestamp: flip2.timestamp,
-          elapsedMs,
-          elapsedDays: Number((elapsedMs / (1000 * 3600 * 24)).toFixed(2))
+          ...reversalEntry
         });
       }
     }
   }
+
+  const whipsawStatus = isWhipsawConfigured ? 'CONFIGURED' : 'UNCONFIGURED';
+  const whipsawCount = isWhipsawConfigured ? whipsaws.length : 'UNCONFIGURED';
 
   // C. WATCH state telemetry
   let totalTimeInWatchMs = 0;
@@ -764,19 +959,59 @@ export function computeShadowReplayMetrics({
 
   // E. Reaction delays (time from material evidence system-knowable availability to review/publication)
   const reactionDelays = [];
+  const reactionDelayBreakdown = [];
+
   for (const step of timeline) {
-    if (step.assessmentResult === ASSESSMENT_RESULTS.PUBLISH_NEW && !step.isColdStartBootstrap) {
-      const stepMs = new Date(step.asOf).getTime();
-      const dataAsOfMs = step.dataAsOf ? new Date(step.dataAsOf).getTime() : stepMs;
-      if (stepMs >= dataAsOfMs) {
-        reactionDelays.push(stepMs - dataAsOfMs);
+    if (
+      (step.assessmentResult === ASSESSMENT_RESULTS.PUBLISH_NEW ||
+       step.lifecycleState === STRATEGY_LIFECYCLE_STATES.REVIEW_REQUIRED) &&
+      !step.isColdStartBootstrap
+    ) {
+      let delayMs = step.reactionDelayMs;
+      let materialKnowableAt = step.materialEventKnowableAt || null;
+      let triggerIds = step.triggerEvidenceIds || [];
+      let status = step.reactionDelayStatus || (typeof delayMs === 'number' ? 'RESOLVED' : 'UNKNOWN');
+
+      if (delayMs === undefined) {
+        const resolved = resolveMaterialTriggerEvidence({
+          triggerReasons: step.triggerReasons || [],
+          observations: historicalObservations,
+          news: historicalNews,
+          allObservations: historicalObservations,
+          allNews: historicalNews,
+          assessmentTimeIso: step.asOf
+        });
+        delayMs = resolved.reactionDelayMs;
+        materialKnowableAt = resolved.materialEventKnowableAt;
+        triggerIds = resolved.triggerEvidenceIds;
+        status = resolved.reactionDelayStatus;
+      }
+
+      reactionDelayBreakdown.push({
+        stepIndex: step.stepIndex,
+        asOf: step.asOf,
+        activeStrategyId: step.activeStrategyId,
+        assessmentResult: step.assessmentResult,
+        triggerReasons: step.triggerReasons || [],
+        triggerEvidenceIds: triggerIds,
+        materialEventKnowableAt: materialKnowableAt,
+        reactionDelayMs: delayMs !== undefined ? delayMs : 'UNKNOWN',
+        status
+      });
+
+      if (typeof delayMs === 'number' && Number.isFinite(delayMs)) {
+        reactionDelays.push(delayMs);
       }
     }
   }
 
   const averageReactionDelayMs = reactionDelays.length > 0
     ? Math.round(reactionDelays.reduce((a, b) => a + b, 0) / reactionDelays.length)
-    : 0;
+    : 'UNKNOWN';
+
+  const averageReactionDelayHours = typeof averageReactionDelayMs === 'number'
+    ? Number((averageReactionDelayMs / (1000 * 3600)).toFixed(2))
+    : 'UNKNOWN';
 
   // F. Deduplication / Syndication suppression
   // Count identical news titles or observation duplicates that were not included simultaneously
@@ -803,8 +1038,11 @@ export function computeShadowReplayMetrics({
     totalSteps: timeline.length,
     totalFlips: strategyFlips.length,
     strategyFlips,
-    whipsawCount: whipsaws.length,
+    whipsawStatus,
+    whipsawThresholdMs: isWhipsawConfigured ? whipsawThresholdMs : null,
+    whipsawCount,
     whipsaws,
+    rawReversals,
     timeInWatchMs: totalTimeInWatchMs,
     timeInWatchHours: Number((totalTimeInWatchMs / (1000 * 3600)).toFixed(2)),
     watchEpisodesCount,
@@ -816,8 +1054,9 @@ export function computeShadowReplayMetrics({
     detailsCount,
     confidenceCount,
     reactionDelays,
+    reactionDelayBreakdown,
     averageReactionDelayMs,
-    averageReactionDelayHours: Number((averageReactionDelayMs / (1000 * 3600)).toFixed(2)),
+    averageReactionDelayHours,
     suppressedDuplicatesCount,
     revisionEventsCount,
     shockEventsCount,
@@ -841,14 +1080,22 @@ export function formatShadowReplaySummary(report) {
   const { replayWindow, dataCoverage, metrics } = report;
   const lines = [];
 
+  const whipsawSummary = metrics.whipsawStatus === 'CONFIGURED'
+    ? `${metrics.whipsawCount} (threshold: ${metrics.whipsawThresholdMs}ms)`
+    : 'UNCONFIGURED (no caller-supplied whipsaw threshold)';
+
+  const reactionDelaySummary = typeof metrics.averageReactionDelayHours === 'number'
+    ? `${metrics.averageReactionDelayHours} hours from material event`
+    : 'UNKNOWN (material trigger timestamp unresolved)';
+
   lines.push('### Shadow Replay & Calibration Summary');
   lines.push(`- **Replay Window**: ${replayWindow.from || 'N/A'} → ${replayWindow.to || 'N/A'} (${replayWindow.totalSteps} steps)`);
   lines.push(`- **Data Coverage**: ${dataCoverage.status} (${dataCoverage.historicalObservationsCount} observations, ${dataCoverage.historicalNewsCount} news items)`);
   lines.push(`- **Strategy Flips**: ${metrics.totalFlips}`);
-  lines.push(`- **Whipsaws (A→B→A Reversals)**: ${metrics.whipsawCount}`);
+  lines.push(`- **Whipsaws (A→B→A Reversals)**: ${whipsawSummary}`);
   lines.push(`- **Time in WATCH**: ${metrics.timeInWatchHours} hours across ${metrics.watchEpisodesCount} episode(s) (${metrics.unresolvedWatchCount} unresolved)`);
   lines.push(`- **Review / Publication Counts**: ${metrics.reviewRequiredCount} reviews triggered, ${metrics.publishNewCount} new versions published, ${metrics.keepCount} keeps`);
-  lines.push(`- **Average Reaction Delay**: ${metrics.averageReactionDelayHours} hours from material dataAsOf`);
+  lines.push(`- **Average Reaction Delay**: ${reactionDelaySummary}`);
   lines.push(`- **Syndicated / Duplicate Suppression**: ${metrics.suppressedDuplicatesCount} suppressed`);
   lines.push(`- **Data Revisions / Shocks Handled**: ${metrics.revisionEventsCount} revisions, ${metrics.shockEventsCount} shocks`);
   lines.push(`- **Determinism Verification**: ${metrics.isDeterministic ? 'PASS' : 'FAIL'} (digest: ${metrics.runDigest?.slice(0, 12)}...)`);

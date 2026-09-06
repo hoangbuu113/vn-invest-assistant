@@ -17,6 +17,5 @@ export {
   runStrategyShadowReplay,
   computeShadowReplayMetrics,
   formatShadowReplaySummary,
-  SHADOW_REPLAY_POLICY_VERSION,
-  DEFAULT_WHIPSAW_THRESHOLD_MS
+  SHADOW_REPLAY_POLICY_VERSION
 } from '../ai/strategyShadowReplay.js';

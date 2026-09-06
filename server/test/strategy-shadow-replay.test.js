@@ -5,6 +5,7 @@ import {
   runStrategyShadowReplay,
   computeShadowReplayMetrics,
   formatShadowReplaySummary,
+  resolveMaterialTriggerEvidence,
   SHADOW_REPLAY_POLICY_VERSION
 } from '../src/ai/strategyShadowReplay.js';
 
@@ -275,7 +276,7 @@ test('6. shadow replay: executes without API keys and performs zero external pro
 // ============================================================
 // 7. Whipsaw Detection (A -> B -> A)
 // ============================================================
-test('7. shadow replay: accurately detects and reports A -> B -> A whipsaw reversals', () => {
+test('7a. shadow replay: omitted whipsawThresholdMs reports UNCONFIGURED without guessing 14 days', () => {
   const v1 = createStrategyVersion({
     strategyId: 'strat_w1',
     publishedAt: '2026-08-01T00:00:00.000Z',
@@ -306,18 +307,76 @@ test('7. shadow replay: accurately detects and reports A -> B -> A whipsaw rever
     regime: { directionalStance: 'BEARISH' }
   });
 
+  // Omitted whipsawThresholdMs
   const metrics = computeShadowReplayMetrics({
     timeline: [],
     shadowVersions: [v1, v2, v3],
-    shadowAssessments: [],
-    whipsawThresholdMs: 14 * 24 * 3600 * 1000
+    shadowAssessments: []
   });
 
   assert.equal(metrics.totalFlips, 2);
-  assert.equal(metrics.whipsawCount, 1, 'Must detect 1 A->B->A whipsaw');
-  assert.equal(metrics.whipsaws[0].stanceA, 'DEFENSIVE');
-  assert.equal(metrics.whipsaws[0].stanceB, 'RISK_ON');
-  assert.equal(metrics.whipsaws[0].elapsedDays, 5);
+  assert.equal(metrics.whipsawStatus, 'UNCONFIGURED');
+  assert.equal(metrics.whipsawThresholdMs, null);
+  assert.equal(metrics.whipsawCount, 'UNCONFIGURED');
+  assert.equal(metrics.whipsaws.length, 0);
+  assert.equal(metrics.rawReversals.length, 1);
+  assert.equal(metrics.rawReversals[0].elapsedDays, 5);
+});
+
+test('7b. shadow replay: explicit whipsawThresholdMs accurately classifies reversals', () => {
+  const v1 = createStrategyVersion({
+    strategyId: 'strat_w1',
+    publishedAt: '2026-08-01T00:00:00.000Z',
+    evidenceFingerprint: 'fp_w1',
+    decisionFingerprint: 'dfp_w1',
+    confidence: 'HIGH',
+    executiveDecision: { stance: 'DEFENSIVE' },
+    regime: { directionalStance: 'BEARISH' }
+  });
+
+  const v2 = createStrategyVersion({
+    strategyId: 'strat_w2',
+    publishedAt: '2026-08-05T00:00:00.000Z',
+    evidenceFingerprint: 'fp_w2',
+    decisionFingerprint: 'dfp_w2',
+    confidence: 'HIGH',
+    executiveDecision: { stance: 'RISK_ON' },
+    regime: { directionalStance: 'BULLISH' }
+  });
+
+  const v3 = createStrategyVersion({
+    strategyId: 'strat_w3',
+    publishedAt: '2026-08-10T00:00:00.000Z',
+    evidenceFingerprint: 'fp_w3',
+    decisionFingerprint: 'dfp_w3',
+    confidence: 'HIGH',
+    executiveDecision: { stance: 'DEFENSIVE' },
+    regime: { directionalStance: 'BEARISH' }
+  });
+
+  // Explicit 6 days window -> 5 days elapsed is within threshold
+  const metrics6d = computeShadowReplayMetrics({
+    timeline: [],
+    shadowVersions: [v1, v2, v3],
+    shadowAssessments: [],
+    whipsawThresholdMs: 6 * 24 * 3600 * 1000
+  });
+
+  assert.equal(metrics6d.whipsawStatus, 'CONFIGURED');
+  assert.equal(metrics6d.whipsawCount, 1);
+  assert.equal(metrics6d.whipsaws[0].stanceA, 'DEFENSIVE');
+  assert.equal(metrics6d.whipsaws[0].stanceB, 'RISK_ON');
+
+  // Explicit 3 days window -> 5 days elapsed is outside threshold
+  const metrics3d = computeShadowReplayMetrics({
+    timeline: [],
+    shadowVersions: [v1, v2, v3],
+    shadowAssessments: [],
+    whipsawThresholdMs: 3 * 24 * 3600 * 1000
+  });
+
+  assert.equal(metrics3d.whipsawStatus, 'CONFIGURED');
+  assert.equal(metrics3d.whipsawCount, 0);
 });
 
 // ============================================================
@@ -370,7 +429,8 @@ test('9. shadow replay: reports INSUFFICIENT coverage without fabricating fake s
   assert.ok(report.dataCoverage.dataGaps.includes('NO_HISTORICAL_OBSERVATIONS_PROVIDED'));
   assert.ok(report.dataCoverage.dataGaps.includes('NO_HISTORICAL_NEWS_PROVIDED'));
   assert.equal(report.metrics.totalFlips, 0);
-  assert.equal(report.metrics.whipsawCount, 0);
+  assert.equal(report.metrics.whipsawStatus, 'UNCONFIGURED');
+  assert.equal(report.metrics.whipsawCount, 'UNCONFIGURED');
 });
 
 // ============================================================
@@ -428,5 +488,178 @@ test('12. shadow replay: FAILED/DEFERRED evaluations do not become completed bas
   assert.equal(report.shadowVersions.length, 1);
   assert.equal(report.shadowAssessments.length, 1);
   assert.equal(report.shadowAssessments[0].evaluationStatus, EVALUATION_STATUSES.COMPLETED);
+});
+
+// ============================================================
+// 13. Reaction Delay Uses Specific Material Event Timestamp, Not Generic dataAsOf
+// ============================================================
+test('13. shadow replay: generic dataAsOf newer than material event does not distort reaction delay', () => {
+  // Material event: CPI final revision available at 2026-08-15T00:00:00.000Z
+  const matObs = Object.freeze(createMarketObservation({
+    observationId: 'vn.macro.cpi.yoy:2026-07:final',
+    factId: 'vn.macro.cpi.yoy',
+    pillar: 'macro',
+    value: 4.35,
+    period: '2026-07',
+    referenceTime: '2026-07',
+    observedAt: '2026-08-15T00:00:00.000Z',
+    publishedAt: '2026-08-15T00:00:00.000Z',
+    firstSeenAt: '2026-08-15T00:00:00.000Z',
+    revision: 'revised'
+  }));
+
+  // Unrelated contemporary news available at 2026-08-19T00:00:00.000Z (generic dataAsOf)
+  const newerUnrelatedNews = Object.freeze({
+    articleId: 'art_unrelated_news_1',
+    title: 'Thị trường phân bón quý 3 duy trì ổn định',
+    summary: 'Giá phân bón Urê thế giới dao động nhẹ trong phiên hôm nay.',
+    source: 'CafeF',
+    dependencyGroup: 'CAFEF',
+    url: 'https://cafef.vn/phan-bon.chn',
+    publishedAt: '2026-08-19T00:00:00.000Z',
+    firstSeenAt: '2026-08-19T00:00:00.000Z'
+  });
+
+  // Replay evaluates at 2026-08-20T00:00:00.000Z
+  const assessmentTimeIso = '2026-08-20T00:00:00.000Z';
+  const resolved = resolveMaterialTriggerEvidence({
+    triggerReasons: [{
+      type: 'OFFICIAL_REVISION_CONSUMED',
+      observationId: 'vn.macro.cpi.yoy:2026-07:final',
+      factId: 'vn.macro.cpi.yoy'
+    }],
+    observations: [matObs],
+    news: [newerUnrelatedNews],
+    assessmentTimeIso
+  });
+
+  assert.equal(resolved.reactionDelayStatus, 'RESOLVED');
+  assert.equal(resolved.materialEventKnowableAt, '2026-08-15T00:00:00.000Z');
+  // Delay must be exactly 5 days (from Aug 15 to Aug 20 = 5 * 86400000 = 432000000 ms), NOT 1 day (Aug 19 to Aug 20)
+  const expectedDelayMs = 5 * 24 * 3600 * 1000;
+  assert.equal(resolved.reactionDelayMs, expectedDelayMs);
+});
+
+// ============================================================
+// 14. Unrelated News Arriving Later Does Not Shorten Reaction Delay
+// ============================================================
+test('14. shadow replay: unrelated news arriving later does not shorten reaction delay', () => {
+  const matObs = Object.freeze(createMarketObservation({
+    observationId: 'vn.macro.cpi.yoy:2026-07:final',
+    factId: 'vn.macro.cpi.yoy',
+    pillar: 'macro',
+    value: 4.35,
+    period: '2026-07',
+    referenceTime: '2026-07',
+    observedAt: '2026-08-10T00:00:00.000Z',
+    publishedAt: '2026-08-10T00:00:00.000Z',
+    firstSeenAt: '2026-08-10T00:00:00.000Z',
+    revision: 'revised'
+  }));
+
+  const unrelatedLateNews = Object.freeze({
+    articleId: 'art_late_unrelated_news',
+    title: 'Giá vàng SJC tiếp tục xu hướng đi ngang',
+    summary: 'Giá vàng miếng SJC duy trì mức giá ổn định trên thị trường tự do.',
+    source: 'VnExpress',
+    dependencyGroup: 'VNEXPRESS',
+    url: 'https://vnexpress.net/vang.html',
+    publishedAt: '2026-08-19T23:00:00.000Z',
+    firstSeenAt: '2026-08-19T23:00:00.000Z'
+  });
+
+  // Delay without unrelated news
+  const resWithoutNews = resolveMaterialTriggerEvidence({
+    triggerReasons: [{
+      type: 'OFFICIAL_REVISION_CONSUMED',
+      observationId: 'vn.macro.cpi.yoy:2026-07:final',
+      factId: 'vn.macro.cpi.yoy'
+    }],
+    observations: [matObs],
+    news: [],
+    assessmentTimeIso: '2026-08-20T00:00:00.000Z'
+  });
+
+  // Delay with unrelated news arriving 1 hour before assessment
+  const resWithNews = resolveMaterialTriggerEvidence({
+    triggerReasons: [{
+      type: 'OFFICIAL_REVISION_CONSUMED',
+      observationId: 'vn.macro.cpi.yoy:2026-07:final',
+      factId: 'vn.macro.cpi.yoy'
+    }],
+    observations: [matObs],
+    news: [unrelatedLateNews],
+    assessmentTimeIso: '2026-08-20T00:00:00.000Z'
+  });
+
+  assert.equal(resWithNews.reactionDelayMs, resWithoutNews.reactionDelayMs);
+  assert.equal(resWithNews.reactionDelayMs, 10 * 24 * 3600 * 1000);
+});
+
+// ============================================================
+// 15. Multiple Required Trigger Evidence Items
+// ============================================================
+test('15. shadow replay: multiple required trigger items start delay from max(systemKnowableAt)', () => {
+  const itemA = Object.freeze(createMarketObservation({
+    observationId: 'obs_macro_cpi',
+    factId: 'vn.macro.cpi.yoy',
+    pillar: 'macro',
+    value: 4.1,
+    observedAt: '2026-08-10T00:00:00.000Z',
+    publishedAt: '2026-08-10T00:00:00.000Z',
+    firstSeenAt: '2026-08-10T00:00:00.000Z'
+  }));
+
+  const itemB = Object.freeze(createMarketObservation({
+    observationId: 'obs_monetary_rate',
+    factId: 'vn.monetary.refinancing_rate',
+    pillar: 'monetary',
+    value: 5.0,
+    observedAt: '2026-08-16T00:00:00.000Z',
+    publishedAt: '2026-08-16T00:00:00.000Z',
+    firstSeenAt: '2026-08-16T00:00:00.000Z'
+  }));
+
+  const assessmentTimeIso = '2026-08-20T00:00:00.000Z';
+  const resolved = resolveMaterialTriggerEvidence({
+    triggerReasons: [
+      { type: 'DATA_REVISION', observationId: 'obs_macro_cpi' },
+      { type: 'DATA_REVISION', observationId: 'obs_monetary_rate' }
+    ],
+    observations: [itemA, itemB],
+    assessmentTimeIso
+  });
+
+  assert.equal(resolved.triggerEvidenceIds.length, 2);
+  // Full trigger set only became knowable when itemB arrived on Aug 16 (max(Aug 10, Aug 16))
+  assert.equal(resolved.materialEventKnowableAt, '2026-08-16T00:00:00.000Z');
+  // Delay is Aug 20 - Aug 16 = 4 days
+  assert.equal(resolved.reactionDelayMs, 4 * 24 * 3600 * 1000);
+});
+
+// ============================================================
+// 16. Missing Trustworthy Material Timestamp -> UNKNOWN
+// ============================================================
+test('16. shadow replay: missing trustworthy material timestamp returns UNKNOWN without fabricating zero', () => {
+  // Observation missing trustworthy systemFirstSeen / observedAt -> resolveEvidenceAvailabilityTime marks replaySafe=false
+  const unsafeObs = Object.freeze(createMarketObservation({
+    observationId: 'obs_untrusted_first_seen',
+    factId: 'vn.macro.cpi.yoy',
+    pillar: 'macro',
+    value: 4.1,
+    publishedAt: '2026-08-10T00:00:00.000Z'
+    // no observedAt, no firstSeenAt
+  }));
+
+  const assessmentTimeIso = '2026-08-20T00:00:00.000Z';
+  const resolved = resolveMaterialTriggerEvidence({
+    triggerReasons: [{ type: 'DATA_REVISION', observationId: 'obs_untrusted_first_seen' }],
+    observations: [unsafeObs],
+    assessmentTimeIso
+  });
+
+  assert.equal(resolved.materialEventKnowableAt, null);
+  assert.equal(resolved.reactionDelayMs, 'UNKNOWN');
+  assert.equal(resolved.reactionDelayStatus, 'UNKNOWN');
 });
 
