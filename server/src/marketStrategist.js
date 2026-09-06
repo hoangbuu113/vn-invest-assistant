@@ -13,6 +13,7 @@ import {
   getLatestStrategyAssessment
 } from './ai/strategyStabilityRepository.js';
 import { recordJobHealth, HEALTH_STATES, OBSERVED_JOBS, ERROR_CATEGORIES } from './observability/dataHealth.js';
+import { attachMarketStrategyConfidence } from './ai/confidenceService.js';
 
 export {
   buildMarketStrategistFactPacket,
@@ -48,7 +49,8 @@ export async function getMarketStrategist({
   allowLlm = true,
   client = undefined,
   isReadOnly = false,
-  idempotencyKey = null
+  idempotencyKey = null,
+  attachConfidenceFn = attachMarketStrategyConfidence
 } = {}) {
   const startTime = Date.now();
   // 1. Fetch validated market context facts from the fabric (L1 cache / persistence only)
@@ -141,6 +143,13 @@ export async function getMarketStrategist({
       isReadOnly,
       idempotencyKey,
       getAuthoritativeEvidenceFingerprint
+    });
+    stabilityResult = await attachConfidenceFn({
+      factPacket,
+      strategyResult: stabilityResult,
+      now,
+      client,
+      isReadOnly
     });
   } catch (strategyErr) {
     const durationMs = Date.now() - startTime;

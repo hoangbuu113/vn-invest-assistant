@@ -4543,7 +4543,7 @@ body {
   letter-spacing: -0.01em;
 }
 
-.strategist-conviction {
+.strategist-confidence-grade {
   display: flex;
   align-items: center;
   gap: 0.45rem;
@@ -4556,12 +4556,12 @@ body {
   white-space: nowrap;
 }
 
-.strategist-conviction strong {
+.strategist-confidence-grade strong {
   color: #ffffff;
   font-size: 0.72rem;
 }
 
-.strategist-conviction strong::before {
+.strategist-confidence-grade strong::before {
   display: inline-block;
   width: 6px;
   height: 6px;
@@ -4572,12 +4572,81 @@ body {
   vertical-align: 1px;
 }
 
-.strategist-conviction.conviction-high strong::before {
+.strategist-confidence-grade.confidence-high strong::before {
   background: #34d399;
 }
 
-.strategist-conviction.conviction-medium strong::before {
+.strategist-confidence-grade.confidence-medium strong::before {
   background: #fbbf24;
+}
+
+.strategist-confidence-grade.confidence-low strong::before,
+.strategist-confidence-grade.confidence-insufficient_evidence strong::before {
+  background: #fb7185;
+}
+
+.strategist-confidence-framework {
+  margin-top: 0.9rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.strategist-confidence-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.strategist-confidence-facts > span {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  padding: 0.35rem 0.55rem;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 6px;
+  background: rgba(15, 23, 42, 0.28);
+}
+
+.strategist-confidence-facts small {
+  color: #94a3b8;
+  font-size: 0.67rem;
+}
+
+.strategist-confidence-facts strong {
+  color: #f8fafc;
+  font-size: 0.72rem;
+}
+
+.strategist-confidence-explanation {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+
+.strategist-confidence-explanation > div > strong {
+  color: #dbeafe;
+  font-size: 0.7rem;
+}
+
+.strategist-confidence-explanation ul {
+  margin: 0.35rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.strategist-confidence-explanation li {
+  margin-top: 0.25rem;
+  color: #cbd5e1;
+  font-size: 0.7rem;
+  line-height: 1.45;
+}
+
+.strategist-confidence-disclaimer {
+  margin: 0.7rem 0 0;
+  color: #94a3b8;
+  font-size: 0.66rem;
+  line-height: 1.45;
 }
 
 .strategist-core-view {
@@ -5140,8 +5209,13 @@ body {
     gap: 0.65rem;
   }
 
-  .strategist-conviction {
+  .strategist-confidence-grade {
     white-space: normal;
+  }
+
+  .strategist-confidence-explanation {
+    grid-template-columns: 1fr;
+    gap: 0.55rem;
   }
 
   .strategist-action-now {

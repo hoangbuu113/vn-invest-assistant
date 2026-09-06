@@ -101,8 +101,18 @@ export function buildMarketStrategistFactPacket({
       observedAt: obs.observedAt || obs.observed_at || null,
       publishedAt: obs.publishedAt || obs.published_at || null,
       publishedTime: obs.publishedTime || obs.published_at || obs.recordedAt || null,
+      sourceAvailableAt: obs.sourceAvailableAt || obs.source_available_at || obs.publishedAt || obs.published_at || obs.observedAt || obs.observed_at || null,
+      firstSeenAt: obs.firstSeenAt || obs.first_seen_at || obs.initialFetchedAt || obs.fetchedAt || obs.fetched_at || null,
+      fetchedAt: obs.fetchedAt || obs.fetched_at || null,
       revision: obs.revision || obs.quality || 'verified',
-      limitations: obs.limitations || null
+      limitations: obs.limitations || null,
+      authorityLevel: obs.authorityLevel || obs.authority_level || null,
+      sourceContentHash: obs.sourceContentHash || obs.source_content_hash || null,
+      cadenceValidCarryForward: obs.cadenceValidCarryForward === true,
+      freshnessDecision: obs.freshnessDecision || null,
+      eventStillEffective: obs.eventStillEffective === true,
+      conflictStatus: obs.conflictStatus || null,
+      normalizedConflict: obs.normalizedConflict || null
     });
   }
 

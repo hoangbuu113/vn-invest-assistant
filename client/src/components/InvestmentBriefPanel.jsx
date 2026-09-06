@@ -152,10 +152,12 @@ export function InvestmentBriefPanel() {
                     {strategistView.executiveDecision.stanceLabel}
                   </strong>
                 </div>
-                <div className={`strategist-conviction conviction-${strategistView.executiveDecision.conviction}`}>
-                  <span>Mức độ xác tín</span>
-                  <strong>{strategistView.executiveDecision.convictionLabel}</strong>
-                </div>
+                {strategistView.confidenceAssessment && (
+                  <div className={`strategist-confidence-grade confidence-${strategistView.confidenceAssessment.publicGrade?.toLowerCase() || 'not-assessed'}`}>
+                    <span>Độ vững của nhận định</span>
+                    <strong>{strategistView.confidenceAssessment.publicGradeLabel}</strong>
+                  </div>
+                )}
               </div>
 
               <div className="strategist-core-view">
@@ -177,6 +179,37 @@ export function InvestmentBriefPanel() {
                     <span>Thay đổi mới nhất:</span>
                   </div>
                   <p className="strategist-change-summary">{strategistView.whatChanged.summary}</p>
+                </div>
+              )}
+
+              {strategistView.confidenceAssessment && (
+                <div className="strategist-confidence-framework">
+                  <div className="strategist-confidence-facts" aria-label="Chi tiết độ vững của nhận định">
+                    <span><small>Bằng chứng</small><strong>{strategistView.confidenceAssessment.evidenceSupportLabel}</strong></span>
+                    <span><small>Kiểm chứng lịch sử</small><strong>{strategistView.confidenceAssessment.calibrationStatusLabel}</strong></span>
+                  </div>
+
+                  <div className="strategist-confidence-explanation">
+                    {strategistView.confidenceAssessment.strengths.length > 0 && (
+                      <div>
+                        <strong>Điểm mạnh</strong>
+                        <ul>{strategistView.confidenceAssessment.strengths.map((item, index) => <li key={`strength-${index}`}>✓ {item}</li>)}</ul>
+                      </div>
+                    )}
+                    {strategistView.confidenceAssessment.limitations.length > 0 && (
+                      <div>
+                        <strong>Giới hạn</strong>
+                        <ul>{strategistView.confidenceAssessment.limitations.map((item, index) => <li key={`limit-${index}`}>△ {item}</li>)}</ul>
+                      </div>
+                    )}
+                    {strategistView.confidenceAssessment.upgrades.length > 0 && (
+                      <div>
+                        <strong>Để đạt Cao</strong>
+                        <ul>{strategistView.confidenceAssessment.upgrades.map((item, index) => <li key={`upgrade-${index}`}>→ {item}</li>)}</ul>
+                      </div>
+                    )}
+                  </div>
+                  <p className="strategist-confidence-disclaimer">{strategistView.confidenceAssessment.disclaimer}</p>
                 </div>
               )}
             </section>

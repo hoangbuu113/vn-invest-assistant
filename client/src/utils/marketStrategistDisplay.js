@@ -33,6 +33,85 @@ export const CONFIDENCE_LABELS = Object.freeze({
   INSUFFICIENT_EVIDENCE: 'Chưa đủ dữ liệu'
 });
 
+export const PUBLIC_CONFIDENCE_LABELS = Object.freeze({
+  HIGH: 'Cao',
+  MEDIUM: 'Trung bình',
+  LOW: 'Thấp',
+  INSUFFICIENT_EVIDENCE: 'Chưa đủ bằng chứng'
+});
+
+export const EVIDENCE_SUPPORT_LABELS = Object.freeze({
+  STRONG: 'Mạnh',
+  ADEQUATE: 'Đủ',
+  FRAGILE: 'Mỏng',
+  INSUFFICIENT: 'Chưa đủ'
+});
+
+export const CALIBRATION_STATUS_LABELS = Object.freeze({
+  UNVALIDATED: 'Chưa kiểm chứng',
+  PARTIAL: 'Một phần',
+  VALIDATED: 'Đã kiểm chứng',
+  SUSPENDED: 'Tạm ngưng'
+});
+
+const CONFIDENCE_REASON_LABELS = Object.freeze({
+  EVIDENCE_REQUIREMENTS_MET: 'Các nhóm bằng chứng thiết yếu đã có đường hỗ trợ hợp lệ.',
+  CRITICAL_EVIDENCE_MISSING: 'Thiếu bằng chứng thiết yếu cho phạm vi nhận định.',
+  EVIDENCE_INTEGRITY_FAILED: 'Bằng chứng không vượt qua kiểm tra toàn vẹn hoặc thời điểm khả dụng.',
+  FRESHNESS_REQUIREMENT_FAILED: 'Dữ liệu cần tính hiện thời không còn đáp ứng yêu cầu.',
+  CORROBORATION_DEPENDENT: 'Nhận định đang phụ thuộc vào đường bằng chứng thay thế.',
+  MATERIAL_CONFLICT_UNRESOLVED: 'Xung đột trọng yếu trong bằng chứng chưa được giải quyết.',
+  ASSUMPTION_SENSITIVE: 'Kết luận nhạy cảm với các giả định phân tích.',
+  ANALYTIC_REVIEW_INCOMPLETE: 'Rà soát giả định và bằng chứng phản biện chưa hoàn tất.',
+  MODEL_APPLICABILITY_UNCERTAIN: 'Khả năng áp dụng mô hình cho bối cảnh hiện tại chưa chắc chắn.',
+  REVISION_IMPACT_PENDING: 'Tác động của bản sửa đổi dữ liệu đang chờ đánh giá.',
+  CALIBRATION_NOT_ESTABLISHED: 'Chưa có kiểm chứng lịch sử phù hợp để công bố mức Cao.',
+  CALIBRATION_NOT_APPLICABLE: 'Kiểm chứng hiện có không áp dụng cho phạm vi hoặc thời điểm này.',
+  DUPLICATE_EVIDENCE_IGNORED: 'Bằng chứng trùng lặp đã được loại khỏi mức hỗ trợ.',
+  CADENCE_VALID_CARRY_FORWARD: 'Dữ liệu chu kỳ chậm vẫn hợp lệ theo kỳ công bố của nguồn.',
+  EXPECTATION_BASELINE_UNAVAILABLE: 'Không có mốc kỳ vọng hợp lệ để đánh giá bất ngờ.',
+  ASSESSMENT_POLICY_UNCONFIGURED: 'Chưa có hồ sơ yêu cầu được quản trị cho phạm vi này.',
+  MATERIAL_LIMITATION_UNRESOLVED: 'Giới hạn trọng yếu của phân tích chưa được giải quyết.'
+});
+
+const UPGRADE_LABELS = Object.freeze({
+  PROVIDE_VALID_ESSENTIAL_SUPPORT_PATH: 'Bổ sung đường bằng chứng hợp lệ cho nhóm thiết yếu còn thiếu.',
+  CONFIGURE_GOVERNED_REQUIREMENT_PROFILE: 'Thiết lập hồ sơ yêu cầu được quản trị cho phạm vi nhận định.',
+  ESTABLISH_APPLICABLE_VALIDATED_CALIBRATION: 'Hoàn tất kiểm chứng lịch sử phù hợp với phạm vi và chính sách hiện tại.'
+});
+
+function confidenceReasonText(reason) {
+  return CONFIDENCE_REASON_LABELS[reason?.code] || reason?.messageKey || reason?.code || '';
+}
+
+function upgradeRequirementText(requirement) {
+  if (UPGRADE_LABELS[requirement?.code]) return UPGRADE_LABELS[requirement.code];
+  if (String(requirement?.code || '').startsWith('RESOLVE_')) return 'Giải quyết giới hạn đang áp dụng trước khi nâng mức độ vững.';
+  return requirement?.code || requirement?.requirementId || '';
+}
+
+export function buildConfidenceAssessmentViewModel(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const assessed = raw.assessmentStatus === 'ASSESSED';
+  const reasons = Array.isArray(raw.reasons) ? raw.reasons : [];
+  return {
+    assessmentId: raw.assessmentId || null,
+    assessmentStatus: raw.assessmentStatus || 'NOT_ASSESSED',
+    publicGrade: assessed ? raw.publicGrade : null,
+    publicGradeLabel: assessed
+      ? (PUBLIC_CONFIDENCE_LABELS[raw.publicGrade] || 'Chưa đủ bằng chứng')
+      : 'Chưa đánh giá',
+    evidenceSupport: raw.evidenceSupport || 'INSUFFICIENT',
+    evidenceSupportLabel: EVIDENCE_SUPPORT_LABELS[raw.evidenceSupport] || 'Chưa đủ',
+    calibrationStatus: raw.calibrationStatus || 'UNVALIDATED',
+    calibrationStatusLabel: CALIBRATION_STATUS_LABELS[raw.calibrationStatus] || 'Chưa kiểm chứng',
+    strengths: reasons.filter((item) => item?.severity === 'POSITIVE').map(confidenceReasonText).filter(Boolean),
+    limitations: reasons.filter((item) => item?.severity === 'LIMITATION' || item?.severity === 'BLOCKING').map(confidenceReasonText).filter(Boolean),
+    upgrades: (Array.isArray(raw.upgradeRequirements) ? raw.upgradeRequirements : []).map(upgradeRequirementText).filter(Boolean),
+    disclaimer: 'Đây là độ vững của cơ sở phân tích, không phải xác suất đầu tư có lãi.'
+  };
+}
+
 export const ASSET_CLASS_LABELS = Object.freeze({
   vietnam_equities: 'VN Cổ phiếu',
   gold: 'Vàng',
@@ -124,6 +203,7 @@ export function buildMarketStrategistViewModel(raw) {
   const generatedAt = data.generatedAt ? formatPublishedTime(data.generatedAt) : 'Vừa xong';
 
   const confidence = data.executiveDecision?.confidence || data.confidence || (conviction === 'insufficient_evidence' ? 'INSUFFICIENT_EVIDENCE' : 'MEDIUM');
+  const confidenceAssessment = buildConfidenceAssessmentViewModel(data.confidenceAssessment);
   const confidenceLabel = CONFIDENCE_LABELS[confidence] || 'Trung bình';
 
   const executiveDecision = {
@@ -254,6 +334,7 @@ export function buildMarketStrategistViewModel(raw) {
     modeLabel,
     fallbackNotice,
     generatedAt,
+    confidenceAssessment,
     executiveDecision,
     brief,
     marketView,
