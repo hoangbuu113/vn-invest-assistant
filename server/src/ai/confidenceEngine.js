@@ -345,12 +345,16 @@ export function evaluateCalibrationApplicability(manifests = [], profile, cutoff
   });
   const current = effective[0] || null;
   if (current?.status === CALIBRATION_STATUS.VALIDATED && current.effectiveAt) {
-    return Object.freeze({ status: CALIBRATION_STATUS.VALIDATED, applicable: true, manifestId: current.manifestId, reasonCode: null });
+    const knowableAt = new Date(Math.max(Date.parse(current.createdAt), Date.parse(current.effectiveAt))).toISOString();
+    return Object.freeze({ status: CALIBRATION_STATUS.VALIDATED, applicable: true, manifestId: current.manifestId, knowableAt, reasonCode: null });
   }
   return Object.freeze({
     status: current?.status || CALIBRATION_STATUS.UNVALIDATED,
     applicable: false,
     manifestId: current?.manifestId || null,
+    knowableAt: current
+      ? new Date(Math.max(Date.parse(current.createdAt), Date.parse(current.effectiveAt || current.createdAt))).toISOString()
+      : null,
     reasonCode: matching.some((manifest) => manifest.status === CALIBRATION_STATUS.VALIDATED)
       ? CONFIDENCE_REASON_CODES.CALIBRATION_NOT_APPLICABLE
       : CONFIDENCE_REASON_CODES.CALIBRATION_NOT_ESTABLISHED
@@ -358,7 +362,7 @@ export function evaluateCalibrationApplicability(manifests = [], profile, cutoff
 }
 
 export function deriveConfidence({ evidenceSupport, capResult, calibration, targetId, scope } = {}) {
-  if (capResult.assessmentStatus === ASSESSMENT_STATUS.NOT_ASSESSED) return Object.freeze({ assessmentStatus: ASSESSMENT_STATUS.NOT_ASSESSED, evidenceSupport, candidateGrade: null, publicGrade: null, calibrationStatus: calibration?.status || CALIBRATION_STATUS.UNVALIDATED, calibrationApplicable: false, calibrationManifestId: null, reasons: capResult.reasons || Object.freeze([]), caps: capResult.caps || Object.freeze([]) });
+  if (capResult.assessmentStatus === ASSESSMENT_STATUS.NOT_ASSESSED) return Object.freeze({ assessmentStatus: ASSESSMENT_STATUS.NOT_ASSESSED, evidenceSupport, candidateGrade: null, publicGrade: null, calibrationStatus: calibration?.status || CALIBRATION_STATUS.UNVALIDATED, calibrationApplicable: false, calibrationManifestId: null, calibrationKnowableAt: null, reasons: capResult.reasons || Object.freeze([]), caps: capResult.caps || Object.freeze([]) });
   const candidateGrade = capResult.candidateGrade;
   let publicGrade = candidateGrade;
   const reasons = [...(capResult.reasons || [])];
@@ -373,7 +377,7 @@ export function deriveConfidence({ evidenceSupport, capResult, calibration, targ
       remediationConditions: ['APPLICABLE_VALIDATED_CALIBRATION_MANIFEST']
     }));
   }
-  return Object.freeze({ assessmentStatus: ASSESSMENT_STATUS.ASSESSED, evidenceSupport, candidateGrade, publicGrade, calibrationStatus: calibration?.status || CALIBRATION_STATUS.UNVALIDATED, calibrationApplicable: calibration?.applicable === true, calibrationManifestId: calibration?.manifestId || null, reasons: Object.freeze(reasons), caps: capResult.caps || Object.freeze([]) });
+  return Object.freeze({ assessmentStatus: ASSESSMENT_STATUS.ASSESSED, evidenceSupport, candidateGrade, publicGrade, calibrationStatus: calibration?.status || CALIBRATION_STATUS.UNVALIDATED, calibrationApplicable: calibration?.applicable === true, calibrationManifestId: calibration?.manifestId || null, calibrationKnowableAt: calibration?.knowableAt || null, reasons: Object.freeze(reasons), caps: capResult.caps || Object.freeze([]) });
 }
 
 export function deriveUpgradeRequirements(derived, supportGraph, profile) {
@@ -423,5 +427,5 @@ export function assessConfidence({ targetType, targetId, scope, horizon = null, 
   });
   const derivedWithReasons = Object.freeze({ ...derived, reasons: Object.freeze(reasons) });
   const upgrades = deriveUpgradeRequirements(derivedWithReasons, supportGraph, profile);
-  return createConfidenceAssessment({ targetType, targetId, scope, horizon: horizon || profile.horizon, cutoff: cutoffIso, asOf, inputFingerprint, profileVersion: profile.profileVersion, policyVersion: profile.policyVersion, evidenceSupport, candidateGrade: derived.candidateGrade, publicGrade: derived.publicGrade, assessmentStatus: derived.assessmentStatus, calibrationStatus: derived.calibrationStatus, calibrationApplicable: derived.calibrationApplicable, calibrationManifestId: derived.calibrationManifestId, gateResults: supportGraph.gateResults, caps: derived.caps, reasons, upgradeRequirements: upgrades, strategyAssessmentId, strategyId, strategyVersion, createdAt: cutoffIso });
+  return createConfidenceAssessment({ targetType, targetId, scope, horizon: horizon || profile.horizon, cutoff: cutoffIso, asOf, inputFingerprint, profileVersion: profile.profileVersion, policyVersion: profile.policyVersion, evidenceSupport, candidateGrade: derived.candidateGrade, publicGrade: derived.publicGrade, assessmentStatus: derived.assessmentStatus, calibrationStatus: derived.calibrationStatus, calibrationApplicable: derived.calibrationApplicable, calibrationManifestId: derived.calibrationManifestId, calibrationKnowableAt: derived.calibrationKnowableAt, gateResults: supportGraph.gateResults, caps: derived.caps, reasons, upgradeRequirements: upgrades, strategyAssessmentId, strategyId, strategyVersion, createdAt: cutoffIso });
 }

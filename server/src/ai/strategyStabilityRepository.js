@@ -47,6 +47,13 @@ export function clearStabilityMemoryStore() {
   testPrivateSupabaseOverride = undefined;
 }
 
+export function getStabilityMemorySnapshotForTest() {
+  return {
+    versions: new Map(memoryStrategyVersions),
+    assessments: new Map(memoryStrategyAssessments)
+  };
+}
+
 /**
  * Converts a database row to a canonical StrategyVersion object.
  */

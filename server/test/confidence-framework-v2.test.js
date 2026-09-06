@@ -15,7 +15,9 @@ import {
   CONFIDENCE_ASSESSMENT_POLICY_VERSION,
   CONFIDENCE_REASON_CODES,
   CONFIDENCE_TARGET_TYPES,
-  createCalibrationManifest
+  EVIDENCE_SUPPORT,
+  createCalibrationManifest,
+  createConfidenceAssessment
 } from '../src/ai/confidenceModel.js';
 import {
   FRESHNESS_BEHAVIOR,
@@ -29,6 +31,13 @@ import {
   persistConfidenceAssessment
 } from '../src/ai/confidenceRepository.js';
 import { attachMarketStrategyConfidence } from '../src/ai/confidenceService.js';
+import { buildMarketStrategistFactPacket } from '../src/ai/marketStrategistEngine.js';
+import { evaluateAndApplyStrategyStability } from '../src/ai/strategyStabilityService.js';
+import {
+  clearStabilityMemoryStore,
+  getStabilityMemorySnapshotForTest
+} from '../src/ai/strategyStabilityRepository.js';
+import { getMarketStrategist } from '../src/marketStrategist.js';
 import { buildConfidenceAssessmentViewModel } from '../../client/src/utils/marketStrategistDisplay.js';
 
 const CUTOFF = '2026-09-06T12:00:00.000Z';
@@ -323,23 +332,147 @@ test('P: candidate HIGH with default UNVALIDATED calibration is public MEDIUM', 
   assert.equal(result.publicGrade, ANALYTIC_CONFIDENCE.MEDIUM);
 });
 
-test('Q: applicable VALIDATED test manifest permits public HIGH', () => {
+test('Q / public HIGH rule A: candidate HIGH with applicable VALIDATED calibration and no cap permits public HIGH', () => {
   const result = assess({ calibrationManifests: [validatedManifest()] });
   assert.equal(result.candidateGrade, ANALYTIC_CONFIDENCE.HIGH);
   assert.equal(result.calibrationStatus, CALIBRATION_STATUS.VALIDATED);
   assert.equal(result.publicGrade, ANALYTIC_CONFIDENCE.HIGH);
 });
 
-test('R: confidence-only changes remain additive to the same strategy identity', async () => {
+test('public HIGH rule B: candidate MEDIUM remains public MEDIUM with applicable VALIDATED calibration', () => {
+  const profile = oneRequirementProfile([
+    { pathId: 'ALTERNATIVE', evidenceGroup: 'MARKET_REFERENCE', authorityLevels: ['MARKET_REFERENCE'], freshnessBehavior: FRESHNESS_BEHAVIOR.REQUIRE_CURRENT, supportLevel: 'ALTERNATIVE' }
+  ]);
+  const result = assess({
+    profile,
+    evidence: [evidence({ authorityLevel: 'MARKET_REFERENCE' })],
+    calibrationManifests: [validatedManifest({ profileVersion: profile.profileVersion })]
+  });
+  assert.equal(result.calibrationStatus, CALIBRATION_STATUS.VALIDATED);
+  assert.equal(result.calibrationApplicable, true);
+  assert.equal(result.candidateGrade, ANALYTIC_CONFIDENCE.MEDIUM);
+  assert.equal(result.publicGrade, ANALYTIC_CONFIDENCE.MEDIUM);
+  assert.deepEqual(result.caps, []);
+});
+
+test('public HIGH rule C: candidate HIGH is public MEDIUM with UNVALIDATED calibration', () => {
+  const result = assess();
+  assert.equal(result.candidateGrade, ANALYTIC_CONFIDENCE.HIGH);
+  assert.equal(result.calibrationStatus, CALIBRATION_STATUS.UNVALIDATED);
+  assert.equal(result.publicGrade, ANALYTIC_CONFIDENCE.MEDIUM);
+});
+
+test('public HIGH rule D: future VALIDATED manifest is non-applicable and cannot grant HIGH', () => {
+  const manifest = validatedManifest({
+    manifestId: 'calibration:test-only:future',
+    createdAt: '2026-09-07T00:00:00.000Z',
+    effectiveAt: '2026-09-07T00:00:00.000Z'
+  });
+  const result = assess({ calibrationManifests: [manifest] });
+  assert.equal(manifest.status, CALIBRATION_STATUS.VALIDATED);
+  assert.equal(result.candidateGrade, ANALYTIC_CONFIDENCE.HIGH);
+  assert.equal(result.calibrationApplicable, false);
+  assert.equal(result.publicGrade, ANALYTIC_CONFIDENCE.MEDIUM);
+});
+
+test('public HIGH rule E: active MEDIUM cap keeps public grade at MEDIUM', () => {
+  const result = assess({
+    calibrationManifests: [validatedManifest()],
+    evidence: strongEvidence().map((item, index) => index === 0
+      ? {
+          ...item,
+          normalizedConflict: {
+            material: true,
+            resolved: false,
+            definition: 'close',
+            unit: 'index_point',
+            period: 'session',
+            vintage: 'v1',
+            scope: 'vn_market',
+            lineage: 'VNDIRECT'
+          }
+        }
+      : item)
+  });
+  assert.equal(result.candidateGrade, ANALYTIC_CONFIDENCE.MEDIUM);
+  assert.equal(result.publicGrade, ANALYTIC_CONFIDENCE.MEDIUM);
+  assert.equal(result.caps.some((cap) => cap.cap === ANALYTIC_CONFIDENCE.MEDIUM), true);
+});
+
+test('public HIGH rule F: active LOW cap keeps public grade at LOW', () => {
+  const result = assess({
+    calibrationManifests: [validatedManifest()],
+    analyticReview: { ...COMPLETE_REVIEW, assumptionSensitive: true }
+  });
+  assert.equal(result.candidateGrade, ANALYTIC_CONFIDENCE.LOW);
+  assert.equal(result.publicGrade, ANALYTIC_CONFIDENCE.LOW);
+  assert.equal(result.caps.some((cap) => cap.cap === ANALYTIC_CONFIDENCE.LOW), true);
+});
+
+test('public HIGH rule G: model boundary rejects malformed persisted HIGH states', () => {
+  const valid = assess({ calibrationManifests: [validatedManifest()] });
+  assert.equal(valid.publicGrade, ANALYTIC_CONFIDENCE.HIGH);
+  const invalidStates = [
+    { candidateGrade: ANALYTIC_CONFIDENCE.MEDIUM },
+    { candidateGrade: ANALYTIC_CONFIDENCE.LOW },
+    { calibrationStatus: CALIBRATION_STATUS.UNVALIDATED },
+    { calibrationApplicable: false },
+    { calibrationManifestId: null },
+    { calibrationKnowableAt: '2026-09-07T00:00:00.000Z' },
+    { caps: [{ code: CONFIDENCE_REASON_CODES.MATERIAL_CONFLICT_UNRESOLVED, scope: valid.scope, cap: ANALYTIC_CONFIDENCE.MEDIUM, evidenceIds: [] }] },
+    { caps: [{ code: CONFIDENCE_REASON_CODES.ASSUMPTION_SENSITIVE, scope: valid.scope, cap: ANALYTIC_CONFIDENCE.LOW, evidenceIds: [] }] }
+  ];
+  for (const override of invalidStates) {
+    assert.throws(
+      () => createConfidenceAssessment({ ...valid, ...override }),
+      /Public HIGH requires assessed candidate HIGH/
+    );
+  }
+});
+
+test('R: real Strategy Stability keeps one StrategyVersion when only confidence changes', async () => {
   clearConfidenceMemoryForTest();
-  const strategyResult = { strategyId: 'strategy:keep', policyVersion: 'strategy-stability-v2', latestAssessmentResult: 'KEEP' };
-  const packet = { evidence: strongEvidence(), evidenceFingerprint: 'stable-fingerprint' };
-  const first = await attachMarketStrategyConfidence({ factPacket: packet, strategyResult, now: new Date(CUTOFF), client: null, analyticReview: COMPLETE_REVIEW });
-  const second = await attachMarketStrategyConfidence({ factPacket: packet, strategyResult, now: new Date(CUTOFF), client: null, analyticReview: { ...COMPLETE_REVIEW, assumptionSensitive: true } });
-  assert.equal(first.strategyId, second.strategyId);
+  clearStabilityMemoryStore();
+  const packet = buildMarketStrategistFactPacket({
+    marketObservations: strongEvidence(),
+    newsArticles: [],
+    now: new Date(CUTOFF)
+  });
+  const initialStability = await evaluateAndApplyStrategyStability({
+    factPacket: packet,
+    now: new Date(CUTOFF),
+    allowLlm: false,
+    client: null
+  });
+  const first = await attachMarketStrategyConfidence({
+    factPacket: packet,
+    strategyResult: initialStability,
+    now: new Date(CUTOFF),
+    client: null,
+    analyticReview: COMPLETE_REVIEW
+  });
+  const versionCountBefore = getStabilityMemorySnapshotForTest().versions.size;
+
+  const keepStability = await evaluateAndApplyStrategyStability({
+    factPacket: packet,
+    now: new Date('2026-09-06T12:15:00.000Z'),
+    allowLlm: false,
+    client: null
+  });
+  const second = await attachMarketStrategyConfidence({
+    factPacket: packet,
+    strategyResult: keepStability,
+    now: new Date('2026-09-06T12:15:00.000Z'),
+    client: null,
+    analyticReview: { ...COMPLETE_REVIEW, assumptionSensitive: true }
+  });
+
+  assert.equal(keepStability.latestAssessmentResult, 'KEEP');
+  assert.equal(second.strategyId, first.strategyId);
+  assert.equal(getStabilityMemorySnapshotForTest().versions.size, versionCountBefore);
+  assert.equal(versionCountBefore, 1);
   assert.notEqual(first.confidenceAssessment.publicGrade, second.confidenceAssessment.publicGrade);
-  assert.equal(first.latestAssessmentResult, 'KEEP');
-  assert.equal(second.latestAssessmentResult, 'KEEP');
+  assert.equal(getConfidenceMemorySnapshotForTest().assessments.size, 2);
 });
 
 test('S: narrative confidence cannot override deterministic public grade', async () => {
@@ -355,17 +488,56 @@ test('S: narrative confidence cannot override deterministic public grade', async
   assert.equal(result.confidenceAssessment.publicGrade, ANALYTIC_CONFIDENCE.MEDIUM);
 });
 
-test('T: production Express route preserves NOT_ASSESSED and INSUFFICIENT_EVIDENCE', async () => {
-  for (const confidenceAssessment of [assess({ profile: null }), assess({ evidence: [] })]) {
-    const app = createApp({ getMarketStrategistFn: async () => ({ brief: {}, executiveDecision: {}, confidenceAssessment }) });
+test('T: real strategist and Express route preserve NOT_ASSESSED and INSUFFICIENT_EVIDENCE', async () => {
+  const cases = [
+    {
+      expectedStatus: ASSESSMENT_STATUS.NOT_ASSESSED,
+      expectedGrade: null,
+      expectedSupport: EVIDENCE_SUPPORT.INSUFFICIENT,
+      expectedReason: CONFIDENCE_REASON_CODES.ASSESSMENT_POLICY_UNCONFIGURED,
+      marketObservations: strongEvidence(),
+      profile: null
+    },
+    {
+      expectedStatus: ASSESSMENT_STATUS.ASSESSED,
+      expectedGrade: ANALYTIC_CONFIDENCE.INSUFFICIENT_EVIDENCE,
+      expectedSupport: EVIDENCE_SUPPORT.INSUFFICIENT,
+      expectedReason: CONFIDENCE_REASON_CODES.CRITICAL_EVIDENCE_MISSING,
+      marketObservations: [],
+      profile: PROFILE_MARKET_STRATEGY_VN_MEDIUM_HORIZON_V1
+    }
+  ];
+
+  for (const scenario of cases) {
+    clearConfidenceMemoryForTest();
+    clearStabilityMemoryStore();
+    const attachConfidenceFn = (options) => attachMarketStrategyConfidence({
+      ...options,
+      profile: scenario.profile
+    });
+    const realStrategistEntryPoint = (options = {}) => getMarketStrategist({
+      ...options,
+      now: new Date(CUTOFF),
+      getMarketContextFabricFn: async () => ({ facts: scenario.marketObservations }),
+      getNewsFeedFn: async () => ({ data: [] }),
+      client: null,
+      attachConfidenceFn
+    });
+
+    await realStrategistEntryPoint({ allowLlm: false, isReadOnly: false });
+    const app = createApp({ getMarketStrategistFn: realStrategistEntryPoint });
     const server = app.listen(0);
     try {
       const address = server.address();
       const response = await fetch(`http://127.0.0.1:${address.port}/api/market-strategist`);
       const body = await response.json();
       assert.equal(response.status, 200);
-      assert.equal(body.data.confidenceAssessment.assessmentStatus, confidenceAssessment.assessmentStatus);
-      assert.equal(body.data.confidenceAssessment.publicGrade, confidenceAssessment.publicGrade);
+      const confidenceAssessment = body.data.confidenceAssessment;
+      assert.equal(confidenceAssessment.assessmentStatus, scenario.expectedStatus);
+      assert.equal(confidenceAssessment.publicGrade, scenario.expectedGrade);
+      assert.equal(confidenceAssessment.evidenceSupport, scenario.expectedSupport);
+      assert.notEqual(confidenceAssessment.publicGrade, ANALYTIC_CONFIDENCE.LOW);
+      assert.ok(confidenceAssessment.reasons.some((reason) => reason.code === scenario.expectedReason));
     } finally {
       await new Promise((resolve) => server.close(resolve));
     }
@@ -463,5 +635,8 @@ test('migration is forward-only, append-only, public-read/service-write, and has
   assert.match(sql, /BEFORE UPDATE OR DELETE ON public\.confidence_assessments/);
   assert.match(sql, /GRANT SELECT, INSERT ON public\.confidence_assessments TO service_role/);
   assert.match(sql, /REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON public\.confidence_assessments FROM PUBLIC, anon, authenticated/);
+  assert.match(sql, /candidate_grade = 'HIGH'/);
+  assert.match(sql, /calibration_knowable_at <= cutoff/);
+  assert.match(sql, /jsonb_array_length\(caps\) = 0/);
   assert.doesNotMatch(sql, /INSERT INTO public\.calibration_manifests/i);
 });

@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS public.confidence_assessments (
     calibration_status TEXT NOT NULL DEFAULT 'UNVALIDATED' CHECK (calibration_status IN ('UNVALIDATED', 'PARTIAL', 'VALIDATED', 'SUSPENDED')),
     calibration_applicable BOOLEAN NOT NULL DEFAULT FALSE,
     calibration_manifest_id TEXT REFERENCES public.calibration_manifests(manifest_id) ON DELETE RESTRICT,
+    calibration_knowable_at TIMESTAMPTZ,
     gate_results JSONB NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(gate_results) = 'array'),
     caps JSONB NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(caps) = 'array'),
     reasons JSONB NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(reasons) = 'array'),
@@ -55,7 +56,19 @@ CREATE TABLE IF NOT EXISTS public.confidence_assessments (
         (assessment_status = 'ASSESSED' AND candidate_grade IS NOT NULL AND public_grade IS NOT NULL)
     ),
     CHECK (candidate_grade <> 'INSUFFICIENT_EVIDENCE' OR public_grade = 'INSUFFICIENT_EVIDENCE'),
-    CHECK (public_grade <> 'HIGH' OR (calibration_status = 'VALIDATED' AND calibration_applicable = TRUE))
+    CHECK (
+        public_grade <> 'HIGH'
+        OR (
+            assessment_status = 'ASSESSED'
+            AND candidate_grade = 'HIGH'
+            AND calibration_status = 'VALIDATED'
+            AND calibration_applicable = TRUE
+            AND calibration_manifest_id IS NOT NULL
+            AND calibration_knowable_at IS NOT NULL
+            AND calibration_knowable_at <= cutoff
+            AND jsonb_array_length(caps) = 0
+        )
+    )
 );
 
 CREATE INDEX IF NOT EXISTS idx_confidence_assessments_target_as_of

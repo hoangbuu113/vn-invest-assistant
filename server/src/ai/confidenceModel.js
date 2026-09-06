@@ -103,15 +103,30 @@ export function createConfidenceAssessment(options = {}) {
   const cutoff = normalizeConfidenceTimestamp(options.cutoff, 'cutoff');
   const asOf = normalizeConfidenceTimestamp(options.asOf || cutoff, 'asOf');
   const createdAt = normalizeConfidenceTimestamp(options.createdAt || asOf, 'createdAt');
+  const calibrationManifestId = normalizedString(options.calibrationManifestId);
+  const calibrationKnowableAt = options.calibrationKnowableAt
+    ? normalizeConfidenceTimestamp(options.calibrationKnowableAt, 'calibrationKnowableAt')
+    : null;
+  const caps = options.caps || options.capResults || [];
   if (!Object.values(ASSESSMENT_STATUS).includes(assessmentStatus)) throw new TypeError('Invalid assessmentStatus');
   if (!Object.values(EVIDENCE_SUPPORT).includes(evidenceSupport)) throw new TypeError('Invalid evidenceSupport');
   const validGrades = new Set([...Object.values(ANALYTIC_CONFIDENCE), null]);
   if (!validGrades.has(candidateGrade) || !validGrades.has(publicGrade)) throw new TypeError('Invalid confidence grade');
   if (!Object.values(CALIBRATION_STATUS).includes(calibrationStatus)) throw new TypeError('Invalid calibrationStatus');
+  if (!Array.isArray(caps)) throw new TypeError('caps must be an array');
   if (assessmentStatus === ASSESSMENT_STATUS.NOT_ASSESSED && (candidateGrade !== null || publicGrade !== null)) throw new TypeError('NOT_ASSESSED requires null candidateGrade and publicGrade');
   if (assessmentStatus === ASSESSMENT_STATUS.ASSESSED && candidateGrade === null) throw new TypeError('ASSESSED requires a candidateGrade');
   if (candidateGrade === ANALYTIC_CONFIDENCE.INSUFFICIENT_EVIDENCE && publicGrade !== ANALYTIC_CONFIDENCE.INSUFFICIENT_EVIDENCE) throw new TypeError('INSUFFICIENT_EVIDENCE cannot be converted to another public grade');
-  if (publicGrade === ANALYTIC_CONFIDENCE.HIGH && !(options.calibrationApplicable === true && calibrationStatus === CALIBRATION_STATUS.VALIDATED)) throw new TypeError('Public HIGH requires applicable validated calibration');
+  if (publicGrade === ANALYTIC_CONFIDENCE.HIGH && !(
+    assessmentStatus === ASSESSMENT_STATUS.ASSESSED
+    && candidateGrade === ANALYTIC_CONFIDENCE.HIGH
+    && calibrationStatus === CALIBRATION_STATUS.VALIDATED
+    && options.calibrationApplicable === true
+    && calibrationManifestId
+    && calibrationKnowableAt
+    && Date.parse(calibrationKnowableAt) <= Date.parse(cutoff)
+    && caps.length === 0
+  )) throw new TypeError('Public HIGH requires assessed candidate HIGH, applicable validated calibration knowable by cutoff, and no active cap');
 
   const targetType = options.targetType;
   const targetId = normalizedString(options.targetId);
@@ -140,9 +155,10 @@ export function createConfidenceAssessment(options = {}) {
     assessmentStatus,
     calibrationStatus,
     calibrationApplicable: options.calibrationApplicable === true,
-    calibrationManifestId: normalizedString(options.calibrationManifestId),
+    calibrationManifestId,
+    calibrationKnowableAt,
     gateResults: freezeRecord(sanitizePublic(options.gateResults || [])),
-    caps: freezeRecord(sanitizePublic(options.caps || options.capResults || [])),
+    caps: freezeRecord(sanitizePublic(caps)),
     reasons: Object.freeze((Array.isArray(options.reasons) ? options.reasons : []).map((reason) => createConfidenceReason(reason.code, reason))),
     upgradeRequirements: freezeRecord(sanitizePublic(options.upgradeRequirements || [])),
     strategyAssessmentId: normalizedString(options.strategyAssessmentId || options.linkedStrategyAssessmentId),
