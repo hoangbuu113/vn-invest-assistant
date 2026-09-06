@@ -32,7 +32,8 @@ export const OBSERVED_JOBS = Object.freeze({
   NEWS_REFRESH_COLLECTOR: 'news_refresh_collector',
   CLAIMS_RECONCILIATION: 'claims_reconciliation',
   MARKET_STRATEGIST_REFRESH: 'market_strategist_refresh',
-  ALERT_SCHEDULER: 'alert_scheduler'
+  ALERT_SCHEDULER: 'alert_scheduler',
+  VN_EQUITY_EVIDENCE_REFRESH: 'vn_equity_evidence_refresh'
 });
 
 export const ALL_OBSERVED_JOBS = Object.freeze(Object.values(OBSERVED_JOBS));

@@ -35,7 +35,7 @@ test('1. health state definitions: HEALTHY, DEGRADED, FAILED, UNKNOWN are immuta
 });
 
 test('2. observed jobs includes at least the 7 required core pipelines', () => {
-  assert.equal(ALL_OBSERVED_JOBS.length, 7);
+  assert.equal(ALL_OBSERVED_JOBS.length, 8);
   assert.ok(ALL_OBSERVED_JOBS.includes('vn_market_context_collector'));
   assert.ok(ALL_OBSERVED_JOBS.includes('official_macro_monetary_collector'));
   assert.ok(ALL_OBSERVED_JOBS.includes('customs_trade_collector'));
@@ -43,6 +43,7 @@ test('2. observed jobs includes at least the 7 required core pipelines', () => {
   assert.ok(ALL_OBSERVED_JOBS.includes('claims_reconciliation'));
   assert.ok(ALL_OBSERVED_JOBS.includes('market_strategist_refresh'));
   assert.ok(ALL_OBSERVED_JOBS.includes('alert_scheduler'));
+  assert.ok(ALL_OBSERVED_JOBS.includes('vn_equity_evidence_refresh'));
 });
 
 test('3. UNKNOWN when never run: unexecuted jobs report UNKNOWN with null timestamps and 0 fabricated dates', async () => {
@@ -50,7 +51,7 @@ test('3. UNKNOWN when never run: unexecuted jobs report UNKNOWN with null timest
 
   const health = await getSystemDataHealth({ client: null, now: new Date('2026-09-06T12:00:00.000Z') });
   assert.equal(health.systemStatus, HEALTH_STATES.UNKNOWN);
-  assert.equal(health.jobs.length, 7);
+  assert.equal(health.jobs.length, 8);
 
   for (const job of health.jobs) {
     assert.equal(job.status, HEALTH_STATES.UNKNOWN, `Job ${job.jobName} must report UNKNOWN when unexecuted`);
@@ -240,7 +241,7 @@ test('8. endpoint read-only: GET /api/system/data-health performs zero mutations
 
   // Directly test getSystemDataHealth with read-only mock
   const healthResult = await getSystemDataHealth({ client: mockDbClient, now: testNow });
-  assert.equal(healthResult.jobsCount, 7);
+  assert.equal(healthResult.jobsCount, 8);
   const alertJob = healthResult.jobs.find((j) => j.jobName === OBSERVED_JOBS.ALERT_SCHEDULER);
   assert.equal(alertJob.status, HEALTH_STATES.HEALTHY);
 });
@@ -518,7 +519,7 @@ test('13. HTTP endpoint: GET /api/system/data-health returns 200, requires no au
     const body = await res.json();
     assert.equal(body.status, 'ok');
     assert.ok(body.data);
-    assert.equal(body.data.jobsCount, 7);
+    assert.equal(body.data.jobsCount, 8);
     assert.equal(Array.isArray(body.data.jobs), true);
 
     const alertJob = body.data.jobs.find((j) => j.jobName === OBSERVED_JOBS.ALERT_SCHEDULER);
@@ -574,7 +575,7 @@ test('15. deterministic systemStatus precedence: FAILED > DEGRADED > UNKNOWN > H
   let h = await getSystemDataHealth({ client: null, now: testNow });
   assert.equal(h.systemStatus, HEALTH_STATES.UNKNOWN);
 
-  // Case B: 1 HEALTHY + 6 UNKNOWN -> systemStatus MUST be UNKNOWN (never fabricated as HEALTHY!)
+  // Case B: 1 HEALTHY + remaining UNKNOWN -> systemStatus MUST be UNKNOWN (never fabricated as HEALTHY!)
   await recordJobHealth({
     jobName: OBSERVED_JOBS.VN_MARKET_CONTEXT_COLLECTOR,
     status: HEALTH_STATES.HEALTHY,
@@ -584,7 +585,7 @@ test('15. deterministic systemStatus precedence: FAILED > DEGRADED > UNKNOWN > H
   h = await getSystemDataHealth({ client: null, now: testNow });
   assert.equal(h.systemStatus, HEALTH_STATES.UNKNOWN, 'Partial UNKNOWN coverage must NEVER report HEALTHY');
 
-  // Case C: 1 DEGRADED + 1 HEALTHY + 5 UNKNOWN -> DEGRADED takes precedence over UNKNOWN
+  // Case C: 1 DEGRADED + 1 HEALTHY + remaining UNKNOWN -> DEGRADED takes precedence over UNKNOWN
   await recordJobHealth({
     jobName: OBSERVED_JOBS.CUSTOMS_TRADE_COLLECTOR,
     status: HEALTH_STATES.DEGRADED,
@@ -594,7 +595,7 @@ test('15. deterministic systemStatus precedence: FAILED > DEGRADED > UNKNOWN > H
   h = await getSystemDataHealth({ client: null, now: testNow });
   assert.equal(h.systemStatus, HEALTH_STATES.DEGRADED, 'DEGRADED takes precedence over UNKNOWN');
 
-  // Case D: 1 FAILED + 1 DEGRADED + 1 HEALTHY + 4 UNKNOWN -> FAILED takes top precedence
+  // Case D: 1 FAILED + 1 DEGRADED + 1 HEALTHY + remaining UNKNOWN -> FAILED takes top precedence
   await recordJobHealth({
     jobName: OBSERVED_JOBS.NEWS_REFRESH_COLLECTOR,
     status: HEALTH_STATES.FAILED,
@@ -604,7 +605,7 @@ test('15. deterministic systemStatus precedence: FAILED > DEGRADED > UNKNOWN > H
   h = await getSystemDataHealth({ client: null, now: testNow });
   assert.equal(h.systemStatus, HEALTH_STATES.FAILED, 'FAILED takes precedence over all other states');
 
-  // Case E: All 7 jobs HEALTHY -> systemStatus is HEALTHY
+  // Case E: All observed jobs HEALTHY -> systemStatus is HEALTHY
   clearDataHealthMemoryStore();
   for (const jobName of ALL_OBSERVED_JOBS) {
     await recordJobHealth({
@@ -615,7 +616,7 @@ test('15. deterministic systemStatus precedence: FAILED > DEGRADED > UNKNOWN > H
     });
   }
   h = await getSystemDataHealth({ client: null, now: testNow });
-  assert.equal(h.systemStatus, HEALTH_STATES.HEALTHY, 'All 7 jobs HEALTHY -> systemStatus is HEALTHY');
+  assert.equal(h.systemStatus, HEALTH_STATES.HEALTHY, 'All observed jobs HEALTHY -> systemStatus is HEALTHY');
 });
 
 test('16. production wiring: runMarketContextCollector records HEALTHY on success and FAILED on uncaught failure', async () => {

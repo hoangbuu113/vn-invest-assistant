@@ -77,6 +77,10 @@ import {
   OBSERVED_JOBS,
   ERROR_CATEGORIES
 } from './src/observability/dataHealth.js';
+import {
+  getVietnamEquityEvidence,
+  runVietnamEquityEvidenceCollector
+} from './src/equities/index.js';
 
 dotenv.config();
 
@@ -168,6 +172,8 @@ export function createApp(services = {}) {
     getAssetComparisonFn = getAssetComparison,
     getVietnamRegimeFn = getVietnamRegime,
     runMarketContextCollectorFn = runMarketContextCollector,
+    getVietnamEquityEvidenceFn = getVietnamEquityEvidence,
+    runVietnamEquityEvidenceCollectorFn = runVietnamEquityEvidenceCollector,
     runNewsCollectorFn = runNewsCollector,
     getOpportunitiesFn = getOpportunities,
     getInvestmentBriefFn = getInvestmentBrief,
@@ -896,6 +902,24 @@ export function createApp(services = {}) {
       return res.status(500).json({
         status: 'error',
         message: 'Failed to fetch asset from database'
+      });
+    }
+  });
+
+  // Provider-free public read of persisted canonical VN equity evidence.
+  app.get('/api/equities/:symbol/evidence', async (req, res) => {
+    try {
+      const evidence = await getVietnamEquityEvidenceFn(req.params.symbol, {
+        client: supabaseAuthClient,
+        getAssetBySymbolFn,
+        now: new Date()
+      });
+      return res.json({ status: 'ok', data: evidence });
+    } catch (error) {
+      return res.status(error.status || 500).json({
+        status: 'error',
+        code: error.code || 'EQUITY_EVIDENCE_UNAVAILABLE',
+        message: error.status ? error.message : 'Failed to read equity evidence'
       });
     }
   });
@@ -1633,6 +1657,29 @@ export function createApp(services = {}) {
       return res.status(500).json({
         status: 'error',
         message: 'Failed to refresh market context observations'
+      });
+    }
+  });
+
+  // Internal collector for immutable VN equity evidence vintages.
+  app.post('/api/internal/equities/refresh', requireAlertScheduler, async (_req, res) => {
+    try {
+      const summary = await runVietnamEquityEvidenceCollectorFn({
+        now: new Date(),
+        client: supabaseAuthClient
+      });
+      if (!summary.success || !summary.isDurable || summary.failedPersistence > 0) {
+        return res.status(503).json({
+          status: 'degraded',
+          message: 'Vietnam equity evidence refresh did not complete durably',
+          data: summary
+        });
+      }
+      return res.json({ status: 'ok', data: summary });
+    } catch (_error) {
+      return res.status(500).json({
+        status: 'error',
+        message: 'Failed to refresh Vietnam equity evidence'
       });
     }
   });
