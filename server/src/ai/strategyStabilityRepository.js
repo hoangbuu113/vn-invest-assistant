@@ -3,7 +3,8 @@ import {
   createStrategyVersion,
   createStrategyAssessment,
   assertZeroPrivateData,
-  STRATEGY_LIFECYCLE_STATUSES
+  STRATEGY_LIFECYCLE_STATUSES,
+  EVALUATION_STATUSES
 } from './strategyStabilityModel.js';
 
 // In-process memory stores for testing and fallback
@@ -312,30 +313,168 @@ export async function supersedeStrategyVersion(strategyId, client = privateSupab
 }
 
 /**
- * Retrieves the latest StrategyAssessment for a given strategyId, or latest overall.
+ * Atomically supersedes expected current published strategy and inserts new StrategyVersion.
+ * In Supabase: calls the atomic PostgreSQL RPC publish_strategy_version_atomic in a single transaction.
+ * In memory: performs a transactional state update with full rollback if constraints fail.
+ *
+ * Guarantees:
+ * - If insertion fails, supersession is rolled back (zero-published prevention).
+ * - If expectedCurrentStrategyId does not match current published strategy, fails with conflict error.
+ * - Single published strategy invariant is preserved.
  */
-export async function getLatestStrategyAssessment(strategyId = null, client = privateSupabase) {
+export async function publishStrategyVersionAtomic({
+  newVersion,
+  expectedCurrentStrategyId = null
+} = {}, client = privateSupabase) {
+  if (!newVersion || !newVersion.strategyId) {
+    throw new Error('publishStrategyVersionAtomic requires a valid newVersion with strategyId');
+  }
+
+  assertZeroPrivateData(newVersion, 'PUBLISH_STRATEGY_VERSION_ATOMIC');
+
+  // In-memory atomic execution helper with rollback snapshot
+  const executeMemoryAtomic = () => {
+    const prevVersionsSnapshot = new Map(memoryStrategyVersions);
+    try {
+      let currentPublished = null;
+      for (const v of memoryStrategyVersions.values()) {
+        if (v.status === STRATEGY_LIFECYCLE_STATUSES.PUBLISHED) {
+          currentPublished = v;
+          break;
+        }
+      }
+
+      if (expectedCurrentStrategyId !== null) {
+        if (!currentPublished) {
+          const err = new Error(`STRATEGY_VERSION_CONFLICT: Expected published strategy ${expectedCurrentStrategyId} but none was found`);
+          err.code = 'P0001';
+          err.isConflict = true;
+          throw err;
+        }
+        if (currentPublished.strategyId !== expectedCurrentStrategyId) {
+          const err = new Error(`STRATEGY_VERSION_CONFLICT: Expected published strategy ${expectedCurrentStrategyId} but found ${currentPublished.strategyId}`);
+          err.code = 'P0001';
+          err.isConflict = true;
+          throw err;
+        }
+      } else {
+        // Cold start bootstrap check: no published strategy may already exist
+        if (currentPublished) {
+          const err = new Error(`STRATEGY_VERSION_CONFLICT: Cold-start bootstrap conflict; published strategy ${currentPublished.strategyId} already exists`);
+          err.code = 'P0001';
+          err.isConflict = true;
+          throw err;
+        }
+      }
+
+      // Supersede current published version if present
+      if (currentPublished) {
+        memoryStrategyVersions.set(currentPublished.strategyId, createStrategyVersion({
+          ...currentPublished,
+          status: STRATEGY_LIFECYCLE_STATUSES.SUPERSEDED
+        }));
+      }
+
+      // Insert new version as published
+      memoryStrategyVersions.set(newVersion.strategyId, newVersion);
+      return { isDurable: false, strategy: newVersion };
+    } catch (err) {
+      // Rollback to prior snapshot
+      memoryStrategyVersions.clear();
+      for (const [k, v] of prevVersionsSnapshot.entries()) {
+        memoryStrategyVersions.set(k, v);
+      }
+      throw err;
+    }
+  };
+
+  if (!client) {
+    return executeMemoryAtomic();
+  }
+
+  const row = strategyVersionToRow(newVersion);
+  try {
+    const { data, error } = await client.rpc('publish_strategy_version_atomic', {
+      p_new_version: row,
+      p_expected_current_strategy_id: expectedCurrentStrategyId
+    });
+
+    if (error) {
+      if (error.code === 'P0001' || error.message?.includes('STRATEGY_VERSION_CONFLICT')) {
+        const conflictErr = new Error(error.message);
+        conflictErr.code = 'P0001';
+        conflictErr.isConflict = true;
+        throw conflictErr;
+      }
+      if (error.code === '23505' || error.message?.includes('idx_strategy_versions_single_published')) {
+        const conflictErr = new Error('Unique constraint violation: idx_strategy_versions_single_published (multiple published versions forbidden)');
+        conflictErr.code = '23505';
+        conflictErr.isConflict = true;
+        throw conflictErr;
+      }
+      if (error.code === 'PGRST202' || error.message?.includes('publish_strategy_version_atomic')) {
+        // Function not yet present in remote schema cache (local/unapplied migration); fallback to memory atomic
+        return executeMemoryAtomic();
+      }
+      throw error;
+    }
+
+    // Mirror to memory on successful DB commit
+    executeMemoryAtomic();
+    return { isDurable: true, strategy: rowToStrategyVersion(data) || newVersion };
+  } catch (err) {
+    await getCurrentPublishedStrategy(client);
+    throw err;
+  }
+}
+
+/**
+ * Retrieves the latest StrategyAssessment for a given strategyId, or latest overall.
+ * Supports { completedOnly: true } to isolate COMPLETED assessments from FAILED/DEFERRED attempts.
+ */
+export async function getLatestStrategyAssessment(strategyId = null, client = privateSupabase, options = {}) {
+  let targetStrategyId = strategyId;
+  let targetClient = client;
+  let targetOptions = options;
+
+  if (strategyId && typeof strategyId === 'object' && !('from' in strategyId)) {
+    targetOptions = strategyId;
+    targetStrategyId = null;
+    targetClient = privateSupabase;
+  } else if (client && typeof client === 'object' && !('from' in client) && ('completedOnly' in client)) {
+    targetOptions = client;
+    targetClient = privateSupabase;
+  }
+
+  const completedOnly = Boolean(targetOptions?.completedOnly);
+
   let latestMemory = null;
   for (const asmt of memoryStrategyAssessments.values()) {
-    if (!strategyId || asmt.strategyId === strategyId) {
+    if (!targetStrategyId || asmt.strategyId === targetStrategyId) {
+      if (completedOnly && asmt.evaluationStatus !== EVALUATION_STATUSES.COMPLETED) {
+        continue;
+      }
       if (!latestMemory || asmt.assessedAt > latestMemory.assessedAt) {
         latestMemory = asmt;
       }
     }
   }
 
-  if (!client) return latestMemory;
+  if (!targetClient) return latestMemory;
 
   try {
-    let query = client
+    let query = targetClient
       .from('strategy_assessments')
-      .select('*')
-      .order('assessed_at', { ascending: false })
-      .limit(1);
+      .select('*');
 
-    if (strategyId) {
-      query = query.eq('strategy_id', strategyId);
+    if (targetStrategyId) {
+      query = query.eq('strategy_id', targetStrategyId);
     }
+    if (completedOnly) {
+      query = query.eq('evaluation_status', EVALUATION_STATUSES.COMPLETED);
+    }
+
+    query = query.order('assessed_at', { ascending: false }).limit(1);
 
     const { data, error } = await query;
     if (error || !Array.isArray(data) || data.length === 0) {
@@ -350,6 +489,14 @@ export async function getLatestStrategyAssessment(strategyId = null, client = pr
   } catch {
     return latestMemory;
   }
+}
+
+/**
+ * Retrieves the latest completed StrategyAssessment for a given strategyId or overall.
+ * GUARANTEE: Incomplete, failed, or deferred assessments are strictly excluded.
+ */
+export async function getLatestCompletedStrategyAssessment(strategyId = null, client = privateSupabase) {
+  return getLatestStrategyAssessment(strategyId, client, { completedOnly: true });
 }
 
 /**

@@ -17,10 +17,10 @@ import { assessStrategyMateriality } from './strategyAssessmentGate.js';
 import {
   getCurrentPublishedStrategy,
   getLatestStrategyAssessment,
+  getLatestCompletedStrategyAssessment,
   getStrategyAssessmentByIdempotencyKey,
-  persistStrategyVersion,
   persistStrategyAssessment,
-  supersedeStrategyVersion
+  publishStrategyVersionAtomic
 } from './strategyStabilityRepository.js';
 import {
   generateMarketStrategist,
@@ -70,13 +70,14 @@ export async function evaluateAndApplyStrategyStability({
     const existing = await getStrategyAssessmentByIdempotencyKey(idempotencyKey, client);
     if (existing) {
       const current = await getCurrentPublishedStrategy(client);
+      const isExistingCompleted = existing.evaluationStatus === EVALUATION_STATUSES.COMPLETED;
       return {
         ...(current?.rawOutput || {}),
         ...(current || {}),
         publishedAt: current?.publishedAt,
         strategyPublishedAt: current?.publishedAt,
         latestAssessmentAt: existing.assessedAt,
-        latestAssessmentResult: existing.result,
+        latestAssessmentResult: isExistingCompleted ? existing.result : null,
         latestAssessmentStatus: existing.evaluationStatus,
         lifecycleState: existing.lifecycleState,
         dataQualityState: existing.dataQualityState,
@@ -84,6 +85,7 @@ export async function evaluateAndApplyStrategyStability({
         shockOverride: existing.shockOverride || null,
         confirmationKeys: existing.confirmationKeys || [],
         idempotencyKey: existing.idempotencyKey,
+        reviewPending: !isExistingCompleted,
         currentConfidence: current?.confidence || existing.confidence,
         dataAsOf: existing.dataAsOf,
         decisionFingerprint: existing.decisionFingerprint,
@@ -94,9 +96,10 @@ export async function evaluateAndApplyStrategyStability({
     }
   }
 
-  // 2. Retrieve current published strategy and latest assessment
+  // 2. Retrieve current published strategy and assessments
   const currentStrategy = await getCurrentPublishedStrategy(client);
   const lastAssessment = await getLatestStrategyAssessment(currentStrategy?.strategyId, client);
+  const lastCompletedAssessment = await getLatestCompletedStrategyAssessment(currentStrategy?.strategyId, client);
 
   // 3. Compute evidence fingerprint
   const evidenceFingerprint = factPacket.evidenceFingerprint || computeStrategistFingerprint({
@@ -114,6 +117,7 @@ export async function evaluateAndApplyStrategyStability({
   const gateResult = assessStrategyMateriality({
     currentStrategy,
     lastAssessment,
+    lastCompletedAssessment,
     factPacket,
     now
   });
@@ -121,19 +125,20 @@ export async function evaluateAndApplyStrategyStability({
   // 5. Public read-only path (e.g. GET endpoint with isReadOnly: true and existing published strategy)
   // Invariant: Public GET is provider-free and NEVER mutates lifecycle state.
   if (currentStrategy && isReadOnly) {
+    const isCompleted = lastAssessment?.evaluationStatus === EVALUATION_STATUSES.COMPLETED;
     return {
       ...(currentStrategy.rawOutput || {}),
       ...currentStrategy,
       publishedAt: currentStrategy.publishedAt,
       strategyPublishedAt: currentStrategy.publishedAt,
       latestAssessmentAt: lastAssessment?.assessedAt || currentStrategy.publishedAt,
-      latestAssessmentResult: lastAssessment?.result || ASSESSMENT_RESULTS.KEEP,
+      latestAssessmentResult: isCompleted ? lastAssessment.result : null,
       latestAssessmentStatus: lastAssessment?.evaluationStatus || EVALUATION_STATUSES.COMPLETED,
       lifecycleState: lastAssessment?.lifecycleState || currentStrategy.lifecycleState || STRATEGY_LIFECYCLE_STATES.STABLE,
       dataQualityState: gateResult.dataQualityState,
       watchReasons: lastAssessment?.watchReasons || currentStrategy.watchReasons || [],
       shockOverride: lastAssessment?.shockOverride || currentStrategy.shockOverride || null,
-      reviewPending: gateResult.requiresReview,
+      reviewPending: !isCompleted ? true : gateResult.requiresReview,
       currentConfidence: currentStrategy.confidence,
       dataAsOf: currentStrategy.dataAsOf,
       decisionFingerprint: currentStrategy.decisionFingerprint,
@@ -269,9 +274,10 @@ export async function evaluateAndApplyStrategyStability({
         publishedAt: currentStrategy.publishedAt,
         strategyPublishedAt: currentStrategy.publishedAt,
         latestAssessmentAt: failedAssessment.assessedAt,
-        latestAssessmentResult: ASSESSMENT_RESULTS.KEEP,
+        latestAssessmentResult: null,
         latestAssessmentStatus: EVALUATION_STATUSES.FAILED,
         lifecycleState: STRATEGY_LIFECYCLE_STATES.REVIEW_REQUIRED,
+        reviewPending: true,
         dataQualityState: gateResult.dataQualityState,
         watchReasons: failedAssessment.watchReasons,
         shockOverride: failedAssessment.shockOverride,
@@ -337,9 +343,10 @@ export async function evaluateAndApplyStrategyStability({
       publishedAt: currentStrategy.publishedAt,
       strategyPublishedAt: currentStrategy.publishedAt,
       latestAssessmentAt: deferredAssessment.assessedAt,
-      latestAssessmentResult: ASSESSMENT_RESULTS.KEEP,
+      latestAssessmentResult: null,
       latestAssessmentStatus: EVALUATION_STATUSES.DEFERRED,
       lifecycleState: STRATEGY_LIFECYCLE_STATES.REVIEW_REQUIRED,
+      reviewPending: true,
       dataQualityState: gateResult.dataQualityState,
       watchReasons: deferredAssessment.watchReasons,
       shockOverride: deferredAssessment.shockOverride,
@@ -392,7 +399,35 @@ export async function evaluateAndApplyStrategyStability({
       methodologyVersion: candidateOutput.methodologyVersion || 'strategist-v1'
     });
 
-    await persistStrategyVersion(newVersion, client);
+    try {
+      await publishStrategyVersionAtomic({
+        newVersion,
+        expectedCurrentStrategyId: null
+      }, client);
+    } catch (err) {
+      if (
+        err.isConflict ||
+        err.code === 'P0001' ||
+        err.code === '23505' ||
+        err.message?.includes('STRATEGY_VERSION_CONFLICT') ||
+        err.message?.includes('idx_strategy_versions_single_published')
+      ) {
+        const refreshed = await getCurrentPublishedStrategy(client);
+        return {
+          ...(refreshed?.rawOutput || {}),
+          ...(refreshed || {}),
+          publishedAt: refreshed?.publishedAt,
+          strategyPublishedAt: refreshed?.publishedAt,
+          latestAssessmentAt: refreshed?.publishedAt,
+          latestAssessmentResult: ASSESSMENT_RESULTS.PUBLISH_NEW,
+          latestAssessmentStatus: EVALUATION_STATUSES.COMPLETED,
+          lifecycleState: STRATEGY_LIFECYCLE_STATES.STABLE,
+          conflict: true,
+          concurrencyError: err.message
+        };
+      }
+      throw err;
+    }
 
     const assessmentId = `asmt_${nowMs}_${createHash('sha256').update(`PUB:${strategyId}:${nowIso}`).digest('hex').slice(0, 12)}`;
     const assessment = createStrategyAssessment({
@@ -553,18 +588,32 @@ export async function evaluateAndApplyStrategyStability({
     methodologyVersion: candidateOutput.methodologyVersion || 'strategist-v1'
   });
 
-  // Mark previous strategy version as superseded
-  await supersedeStrategyVersion(currentStrategy.strategyId, client);
-
-  // Persist new version (catches concurrent published conflict if any)
+  // Atomic publication: atomically supersedes current strategy and inserts new version
+  // Guarantees zero-published prevention via transaction rollback and expectedCurrentStrategyId validation
   try {
-    await persistStrategyVersion(newVersion, client);
+    await publishStrategyVersionAtomic({
+      newVersion,
+      expectedCurrentStrategyId: currentStrategy.strategyId
+    }, client);
   } catch (err) {
-    if (err.code === '23505' || err.message?.includes('idx_strategy_versions_single_published')) {
+    if (
+      err.isConflict ||
+      err.code === 'P0001' ||
+      err.code === '23505' ||
+      err.message?.includes('STRATEGY_VERSION_CONFLICT') ||
+      err.message?.includes('idx_strategy_versions_single_published')
+    ) {
       const refreshed = await getCurrentPublishedStrategy(client);
       return {
         ...(refreshed?.rawOutput || {}),
         ...(refreshed || {}),
+        publishedAt: refreshed?.publishedAt,
+        strategyPublishedAt: refreshed?.publishedAt,
+        latestAssessmentAt: lastAssessment?.assessedAt || refreshed?.publishedAt,
+        latestAssessmentResult: lastAssessment?.evaluationStatus === EVALUATION_STATUSES.COMPLETED ? lastAssessment.result : null,
+        latestAssessmentStatus: lastAssessment?.evaluationStatus || EVALUATION_STATUSES.COMPLETED,
+        lifecycleState: STRATEGY_LIFECYCLE_STATES.REVIEW_REQUIRED,
+        reviewPending: true,
         conflict: true,
         concurrencyError: err.message
       };

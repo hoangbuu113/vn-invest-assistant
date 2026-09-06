@@ -7,6 +7,7 @@ import {
   SHOCK_SCOPES,
   SHOCK_STATUSES,
   REVISION_TYPES,
+  EVALUATION_STATUSES,
   computeConfirmationKey,
   createShockOverride
 } from './strategyStabilityModel.js';
@@ -19,15 +20,18 @@ export const MATERIALITY_TRIGGER_TYPES = Object.freeze({
   CLAIM_CONTRADICTED: 'CLAIM_CONTRADICTED',
   CONTRADICTION_RESOLVED: 'CONTRADICTION_RESOLVED',
   OFFICIAL_REVISION_CONSUMED: 'OFFICIAL_REVISION_CONSUMED',
+  NEW_PERIOD_RELEASE: 'NEW_PERIOD_RELEASE',
   EVIDENCE_QUALITY_DEGRADATION: 'EVIDENCE_QUALITY_DEGRADATION',
   DATA_QUALITY_DEGRADATION: 'DATA_QUALITY_DEGRADATION',
   STRUCTURED_POLICY_EVENT: 'STRUCTURED_POLICY_EVENT',
   INVALIDATION_CONDITION_TRIGGERED: 'INVALIDATION_CONDITION_TRIGGERED',
   NON_MATERIAL_NEWS_ONLY: 'NON_MATERIAL_NEWS_ONLY',
   SHOCK_OVERRIDE: 'SHOCK_OVERRIDE',
+  SHOCK_RESOLVED: 'SHOCK_RESOLVED',
   UNCONFIRMED_SIGNAL: 'UNCONFIRMED_SIGNAL',
   CONFIRMED_SIGNAL: 'CONFIRMED_SIGNAL',
-  WATCH_INVALIDATED: 'WATCH_INVALIDATED'
+  WATCH_INVALIDATED: 'WATCH_INVALIDATED',
+  REVIEW_PENDING_RETRY: 'REVIEW_PENDING_RETRY'
 });
 
 /**
@@ -76,7 +80,7 @@ export function assessDataQuality(factPacket) {
 export function classifyEvidenceRevision(obs, previousObs = null) {
   if (!obs || typeof obs !== 'object') return null;
 
-  if (obs.isRetracted || obs.status === 'retracted') {
+  if (obs.isRetracted || obs.status === 'retracted' || obs.retraction) {
     return REVISION_TYPES.RETRACTION;
   }
   if (obs.isMethodologyChange || obs.methodologyChange || obs.methodologyVersion === 'post_oct_2025_m2') {
@@ -85,12 +89,33 @@ export function classifyEvidenceRevision(obs, previousObs = null) {
   if (obs.isCorrection || obs.correctionOf || obs.errorCorrection) {
     return REVISION_TYPES.SOURCE_CORRECTION;
   }
+
+  const obsPeriod = obs.period || obs.referencePeriod;
+  const prevPeriod = previousObs ? (previousObs.period || previousObs.referencePeriod) : null;
+
+  // New reporting period for same fact series (e.g. Aug -> Sep)
+  if (previousObs && obsPeriod && prevPeriod && obsPeriod !== prevPeriod) {
+    return REVISION_TYPES.NEW_PERIOD;
+  }
+
+  // Same period revision (vintage/value change or explicit revision tag)
+  if (previousObs && obsPeriod && prevPeriod && obsPeriod === prevPeriod) {
+    if (
+      obs.revision === 'revised' ||
+      Boolean(obs.revisionOf) ||
+      Boolean(obs.revision_of) ||
+      (obs.vintage && previousObs.vintage && obs.vintage !== previousObs.vintage) ||
+      (obs.value !== undefined && previousObs.value !== undefined && obs.value !== previousObs.value)
+    ) {
+      return REVISION_TYPES.DATA_REVISION;
+    }
+  }
+
+  // Standalone revision indicators without previous observation
   if (obs.revision === 'revised' || Boolean(obs.revisionOf) || Boolean(obs.revision_of)) {
     return REVISION_TYPES.DATA_REVISION;
   }
-  if (previousObs && obs.period && previousObs.period && obs.period !== previousObs.period) {
-    return REVISION_TYPES.NEW_PERIOD;
-  }
+
   return null;
 }
 
@@ -296,6 +321,7 @@ export function transitionLifecycleState(currentState, event, context = {}) {
 export function assessStrategyMateriality({
   currentStrategy = null,
   lastAssessment = null,
+  lastCompletedAssessment = null,
   factPacket,
   now = new Date()
 } = {}) {
@@ -336,12 +362,27 @@ export function assessStrategyMateriality({
     claims: factPacket.claims
   });
 
-  const baselineEvidenceFingerprint = lastAssessment?.evidenceFingerprint || currentStrategy.evidenceFingerprint;
-  const currentLifecycleState = lastAssessment?.lifecycleState || currentStrategy.lifecycleState || STRATEGY_LIFECYCLE_STATES.STABLE;
+  // Effective completed assessment: incomplete assessments (FAILED/DEFERRED) must NEVER establish baseline
+  const effectiveCompletedAssessment =
+    (lastCompletedAssessment && lastCompletedAssessment.evaluationStatus === EVALUATION_STATUSES.COMPLETED)
+      ? lastCompletedAssessment
+      : (lastAssessment?.evaluationStatus === EVALUATION_STATUSES.COMPLETED ? lastAssessment : null);
 
-  // 2. Shock Override check (bypasses confirmation waiting)
-  const shockOverride = detectShockOverride(factPacket, currentStrategy);
-  if (shockOverride) {
+  const baselineEvidenceFingerprint = effectiveCompletedAssessment?.evidenceFingerprint || currentStrategy.evidenceFingerprint;
+  const currentLifecycleState = lastAssessment?.lifecycleState || currentStrategy.lifecycleState || STRATEGY_LIFECYCLE_STATES.STABLE;
+  const isPriorEvaluationIncomplete = Boolean(lastAssessment && lastAssessment.evaluationStatus !== EVALUATION_STATUSES.COMPLETED);
+
+  // 2. Shock Override check & active shock resolution
+  const newlyDetectedShock = detectShockOverride(factPacket, currentStrategy);
+  const previousActiveShock =
+    (lastAssessment?.shockOverride?.status === SHOCK_STATUSES.ACTIVE ? lastAssessment.shockOverride : null) ||
+    (currentStrategy?.shockOverride?.status === SHOCK_STATUSES.ACTIVE ? currentStrategy.shockOverride : null);
+
+  let shockOverride = null;
+  let shockResolvedThisCycle = null;
+
+  if (newlyDetectedShock) {
+    shockOverride = newlyDetectedShock;
     return {
       requiresReview: true,
       lifecycleState: STRATEGY_LIFECYCLE_STATES.REVIEW_REQUIRED,
@@ -358,12 +399,41 @@ export function assessStrategyMateriality({
         }
       ]
     };
+  } else if (previousActiveShock) {
+    const resolvedOrActive = resolveShockOverride(previousActiveShock, factPacket, now);
+    if (resolvedOrActive.status === SHOCK_STATUSES.ACTIVE) {
+      // Shock remains active (elapsed time alone cannot resolve; no resolution evidence)
+      shockOverride = resolvedOrActive;
+      return {
+        requiresReview: true,
+        lifecycleState: STRATEGY_LIFECYCLE_STATES.REVIEW_REQUIRED,
+        dataQualityState,
+        confirmationKeys,
+        watchReasons: [],
+        shockOverride,
+        reasons: [
+          {
+            type: MATERIALITY_TRIGGER_TYPES.SHOCK_OVERRIDE,
+            scope: shockOverride.scope,
+            reason: shockOverride.reason,
+            description: `Duy trì cơ chế can thiệp khẩn cấp (SHOCK_OVERRIDE) cấp độ ${shockOverride.scope}: chưa có bằng chứng giải tỏa hợp lệ.`
+          }
+        ]
+      };
+    } else if (resolvedOrActive.status === SHOCK_STATUSES.RESOLVED) {
+      // Valid resolution evidence satisfied resolutionCondition!
+      shockResolvedThisCycle = resolvedOrActive;
+      shockOverride = resolvedOrActive;
+    }
   }
 
-  // 3. Exact evidence match: if evidence fingerprint is identical and last assessment completed successfully
+  // 3. Exact evidence match: only if evidence matches completed baseline AND prior evaluation was not incomplete AND not REVIEW_REQUIRED
   if (
     currentEvidenceFingerprint === baselineEvidenceFingerprint &&
-    lastAssessment?.evaluationStatus === 'COMPLETED'
+    effectiveCompletedAssessment &&
+    !isPriorEvaluationIncomplete &&
+    currentLifecycleState !== STRATEGY_LIFECYCLE_STATES.REVIEW_REQUIRED &&
+    !shockResolvedThisCycle
   ) {
     return {
       requiresReview: false,
@@ -395,11 +465,16 @@ export function assessStrategyMateriality({
     for (const id of rawStrategy.citations.factObservationIds || []) citedEvidenceIds.add(id);
     for (const id of rawStrategy.citations.articleIds || []) citedEvidenceIds.add(id);
   }
+  const prevObsMap = new Map();
   if (Array.isArray(rawStrategy.evidence)) {
     for (const item of rawStrategy.evidence) {
-      if (item.observationId) citedEvidenceIds.add(item.observationId);
-      if (item.id) citedEvidenceIds.add(item.id);
-      if (item.factId) citedEvidenceIds.add(item.factId);
+      if (item && typeof item === 'object') {
+        if (item.observationId) citedEvidenceIds.add(item.observationId);
+        if (item.id) citedEvidenceIds.add(item.id);
+        if (item.factId) citedEvidenceIds.add(item.factId);
+        const k = item.factId || item.id || item.observationId;
+        if (k && !prevObsMap.has(k)) prevObsMap.set(k, item);
+      }
     }
   }
   if (Array.isArray(rawStrategy.keyDrivers)) {
@@ -423,24 +498,41 @@ export function assessStrategyMateriality({
     }
   }
 
-  // 4. Check for official revisions of consumed or core facts
+  // 4. Check for official revisions / new periods of consumed or core facts
   for (const obs of evidence) {
     const isCited = citedEvidenceIds.size === 0 ||
       citedEvidenceIds.has(obs.observationId || obs.id) ||
       citedEvidenceIds.has(obs.factId) ||
       (obs.revisionOf && citedEvidenceIds.has(obs.revisionOf)) ||
       (obs.revision_of && citedEvidenceIds.has(obs.revision_of));
-    const hasRevision = obs.revision === 'revised' || Boolean(obs.revisionOf) || Boolean(obs.revision_of) || Boolean(obs.isCorrection);
-    if (hasRevision && isCited) {
-      const revisionType = classifyEvidenceRevision(obs);
-      reasons.push({
-        type: MATERIALITY_TRIGGER_TYPES.OFFICIAL_REVISION_CONSUMED,
-        factId: obs.factId || obs.id,
-        observationId: obs.observationId || obs.id,
-        revision: obs.revision,
-        revisionType,
-        description: `Dữ liệu chính thức được điều chỉnh cho chỉ số đã sử dụng: ${obs.label || obs.metric || obs.id}`
-      });
+
+    const factKey = obs.factId || obs.id;
+    const previousObs = prevObsMap.get(factKey) || null;
+    const revisionType = classifyEvidenceRevision(obs, previousObs);
+
+    if (revisionType && isCited) {
+      if (revisionType === REVISION_TYPES.NEW_PERIOD) {
+        const currPeriod = obs.period || obs.referencePeriod;
+        const prevPeriod = previousObs ? (previousObs.period || previousObs.referencePeriod) : null;
+        reasons.push({
+          type: MATERIALITY_TRIGGER_TYPES.NEW_PERIOD_RELEASE,
+          factId: obs.factId || obs.id,
+          observationId: obs.observationId || obs.id,
+          period: currPeriod,
+          previousPeriod: prevPeriod,
+          revisionType: REVISION_TYPES.NEW_PERIOD,
+          description: `Kỳ dữ liệu mới (${currPeriod}) được phát hành cho chỉ số đã sử dụng (${prevPeriod}): ${obs.label || obs.metric || obs.id}`
+        });
+      } else {
+        reasons.push({
+          type: MATERIALITY_TRIGGER_TYPES.OFFICIAL_REVISION_CONSUMED,
+          factId: obs.factId || obs.id,
+          observationId: obs.observationId || obs.id,
+          revision: obs.revision,
+          revisionType,
+          description: `Dữ liệu chính thức được điều chỉnh cho chỉ số đã sử dụng: ${obs.label || obs.metric || obs.id}`
+        });
+      }
     }
   }
 
@@ -626,7 +718,27 @@ export function assessStrategyMateriality({
     };
   }
 
-  // 9. Non-material news check:
+  // 9. Shock resolution reason
+  if (shockResolvedThisCycle) {
+    reasons.push({
+      type: MATERIALITY_TRIGGER_TYPES.SHOCK_RESOLVED,
+      scope: shockResolvedThisCycle.scope,
+      reason: shockResolvedThisCycle.reason,
+      description: `Cơ chế can thiệp khẩn cấp (SHOCK_OVERRIDE) cấp độ ${shockResolvedThisCycle.scope} đã được giải tỏa dựa trên bằng chứng hợp lệ.`
+    });
+  }
+
+  // 10. Sticky REVIEW_REQUIRED protection:
+  // If prior evaluation was incomplete (FAILED/DEFERRED) or current lifecycle is REVIEW_REQUIRED,
+  // same evidence fingerprint must NEVER transition to STABLE without a completed review.
+  if (reasons.length === 0 && (isPriorEvaluationIncomplete || currentLifecycleState === STRATEGY_LIFECYCLE_STATES.REVIEW_REQUIRED)) {
+    reasons.push({
+      type: MATERIALITY_TRIGGER_TYPES.REVIEW_PENDING_RETRY,
+      description: 'Đánh giá trước đó chưa hoàn thành (FAILED/DEFERRED) hoặc đang ở trạng thái REVIEW_REQUIRED; tiếp tục duy trì yêu cầu rà soát.'
+    });
+  }
+
+  // 11. Non-material news check (only when no material structural triggers exist):
   if (reasons.length === 0) {
     const hasNovelIndependentClaim = claims.some(
       (c) => c.independentSourceCount > 1 && c.supportStatus !== CLAIM_STATUS.SINGLE_SOURCE
@@ -657,7 +769,7 @@ export function assessStrategyMateriality({
     dataQualityState,
     confirmationKeys,
     watchReasons: [],
-    shockOverride: null,
+    shockOverride: shockOverride || null,
     reasons
   };
 }

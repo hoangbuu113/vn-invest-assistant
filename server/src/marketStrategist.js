@@ -2,6 +2,7 @@ import { getMarketContextFabric } from './context/fabric.js';
 import { getNewsFeed } from './news.js';
 import {
   buildMarketStrategistFactPacket,
+  computeStrategistFingerprint,
   generateMarketStrategist,
   globalMarketStrategistRuntime,
   MarketStrategistRuntime
@@ -14,6 +15,7 @@ import {
 
 export {
   buildMarketStrategistFactPacket,
+  computeStrategistFingerprint,
   generateMarketStrategist,
   globalMarketStrategistRuntime,
   MarketStrategistRuntime,
@@ -76,6 +78,48 @@ export async function getMarketStrategist({
     now
   });
 
+  // Authoritative evidence resolver for stale-evaluation protection (read-only requests perform no publication)
+  // Re-reads current persisted/cached validated evidence and computes fresh fingerprint immediately before publication
+  const getAuthoritativeEvidenceFingerprint = !isReadOnly
+    ? async () => {
+        const revalNow = new Date();
+        let freshObs = [];
+        try {
+          const freshFabric = await getMarketContextFabricFn({ now: revalNow });
+          freshObs = Array.isArray(freshFabric?.facts) ? freshFabric.facts : [];
+        } catch {
+          freshObs = [];
+        }
+
+        let freshNews = [];
+        try {
+          const freshNewsResult = await getNewsFeedFn({ limit: 40, now: revalNow });
+          freshNews = Array.isArray(freshNewsResult?.data)
+            ? freshNewsResult.data
+            : (Array.isArray(freshNewsResult?.news) ? freshNewsResult.news : []);
+        } catch {
+          freshNews = [];
+        }
+
+        const freshPacket = buildMarketStrategistFactPacket({
+          marketObservations: freshObs,
+          newsArticles: freshNews,
+          now: revalNow
+        });
+
+        return freshPacket?.evidenceFingerprint || computeStrategistFingerprint({
+          validFactIds: freshPacket?.validFactIds,
+          validArticleIds: freshPacket?.validArticleIds,
+          validSignalIds: freshPacket?.validSignalIds,
+          validClaimIds: freshPacket?.validClaimIds,
+          evidence: freshPacket?.evidence || freshObs,
+          untrustedNews: freshPacket?.untrustedNews || freshNews,
+          derivedSignals: freshPacket?.derivedSignals || [],
+          claims: freshPacket?.claims || []
+        });
+      }
+    : null;
+
   // 4. Evaluate Strategy Stability lifecycle
   return evaluateAndApplyStrategyStability({
     factPacket,
@@ -91,6 +135,7 @@ export async function getMarketStrategist({
     aiEnabled,
     client,
     isReadOnly,
-    idempotencyKey
+    idempotencyKey,
+    getAuthoritativeEvidenceFingerprint
   });
 }
