@@ -3,6 +3,7 @@ import { globalNewsService } from './service.js';
 import { deduplicateCanonicalArticles, normalizeCanonicalArticle } from './contract.js';
 import { fetchPersistedNewsArticles, persistNewsArticles } from './repository.js';
 import { globalNewsReadCache } from './reader.js';
+import { recordJobHealth, HEALTH_STATES, OBSERVED_JOBS, ERROR_CATEGORIES } from '../observability/dataHealth.js';
 
 function sourceMetadata(sourceResults = []) {
   return sourceResults.map((source) => ({
@@ -50,11 +51,38 @@ export async function runNewsCollector({
     }).filter(Boolean)
   );
 
+  const startTime = Date.now();
   const persistence = await persistFn(canonicalArticles, client);
   readCache?.clear?.();
   const retainedArticles = await fetchPersistedFn({ client, now, limit: 500 });
   const success = persistence.failedPersistence === 0
     && (canonicalArticles.length > 0 || retainedArticles.length > 0 || !sourceResult.allFailed);
+
+  const durationMs = Date.now() - startTime;
+  let newsHealthStatus = HEALTH_STATES.HEALTHY;
+  if (sourceResult.allFailed || (persistence.failedPersistence > 0 && persistence.durablyPersisted === 0)) {
+    newsHealthStatus = HEALTH_STATES.FAILED;
+  } else if (sourceResult.partial || persistence.failedPersistence > 0) {
+    newsHealthStatus = HEALTH_STATES.DEGRADED;
+  }
+
+  try {
+    await recordJobHealth({
+      jobName: OBSERVED_JOBS.NEWS_REFRESH_COLLECTOR,
+      status: newsHealthStatus,
+      durationMs,
+      recordsRead: sourceResult.allArticles.length,
+      recordsWritten: persistence.durablyPersisted || 0,
+      dataAsOf: now.toISOString(),
+      policyVersion: 'v1.3',
+      errorCode: sourceResult.allFailed ? 'ALL_PROVIDERS_FAILED' : (sourceResult.partial ? 'PARTIAL_PROVIDERS_FAILED' : null),
+      errorCategory: (sourceResult.allFailed || sourceResult.partial) ? ERROR_CATEGORIES.UPSTREAM_PROVIDER : null,
+      client,
+      now
+    });
+  } catch {
+    // Non-blocking telemetry
+  }
 
   return {
     success,

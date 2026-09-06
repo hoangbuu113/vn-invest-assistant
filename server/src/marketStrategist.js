@@ -12,6 +12,7 @@ import {
   getCurrentPublishedStrategy,
   getLatestStrategyAssessment
 } from './ai/strategyStabilityRepository.js';
+import { recordJobHealth, HEALTH_STATES, OBSERVED_JOBS } from './observability/dataHealth.js';
 
 export {
   buildMarketStrategistFactPacket,
@@ -49,6 +50,7 @@ export async function getMarketStrategist({
   isReadOnly = false,
   idempotencyKey = null
 } = {}) {
+  const startTime = Date.now();
   // 1. Fetch validated market context facts from the fabric (L1 cache / persistence only)
   let marketObservations = [];
   try {
@@ -121,7 +123,7 @@ export async function getMarketStrategist({
     : null;
 
   // 4. Evaluate Strategy Stability lifecycle
-  return evaluateAndApplyStrategyStability({
+  const stabilityResult = await evaluateAndApplyStrategyStability({
     factPacket,
     now,
     allowLlm,
@@ -138,4 +140,26 @@ export async function getMarketStrategist({
     idempotencyKey,
     getAuthoritativeEvidenceFingerprint
   });
+
+  const durationMs = Date.now() - startTime;
+  const isDataDegraded = stabilityResult?.assessment?.dataQualityState === 'DEGRADED';
+  const strategistStatus = isDataDegraded ? HEALTH_STATES.DEGRADED : HEALTH_STATES.HEALTHY;
+
+  try {
+    await recordJobHealth({
+      jobName: OBSERVED_JOBS.MARKET_STRATEGIST_REFRESH,
+      status: strategistStatus,
+      durationMs,
+      recordsRead: (marketObservations.length || 0) + (newsArticles.length || 0),
+      recordsWritten: stabilityResult?.action === 'PUBLISH_NEW' ? 1 : 0,
+      dataAsOf: factPacket?.dataAsOf || now.toISOString(),
+      policyVersion: 'strategy-stability-v2',
+      client,
+      now
+    });
+  } catch {
+    // Non-blocking telemetry
+  }
+
+  return stabilityResult;
 }

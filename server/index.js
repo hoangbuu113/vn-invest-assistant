@@ -70,6 +70,13 @@ import {
   upsertPushSubscription,
   deletePushSubscriptionByEndpoint
 } from './src/supabase.js';
+import {
+  getSystemDataHealth,
+  recordJobHealth,
+  HEALTH_STATES,
+  OBSERVED_JOBS,
+  ERROR_CATEGORIES
+} from './src/observability/dataHealth.js';
 
 dotenv.config();
 
@@ -185,6 +192,7 @@ export function createApp(services = {}) {
     upsertPushSubscriptionFn = upsertPushSubscription,
     deletePushSubscriptionByEndpointFn = deletePushSubscriptionByEndpoint,
     dispatchPendingWebPushDeliveriesFn = dispatchPendingWebPushDeliveries,
+    getSystemDataHealthFn = getSystemDataHealth,
     corsOrigins = process.env.CORS_ORIGINS,
     transactionClient,
     cashClient,
@@ -283,6 +291,27 @@ export function createApp(services = {}) {
       status: 'error',
       message: 'Database connection check failed'
     });
+  });
+
+  // Data health and operational pipeline observability endpoint (V1.3 — 01E)
+  app.get('/api/system/data-health', async (req, res) => {
+    try {
+      const health = await getSystemDataHealthFn({
+        client: supabaseAuthClient,
+        now: new Date()
+      });
+      const statusCode = health.systemStatus === 'FAILED' ? 503 : 200;
+      return res.status(statusCode).json({
+        status: 'ok',
+        data: health
+      });
+    } catch (error) {
+      return res.status(503).json({
+        status: 'error',
+        code: 'HEALTH_CHECK_FAILED',
+        message: 'Failed to retrieve system data health'
+      });
+    }
   });
 
   // Investor profile endpoints
@@ -1490,6 +1519,7 @@ export function createApp(services = {}) {
   });
 
   app.post('/api/internal/alerts/evaluate', requireAlertScheduler, async (req, res) => {
+    const schedulerStartTime = Date.now();
     try {
       const summary = await evaluateAndPersistAlertsFn({
         getMarketSnapshotFn,
@@ -1510,6 +1540,25 @@ export function createApp(services = {}) {
         // Failure isolation: preserve alert evaluation outcome without rollback
       }
 
+      const alertSchedulerStatus = (deliverySummary?.deliveryPermanentFailureCount > 0)
+        ? HEALTH_STATES.DEGRADED
+        : HEALTH_STATES.HEALTHY;
+
+      try {
+        await recordJobHealth({
+          jobName: OBSERVED_JOBS.ALERT_SCHEDULER,
+          status: alertSchedulerStatus,
+          durationMs: Date.now() - schedulerStartTime,
+          recordsRead: summary?.evaluatedCount || 0,
+          recordsWritten: (summary?.triggeredCount || 0) + (deliverySummary?.deliverySentCount || 0),
+          policyVersion: 'v1.1-improvement-12',
+          client: supabaseAuthClient,
+          now: new Date()
+        });
+      } catch {
+        // Non-blocking telemetry
+      }
+
       return res.json({
         status: 'ok',
         data: {
@@ -1525,6 +1574,20 @@ export function createApp(services = {}) {
         }
       });
     } catch (_error) {
+      try {
+        await recordJobHealth({
+          jobName: OBSERVED_JOBS.ALERT_SCHEDULER,
+          status: HEALTH_STATES.FAILED,
+          durationMs: Date.now() - schedulerStartTime,
+          error: _error,
+          policyVersion: 'v1.1-improvement-12',
+          client: supabaseAuthClient,
+          now: new Date()
+        });
+      } catch {
+        // Non-blocking telemetry
+      }
+
       return res.status(500).json({
         status: 'error',
         message: 'Failed to evaluate price alerts'
@@ -1537,7 +1600,8 @@ export function createApp(services = {}) {
     try {
       const summary = await runMarketContextCollectorFn({
         now: new Date(),
-        client: supabaseAuthClient
+        client: supabaseAuthClient,
+        recordHealth: true
       });
       if (!summary.isDurable || summary.failedPersistence > 0) {
         return res.status(503).json({

@@ -1,5 +1,6 @@
 import { createMarketClaim } from './claimModel.js';
 import { privateSupabase } from '../supabase.js';
+import { recordJobHealth, HEALTH_STATES, OBSERVED_JOBS } from '../observability/dataHealth.js';
 
 // In-process memory store for fast testing and fallback
 const memoryClaims = new Map();
@@ -146,6 +147,19 @@ export async function persistClaims(reconciledList = [], client = privateSupabas
         console.warn(`[claimRepository] Database upsert notice: ${err.message}`);
       }
     }
+  }
+
+  try {
+    await recordJobHealth({
+      jobName: OBSERVED_JOBS.CLAIMS_RECONCILIATION,
+      status: HEALTH_STATES.HEALTHY,
+      recordsRead: reconciledList.length,
+      recordsWritten: savedClaims.length,
+      policyVersion: 'claims-v1',
+      client
+    });
+  } catch {
+    // Non-blocking telemetry
   }
 
   return savedClaims;

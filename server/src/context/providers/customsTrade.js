@@ -29,6 +29,7 @@ import {
   UNIT_TYPES,
   FACT_LIFECYCLE_STATUS
 } from '../factModel.js';
+import { recordJobHealth, HEALTH_STATES, OBSERVED_JOBS, ERROR_CATEGORIES } from '../../observability/dataHealth.js';
 
 export const CUSTOMS_APPROVED_HOSTS = Object.freeze([
   'files.customs.gov.vn',
@@ -770,6 +771,7 @@ export async function ingestCustomsDocument({
   fetchFn = fetch,
   pdfParseFn = pdfParse
 } = {}) {
+  const startTime = Date.now();
   // 1. SSRF Validation
   if (!isOfficialCustomsUrl(documentUrl)) {
     return {
@@ -821,6 +823,21 @@ export async function ingestCustomsDocument({
   const observations = parsed.direction === 'EXPORT'
     ? normalizeCustomsTradeFacts({ exportDocResult: parsed, derivedBalance: false, now })
     : normalizeCustomsTradeFacts({ importDocResult: parsed, derivedBalance: false, now });
+
+  try {
+    await recordJobHealth({
+      jobName: OBSERVED_JOBS.CUSTOMS_TRADE_COLLECTOR,
+      status: HEALTH_STATES.HEALTHY,
+      durationMs: Date.now() - startTime,
+      recordsRead: 1,
+      recordsWritten: observations.length,
+      dataAsOf: parsed.publishedAt || now.toISOString(),
+      policyVersion: 'customs-trade-v1',
+      now
+    });
+  } catch {
+    // Non-blocking telemetry
+  }
 
   return {
     success: true,

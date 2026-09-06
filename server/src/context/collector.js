@@ -21,6 +21,7 @@ import { fetchGlobalMarketPillar, fetchUsdVndObservation } from './providers/glo
 import { normalizeNsoMacroFacts } from './providers/nsoMacro.js';
 import { normalizeSbvMonetaryFacts } from './providers/sbvMonetary.js';
 import { isSourceDue, recordCheckpoint, SOURCE_KEYS, CHECKPOINT_STATUS } from './collectorCheckpoints.js';
+import { recordJobHealth, HEALTH_STATES, OBSERVED_JOBS, ERROR_CATEGORIES } from '../observability/dataHealth.js';
 import { privateSupabase } from '../supabase.js';
 
 /**
@@ -420,8 +421,10 @@ export async function runMarketContextCollector({
   fetchNsoMacroFn = null,
   fetchSbvOfficialFn = null,
   fetchCustomsTradeFn = null,
-  forceRefresh = false
+  forceRefresh = false,
+  recordHealth = false
 } = {}) {
+  const startTime = Date.now();
   // 1. Check due gating for slow-moving official sources
   const [macroDue, sbvDue] = await Promise.all([
     forceRefresh ? Promise.resolve(true) : isSourceDue(SOURCE_KEYS.NSO_MONTHLY, { now, client }),
@@ -564,6 +567,62 @@ export async function runMarketContextCollector({
   const memoryAcceptedCount = persistResult.memoryAccepted || 0;
   const failedPersistenceCount = persistResult.failedPersistence || 0;
   const isDurable = Boolean(persistResult.isDurable);
+  const durationMs = Date.now() - startTime;
+
+  if (recordHealth) {
+    // Record operational health for VN market context collector
+    const contextHealthStatus = (!isDurable || failedPersistenceCount > 0)
+      ? HEALTH_STATES.DEGRADED
+      : HEALTH_STATES.HEALTHY;
+
+    try {
+      await recordJobHealth({
+        jobName: OBSERVED_JOBS.VN_MARKET_CONTEXT_COLLECTOR,
+        status: contextHealthStatus,
+        durationMs,
+        recordsRead: allObservations.length,
+        recordsWritten: durablyPersistedCount,
+        dataAsOf: now.toISOString(),
+        policyVersion: 'v1.3',
+        errorCode: failedPersistenceCount > 0 ? 'PARTIAL_PERSISTENCE' : null,
+        errorCategory: failedPersistenceCount > 0 ? ERROR_CATEGORIES.DATABASE : null,
+        client,
+        now
+      });
+    } catch {
+      // Non-blocking telemetry
+    }
+
+    // Record operational health for official macro/monetary collector if due
+    if (macroDue || sbvDue) {
+      const isOfficialFailed = (macroDue && macroRes.status === 'rejected') || (sbvDue && sbvRes.status === 'rejected');
+      const isOfficialBlocked = sbvDue && (
+        (sbvRes.status === 'fulfilled' && (sbvRes.value?.reason === 'PROVIDER_ACCESS_DENIED' || sbvRes.value?.status === 'blocked')) ||
+        (sbvRes.status === 'rejected' && sbvRes.reason?.code === 'PROVIDER_ACCESS_DENIED')
+      );
+      const officialHealthStatus = isOfficialFailed
+        ? HEALTH_STATES.FAILED
+        : (isOfficialBlocked ? HEALTH_STATES.DEGRADED : HEALTH_STATES.HEALTHY);
+
+      try {
+        await recordJobHealth({
+          jobName: OBSERVED_JOBS.OFFICIAL_MACRO_MONETARY_COLLECTOR,
+          status: officialHealthStatus,
+          durationMs,
+          recordsRead: rawMacro.length + rawMonetary.length,
+          recordsWritten: validToPersist.filter((o) => o.pillar === PILLARS.MACRO || o.pillar === PILLARS.MONETARY).length,
+          dataAsOf: now.toISOString(),
+          policyVersion: 'v1.3',
+          errorCode: isOfficialBlocked ? 'PROVIDER_ACCESS_DENIED' : (isOfficialFailed ? 'OFFICIAL_SOURCE_FAILED' : null),
+          errorCategory: (isOfficialBlocked || isOfficialFailed) ? ERROR_CATEGORIES.UPSTREAM_PROVIDER : null,
+          client,
+          now
+        });
+      } catch {
+        // Non-blocking telemetry
+      }
+    }
+  }
 
   return {
     success: isDurable,
