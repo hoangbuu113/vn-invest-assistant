@@ -81,6 +81,10 @@ import {
   getVietnamEquityEvidence,
   runVietnamEquityEvidenceCollector
 } from './src/equities/index.js';
+import {
+  getPublishedEquityOpportunities,
+  runVietnamEquityOpportunityRefresh
+} from './src/equityOpportunities/index.js';
 
 dotenv.config();
 
@@ -174,6 +178,8 @@ export function createApp(services = {}) {
     runMarketContextCollectorFn = runMarketContextCollector,
     getVietnamEquityEvidenceFn = getVietnamEquityEvidence,
     runVietnamEquityEvidenceCollectorFn = runVietnamEquityEvidenceCollector,
+    getPublishedEquityOpportunitiesFn = getPublishedEquityOpportunities,
+    runVietnamEquityOpportunityRefreshFn = runVietnamEquityOpportunityRefresh,
     runNewsCollectorFn = runNewsCollector,
     getOpportunitiesFn = getOpportunities,
     getInvestmentBriefFn = getInvestmentBrief,
@@ -920,6 +926,44 @@ export function createApp(services = {}) {
         status: 'error',
         code: error.code || 'EQUITY_EVIDENCE_UNAVAILABLE',
         message: error.status ? error.message : 'Failed to read equity evidence'
+      });
+    }
+  });
+
+  // Public provider-free reads of persisted deterministic VN equity screens.
+  // Feature 28's private profile-aware /api/opportunities route remains unchanged.
+  app.get('/api/equity-opportunities', async (_req, res) => {
+    try {
+      const result = await getPublishedEquityOpportunitiesFn({ client: supabaseAuthClient });
+      return res.json({ status: 'ok', data: result });
+    } catch (_error) {
+      return res.status(503).json({
+        status: 'error',
+        code: 'EQUITY_OPPORTUNITY_READ_UNAVAILABLE',
+        message: 'Failed to read persisted equity opportunities'
+      });
+    }
+  });
+
+  app.get('/api/equity-opportunities/:symbol', async (req, res) => {
+    try {
+      const result = await getPublishedEquityOpportunitiesFn({
+        client: supabaseAuthClient,
+        symbol: req.params.symbol
+      });
+      if (result.candidates.length === 0) {
+        return res.status(404).json({
+          status: 'error',
+          code: 'EQUITY_OPPORTUNITY_NOT_FOUND',
+          message: 'No persisted equity opportunity evaluation is available'
+        });
+      }
+      return res.json({ status: 'ok', data: result.candidates[0] });
+    } catch (_error) {
+      return res.status(503).json({
+        status: 'error',
+        code: 'EQUITY_OPPORTUNITY_READ_UNAVAILABLE',
+        message: 'Failed to read persisted equity opportunity'
       });
     }
   });
@@ -1680,6 +1724,33 @@ export function createApp(services = {}) {
       return res.status(500).json({
         status: 'error',
         message: 'Failed to refresh Vietnam equity evidence'
+      });
+    }
+  });
+
+  // Internal provider-free deterministic evaluation over persisted 01F evidence.
+  app.post('/api/internal/equity-opportunities/refresh', requireAlertScheduler, async (_req, res) => {
+    try {
+      const summary = await runVietnamEquityOpportunityRefreshFn({
+        now: new Date(),
+        client: supabaseAuthClient
+      });
+      if (!summary.success || !summary.isDurable || summary.failedPersistence > 0) {
+        return res.status(503).json({
+          status: 'error',
+          code: 'EQUITY_OPPORTUNITY_REFRESH_NOT_DURABLE',
+          data: summary
+        });
+      }
+      return res.json({
+        status: summary.status === HEALTH_STATES.DEGRADED ? 'degraded' : 'ok',
+        data: summary
+      });
+    } catch (_error) {
+      return res.status(500).json({
+        status: 'error',
+        code: 'EQUITY_OPPORTUNITY_REFRESH_FAILED',
+        message: 'Failed to refresh deterministic equity opportunities'
       });
     }
   });

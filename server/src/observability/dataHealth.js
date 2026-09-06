@@ -33,7 +33,8 @@ export const OBSERVED_JOBS = Object.freeze({
   CLAIMS_RECONCILIATION: 'claims_reconciliation',
   MARKET_STRATEGIST_REFRESH: 'market_strategist_refresh',
   ALERT_SCHEDULER: 'alert_scheduler',
-  VN_EQUITY_EVIDENCE_REFRESH: 'vn_equity_evidence_refresh'
+  VN_EQUITY_EVIDENCE_REFRESH: 'vn_equity_evidence_refresh',
+  VN_OPPORTUNITY_ENGINE_REFRESH: 'vn_opportunity_engine_refresh'
 });
 
 export const ALL_OBSERVED_JOBS = Object.freeze(Object.values(OBSERVED_JOBS));
