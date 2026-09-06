@@ -12,3 +12,11 @@ export {
   buildHistoricalEvidencePacket,
   REPLAY_POLICY_VERSION
 } from './historicalReplay.js';
+
+export {
+  runStrategyShadowReplay,
+  computeShadowReplayMetrics,
+  formatShadowReplaySummary,
+  SHADOW_REPLAY_POLICY_VERSION,
+  DEFAULT_WHIPSAW_THRESHOLD_MS
+} from '../ai/strategyShadowReplay.js';
