@@ -363,7 +363,7 @@ test('12. real refresh service persists candidates and records HEALTHY execution
   assert.equal(checkpoint.metadata.healthState, HEALTH_STATES.HEALTHY);
 });
 
-test('13. normal insufficient evidence is DEGRADED rather than operational FAILED', async () => {
+test('13. normal insufficient evidence is HEALTHY execution rather than degraded operational state', async () => {
   const db = createOpportunityDb();
   const summary = await runVietnamEquityOpportunityRefresh({
     now: new Date('2026-09-04T09:00:00.000Z'),
@@ -372,9 +372,99 @@ test('13. normal insufficient evidence is DEGRADED rather than operational FAILE
     fetchEvidenceFn: async () => []
   });
   assert.equal(summary.success, true);
+  assert.equal(summary.status, HEALTH_STATES.HEALTHY);
+  assert.equal(summary.candidates.candidates[0].qualificationStatus, EQUITY_QUALIFICATION_STATUS.INSUFFICIENT_EVIDENCE);
+  const checkpoint = db.checkpointRows.get(OBSERVED_JOBS.VN_OPPORTUNITY_ENGINE_REFRESH);
+  assert.equal(checkpoint.status, 'success');
+  assert.equal(checkpoint.metadata.healthState, HEALTH_STATES.HEALTHY);
+  assert.equal(checkpoint.metadata.insufficientEvidenceCount, 1);
+});
+
+test('13a. candidates with INSUFFICIENT_EVIDENCE yield HEALTHY operational status', async () => {
+  const db = createOpportunityDb();
+  const summary = await runVietnamEquityOpportunityRefresh({
+    now: new Date('2026-09-04T09:00:00.000Z'),
+    client: db,
+    getAssetsFn: async () => [fpt],
+    fetchEvidenceFn: async () => []
+  });
+  assert.equal(summary.status, HEALTH_STATES.HEALTHY);
+  const checkpoint = db.checkpointRows.get(OBSERVED_JOBS.VN_OPPORTUNITY_ENGINE_REFRESH);
+  assert.equal(checkpoint.status, 'success');
+  assert.equal(checkpoint.metadata.insufficientEvidenceCount, 1);
+});
+
+test('13b. candidate with REJECTED yields HEALTHY operational status', async () => {
+  const db = createOpportunityDb();
+  const inactiveAsset = { ...fpt, isActive: false };
+  const summary = await runVietnamEquityOpportunityRefresh({
+    now: new Date('2026-09-04T09:00:00.000Z'),
+    client: db,
+    getAssetsFn: async () => [inactiveAsset],
+    fetchEvidenceFn: async () => fullMarketEvidence(inactiveAsset)
+  });
+  assert.equal(summary.status, HEALTH_STATES.HEALTHY);
+  assert.equal(summary.candidates.candidates[0].qualificationStatus, EQUITY_QUALIFICATION_STATUS.REJECTED);
+  const checkpoint = db.checkpointRows.get(OBSERVED_JOBS.VN_OPPORTUNITY_ENGINE_REFRESH);
+  assert.equal(checkpoint.status, 'success');
+  assert.equal(checkpoint.metadata.rejectedCount, 1);
+});
+
+test('13c. candidate with WATCH yields HEALTHY operational status', async () => {
+  const db = createOpportunityDb();
+  const summary = await runVietnamEquityOpportunityRefresh({
+    now: new Date('2026-09-04T09:00:00.000Z'),
+    client: db,
+    getAssetsFn: async () => [fpt],
+    fetchEvidenceFn: async () => fullMarketEvidence()
+  });
+  assert.equal(summary.status, HEALTH_STATES.HEALTHY);
+  assert.equal(summary.candidates.candidates[0].qualificationStatus, EQUITY_QUALIFICATION_STATUS.WATCH);
+  const checkpoint = db.checkpointRows.get(OBSERVED_JOBS.VN_OPPORTUNITY_ENGINE_REFRESH);
+  assert.equal(checkpoint.status, 'success');
+  assert.equal(checkpoint.metadata.watchCount, 1);
+});
+
+test('13d. partial persistence failure yields DEGRADED operational status', async () => {
+  const db = createOpportunityDb();
+  const summary = await runVietnamEquityOpportunityRefresh({
+    now: new Date('2026-09-04T09:00:00.000Z'),
+    client: db,
+    getAssetsFn: async () => [fpt, vcb],
+    fetchEvidenceFn: async (sym) => fullMarketEvidence(sym === 'VCB' ? vcb : fpt),
+    persistEvaluationsFn: async () => ({
+      durablyAccepted: 1,
+      failedPersistence: 1,
+      isDurable: true
+    })
+  });
+  assert.equal(summary.success, true);
   assert.equal(summary.status, HEALTH_STATES.DEGRADED);
-  assert.equal(summary.candidates.candidates[0].qualificationStatus, 'INSUFFICIENT_EVIDENCE');
-  assert.equal(db.checkpointRows.get(OBSERVED_JOBS.VN_OPPORTUNITY_ENGINE_REFRESH).status, 'quarantined');
+  assert.equal(summary.failedPersistence, 1);
+  const checkpoint = db.checkpointRows.get(OBSERVED_JOBS.VN_OPPORTUNITY_ENGINE_REFRESH);
+  assert.equal(checkpoint.status, 'quarantined');
+  assert.equal(checkpoint.metadata.healthState, HEALTH_STATES.DEGRADED);
+  assert.equal(checkpoint.metadata.errorCode, 'PARTIAL_PERSISTENCE');
+});
+
+test('13e. fatal persistence failure yields FAILED operational status', async () => {
+  const db = createOpportunityDb();
+  const summary = await runVietnamEquityOpportunityRefresh({
+    now: new Date('2026-09-04T09:00:00.000Z'),
+    client: db,
+    getAssetsFn: async () => [fpt],
+    fetchEvidenceFn: async () => fullMarketEvidence(),
+    persistEvaluationsFn: async () => ({
+      durablyAccepted: 0,
+      failedPersistence: 1,
+      isDurable: false
+    })
+  });
+  assert.equal(summary.success, false);
+  assert.equal(summary.status, HEALTH_STATES.FAILED);
+  const checkpoint = db.checkpointRows.get(OBSERVED_JOBS.VN_OPPORTUNITY_ENGINE_REFRESH);
+  assert.equal(checkpoint.status, 'failed');
+  assert.equal(checkpoint.metadata.healthState, HEALTH_STATES.FAILED);
 });
 
 test('14. DB persistence failure publishes nothing to memory and records FAILED', async () => {
@@ -429,26 +519,110 @@ test('14a. deterministic evaluation failure records FAILED before rethrow', asyn
 test('15. AI explanations require exact citations and reject numerical or action claims', async () => {
   const candidate = evaluate();
   const closeId = candidate.evidenceRefs.find((item) => item.metric === 'close').observationId;
+  const volumeId = candidate.evidenceRefs.find((item) => item.metric === 'volume').observationId;
+
+  // Baseline valid explanation
   const valid = validateEquityOpportunityAiExplanation(candidate, {
     summary: { text: 'The candidate has validated completed market evidence.', evidenceRefs: [closeId] },
     supportingEvidence: [{ text: 'The cited close supports continued evidence monitoring.', evidenceRefs: [closeId] }]
   });
   assert.equal(valid.valid, true);
 
-  const fabricatedNumber = validateEquityOpportunityAiExplanation(candidate, {
-    summary: { text: 'The price can rise 20 percent.', evidenceRefs: [closeId] },
-    supportingEvidence: [{ text: 'Evidence is cited.', evidenceRefs: [closeId] }]
+  // Requirement A: Date-grounded statement with citation -> accepted
+  const dateGrounded = validateEquityOpportunityAiExplanation(candidate, {
+    summary: { text: 'Phiên dữ liệu ngày 2026-09-04 ghi nhận giá đóng cửa hoàn tất.', evidenceRefs: [closeId] },
+    supportingEvidence: [{ text: 'Ghi nhận giao dịch hoàn tất cho ngày 2026-09-04.', evidenceRefs: [closeId] }]
   });
-  const actionClaim = validateEquityOpportunityAiExplanation(candidate, {
-    summary: { text: 'Buy this candidate.', evidenceRefs: [closeId] },
-    supportingEvidence: [{ text: 'Evidence is cited.', evidenceRefs: [closeId] }]
+  assert.equal(dateGrounded.valid, true, 'Date-grounded statement must be accepted');
+
+  // Requirement B: Reference period with citation -> accepted
+  const periodGrounded = validateEquityOpportunityAiExplanation(candidate, {
+    summary: { text: 'Dữ liệu quý 3 năm 2026 ghi nhận phiên giao dịch hợp lệ.', evidenceRefs: [closeId] },
+    supportingEvidence: [{ text: 'Quan sát thuộc kỳ Q3 2026 được xác thực.', evidenceRefs: [closeId] }]
   });
+  assert.equal(periodGrounded.valid, true, 'Reference period statement must be accepted');
+
+  // Requirement C: Actual observation value with citation -> accepted
+  const priceGrounded = validateEquityOpportunityAiExplanation(candidate, {
+    summary: { text: 'Giá đóng cửa đạt 101 VND theo phiên giao dịch.', evidenceRefs: [closeId] },
+    supportingEvidence: [{ text: 'Mức giá 101 VND được đối chiếu từ nguồn dữ liệu thị trường.', evidenceRefs: [closeId] }]
+  });
+  assert.equal(priceGrounded.valid, true, 'Actual observed price 101 VND must be accepted');
+
+  const volumeGrounded = validateEquityOpportunityAiExplanation(candidate, {
+    summary: { text: 'Khối lượng giao dịch ghi nhận 1,000,000 cổ phiếu.', evidenceRefs: [volumeId] },
+    supportingEvidence: [{ text: 'Khối lượng 1.000.000 cổ phiếu hoàn tất phiên.', evidenceRefs: [volumeId] }]
+  });
+  assert.equal(volumeGrounded.valid, true, 'Actual observed volume 1,000,000 must be accepted');
+
+  // Requirement D: Invented numeric value -> rejected
+  const inventedPrice = validateEquityOpportunityAiExplanation(candidate, {
+    summary: { text: 'Giá cổ phiếu đạt 999 VND theo dự đoán.', evidenceRefs: [closeId] },
+    supportingEvidence: [{ text: 'Dữ liệu được trích dẫn.', evidenceRefs: [closeId] }]
+  });
+  assert.equal(inventedPrice.valid, false, 'Invented price 999 VND must be rejected');
+
+  // Requirement E: Target price -> rejected
+  const targetPrice = validateEquityOpportunityAiExplanation(candidate, {
+    summary: { text: 'Giá mục tiêu 120000 VND trong ngắn hạn.', evidenceRefs: [closeId] },
+    supportingEvidence: [{ text: 'Dữ liệu được trích dẫn.', evidenceRefs: [closeId] }]
+  });
+  assert.equal(targetPrice.valid, false, 'Target price must be rejected');
+
+  // Requirement F: Probability claim -> rejected
+  const probabilityClaim = validateEquityOpportunityAiExplanation(candidate, {
+    summary: { text: 'Xác suất tăng 70% trong tuần tới.', evidenceRefs: [closeId] },
+    supportingEvidence: [{ text: 'Dữ liệu được trích dẫn.', evidenceRefs: [closeId] }]
+  });
+  assert.equal(probabilityClaim.valid, false, 'Probability claim must be rejected');
+
+  // Requirement G: Confidence claim -> rejected
+  const confidenceClaim = validateEquityOpportunityAiExplanation(candidate, {
+    summary: { text: 'Mức độ tin cậy 85% cho tín hiệu kỹ thuật.', evidenceRefs: [closeId] },
+    supportingEvidence: [{ text: 'Dữ liệu được trích dẫn.', evidenceRefs: [closeId] }]
+  });
+  assert.equal(confidenceClaim.valid, false, 'Confidence claim must be rejected');
+
+  // Requirement H: Expected return -> rejected
+  const returnClaim = validateEquityOpportunityAiExplanation(candidate, {
+    summary: { text: 'Expected return 20% cho danh mục.', evidenceRefs: [closeId] },
+    supportingEvidence: [{ text: 'Dữ liệu được trích dẫn.', evidenceRefs: [closeId] }]
+  });
+  assert.equal(returnClaim.valid, false, 'Expected return claim must be rejected');
+
+  // Requirement I: BUY/SELL/HOLD / mua/bán/giữ -> rejected
+  for (const forbiddenPhrase of [
+    'Buy candidate immediately.',
+    'Sell candidate position.',
+    'Hold candidate stock.',
+    'Khuyến nghị mua cổ phiếu.',
+    'Nhà đầu tư nên bán ra.',
+    'Khuyến nghị giữ tỷ trọng hiện tại.'
+  ]) {
+    const actionResult = validateEquityOpportunityAiExplanation(candidate, {
+      summary: { text: forbiddenPhrase, evidenceRefs: [closeId] },
+      supportingEvidence: [{ text: 'Dữ liệu được trích dẫn.', evidenceRefs: [closeId] }]
+    });
+    assert.equal(actionResult.valid, false, `Forbidden action "${forbiddenPhrase}" must be rejected`);
+  }
+
+  // Requirement J: AI explanation rejection preserves candidate.qualificationStatus (WATCH)
+  const rejectedAiExplanation = await explainEquityOpportunity(candidate, {
+    generateAiFn: async () => ({
+      summary: { text: 'Giá mục tiêu 120000 VND và khuyến nghị mua.', evidenceRefs: [closeId] },
+      supportingEvidence: [{ text: 'Xác suất tăng 70%.', evidenceRefs: [closeId] }]
+    })
+  });
+  assert.equal(candidate.qualificationStatus, EQUITY_QUALIFICATION_STATUS.WATCH, 'candidate qualificationStatus must stay WATCH');
+  assert.equal(rejectedAiExplanation.generationMode, 'deterministic_fallback');
+  assert.equal(rejectedAiExplanation.status, 'available');
+  assert.deepEqual(rejectedAiExplanation.summary.evidenceRefs, candidate.qualificationReasons[0].evidenceRefs);
+
+  // Unknown citation -> rejected
   const unknownCitation = validateEquityOpportunityAiExplanation(candidate, {
     summary: { text: 'The candidate has validated evidence.', evidenceRefs: ['unknown'] },
     supportingEvidence: [{ text: 'Evidence is cited.', evidenceRefs: [closeId] }]
   });
-  assert.equal(fabricatedNumber.valid, false);
-  assert.equal(actionClaim.valid, false);
   assert.equal(unknownCitation.valid, false);
 });
 

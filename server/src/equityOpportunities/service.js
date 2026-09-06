@@ -275,9 +275,11 @@ export async function runVietnamEquityOpportunityRefresh({
     }
 
     const persistence = await persistEvaluationsFn(records, client);
-    const persistenceFailed = persistence.failedPersistence > 0
-      || (records.length > 0 && persistence.isDurable !== true);
-    if (persistenceFailed) {
+    const isFatalPersistence = persistence.failedPersistence > 0
+      && (persistence.durablyAccepted === 0 || !persistence.durablyAccepted);
+    const isDurableMissing = records.length > 0 && !persistence.isDurable && !persistence.memoryOnly;
+
+    if (isFatalPersistence || isDurableMissing) {
       await recordHealthSafely({
         jobName: OBSERVED_JOBS.VN_OPPORTUNITY_ENGINE_REFRESH,
         status: HEALTH_STATES.FAILED,
@@ -300,18 +302,40 @@ export async function runVietnamEquityOpportunityRefresh({
       };
     }
 
+    const isPartialPersistence = persistence.failedPersistence > 0
+      && (persistence.durablyAccepted || 0) > 0;
+    const isUniverseEmpty = stocks.length === 0 || candidates.length === 0;
+
+    let status = HEALTH_STATES.HEALTHY;
+    let errorCode = null;
+    let errorCategory = null;
+
+    if (isPartialPersistence) {
+      status = HEALTH_STATES.DEGRADED;
+      errorCode = 'PARTIAL_PERSISTENCE';
+      errorCategory = ERROR_CATEGORIES.DATABASE;
+    } else if (isUniverseEmpty) {
+      status = HEALTH_STATES.DEGRADED;
+      errorCode = 'EMPTY_EQUITY_UNIVERSE';
+      errorCategory = ERROR_CATEGORIES.VALIDATION;
+    }
+
+    const shortlist = buildEquityOpportunityShortlist(candidates, {
+      generatedAt: evaluationTime.toISOString()
+    });
+
+    const watchCount = candidates.filter((item) => (
+      item.qualificationStatus === EQUITY_QUALIFICATION_STATUS.WATCH
+    )).length;
+    const qualifiedCount = candidates.filter((item) => (
+      item.qualificationStatus === EQUITY_QUALIFICATION_STATUS.QUALIFIED
+    )).length;
     const insufficientCount = candidates.filter((item) => (
       item.qualificationStatus === EQUITY_QUALIFICATION_STATUS.INSUFFICIENT_EVIDENCE
     )).length;
     const rejectedCount = candidates.filter((item) => (
       item.qualificationStatus === EQUITY_QUALIFICATION_STATUS.REJECTED
     )).length;
-    const status = insufficientCount > 0 || rejectedCount > 0 || candidates.length === 0
-      ? HEALTH_STATES.DEGRADED
-      : HEALTH_STATES.HEALTHY;
-    const shortlist = buildEquityOpportunityShortlist(candidates, {
-      generatedAt: evaluationTime.toISOString()
-    });
 
     await recordHealthSafely({
       jobName: OBSERVED_JOBS.VN_OPPORTUNITY_ENGINE_REFRESH,
@@ -320,12 +344,14 @@ export async function runVietnamEquityOpportunityRefresh({
       recordsRead: evidenceRead,
       recordsWritten: persistence.durablyAccepted || 0,
       dataAsOf: evaluationTime.toISOString(),
-      errorCode: status === HEALTH_STATES.DEGRADED ? 'INSUFFICIENT_EVIDENCE' : null,
-      errorCategory: status === HEALTH_STATES.DEGRADED ? ERROR_CATEGORIES.VALIDATION : null,
+      errorCode,
+      errorCategory,
       policyVersion: EQUITY_OPPORTUNITY_POLICY_VERSION,
       metadata: {
         candidateCount: candidates.length,
         shortlistCount: shortlist.shortlist.length,
+        qualifiedCount,
+        watchCount,
         insufficientEvidenceCount: insufficientCount,
         rejectedCount
       },
@@ -337,8 +363,8 @@ export async function runVietnamEquityOpportunityRefresh({
       success: true,
       status,
       isDurable: persistence.isDurable,
-      failedPersistence: 0,
-      durablyAccepted: persistence.durablyAccepted,
+      failedPersistence: persistence.failedPersistence || 0,
+      durablyAccepted: persistence.durablyAccepted || 0,
       candidates: shortlist
     };
   } catch (error) {
