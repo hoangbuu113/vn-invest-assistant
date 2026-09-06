@@ -428,13 +428,13 @@ export async function getSystemDataHealth({
   let systemStatus = HEALTH_STATES.HEALTHY;
   const hasFailed = jobs.some((j) => j.status === HEALTH_STATES.FAILED);
   const hasDegraded = jobs.some((j) => j.status === HEALTH_STATES.DEGRADED);
-  const allUnknown = jobs.every((j) => j.status === HEALTH_STATES.UNKNOWN);
+  const hasUnknown = jobs.some((j) => j.status === HEALTH_STATES.UNKNOWN);
 
   if (hasFailed) {
     systemStatus = HEALTH_STATES.FAILED;
   } else if (hasDegraded) {
     systemStatus = HEALTH_STATES.DEGRADED;
-  } else if (allUnknown) {
+  } else if (hasUnknown) {
     systemStatus = HEALTH_STATES.UNKNOWN;
   } else {
     systemStatus = HEALTH_STATES.HEALTHY;

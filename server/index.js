@@ -1597,6 +1597,7 @@ export function createApp(services = {}) {
 
   // Internal market context refresh endpoint (Feature 27B / Improvement 02 collector)
   app.post('/api/internal/context/refresh', requireAlertScheduler, async (req, res) => {
+    const refreshStartTime = Date.now();
     try {
       const summary = await runMarketContextCollectorFn({
         now: new Date(),
@@ -1615,6 +1616,20 @@ export function createApp(services = {}) {
         data: summary
       });
     } catch (error) {
+      try {
+        await recordJobHealth({
+          jobName: OBSERVED_JOBS.VN_MARKET_CONTEXT_COLLECTOR,
+          status: HEALTH_STATES.FAILED,
+          durationMs: Date.now() - refreshStartTime,
+          error,
+          policyVersion: 'v1.3',
+          client: supabaseAuthClient,
+          now: new Date()
+        });
+      } catch {
+        // Non-blocking telemetry
+      }
+
       return res.status(500).json({
         status: 'error',
         message: 'Failed to refresh market context observations'
@@ -1624,6 +1639,7 @@ export function createApp(services = {}) {
 
   // Internal normalized-news ingestion. Public news requests never call upstream providers.
   app.post('/api/internal/news/refresh', requireAlertScheduler, async (_req, res) => {
+    const newsStartTime = Date.now();
     try {
       const summary = await runNewsCollectorFn({
         now: new Date(),
@@ -1637,7 +1653,21 @@ export function createApp(services = {}) {
         });
       }
       return res.json({ status: 'ok', data: summary });
-    } catch {
+    } catch (err) {
+      try {
+        await recordJobHealth({
+          jobName: OBSERVED_JOBS.NEWS_REFRESH_COLLECTOR,
+          status: HEALTH_STATES.FAILED,
+          durationMs: Date.now() - newsStartTime,
+          error: err,
+          policyVersion: 'v1.3',
+          client: supabaseAuthClient,
+          now: new Date()
+        });
+      } catch {
+        // Non-blocking telemetry
+      }
+
       return res.status(500).json({
         status: 'error',
         message: 'Failed to refresh market news'

@@ -769,80 +769,156 @@ export async function ingestCustomsDocument({
   publishedAt = null,
   now = new Date(),
   fetchFn = fetch,
-  pdfParseFn = pdfParse
+  pdfParseFn = pdfParse,
+  client = undefined
 } = {}) {
   const startTime = Date.now();
-  // 1. SSRF Validation
-  if (!isOfficialCustomsUrl(documentUrl)) {
-    return {
-      success: false,
-      status: 'rejected',
-      reason: 'UNAPPROVED_SOURCE_HOST',
-      details: `URL does not belong to approved official Customs hosts: ${documentUrl}`
-    };
-  }
-
-  // 2. Fetch document if buffer not already provided
-  let pdfBuffer = buffer;
-  let finalSourceUrl = documentUrl;
-
-  if (!pdfBuffer) {
-    const fetchResult = await fetchCustomsWithSafeRedirect(documentUrl, { fetchFn });
-    if (!fetchResult.success) {
+  try {
+    // 1. SSRF Validation
+    if (!isOfficialCustomsUrl(documentUrl)) {
+      try {
+        await recordJobHealth({
+          jobName: OBSERVED_JOBS.CUSTOMS_TRADE_COLLECTOR,
+          status: HEALTH_STATES.FAILED,
+          durationMs: Date.now() - startTime,
+          recordsRead: 0,
+          recordsWritten: 0,
+          dataAsOf: null,
+          policyVersion: 'customs-trade-v1',
+          errorCode: 'UNAPPROVED_SOURCE_HOST',
+          errorCategory: ERROR_CATEGORIES.VALIDATION,
+          client,
+          now
+        });
+      } catch {
+        // Non-blocking telemetry
+      }
       return {
         success: false,
-        status: fetchResult.status,
-        reason: fetchResult.reason,
-        details: fetchResult.details,
-        httpStatus: fetchResult.httpStatus,
-        error: fetchResult.error
+        status: 'rejected',
+        reason: 'UNAPPROVED_SOURCE_HOST',
+        details: `URL does not belong to approved official Customs hosts: ${documentUrl}`
       };
     }
-    pdfBuffer = fetchResult.buffer;
-    finalSourceUrl = fetchResult.finalUrl;
-  }
 
-  // 3. Parse document
-  // Publication date is never guessed from URL path; remains null unless explicitly provided
-  const parsed = await parseCustomsTradeDocument(pdfBuffer, {
-    sourceUrl: finalSourceUrl,
-    publishedAt,
-    pdfParseFn
-  });
+    // 2. Fetch document if buffer not already provided
+    let pdfBuffer = buffer;
+    let finalSourceUrl = documentUrl;
 
-  if (parsed.status !== 'available') {
-    return {
-      success: false,
-      status: parsed.status,
-      reason: parsed.reason,
-      details: parsed.details
-    };
-  }
+    if (!pdfBuffer) {
+      const fetchResult = await fetchCustomsWithSafeRedirect(documentUrl, { fetchFn });
+      if (!fetchResult.success) {
+        try {
+          await recordJobHealth({
+            jobName: OBSERVED_JOBS.CUSTOMS_TRADE_COLLECTOR,
+            status: HEALTH_STATES.FAILED,
+            durationMs: Date.now() - startTime,
+            recordsRead: 0,
+            recordsWritten: 0,
+            dataAsOf: null,
+            policyVersion: 'customs-trade-v1',
+            errorCode: fetchResult.reason || 'FETCH_FAILED',
+            errorCategory: fetchResult.reason === 'UNAPPROVED_REDIRECT_TARGET'
+              ? ERROR_CATEGORIES.VALIDATION
+              : ERROR_CATEGORIES.UPSTREAM_PROVIDER,
+            client,
+            now
+          });
+        } catch {
+          // Non-blocking telemetry
+        }
+        return {
+          success: false,
+          status: fetchResult.status,
+          reason: fetchResult.reason,
+          details: fetchResult.details,
+          httpStatus: fetchResult.httpStatus,
+          error: fetchResult.error
+        };
+      }
+      pdfBuffer = fetchResult.buffer;
+      finalSourceUrl = fetchResult.finalUrl;
+    }
 
-  // 4. Normalize
-  const observations = parsed.direction === 'EXPORT'
-    ? normalizeCustomsTradeFacts({ exportDocResult: parsed, derivedBalance: false, now })
-    : normalizeCustomsTradeFacts({ importDocResult: parsed, derivedBalance: false, now });
-
-  try {
-    await recordJobHealth({
-      jobName: OBSERVED_JOBS.CUSTOMS_TRADE_COLLECTOR,
-      status: HEALTH_STATES.HEALTHY,
-      durationMs: Date.now() - startTime,
-      recordsRead: 1,
-      recordsWritten: observations.length,
-      dataAsOf: parsed.publishedAt || now.toISOString(),
-      policyVersion: 'customs-trade-v1',
-      now
+    // 3. Parse document
+    // Publication date is never guessed from URL path; remains null unless explicitly provided
+    const parsed = await parseCustomsTradeDocument(pdfBuffer, {
+      sourceUrl: finalSourceUrl,
+      publishedAt,
+      pdfParseFn
     });
-  } catch {
-    // Non-blocking telemetry
-  }
 
-  return {
-    success: true,
-    status: 'available',
-    parsed,
-    observations
-  };
+    if (parsed.status !== 'available') {
+      const isQuarantined = parsed.status === 'quarantined';
+      try {
+        await recordJobHealth({
+          jobName: OBSERVED_JOBS.CUSTOMS_TRADE_COLLECTOR,
+          status: isQuarantined ? HEALTH_STATES.DEGRADED : HEALTH_STATES.FAILED,
+          durationMs: Date.now() - startTime,
+          recordsRead: 1,
+          recordsWritten: 0,
+          dataAsOf: publishedAt || null,
+          policyVersion: 'customs-trade-v1',
+          errorCode: parsed.reason || (isQuarantined ? 'DOCUMENT_QUARANTINED' : 'PARSE_FAILED'),
+          errorCategory: ERROR_CATEGORIES.VALIDATION,
+          client,
+          now
+        });
+      } catch {
+        // Non-blocking telemetry
+      }
+      return {
+        success: false,
+        status: parsed.status,
+        reason: parsed.reason,
+        details: parsed.details
+      };
+    }
+
+    // 4. Normalize
+    const observations = parsed.direction === 'EXPORT'
+      ? normalizeCustomsTradeFacts({ exportDocResult: parsed, derivedBalance: false, now })
+      : normalizeCustomsTradeFacts({ importDocResult: parsed, derivedBalance: false, now });
+
+    try {
+      await recordJobHealth({
+        jobName: OBSERVED_JOBS.CUSTOMS_TRADE_COLLECTOR,
+        status: HEALTH_STATES.HEALTHY,
+        durationMs: Date.now() - startTime,
+        recordsRead: 1,
+        recordsWritten: observations.length,
+        dataAsOf: parsed.publishedAt || now.toISOString(),
+        policyVersion: 'customs-trade-v1',
+        client,
+        now
+      });
+    } catch {
+      // Non-blocking telemetry
+    }
+
+    return {
+      success: true,
+      status: 'available',
+      parsed,
+      observations
+    };
+  } catch (err) {
+    try {
+      await recordJobHealth({
+        jobName: OBSERVED_JOBS.CUSTOMS_TRADE_COLLECTOR,
+        status: HEALTH_STATES.FAILED,
+        durationMs: Date.now() - startTime,
+        recordsRead: 0,
+        recordsWritten: 0,
+        dataAsOf: null,
+        policyVersion: 'customs-trade-v1',
+        error: err,
+        client,
+        now
+      });
+    } catch {
+      // Non-blocking telemetry
+    }
+    throw err;
+  }
 }

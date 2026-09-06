@@ -1,6 +1,6 @@
 import { createMarketClaim } from './claimModel.js';
 import { privateSupabase } from '../supabase.js';
-import { recordJobHealth, HEALTH_STATES, OBSERVED_JOBS } from '../observability/dataHealth.js';
+import { recordJobHealth, HEALTH_STATES, OBSERVED_JOBS, ERROR_CATEGORIES } from '../observability/dataHealth.js';
 
 // In-process memory store for fast testing and fallback
 const memoryClaims = new Map();
@@ -90,7 +90,11 @@ export async function persistClaims(reconciledList = [], client = privateSupabas
     return [];
   }
 
+  const startTime = Date.now();
   const savedClaims = [];
+  let dbError = null;
+  let failedDbUpserts = 0;
+  let totalDbAttempts = 0;
 
   for (const item of reconciledList) {
     const claim = item.claim || item;
@@ -122,10 +126,15 @@ export async function persistClaims(reconciledList = [], client = privateSupabas
 
     // Save to Postgres if client is available
     if (client && typeof client.from === 'function') {
+      totalDbAttempts++;
       try {
         const row = claimToRow(claim);
         if (row) {
-          await client.from('market_claims').upsert(row, { onConflict: 'claim_id' });
+          const res = await client.from('market_claims').upsert(row, { onConflict: 'claim_id' });
+          if (res?.error) {
+            failedDbUpserts++;
+            dbError = dbError || res.error;
+          }
         }
 
         if (links.length > 0) {
@@ -138,25 +147,43 @@ export async function persistClaims(reconciledList = [], client = privateSupabas
             is_independent: ev.isIndependent === true,
             created_at: ev.createdAt || new Date().toISOString()
           }));
-          await client.from('claim_evidence_links').upsert(linkRows, {
+          const linkRes = await client.from('claim_evidence_links').upsert(linkRows, {
             onConflict: 'claim_id,evidence_type,evidence_id'
           });
+          if (linkRes?.error) {
+            dbError = dbError || linkRes.error;
+          }
         }
       } catch (err) {
+        failedDbUpserts++;
+        dbError = dbError || err;
         // Log error non-critically for offline / test environments
         console.warn(`[claimRepository] Database upsert notice: ${err.message}`);
       }
     }
   }
 
+  // Determine truthful health status
+  let claimsHealthStatus = HEALTH_STATES.HEALTHY;
+  if (totalDbAttempts > 0 && dbError) {
+    claimsHealthStatus = (failedDbUpserts === totalDbAttempts)
+      ? HEALTH_STATES.FAILED
+      : HEALTH_STATES.DEGRADED;
+  }
+
   try {
     await recordJobHealth({
       jobName: OBSERVED_JOBS.CLAIMS_RECONCILIATION,
-      status: HEALTH_STATES.HEALTHY,
+      status: claimsHealthStatus,
+      durationMs: Date.now() - startTime,
       recordsRead: reconciledList.length,
-      recordsWritten: savedClaims.length,
+      recordsWritten: claimsHealthStatus === HEALTH_STATES.FAILED ? 0 : (savedClaims.length - failedDbUpserts),
       policyVersion: 'claims-v1',
-      client
+      errorCode: dbError ? (dbError.code || 'DATABASE_ERROR') : null,
+      errorCategory: dbError ? ERROR_CATEGORIES.DATABASE : null,
+      error: dbError,
+      client,
+      now: new Date()
     });
   } catch {
     // Non-blocking telemetry

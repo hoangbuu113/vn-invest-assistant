@@ -12,7 +12,7 @@ import {
   getCurrentPublishedStrategy,
   getLatestStrategyAssessment
 } from './ai/strategyStabilityRepository.js';
-import { recordJobHealth, HEALTH_STATES, OBSERVED_JOBS } from './observability/dataHealth.js';
+import { recordJobHealth, HEALTH_STATES, OBSERVED_JOBS, ERROR_CATEGORIES } from './observability/dataHealth.js';
 
 export {
   buildMarketStrategistFactPacket,
@@ -123,27 +123,52 @@ export async function getMarketStrategist({
     : null;
 
   // 4. Evaluate Strategy Stability lifecycle
-  const stabilityResult = await evaluateAndApplyStrategyStability({
-    factPacket,
-    now,
-    allowLlm,
-    geminiApiKey,
-    geminiModel,
-    openAiApiKey,
-    apiKey,
-    runtime,
-    generateLlmFn,
-    fetchFn,
-    aiEnabled,
-    client,
-    isReadOnly,
-    idempotencyKey,
-    getAuthoritativeEvidenceFingerprint
-  });
+  let stabilityResult;
+  try {
+    stabilityResult = await evaluateAndApplyStrategyStability({
+      factPacket,
+      now,
+      allowLlm,
+      geminiApiKey,
+      geminiModel,
+      openAiApiKey,
+      apiKey,
+      runtime,
+      generateLlmFn,
+      fetchFn,
+      aiEnabled,
+      client,
+      isReadOnly,
+      idempotencyKey,
+      getAuthoritativeEvidenceFingerprint
+    });
+  } catch (strategyErr) {
+    const durationMs = Date.now() - startTime;
+    try {
+      await recordJobHealth({
+        jobName: OBSERVED_JOBS.MARKET_STRATEGIST_REFRESH,
+        status: HEALTH_STATES.FAILED,
+        durationMs,
+        recordsRead: (marketObservations.length || 0) + (newsArticles.length || 0),
+        recordsWritten: 0,
+        dataAsOf: factPacket?.dataAsOf || now.toISOString(),
+        policyVersion: 'strategy-stability-v2',
+        error: strategyErr,
+        client,
+        now
+      });
+    } catch {
+      // Non-blocking telemetry
+    }
+    throw strategyErr;
+  }
 
   const durationMs = Date.now() - startTime;
-  const isDataDegraded = stabilityResult?.assessment?.dataQualityState === 'DEGRADED';
-  const strategistStatus = isDataDegraded ? HEALTH_STATES.DEGRADED : HEALTH_STATES.HEALTHY;
+  const isFailed = stabilityResult?.assessment?.decisionOutcome === 'FAILED' || stabilityResult?.action === 'FAILED';
+  const isDataDegraded = stabilityResult?.assessment?.dataQualityState === 'DEGRADED' || stabilityResult?.assessment?.decisionOutcome === 'DEGRADED';
+  const strategistStatus = isFailed
+    ? HEALTH_STATES.FAILED
+    : (isDataDegraded ? HEALTH_STATES.DEGRADED : HEALTH_STATES.HEALTHY);
 
   try {
     await recordJobHealth({
@@ -154,6 +179,8 @@ export async function getMarketStrategist({
       recordsWritten: stabilityResult?.action === 'PUBLISH_NEW' ? 1 : 0,
       dataAsOf: factPacket?.dataAsOf || now.toISOString(),
       policyVersion: 'strategy-stability-v2',
+      errorCode: isFailed ? 'STRATEGY_ASSESSMENT_FAILED' : null,
+      errorCategory: isFailed ? ERROR_CATEGORIES.INTERNAL : null,
       client,
       now
     });

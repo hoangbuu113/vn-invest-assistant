@@ -421,18 +421,20 @@ export async function runMarketContextCollector({
   fetchNsoMacroFn = null,
   fetchSbvOfficialFn = null,
   fetchCustomsTradeFn = null,
+  fetchLatestPersistedObservationsFn = fetchLatestPersistedObservations,
   forceRefresh = false,
   recordHealth = false
 } = {}) {
   const startTime = Date.now();
-  // 1. Check due gating for slow-moving official sources
+  try {
+    // 1. Check due gating for slow-moving official sources
   const [macroDue, sbvDue] = await Promise.all([
     forceRefresh ? Promise.resolve(true) : isSourceDue(SOURCE_KEYS.NSO_MONTHLY, { now, client }),
     forceRefresh ? Promise.resolve(true) : isSourceDue(SOURCE_KEYS.SBV_FX_CENTRAL, { now, client })
   ]);
 
   // 2. Fetch persisted last-known-good observations for merge
-  const lastKnownGood = await fetchLatestPersistedObservations(client, now);
+  const lastKnownGood = await fetchLatestPersistedObservationsFn(client, now);
 
   // 3. Fetch live data across pillars concurrently with fault isolation
   const [macroRes, sbvRes, sbvOfficialRes, usdVndRes, marketRes, intermarketRes, tradeRes] = await Promise.allSettled([
@@ -571,9 +573,12 @@ export async function runMarketContextCollector({
 
   if (recordHealth) {
     // Record operational health for VN market context collector
-    const contextHealthStatus = (!isDurable || failedPersistenceCount > 0)
-      ? HEALTH_STATES.DEGRADED
-      : HEALTH_STATES.HEALTHY;
+    let contextHealthStatus = HEALTH_STATES.HEALTHY;
+    if (durablyPersistedCount === 0 && failedPersistenceCount > 0) {
+      contextHealthStatus = HEALTH_STATES.FAILED;
+    } else if (!isDurable || failedPersistenceCount > 0) {
+      contextHealthStatus = HEALTH_STATES.DEGRADED;
+    }
 
     try {
       await recordJobHealth({
@@ -584,7 +589,7 @@ export async function runMarketContextCollector({
         recordsWritten: durablyPersistedCount,
         dataAsOf: now.toISOString(),
         policyVersion: 'v1.3',
-        errorCode: failedPersistenceCount > 0 ? 'PARTIAL_PERSISTENCE' : null,
+        errorCode: failedPersistenceCount > 0 ? (durablyPersistedCount === 0 ? 'PERSISTENCE_FAILED' : 'PARTIAL_PERSISTENCE') : null,
         errorCategory: failedPersistenceCount > 0 ? ERROR_CATEGORIES.DATABASE : null,
         client,
         now
@@ -637,4 +642,25 @@ export async function runMarketContextCollector({
     persistenceError: persistResult.error || null,
     timestamp: now.toISOString()
   };
+} catch (err) {
+  if (recordHealth) {
+    try {
+      await recordJobHealth({
+        jobName: OBSERVED_JOBS.VN_MARKET_CONTEXT_COLLECTOR,
+        status: HEALTH_STATES.FAILED,
+        durationMs: Date.now() - startTime,
+        recordsRead: 0,
+        recordsWritten: 0,
+        dataAsOf: now.toISOString(),
+        policyVersion: 'v1.3',
+        error: err,
+        client,
+        now
+      });
+    } catch {
+      // Non-blocking telemetry
+    }
+  }
+  throw err;
+}
 }

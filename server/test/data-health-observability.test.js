@@ -16,6 +16,13 @@ import {
 } from '../src/observability/dataHealth.js';
 import { createApp } from '../index.js';
 import { getVietnamRegime } from '../src/regime.js';
+import { runMarketContextCollector } from '../src/context/collector.js';
+import { ingestCustomsDocument } from '../src/context/providers/customsTrade.js';
+import { persistClaims } from '../src/claims/claimRepository.js';
+import { getMarketStrategist } from '../src/marketStrategist.js';
+import { runNewsCollector } from '../src/news/collector.js';
+import { createMarketClaim, CLAIM_TYPES, CLAIM_STATUS } from '../src/claims/claimModel.js';
+import { createMarketObservation } from '../src/context/factModel.js';
 
 test('1. health state definitions: HEALTHY, DEGRADED, FAILED, UNKNOWN are immutable enums', () => {
   assert.equal(HEALTH_STATES.HEALTHY, 'HEALTHY');
@@ -439,6 +446,403 @@ test('14. HTTP endpoint: GET /api/system/data-health returns 503 when systemStat
     const body = await res.json();
     assert.equal(body.status, 'ok');
     assert.equal(body.data.systemStatus, HEALTH_STATES.FAILED);
+  } finally {
+    server.close();
+  }
+});
+
+test('15. deterministic systemStatus precedence: FAILED > DEGRADED > UNKNOWN > HEALTHY', async () => {
+  clearDataHealthMemoryStore();
+  const testNow = new Date('2026-09-06T12:00:00.000Z');
+
+  // Case A: 0 executed jobs -> all UNKNOWN -> systemStatus is UNKNOWN
+  let h = await getSystemDataHealth({ client: null, now: testNow });
+  assert.equal(h.systemStatus, HEALTH_STATES.UNKNOWN);
+
+  // Case B: 1 HEALTHY + 6 UNKNOWN -> systemStatus MUST be UNKNOWN (never fabricated as HEALTHY!)
+  await recordJobHealth({
+    jobName: OBSERVED_JOBS.VN_MARKET_CONTEXT_COLLECTOR,
+    status: HEALTH_STATES.HEALTHY,
+    client: null,
+    now: testNow
+  });
+  h = await getSystemDataHealth({ client: null, now: testNow });
+  assert.equal(h.systemStatus, HEALTH_STATES.UNKNOWN, 'Partial UNKNOWN coverage must NEVER report HEALTHY');
+
+  // Case C: 1 DEGRADED + 1 HEALTHY + 5 UNKNOWN -> DEGRADED takes precedence over UNKNOWN
+  await recordJobHealth({
+    jobName: OBSERVED_JOBS.CUSTOMS_TRADE_COLLECTOR,
+    status: HEALTH_STATES.DEGRADED,
+    client: null,
+    now: testNow
+  });
+  h = await getSystemDataHealth({ client: null, now: testNow });
+  assert.equal(h.systemStatus, HEALTH_STATES.DEGRADED, 'DEGRADED takes precedence over UNKNOWN');
+
+  // Case D: 1 FAILED + 1 DEGRADED + 1 HEALTHY + 4 UNKNOWN -> FAILED takes top precedence
+  await recordJobHealth({
+    jobName: OBSERVED_JOBS.NEWS_REFRESH_COLLECTOR,
+    status: HEALTH_STATES.FAILED,
+    client: null,
+    now: testNow
+  });
+  h = await getSystemDataHealth({ client: null, now: testNow });
+  assert.equal(h.systemStatus, HEALTH_STATES.FAILED, 'FAILED takes precedence over all other states');
+
+  // Case E: All 7 jobs HEALTHY -> systemStatus is HEALTHY
+  clearDataHealthMemoryStore();
+  for (const jobName of ALL_OBSERVED_JOBS) {
+    await recordJobHealth({
+      jobName,
+      status: HEALTH_STATES.HEALTHY,
+      client: null,
+      now: testNow
+    });
+  }
+  h = await getSystemDataHealth({ client: null, now: testNow });
+  assert.equal(h.systemStatus, HEALTH_STATES.HEALTHY, 'All 7 jobs HEALTHY -> systemStatus is HEALTHY');
+});
+
+test('16. production wiring: runMarketContextCollector records HEALTHY on success and FAILED on uncaught failure', async () => {
+  clearDataHealthMemoryStore();
+  const testNow = new Date('2026-09-06T12:00:00.000Z');
+
+  const checkpointRows = new Map();
+  const observationRows = new Map();
+  const mockDbClient = {
+    from(table) {
+      if (table === 'market_context_collector_checkpoints') {
+        return {
+          upsert(row) {
+            checkpointRows.set(row.source_key, { ...row });
+            return {
+              select: async () => ({ data: [{ ...row }], error: null })
+            };
+          },
+          select: async () => ({
+            data: Array.from(checkpointRows.values()),
+            error: null
+          })
+        };
+      }
+      if (table === 'market_context_observations') {
+        return {
+          upsert(rows) {
+            const list = Array.isArray(rows) ? rows : [rows];
+            for (const r of list) observationRows.set(r.observation_id, { ...r });
+            return {
+              select: async () => ({ data: list.map((r) => ({ ...r })), error: null })
+            };
+          },
+          select: () => {
+            const query = {
+              order: () => query,
+              then: (resolve) => resolve({ data: Array.from(observationRows.values()), error: null }),
+              data: Array.from(observationRows.values()),
+              error: null
+            };
+            return query;
+          }
+        };
+      }
+      throw new Error(`Unexpected table: ${table}`);
+    }
+  };
+
+  const sampleObs = createMarketObservation({
+    id: 'vn.market.vnindex.close',
+    factId: 'vn.market.vnindex.close',
+    pillar: 'market',
+    label: 'VN-Index',
+    metric: 'VN-Index Close',
+    value: 1250.5,
+    unit: 'points',
+    status: 'available'
+  });
+
+  // 1. Successful run with recordHealth: true
+  const summary = await runMarketContextCollector({
+    now: testNow,
+    client: mockDbClient,
+    fetchMarketPillarFn: async () => [sampleObs],
+    fetchGlobalPillarFn: async () => [],
+    fetchUsdVndFn: async () => null,
+    fetchNsoInflationFn: async () => null,
+    fetchSbvMoneyMarketFn: async () => null,
+    recordHealth: true,
+    forceRefresh: false
+  });
+
+  assert.equal(summary.success, true);
+  const healthAfterSuccess = await getSystemDataHealth({ client: mockDbClient, now: testNow });
+  const vnJobSuccess = healthAfterSuccess.jobs.find((j) => j.jobName === OBSERVED_JOBS.VN_MARKET_CONTEXT_COLLECTOR);
+  assert.ok(vnJobSuccess);
+  assert.equal(vnJobSuccess.status, HEALTH_STATES.HEALTHY);
+
+  // 2. Fatal uncaught failure with recordHealth: true
+  await assert.rejects(async () => {
+    await runMarketContextCollector({
+      now: testNow,
+      client: mockDbClient,
+      fetchLatestPersistedObservationsFn: async () => {
+        throw new Error('Fatal network failure fetching market observations');
+      },
+      recordHealth: true
+    });
+  }, /Fatal network failure fetching market observations/);
+
+  const healthAfterFailure = await getSystemDataHealth({ client: mockDbClient, now: testNow });
+  const vnJobFailure = healthAfterFailure.jobs.find((j) => j.jobName === OBSERVED_JOBS.VN_MARKET_CONTEXT_COLLECTOR);
+  assert.ok(vnJobFailure);
+  assert.equal(vnJobFailure.status, HEALTH_STATES.FAILED);
+  assert.equal(vnJobFailure.errorCode, 'NETWORK_ERROR');
+});
+
+test('17. production wiring: ingestCustomsDocument records FAILED on SSRF rejection and DEGRADED on quarantine', async () => {
+  clearDataHealthMemoryStore();
+  const testNow = new Date('2026-09-06T12:00:00.000Z');
+
+  const checkpointRows = new Map();
+  const mockDbClient = {
+    from(table) {
+      assert.equal(table, 'market_context_collector_checkpoints');
+      return {
+        upsert(row) {
+          checkpointRows.set(row.source_key, { ...row });
+          return {
+            select: async () => ({ data: [{ ...row }], error: null })
+          };
+        },
+        select: async () => ({
+          data: Array.from(checkpointRows.values()),
+          error: null
+        })
+      };
+    }
+  };
+
+  // 1. SSRF rejection path
+  const ssrfResult = await ingestCustomsDocument({
+    documentUrl: 'https://attacker.evil/fake-customs.pdf',
+    client: mockDbClient,
+    now: testNow
+  });
+  assert.equal(ssrfResult.success, false);
+  assert.equal(ssrfResult.status, 'rejected');
+
+  const healthAfterSsrf = await getSystemDataHealth({ client: mockDbClient, now: testNow });
+  const customsJobSsrf = healthAfterSsrf.jobs.find((j) => j.jobName === OBSERVED_JOBS.CUSTOMS_TRADE_COLLECTOR);
+  assert.ok(customsJobSsrf);
+  assert.equal(customsJobSsrf.status, HEALTH_STATES.FAILED);
+  assert.equal(customsJobSsrf.errorCode, 'UNAPPROVED_SOURCE_HOST');
+
+  // 2. Quarantine path: valid customs domain, but malformed / non-PDF buffer
+  const quarantinedResult = await ingestCustomsDocument({
+    documentUrl: 'https://files.customs.gov.vn/report.pdf',
+    buffer: Buffer.from('NOT A PDF'),
+    client: mockDbClient,
+    now: testNow
+  });
+  assert.equal(quarantinedResult.success, false);
+  assert.equal(quarantinedResult.status, 'quarantined');
+
+  const healthAfterQuarantine = await getSystemDataHealth({ client: mockDbClient, now: testNow });
+  const customsJobQuarantine = healthAfterQuarantine.jobs.find((j) => j.jobName === OBSERVED_JOBS.CUSTOMS_TRADE_COLLECTOR);
+  assert.ok(customsJobQuarantine);
+  assert.equal(customsJobQuarantine.status, HEALTH_STATES.DEGRADED);
+});
+
+test('18. production wiring: persistClaims records FAILED/DEGRADED when DB persistence fails, never HEALTHY', async () => {
+  clearDataHealthMemoryStore();
+  const testNow = new Date('2026-09-06T12:00:00.000Z');
+
+  const checkpointRows = new Map();
+  const failingDbClient = {
+    from(table) {
+      if (table === 'market_context_collector_checkpoints') {
+        return {
+          upsert(row) {
+            checkpointRows.set(row.source_key, { ...row });
+            return {
+              select: async () => ({ data: [{ ...row }], error: null })
+            };
+          },
+          select: async () => ({
+            data: Array.from(checkpointRows.values()),
+            error: null
+          })
+        };
+      }
+      // market_claims or claim_evidence_links fail:
+      return {
+        upsert: async () => ({
+          data: null,
+          error: { code: '23505', message: 'Database constraint violation on market_claims' }
+        })
+      };
+    }
+  };
+
+  const sampleClaim = createMarketClaim({
+    claimType: CLAIM_TYPES.MACRO_NUMERIC,
+    claimId: 'claim_db_fail_test',
+    subject: 'cpi',
+    numericValue: 4.2,
+    supportStatus: CLAIM_STATUS.SUPPORTED,
+    publishedAt: testNow.toISOString()
+  });
+
+  await persistClaims([{ claim: sampleClaim, supportingEvidence: [] }], failingDbClient);
+
+  const health = await getSystemDataHealth({ client: failingDbClient, now: testNow });
+  const claimsJob = health.jobs.find((j) => j.jobName === OBSERVED_JOBS.CLAIMS_RECONCILIATION);
+  assert.ok(claimsJob);
+  assert.equal(claimsJob.status, HEALTH_STATES.FAILED, 'DB upsert failure must record FAILED, never HEALTHY');
+  assert.equal(claimsJob.errorCode, '23505');
+  assert.equal(claimsJob.errorCategory, ERROR_CATEGORIES.DATABASE);
+});
+
+test('19. production wiring: getMarketStrategist records FAILED and rethrows when strategy evaluation crashes', async () => {
+  clearDataHealthMemoryStore();
+  const testNow = new Date('2026-09-06T12:00:00.000Z');
+
+  const checkpointRows = new Map();
+  const mockDbClient = {
+    from(table) {
+      if (table === 'market_context_collector_checkpoints') {
+        return {
+          upsert(row) {
+            checkpointRows.set(row.source_key, { ...row });
+            return {
+              select: async () => ({ data: [{ ...row }], error: null })
+            };
+          },
+          select: async () => ({
+            data: Array.from(checkpointRows.values()),
+            error: null
+          })
+        };
+      }
+      return {
+        upsert: () => ({ select: async () => ({ data: [], error: null }) }),
+        select: () => ({
+          eq: () => ({ order: () => ({ limit: async () => ({ data: [], error: null }) }) }),
+          order: () => ({ limit: async () => ({ data: [], error: null }) }),
+          data: [],
+          error: null
+        })
+      };
+    }
+  };
+
+  // Pass a throwing generateLlmFn to trigger strategy evaluation failure
+  await assert.rejects(async () => {
+    await getMarketStrategist({
+      now: testNow,
+      client: mockDbClient,
+      allowLlm: true,
+      aiEnabled: true,
+      apiKey: 'test-key',
+      runtime: 'gemini',
+      generateLlmFn: async () => {
+        throw new Error('Upstream LLM provider access denied: 403 Forbidden');
+      },
+      getMarketContextFabricFn: async () => ({ facts: [] }),
+      getNewsFeedFn: async () => ({ articles: [] })
+    });
+  }, /STRATEGY_INITIAL_PUBLICATION_FAILED/);
+
+  const health = await getSystemDataHealth({ client: mockDbClient, now: testNow });
+  const strategistJob = health.jobs.find((j) => j.jobName === OBSERVED_JOBS.MARKET_STRATEGIST_REFRESH);
+  assert.ok(strategistJob);
+  assert.equal(strategistJob.status, HEALTH_STATES.FAILED);
+  assert.equal(strategistJob.errorCode, 'AI_STRATEGIST_UNAVAILABLE');
+});
+
+test('20. production wiring: real news collector & alerts evaluation, verified via GET /api/system/data-health', async () => {
+  clearDataHealthMemoryStore();
+  const testNow = new Date('2026-09-06T12:00:00.000Z');
+
+  const checkpointRows = new Map();
+  const mockDbClient = {
+    from(table) {
+      assert.equal(table, 'market_context_collector_checkpoints');
+      return {
+        upsert(row) {
+          checkpointRows.set(row.source_key, { ...row });
+          return {
+            select: async () => ({ data: [{ ...row }], error: null })
+          };
+        },
+        select: async () => ({
+          data: Array.from(checkpointRows.values()),
+          error: null
+        })
+      };
+    }
+  };
+
+  // Real invocation of runNewsCollector
+  await runNewsCollector({
+    now: testNow,
+    client: mockDbClient,
+    service: {
+      fetchAllSources: async () => ({
+        allArticles: [],
+        sourceResults: [{ sourceId: 'cafef', status: 'ok', articleCount: 0 }]
+      }),
+      processArticles: () => []
+    },
+    persistFn: async () => ({ isDurable: true, durablyPersisted: 0, failedPersistence: 0 }),
+    fetchPersistedFn: async () => []
+  });
+
+  const schedulerToken = 'a'.repeat(32);
+  const app = createApp({
+    supabaseAuthClient: mockDbClient,
+    getMarketSnapshotFn: async () => ({}),
+    evaluateAndPersistAlertsFn: async () => ({
+      evaluatedCount: 10,
+      triggeredCount: 1,
+      unavailableCount: 0,
+      staleCount: 0
+    }),
+    dispatchPendingWebPushDeliveriesFn: async () => ({
+      deliveryClaimedCount: 1,
+      deliverySentCount: 1,
+      deliveryPermanentFailureCount: 0
+    }),
+    alertSchedulerToken: schedulerToken
+  });
+
+  const server = app.listen(0);
+  const port = server.address().port;
+
+  try {
+    // Invoke real alert scheduler route
+    const alertRes = await fetch(`http://127.0.0.1:${port}/api/internal/alerts/evaluate`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${schedulerToken}`
+      }
+    });
+    assert.equal(alertRes.status, 200);
+
+    // Verify GET /api/system/data-health reflects both real pipeline checkpoints
+    const healthRes = await fetch(`http://127.0.0.1:${port}/api/system/data-health`);
+    assert.equal(healthRes.status, 200);
+    const body = await healthRes.json();
+    assert.equal(body.status, 'ok');
+
+    const newsJob = body.data.jobs.find((j) => j.jobName === OBSERVED_JOBS.NEWS_REFRESH_COLLECTOR);
+    assert.ok(newsJob);
+    assert.equal(newsJob.status, HEALTH_STATES.HEALTHY);
+
+    const alertJob = body.data.jobs.find((j) => j.jobName === OBSERVED_JOBS.ALERT_SCHEDULER);
+    assert.ok(alertJob);
+    assert.equal(alertJob.status, HEALTH_STATES.HEALTHY);
+    assert.equal(alertJob.recordsRead, 10);
+    assert.equal(alertJob.recordsWritten, 2); // 1 triggered + 1 sent
   } finally {
     server.close();
   }
