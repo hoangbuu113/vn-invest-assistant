@@ -79,6 +79,11 @@ export function InvestmentBriefPanel() {
                 Cập nhật: {view.generatedAt}
               </span>
             ) : null}
+            {view?.generationBadge && (
+              <span className="market-brief-cadence-badge" title={view.modeLabel}>
+                {view.generationBadge}
+              </span>
+            )}
             {view?.hasMixedCadence && (
               <span className="market-brief-cadence-badge" title={view.cadenceLimitations?.join('\n') || 'Các nguồn dữ liệu có chu kỳ công bố khác nhau'}>
                 {view.mixedCadenceNotice || 'Nguồn có độ trễ khác nhau'}
@@ -112,7 +117,7 @@ export function InvestmentBriefPanel() {
       )}
 
       {/* Idle State */}
-      {state.phase === 'idle' && (
+      {state.phase === 'idle' && !view && (
         <div className="market-brief-empty-state">
           <p>Nhấn <strong>"Tạo bản tin"</strong> để tổng hợp góc nhìn thị trường cập nhật theo dữ kiện thực tế.</p>
         </div>
@@ -165,6 +170,15 @@ export function InvestmentBriefPanel() {
                   <p>{strategistView.executiveDecision.actionNow}</p>
                 </div>
               </div>
+
+              {strategistView.whatChanged?.summary && (
+                <div className="strategist-change-section">
+                  <div className="strategist-change-badge">
+                    <span>Thay đổi mới nhất:</span>
+                  </div>
+                  <p className="strategist-change-summary">{strategistView.whatChanged.summary}</p>
+                </div>
+              )}
             </section>
           )}
 
@@ -194,7 +208,7 @@ export function InvestmentBriefPanel() {
                     <span className={`strategist-priority priority-${asset.priority}`} role="cell">
                       <i aria-hidden="true" />{asset.priorityLabel}
                     </span>
-                    <p role="cell">{asset.rationale}</p>
+                    <p className="strategist-asset-rationale" role="cell">{asset.rationale}</p>
                   </div>
                 ))}
               </div>
@@ -202,51 +216,51 @@ export function InvestmentBriefPanel() {
           )}
 
           {(strategistView.preferredThemes.length > 0 || strategistView.avoidOrUnderweight.length > 0) && (
-            <section className="strategist-theme-grid" aria-label="Cơ hội và rủi ro theo chủ đề">
+            <section className="strategist-theme-grid">
               {strategistView.preferredThemes.length > 0 && (
-              <article className="strategist-theme-lane strategist-theme-opportunity">
-                <div className="strategist-theme-heading">
-                  <span aria-hidden="true">+</span>
-                  <div>
-                    <span className="strategist-eyebrow">Cơ hội đáng chú ý</span>
-                    <h4>Chủ đề ưu tiên</h4>
+                <article className="strategist-theme-lane strategist-theme-opportunity">
+                  <div className="strategist-theme-heading">
+                    <span aria-hidden="true">+</span>
+                    <div>
+                      <span className="strategist-eyebrow">Cơ hội / ưu tiên</span>
+                      <h4>Nhóm cổ phiếu ưu tiên</h4>
+                    </div>
                   </div>
-                </div>
-                <ul>
-                  {strategistView.preferredThemes.map((item, idx) => (
-                    <li key={`${item.theme}-${idx}`}>
-                      <strong>{item.theme}</strong>
-                      {item.rationale && <p>{item.rationale}</p>}
-                    </li>
-                  ))}
-                </ul>
-              </article>
+                  <ul>
+                    {strategistView.preferredThemes.map((item, idx) => (
+                      <li key={`${item.theme}-${idx}`}>
+                        <strong>{item.theme}</strong>
+                        {item.rationale && <p>{item.rationale}</p>}
+                      </li>
+                    ))}
+                  </ul>
+                </article>
               )}
 
               {strategistView.avoidOrUnderweight.length > 0 && (
-              <article className="strategist-theme-lane strategist-theme-risk">
-                <div className="strategist-theme-heading">
-                  <span aria-hidden="true">−</span>
-                  <div>
-                    <span className="strategist-eyebrow">Rủi ro / giảm ưu tiên</span>
-                    <h4>Nhóm cần hạn chế</h4>
+                <article className="strategist-theme-lane strategist-theme-risk">
+                  <div className="strategist-theme-heading">
+                    <span aria-hidden="true">−</span>
+                    <div>
+                      <span className="strategist-eyebrow">Rủi ro / giảm ưu tiên</span>
+                      <h4>Nhóm cần hạn chế</h4>
+                    </div>
                   </div>
-                </div>
-                <ul>
-                  {strategistView.avoidOrUnderweight.map((item, idx) => (
-                    <li key={`${item.theme}-${idx}`}>
-                      <strong>{item.theme}</strong>
-                      {item.reason && <p>{item.reason}</p>}
-                    </li>
-                  ))}
-                </ul>
-              </article>
+                  <ul>
+                    {strategistView.avoidOrUnderweight.map((item, idx) => (
+                      <li key={`${item.theme}-${idx}`}>
+                        <strong>{item.theme}</strong>
+                        {item.reason && <p>{item.reason}</p>}
+                      </li>
+                    ))}
+                  </ul>
+                </article>
               )}
             </section>
           )}
 
           <section className="strategist-research-grid">
-            {strategistView.keyDrivers.length > 0 && (
+            {(strategistView.keyDrivers.length > 0 || strategistView.why?.summary) && (
               <article className="strategist-research-column">
                 <div className="strategist-section-header compact">
                   <div>
@@ -254,6 +268,9 @@ export function InvestmentBriefPanel() {
                     <h4>Vì sao có góc nhìn này?</h4>
                   </div>
                 </div>
+                {strategistView.why?.summary && (
+                  <p className="strategist-why-summary">{strategistView.why.summary}</p>
+                )}
                 <ol className="strategist-numbered-list">
                   {strategistView.keyDrivers.map((item, idx) => (
                     <li key={`${item.driver}-${idx}`}>{item.driver}</li>

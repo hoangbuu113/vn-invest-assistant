@@ -570,7 +570,89 @@ export function buildSafeInsufficientEvidenceBrief({
   const defaultEvId = availableObsIds[0] || null;
   const fallbackEvList = defaultEvId ? [defaultEvId] : [];
 
+  const marketView = {
+    stance: 'neutral',
+    stanceLabel: 'Trung lập',
+    conviction: 'insufficient_evidence',
+    convictionLabel: 'Chưa đủ dữ liệu',
+    confidence: 'INSUFFICIENT_EVIDENCE',
+    confidenceLabel: 'Chưa đủ dữ liệu',
+    headline: 'Dữ liệu thị trường hiện tại chưa đầy đủ hoặc không vượt qua cổng kiểm định bằng chứng.',
+    explanation: 'Dữ liệu thị trường hiện tại chưa đầy đủ để đưa ra định hướng hành động cụ thể; nhà đầu tư nên tạm thời quan sát và ưu tiên quản trị rủi ro danh mục.'
+  };
+
+  const why = {
+    factors: [
+      {
+        factor: defaultEvId
+          ? 'Hệ thống ghi nhận dữ kiện cơ sở đang khả dụng nhưng chưa đáp ứng ngưỡng kiểm chứng đa chiều.'
+          : 'Hệ thống đang chờ cập nhật dữ kiện thị trường công khai mới nhất.',
+        evidenceIds: fallbackEvList,
+        signalIds: []
+      }
+    ],
+    summary: 'Dữ liệu thị trường hiện tại chưa đầy đủ để đưa ra kết luận xác đáng; hệ thống bảo lưu góc nhìn thận trọng theo nguyên tắc toàn vẹn bằng chứng.'
+  };
+
+  const whatChanged = {
+    hasMaterialChange: false,
+    materialChanges: [],
+    summary: 'Hiện chưa đủ bằng chứng tin cậy để xác lập thay đổi chiến lược thị trường. Hệ thống tạm thời bảo lưu trạng thái quan sát.'
+  };
+
+  const risks = {
+    keyRisks: [
+      'Thiếu hụt dữ liệu đầu vào có thể dẫn tới quyết định sai lệch nếu hành động vội vàng.'
+    ],
+    invalidationConditions: [
+      'Hệ thống tiếp nhận đầy đủ dữ kiện giao dịch và chỉ số vĩ mô được xác minh.'
+    ],
+    evidenceIds: fallbackEvList,
+    signalIds: []
+  };
+
+  const whatToWatch = {
+    items: [
+      { item: 'Cập nhật dữ kiện giao dịch đóng cửa của chỉ số VN-Index', priority: 'high', monitorCadence: 'daily' },
+      { item: 'Công bố chỉ số vĩ mô CPI và biến động tỷ giá USD/VND', priority: 'high', monitorCadence: 'monthly' },
+      { item: 'Báo cáo dòng tiền và thanh khoản liên ngân hàng', priority: 'medium', monitorCadence: 'weekly' }
+    ]
+  };
+
+  const dataContext = {
+    dataAsOf: factPacket.dataAsOf || generatedAt,
+    freshness: 'Chưa đầy đủ',
+    hasMixedCadence: Boolean(factPacket.evidenceCoverage?.hasMixedCadence),
+    limitations: ['Dữ liệu đầu vào chưa đáp ứng điều kiện kiểm định đa chiều.'],
+    coverageRatio: typeof factPacket.evidenceCoverage?.coverageRatio === 'number' ? factPacket.evidenceCoverage.coverageRatio : 0
+  };
+
+  const sources = {
+    citations: {
+      factObservationIds: availableObsIds,
+      articleIds: availableArticleIds,
+      signalIds: availableSignalIds
+    },
+    evidence: Array.isArray(factPacket.evidence) ? factPacket.evidence : []
+  };
+
   return {
+    brief: {
+      marketView,
+      why,
+      whatChanged,
+      risks,
+      whatToWatch,
+      dataContext,
+      sources
+    },
+    marketView,
+    why,
+    whatChanged,
+    risks,
+    whatToWatch,
+    dataContext,
+    sources,
     executiveDecision: {
       stance: 'neutral',
       conviction: 'insufficient_evidence',
@@ -675,6 +757,7 @@ export function buildSafeInsufficientEvidenceBrief({
       articleIds: availableArticleIds,
       signalIds: availableSignalIds
     },
+    evidence: sources.evidence,
     generatedAt,
     dataAsOf: factPacket.dataAsOf || generatedAt,
     evidenceCoverage: factPacket.evidenceCoverage || null,

@@ -15,6 +15,7 @@ import {
   applySharedPublicationGate,
   buildSafeInsufficientEvidenceBrief
 } from './marketStrategistValidation.js';
+import { buildDeterministicMarketBrief } from './marketStrategistBrief.js';
 import { deriveMarketSignals } from './derivedSignals.js';
 import { normalizeReferencePeriodKey } from '../context/factModel.js';
 import { persistRunManifest } from './marketStrategistManifest.js';
@@ -557,7 +558,7 @@ export const globalMarketStrategistRuntime = new MarketStrategistRuntime();
  * never fabricates allocation percentages or unevidenced themes.
  */
 export function generateDeterministicMarketStrategist({ factPacket, now = new Date() }) {
-  const { evidence = [], untrustedNews = [], derivedSignals = [] } = factPacket;
+  const { evidence = [] } = factPacket || {};
 
   // If evidence is empty: return safe INSUFFICIENT_EVIDENCE brief immediately
   if (evidence.length === 0) {
@@ -568,292 +569,7 @@ export function generateDeterministicMarketStrategist({ factPacket, now = new Da
     });
   }
 
-  const obsByFactId = new Map();
-  for (const item of evidence) {
-    if (item.factId) obsByFactId.set(item.factId, item);
-    if (item.id) obsByFactId.set(item.id, item);
-    if (item.observationId) obsByFactId.set(item.observationId, item);
-  }
-
-  const vnIndexObs = obsByFactId.get('vn.market.vnindex.close');
-  const cpiObs = obsByFactId.get('vn.macro.cpi.yoy');
-  const usdVndObs = obsByFactId.get('vn.monetary.fx.usd_vnd');
-  const dxyObs = obsByFactId.get('global.intermarket.dxy.quote');
-  const us10yObs = obsByFactId.get('global.intermarket.us10y.yield');
-  const brentObs = obsByFactId.get('global.intermarket.brent.futures');
-
-  const signalsByType = new Map();
-  for (const s of derivedSignals) {
-    signalsByType.set(s.signalType, s);
-  }
-
-  const vnTrendSignal = signalsByType.get('VN_MARKET_TREND');
-  const inflationSignal = signalsByType.get('INFLATION_CONTEXT');
-  const fxSignal = signalsByType.get('FX_PRESSURE');
-  const dxySignal = signalsByType.get('GLOBAL_USD_PRESSURE');
-
-  const citedFactIds = [];
-  if (vnIndexObs) citedFactIds.push(vnIndexObs.id);
-  if (cpiObs) citedFactIds.push(cpiObs.id);
-  if (usdVndObs) citedFactIds.push(usdVndObs.id);
-  if (dxyObs) citedFactIds.push(dxyObs.id);
-  if (us10yObs) citedFactIds.push(us10yObs.id);
-  if (brentObs) citedFactIds.push(brentObs.id);
-
-  const citedSignalIds = derivedSignals.map((s) => s.signalId);
-  const citedArticleIds = untrustedNews.slice(0, 3).map((a) => a.articleId);
-
-  // Confidence state derivation
-  let confidence = 'MEDIUM';
-  let conviction = 'medium';
-  let stance = 'neutral';
-
-  const cpiVal = typeof cpiObs?.value === 'number' ? cpiObs.value : null;
-  const vnIndexChg = typeof vnIndexObs?.change === 'number' ? vnIndexObs.change : null;
-
-  // Case A: Missing VN-Index observation (cannot make directional equity calls)
-  if (!vnIndexObs) {
-    confidence = 'LOW';
-    conviction = 'low';
-    stance = 'neutral';
-  } else if (vnIndexChg !== null && vnIndexChg > 0 && (cpiVal === null || cpiVal < 4.5)) {
-    stance = 'selective_risk_on';
-    confidence = 'MEDIUM';
-    conviction = 'medium';
-  } else if (cpiVal !== null && cpiVal >= 4.5) {
-    stance = 'defensive';
-    confidence = 'MEDIUM';
-    conviction = 'medium';
-  } else {
-    stance = 'neutral';
-    confidence = 'LOW';
-    conviction = 'low';
-  }
-
-  const vnIndexProse = vnIndexObs?.value
-    ? `Chỉ số VN-Index ghi nhận mức ${vnIndexObs.value} điểm (${vnIndexObs.change !== null && vnIndexObs.change >= 0 ? '+' : ''}${vnIndexObs.change ?? 0} điểm), phản ánh tâm lý giao dịch có sự phân hóa giữa các nhóm ngành.`
-    : 'Thị trường chứng khoán Việt Nam duy trì nhịp tích lũy trong bối cảnh các chỉ số thanh khoản cần thêm tín hiệu xác nhận.';
-
-  const isCpiContradicted = (factPacket.claims || []).some(
-    (c) => c.subject === 'vn.macro.cpi.yoy' && (c.supportStatus === 'CONTRADICTED' || c.contradictionCount > 0)
-  );
-  let cpiProse = 'Dữ liệu lạm phát chính thức tiếp tục được cập nhật theo kỳ công bố của cơ quan thống kê.';
-  if (cpiObs?.value) {
-    if (isCpiContradicted) {
-      cpiProse = `Lạm phát CPI (YoY) ghi nhận ở mức ${cpiObs.value}%, tuy nhiên tồn tại sự khác biệt và tranh cãi giữa các nguồn số liệu; nhà đầu tư cần thận trọng theo dõi các công bố chính thức tiếp theo.`;
-    } else {
-      cpiProse = `Lạm phát CPI (YoY) ở mức ${cpiObs.value}%, trong vùng kiểm soát của chính sách vĩ mô nhưng vẫn đòi hỏi theo dõi chặt chẽ biến động chi phí đầu vào.`;
-    }
-  }
-
-  const globalProse = dxyObs?.value
-    ? `Trên thị trường quốc tế, chỉ số DXY đạt ${dxyObs.value} điểm${us10yObs?.value ? ` và lợi suất Trái phiếu Mỹ 10 năm ở mức ${us10yObs.value}%` : ''}, tác động đến mặt bằng tỷ giá và dòng vốn biên giới.`
-    : 'Bối cảnh liên thị trường toàn cầu tiếp tục chịu ảnh hưởng từ định hướng lãi suất của các ngân hàng trung ương lớn.';
-
-  const keyDrivers = [];
-  if (vnIndexObs) {
-    keyDrivers.push({
-      driver: `Diễn biến chỉ số chứng khoán trong nước duy trì vùng vận động tại ${vnIndexObs.value} điểm.`,
-      evidenceIds: [vnIndexObs.id],
-      signalIds: vnTrendSignal ? [vnTrendSignal.signalId] : []
-    });
-  }
-  if (cpiObs) {
-    keyDrivers.push({
-      driver: `Lạm phát trong nước được ghi nhận ở mức ${cpiObs.value}%, định hình kỳ vọng chính sách tiền tệ.`,
-      evidenceIds: [cpiObs.id],
-      signalIds: inflationSignal ? [inflationSignal.signalId] : []
-    });
-  }
-  if (dxyObs || usdVndObs) {
-    const ids = [];
-    const sigIds = [];
-    if (dxyObs) ids.push(dxyObs.id);
-    if (usdVndObs) ids.push(usdVndObs.id);
-    if (dxySignal) sigIds.push(dxySignal.signalId);
-    if (fxSignal) sigIds.push(fxSignal.signalId);
-    keyDrivers.push({
-      driver: `Áp lực tỷ giá và chỉ số sức mạnh USD (DXY: ${dxyObs?.value ?? 'N/A'}, USD/VND: ${usdVndObs?.value ?? 'N/A'}) chi phối dòng tiền đầu tư.`,
-      evidenceIds: ids,
-      signalIds: sigIds
-    });
-  }
-  if (keyDrivers.length === 0 && evidence.length > 0) {
-    keyDrivers.push({
-      driver: `Dữ liệu thị trường cơ sở từ nguồn ${evidence[0].source} được ghi nhận ở trạng thái ${evidence[0].status}.`,
-      evidenceIds: [evidence[0].id],
-      signalIds: []
-    });
-  }
-
-  const defaultEvId = evidence[0]?.id || 'context';
-
-  // Strict: NO fabricated allocation percentages
-  const executiveDecision = {
-    stance,
-    conviction,
-    confidence,
-    oneLineDecision: stance === 'selective_risk_on'
-      ? 'Thị trường vận động tích cực có chọn lọc; ưu tiên giải ngân từng phần vào nhóm doanh nghiệp có dòng tiền lành mạnh và kỷ luật rủi ro cao.'
-      : (stance === 'defensive'
-        ? 'Áp lực vĩ mô và chi phí gia tăng; ưu tiên bảo toàn vốn, kiểm soát đòn bẩy và duy trì thanh khoản tiền mặt an toàn.'
-        : 'Thị trường dao động tích lũy; duy trì vị thế cân bằng và chỉ giải ngân theo các mốc hỗ trợ kỹ thuật rõ ràng.'),
-    actionNow: stance === 'selective_risk_on'
-      ? 'Không mua đuổi ở các nhịp hưng phấn; chia nhỏ các đợt giải ngân tại vùng hỗ trợ đối với các nhóm có động lực dòng tiền thực tế.'
-      : (stance === 'defensive'
-        ? 'Chủ động hạ tỷ trọng các nhóm nhạy cảm lãi suất và đòn bẩy cao; nâng tỷ trọng thanh khoản tiền mặt phòng thủ.'
-        : (confidence === 'LOW'
-          ? 'Dữ liệu chỉ số chứng khoán cơ sở hoặc vĩ mô còn hạn chế; tạm thời quan sát thận trọng và duy trì kỷ luật danh mục.'
-          : 'Duy trì tỷ trọng danh mục ở mức cân bằng thận trọng; kiên nhẫn chờ đợi tín hiệu dòng tiền lan tỏa trước khi mở rộng quy mô.'))
-  };
-
-  // Directional asset calls strictly gated by evidence existence
-  const equityStance = (!vnIndexObs || confidence === 'LOW')
-    ? 'watch'
-    : (stance === 'selective_risk_on' ? 'increase' : 'hold');
-
-  const assetStrategy = [
-    {
-      assetClass: 'vietnam_equities',
-      stance: equityStance,
-      priority: vnIndexObs ? 'high' : 'low',
-      rationale: vnIndexObs
-        ? 'VN-Index duy trì vùng vận động có sự phân hóa; ưu tiên quản trị điểm mua tại vùng giá hợp lý thay vì mua đuổi.'
-        : 'Chưa đủ dữ liệu xác nhận xu hướng VN-Index; tạm thời theo dõi diễn biến thanh khoản và dòng tiền.',
-      evidenceIds: vnIndexObs ? [vnIndexObs.id] : [defaultEvId],
-      signalIds: vnTrendSignal ? [vnTrendSignal.signalId] : [],
-      conclusionType: 'ASSET_BIAS',
-      supportStatus: vnIndexObs ? 'supported' : 'conditional',
-      limitations: 'Chưa bao gồm diễn biến độ rộng chi tiết của toàn bộ các sàn giao dịch.'
-    },
-    {
-      assetClass: 'gold',
-      stance: 'hold',
-      priority: 'medium',
-      rationale: 'Nắm giữ vị thế phòng thủ chiến lược trước biến số lạm phát quốc tế và bất ổn địa chính trị kéo dài.',
-      evidenceIds: brentObs ? [brentObs.id] : (dxyObs ? [dxyObs.id] : [defaultEvId]),
-      signalIds: [],
-      conclusionType: 'ASSET_BIAS',
-      supportStatus: 'supported',
-      limitations: 'Tham chiếu thị trường giao ngay quốc tế.'
-    },
-    {
-      assetClass: 'usd',
-      stance: 'watch',
-      priority: 'medium',
-      rationale: 'Theo dõi chặt biến động chỉ số DXY và diễn biến tỷ giá trong nước để đánh giá dư địa chính sách tiền tệ.',
-      evidenceIds: usdVndObs ? [usdVndObs.id] : (dxyObs ? [dxyObs.id] : [defaultEvId]),
-      signalIds: fxSignal ? [fxSignal.signalId] : [],
-      conclusionType: 'ASSET_BIAS',
-      supportStatus: 'supported',
-      limitations: 'Tỷ giá giao ngay tham chiếu.'
-    },
-    {
-      assetClass: 'crypto',
-      stance: 'watch',
-      priority: 'low',
-      rationale: 'Thị trường tài sản số biến động mạnh theo thanh khoản toàn cầu; hạn chế sử dụng đòn bẩy tài chính.',
-      evidenceIds: dxyObs ? [dxyObs.id] : [defaultEvId],
-      signalIds: dxySignal ? [dxySignal.signalId] : [],
-      conclusionType: 'ASSET_BIAS',
-      supportStatus: 'supported',
-      limitations: 'Tài sản rủi ro cao nhạy cảm thanh khoản.'
-    },
-    {
-      assetClass: 'cash',
-      stance: 'hold',
-      priority: 'high',
-      rationale: 'Duy trì thanh khoản sẵn sàng để chủ động tận dụng các nhịp điều chỉnh giải ngân vào các cổ phiếu cơ bản tốt.',
-      evidenceIds: cpiObs ? [cpiObs.id] : [defaultEvId],
-      signalIds: inflationSignal ? [inflationSignal.signalId] : [],
-      conclusionType: 'ASSET_BIAS',
-      supportStatus: 'supported',
-      limitations: 'Dự trữ thanh khoản phòng thủ.'
-    }
-  ];
-
-  // Preferred Themes: Only when supported by news or evidence
-  const preferredThemes = [];
-  if (citedArticleIds.length > 0 && vnIndexObs) {
-    preferredThemes.push({
-      theme: 'Doanh nghiệp đầu ngành dòng tiền mạnh và nợ thấp',
-      stance: 'prefer',
-      rationale: 'Khả năng chống chịu tốt trước biến động chi phí đầu vào và lãi suất vay.',
-      evidenceIds: [vnIndexObs.id],
-      signalIds: vnTrendSignal ? [vnTrendSignal.signalId] : [],
-      conclusionType: 'THEME_PREFERENCE',
-      supportStatus: 'supported',
-      limitations: 'Yêu cầu thẩm định báo cáo tài chính từng quý.'
-    });
-  }
-
-  // Avoid Themes: Only when supported
-  const avoidOrUnderweight = [];
-  if (usdVndObs || dxyObs) {
-    avoidOrUnderweight.push({
-      theme: 'Nhóm doanh nghiệp chịu chi phí nợ ngoại tệ cao hoặc đầu cơ đòn bẩy',
-      reason: 'Biên an toàn thấp và dễ bị tổn thương khi biến động tỷ giá và thanh khoản phân hóa.',
-      evidenceIds: [usdVndObs?.id || dxyObs?.id].filter(Boolean),
-      signalIds: fxSignal ? [fxSignal.signalId] : [],
-      conclusionType: 'THEME_UNDERWEIGHT',
-      supportStatus: 'supported',
-      limitations: 'Tác động theo từng chu kỳ tái cơ cấu nợ.'
-    });
-  }
-
-  const orientationEvidenceIds = citedFactIds.slice(0, 4);
-  const risksEvidenceIds = citedFactIds.slice(0, 3);
-
-  const fallbackCandidate = {
-    executiveDecision,
-    assetStrategy,
-    preferredThemes,
-    avoidOrUnderweight,
-    marketOverview: {
-      vietnam: `${vnIndexProse} ${cpiProse}`.trim(),
-      global: globalProse.trim()
-    },
-    keyDrivers: keyDrivers.length > 0 ? keyDrivers : [
-      { driver: 'Thị trường vận động ổn định theo các dữ kiện vĩ mô và liên thị trường đã kiểm chứng.', evidenceIds: [evidence[0]?.id || 'context'] }
-    ],
-    investmentOrientation: {
-      stance,
-      preferredThemes: preferredThemes.map((t) => t.theme),
-      pressuredThemes: avoidOrUnderweight.map((t) => t.theme),
-      rationale: executiveDecision.actionNow,
-      evidenceIds: orientationEvidenceIds.length > 0 ? orientationEvidenceIds : [evidence[0]?.id || 'context'],
-      signalIds: citedSignalIds.slice(0, 4)
-    },
-    risksAndInvalidation: {
-      keyRisks: [
-        'Biến động tỷ giá USD/VND gia tăng làm tăng chi phí vốn ngoại và áp lực lạm phát nhập khẩu.',
-        'Lợi suất trái phiếu quốc tế duy trì mức cao kéo dài ảnh hưởng dòng vốn gián tiếp.'
-      ],
-      invalidationConditions: [
-        'DXY hạ nhiệt bền vững hoặc tỷ giá trong nước ổn định trở lại.',
-        'Thanh khoản và độ rộng thị trường chứng khoán cải thiện đồng thuận.'
-      ],
-      evidenceIds: risksEvidenceIds.length > 0 ? risksEvidenceIds : [evidence[0]?.id || 'context'],
-      signalIds: citedSignalIds.slice(0, 2)
-    },
-    watchNext: [
-      'Công bố chỉ số giá tiêu dùng CPI kỳ tới của Tổng cục Thống kê',
-      'Định hướng điều hành lãi suất và thanh khoản của Ngân hàng Nhà nước',
-      'Biến động chỉ số DXY và diễn biến giá dầu thô Brent quốc tế'
-    ],
-    citations: {
-      factObservationIds: citedFactIds.length > 0 ? citedFactIds : [evidence[0]?.id || 'context'],
-      articleIds: citedArticleIds,
-      signalIds: citedSignalIds
-    },
-    generatedAt: now instanceof Date ? now.toISOString() : new Date().toISOString(),
-    dataAsOf: factPacket.dataAsOf,
-    evidenceCoverage: factPacket.evidenceCoverage || null,
-    generationMode: 'deterministic_fallback',
-    methodologyVersion: STRATEGIST_METHODOLOGY_VERSION
-  };
-
-  return fallbackCandidate;
+  return buildDeterministicMarketBrief({ factPacket, now });
 }
 
 /**
@@ -1128,6 +844,23 @@ export async function generateMarketStrategist({
       rationale: result.executiveDecision.actionNow || result.executiveDecision.oneLineDecision,
       evidenceIds: (result.assetStrategy || []).flatMap((a) => a.evidenceIds || []).slice(0, 6)
     };
+  }
+
+  // Ensure Always-Available Brief contract is fully populated on all execution paths
+  if (!result.brief) {
+    const enriched = buildDeterministicMarketBrief({
+      strategy: result,
+      factPacket,
+      now
+    });
+    result.brief = enriched.brief;
+    result.marketView = enriched.marketView;
+    result.why = enriched.why;
+    result.whatChanged = enriched.whatChanged;
+    result.risks = enriched.risks;
+    result.whatToWatch = enriched.whatToWatch;
+    result.dataContext = enriched.dataContext;
+    result.sources = enriched.sources;
   }
 
   // 4. Record run manifest

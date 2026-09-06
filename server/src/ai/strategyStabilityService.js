@@ -13,7 +13,7 @@ import {
   createStrategyAssessment,
   assertZeroPrivateData
 } from './strategyStabilityModel.js';
-import { assessStrategyMateriality } from './strategyAssessmentGate.js';
+import { assessStrategyMateriality, MATERIALITY_TRIGGER_TYPES } from './strategyAssessmentGate.js';
 import {
   getCurrentPublishedStrategy,
   getLatestStrategyAssessment,
@@ -26,6 +26,7 @@ import {
   generateMarketStrategist,
   computeStrategistFingerprint
 } from './marketStrategistEngine.js';
+import { buildDeterministicMarketBrief } from './marketStrategistBrief.js';
 
 /**
  * Orchestrates the Strategy Stability lifecycle (Two Clocks):
@@ -126,9 +127,33 @@ export async function evaluateAndApplyStrategyStability({
   // Invariant: Public GET is provider-free and NEVER mutates lifecycle state.
   if (currentStrategy && isReadOnly) {
     const isCompleted = lastAssessment?.evaluationStatus === EVALUATION_STATUSES.COMPLETED;
+    const briefData = buildDeterministicMarketBrief({
+      currentStrategy,
+      assessment: lastAssessment,
+      lastAssessment,
+      gateResult,
+      factPacket,
+      now
+    });
+
     return {
       ...(currentStrategy.rawOutput || {}),
+      ...briefData,
       ...currentStrategy,
+      brief: briefData.brief,
+      marketView: briefData.marketView,
+      why: briefData.why,
+      whatChanged: briefData.whatChanged,
+      risks: briefData.risks,
+      whatToWatch: briefData.whatToWatch,
+      dataContext: briefData.dataContext,
+      sources: briefData.sources,
+      evidence: briefData.evidence,
+      citations: briefData.citations,
+      marketOverview: currentStrategy.rawOutput?.marketOverview || briefData.marketOverview,
+      keyDrivers: currentStrategy.rawOutput?.keyDrivers || briefData.keyDrivers,
+      risksAndInvalidation: currentStrategy.rawOutput?.risksAndInvalidation || briefData.risksAndInvalidation,
+      watchNext: currentStrategy.rawOutput?.watchNext || briefData.watchNext,
       publishedAt: currentStrategy.publishedAt,
       strategyPublishedAt: currentStrategy.publishedAt,
       latestAssessmentAt: lastAssessment?.assessedAt || currentStrategy.publishedAt,
@@ -187,9 +212,33 @@ export async function evaluateAndApplyStrategyStability({
 
     await persistStrategyAssessment(assessment, client);
 
+    const briefData = buildDeterministicMarketBrief({
+      currentStrategy,
+      assessment,
+      lastAssessment,
+      gateResult,
+      factPacket,
+      now
+    });
+
     return {
       ...(currentStrategy.rawOutput || {}),
+      ...briefData,
       ...currentStrategy,
+      brief: briefData.brief,
+      marketView: briefData.marketView,
+      why: briefData.why,
+      whatChanged: briefData.whatChanged,
+      risks: briefData.risks,
+      whatToWatch: briefData.whatToWatch,
+      dataContext: briefData.dataContext,
+      sources: briefData.sources,
+      evidence: briefData.evidence,
+      citations: briefData.citations,
+      marketOverview: briefData.marketOverview,
+      keyDrivers: briefData.keyDrivers,
+      risksAndInvalidation: briefData.risksAndInvalidation,
+      watchNext: briefData.watchNext,
       publishedAt: currentStrategy.publishedAt,
       strategyPublishedAt: currentStrategy.publishedAt,
       latestAssessmentAt: assessment.assessedAt,
@@ -268,9 +317,33 @@ export async function evaluateAndApplyStrategyStability({
 
       await persistStrategyAssessment(failedAssessment, client);
 
+      const briefData = buildDeterministicMarketBrief({
+        currentStrategy,
+        assessment: failedAssessment,
+        lastAssessment,
+        gateResult,
+        factPacket,
+        now
+      });
+
       return {
         ...(currentStrategy.rawOutput || {}),
+        ...briefData,
         ...currentStrategy,
+        brief: briefData.brief,
+        marketView: briefData.marketView,
+        why: briefData.why,
+        whatChanged: briefData.whatChanged,
+        risks: briefData.risks,
+        whatToWatch: briefData.whatToWatch,
+        dataContext: briefData.dataContext,
+        sources: briefData.sources,
+        evidence: briefData.evidence,
+        citations: briefData.citations,
+        marketOverview: briefData.marketOverview,
+        keyDrivers: briefData.keyDrivers,
+        risksAndInvalidation: briefData.risksAndInvalidation,
+        watchNext: briefData.watchNext,
         publishedAt: currentStrategy.publishedAt,
         strategyPublishedAt: currentStrategy.publishedAt,
         latestAssessmentAt: failedAssessment.assessedAt,
@@ -337,9 +410,33 @@ export async function evaluateAndApplyStrategyStability({
 
     await persistStrategyAssessment(deferredAssessment, client);
 
+    const briefData = buildDeterministicMarketBrief({
+      currentStrategy,
+      assessment: deferredAssessment,
+      lastAssessment,
+      gateResult,
+      factPacket,
+      now
+    });
+
     return {
       ...(currentStrategy.rawOutput || {}),
+      ...briefData,
       ...currentStrategy,
+      brief: briefData.brief,
+      marketView: briefData.marketView,
+      why: briefData.why,
+      whatChanged: briefData.whatChanged,
+      risks: briefData.risks,
+      whatToWatch: briefData.whatToWatch,
+      dataContext: briefData.dataContext,
+      sources: briefData.sources,
+      evidence: briefData.evidence,
+      citations: briefData.citations,
+      marketOverview: briefData.marketOverview,
+      keyDrivers: briefData.keyDrivers,
+      risksAndInvalidation: briefData.risksAndInvalidation,
+      watchNext: briefData.watchNext,
       publishedAt: currentStrategy.publishedAt,
       strategyPublishedAt: currentStrategy.publishedAt,
       latestAssessmentAt: deferredAssessment.assessedAt,
@@ -534,9 +631,34 @@ export async function evaluateAndApplyStrategyStability({
 
     await persistStrategyAssessment(assessment, client);
 
+    const briefData = buildDeterministicMarketBrief({
+      currentStrategy,
+      candidateStrategy: candidateOutput,
+      assessment,
+      lastAssessment,
+      gateResult,
+      factPacket,
+      now
+    });
+
     return {
       ...(currentStrategy.rawOutput || candidateOutput || {}),
+      ...briefData,
       ...currentStrategy,
+      brief: candidateOutput?.brief || briefData.brief,
+      marketView: candidateOutput?.marketView || briefData.marketView,
+      why: candidateOutput?.why || briefData.why,
+      whatChanged: candidateOutput?.whatChanged || briefData.whatChanged,
+      risks: candidateOutput?.risks || briefData.risks,
+      whatToWatch: candidateOutput?.whatToWatch || briefData.whatToWatch,
+      dataContext: candidateOutput?.dataContext || briefData.dataContext,
+      sources: candidateOutput?.sources || briefData.sources,
+      evidence: candidateOutput?.evidence || briefData.evidence,
+      citations: candidateOutput?.citations || briefData.citations,
+      marketOverview: candidateOutput?.marketOverview || briefData.marketOverview,
+      keyDrivers: candidateOutput?.keyDrivers || briefData.keyDrivers,
+      risksAndInvalidation: candidateOutput?.risksAndInvalidation || briefData.risksAndInvalidation,
+      watchNext: candidateOutput?.watchNext || briefData.watchNext,
       publishedAt: currentStrategy.publishedAt,
       strategyPublishedAt: currentStrategy.publishedAt,
       latestAssessmentAt: assessment.assessedAt,
