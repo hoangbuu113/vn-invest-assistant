@@ -11,6 +11,15 @@ import {
 const memoryStrategyVersions = new Map();
 const memoryStrategyAssessments = new Map();
 
+const isTestEnvironment = process.env.NODE_ENV === 'test' ||
+  process.execArgv.some(a => typeof a === 'string' && a.includes('--test')) ||
+  process.argv.some(a => typeof a === 'string' && (a.includes('test') || a.includes('node:test')));
+
+export function resolveStabilityClient(client) {
+  if (client !== undefined) return client;
+  return isTestEnvironment ? null : privateSupabase;
+}
+
 /**
  * Resets the in-memory stability store (for tests).
  */
@@ -166,7 +175,9 @@ export function strategyAssessmentToRow(assessment) {
 /**
  * Retrieves the currently published StrategyVersion.
  */
-export async function getCurrentPublishedStrategy(client = privateSupabase) {
+export async function getCurrentPublishedStrategy(client = undefined) {
+  const targetClient = resolveStabilityClient(client);
+
   // Check memory store first for immediate cache
   let latestMemory = null;
   for (const item of memoryStrategyVersions.values()) {
@@ -177,12 +188,12 @@ export async function getCurrentPublishedStrategy(client = privateSupabase) {
     }
   }
 
-  if (!client) {
+  if (!targetClient) {
     return latestMemory;
   }
 
   try {
-    const { data, error } = await client
+    const { data, error } = await targetClient
       .from('strategy_versions')
       .select('*')
       .eq('status', STRATEGY_LIFECYCLE_STATUSES.PUBLISHED)
@@ -206,16 +217,17 @@ export async function getCurrentPublishedStrategy(client = privateSupabase) {
 /**
  * Retrieves a StrategyVersion by ID.
  */
-export async function getStrategyVersionById(strategyId, client = privateSupabase) {
+export async function getStrategyVersionById(strategyId, client = undefined) {
+  const targetClient = resolveStabilityClient(client);
   if (!strategyId) return null;
   if (memoryStrategyVersions.has(strategyId)) {
     return memoryStrategyVersions.get(strategyId);
   }
 
-  if (!client) return null;
+  if (!targetClient) return null;
 
   try {
-    const { data, error } = await client
+    const { data, error } = await targetClient
       .from('strategy_versions')
       .select('*')
       .eq('strategy_id', strategyId)
@@ -236,7 +248,8 @@ export async function getStrategyVersionById(strategyId, client = privateSupabas
  * Persists a StrategyVersion to database and memory store.
  * Enforces single published strategy constraint.
  */
-export async function persistStrategyVersion(strategyVersion, client = privateSupabase) {
+export async function persistStrategyVersion(strategyVersion, client = undefined) {
+  const targetClient = resolveStabilityClient(client);
   if (!strategyVersion?.strategyId) {
     throw new Error('persistStrategyVersion requires a valid strategyVersion with strategyId');
   }
@@ -258,13 +271,13 @@ export async function persistStrategyVersion(strategyVersion, client = privateSu
   // In-memory update
   memoryStrategyVersions.set(strategyVersion.strategyId, strategyVersion);
 
-  if (!client) {
+  if (!targetClient) {
     return { isDurable: false, strategyId: strategyVersion.strategyId };
   }
 
   const row = strategyVersionToRow(strategyVersion);
   try {
-    const { error } = await client
+    const { error } = await targetClient
       .from('strategy_versions')
       .upsert(row, { onConflict: 'strategy_id' });
 
@@ -325,12 +338,14 @@ export async function supersedeStrategyVersion(strategyId, client = privateSupab
 export async function publishStrategyVersionAtomic({
   newVersion,
   expectedCurrentStrategyId = null
-} = {}, client = privateSupabase) {
+} = {}, client = undefined) {
   if (!newVersion || !newVersion.strategyId) {
     throw new Error('publishStrategyVersionAtomic requires a valid newVersion with strategyId');
   }
 
   assertZeroPrivateData(newVersion, 'PUBLISH_STRATEGY_VERSION_ATOMIC');
+
+  const targetClient = resolveStabilityClient(client);
 
   // In-memory atomic execution helper with rollback snapshot
   const executeMemoryAtomic = () => {
@@ -388,13 +403,13 @@ export async function publishStrategyVersionAtomic({
     }
   };
 
-  if (!client) {
+  if (!targetClient) {
     return executeMemoryAtomic();
   }
 
   const row = strategyVersionToRow(newVersion);
   try {
-    const { data, error } = await client.rpc('publish_strategy_version_atomic', {
+    const { data, error } = await targetClient.rpc('publish_strategy_version_atomic', {
       p_new_version: row,
       p_expected_current_strategy_id: expectedCurrentStrategyId
     });
@@ -412,18 +427,37 @@ export async function publishStrategyVersionAtomic({
         conflictErr.isConflict = true;
         throw conflictErr;
       }
-      if (error.code === 'PGRST202' || error.message?.includes('publish_strategy_version_atomic')) {
-        // Function not yet present in remote schema cache (local/unapplied migration); fallback to memory atomic
-        return executeMemoryAtomic();
+      if (
+        error.code === 'PGRST202' ||
+        error.code === '42883' ||
+        error.message?.includes('publish_strategy_version_atomic')
+      ) {
+        const rpcUnavailableErr = new Error(
+          `STRATEGY_PUBLICATION_RPC_UNAVAILABLE: publish_strategy_version_atomic function unavailable (${error.message || 'PGRST202 schema cache error'}). ` +
+          'Apply migration 20260906010000_harden_strategy_stability_publication.sql before publishing.'
+        );
+        rpcUnavailableErr.code = error.code || 'PGRST202';
+        rpcUnavailableErr.isRpcMissing = true;
+        rpcUnavailableErr.cause = error;
+        throw rpcUnavailableErr;
       }
       throw error;
     }
 
-    // Mirror to memory on successful DB commit
-    executeMemoryAtomic();
-    return { isDurable: true, strategy: rowToStrategyVersion(data) || newVersion };
+    const publishedStrategy = rowToStrategyVersion(data) || newVersion;
+    // Mirror DB state to memory store without re-evaluating CAS assertions (DB already validated CAS)
+    for (const [id, existing] of memoryStrategyVersions.entries()) {
+      if (existing.status === STRATEGY_LIFECYCLE_STATUSES.PUBLISHED && id !== publishedStrategy.strategyId) {
+        memoryStrategyVersions.set(id, createStrategyVersion({
+          ...existing,
+          status: STRATEGY_LIFECYCLE_STATUSES.SUPERSEDED
+        }));
+      }
+    }
+    memoryStrategyVersions.set(publishedStrategy.strategyId, publishedStrategy);
+    return { isDurable: true, strategy: publishedStrategy };
   } catch (err) {
-    await getCurrentPublishedStrategy(client);
+    await getCurrentPublishedStrategy(targetClient).catch(() => null);
     throw err;
   }
 }
@@ -432,7 +466,7 @@ export async function publishStrategyVersionAtomic({
  * Retrieves the latest StrategyAssessment for a given strategyId, or latest overall.
  * Supports { completedOnly: true } to isolate COMPLETED assessments from FAILED/DEFERRED attempts.
  */
-export async function getLatestStrategyAssessment(strategyId = null, client = privateSupabase, options = {}) {
+export async function getLatestStrategyAssessment(strategyId = null, client = undefined, options = {}) {
   let targetStrategyId = strategyId;
   let targetClient = client;
   let targetOptions = options;
@@ -440,11 +474,13 @@ export async function getLatestStrategyAssessment(strategyId = null, client = pr
   if (strategyId && typeof strategyId === 'object' && !('from' in strategyId)) {
     targetOptions = strategyId;
     targetStrategyId = null;
-    targetClient = privateSupabase;
+    targetClient = undefined;
   } else if (client && typeof client === 'object' && !('from' in client) && ('completedOnly' in client)) {
     targetOptions = client;
-    targetClient = privateSupabase;
+    targetClient = undefined;
   }
+
+  targetClient = resolveStabilityClient(targetClient);
 
   const completedOnly = Boolean(targetOptions?.completedOnly);
 
@@ -495,30 +531,32 @@ export async function getLatestStrategyAssessment(strategyId = null, client = pr
  * Retrieves the latest completed StrategyAssessment for a given strategyId or overall.
  * GUARANTEE: Incomplete, failed, or deferred assessments are strictly excluded.
  */
-export async function getLatestCompletedStrategyAssessment(strategyId = null, client = privateSupabase) {
+export async function getLatestCompletedStrategyAssessment(strategyId = null, client = undefined) {
   return getLatestStrategyAssessment(strategyId, client, { completedOnly: true });
 }
 
 /**
  * Persists a StrategyAssessment (append-only).
  */
-export async function persistStrategyAssessment(assessment, client = privateSupabase) {
+export async function persistStrategyAssessment(assessment, client = undefined) {
   if (!assessment?.assessmentId) {
     throw new Error('persistStrategyAssessment requires a valid assessment with assessmentId');
   }
 
   assertZeroPrivateData(assessment, 'PERSIST_STRATEGY_ASSESSMENT');
 
+  const targetClient = resolveStabilityClient(client);
+
   // In-memory append
   memoryStrategyAssessments.set(assessment.assessmentId, assessment);
 
-  if (!client) {
+  if (!targetClient) {
     return { isDurable: false, assessmentId: assessment.assessmentId };
   }
 
   const row = strategyAssessmentToRow(assessment);
   try {
-    const { error } = await client
+    const { error } = await targetClient
       .from('strategy_assessments')
       .insert(row);
 
@@ -534,16 +572,18 @@ export async function persistStrategyAssessment(assessment, client = privateSupa
 /**
  * Lists StrategyAssessments for audit trail.
  */
-export async function listStrategyAssessments(strategyId = null, client = privateSupabase, limit = 50) {
+export async function listStrategyAssessments(strategyId = null, client = undefined, limit = 50) {
+  const targetClient = resolveStabilityClient(client);
+
   const memoryList = Array.from(memoryStrategyAssessments.values())
     .filter((a) => !strategyId || a.strategyId === strategyId)
     .sort((a, b) => b.assessedAt.localeCompare(a.assessedAt))
     .slice(0, limit);
 
-  if (!client) return memoryList;
+  if (!targetClient) return memoryList;
 
   try {
-    let query = client
+    let query = targetClient
       .from('strategy_assessments')
       .select('*')
       .order('assessed_at', { ascending: false })
@@ -567,7 +607,7 @@ export async function listStrategyAssessments(strategyId = null, client = privat
 /**
  * Retrieves a StrategyAssessment by its idempotencyKey.
  */
-export async function getStrategyAssessmentByIdempotencyKey(idempotencyKey, client = privateSupabase) {
+export async function getStrategyAssessmentByIdempotencyKey(idempotencyKey, client = undefined) {
   if (!idempotencyKey) return null;
 
   for (const asmt of memoryStrategyAssessments.values()) {
@@ -576,10 +616,11 @@ export async function getStrategyAssessmentByIdempotencyKey(idempotencyKey, clie
     }
   }
 
-  if (!client) return null;
+  const targetClient = resolveStabilityClient(client);
+  if (!targetClient) return null;
 
   try {
-    const { data, error } = await client
+    const { data, error } = await targetClient
       .from('strategy_assessments')
       .select('*')
       .eq('idempotency_key', idempotencyKey)

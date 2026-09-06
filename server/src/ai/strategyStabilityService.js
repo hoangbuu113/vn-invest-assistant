@@ -426,6 +426,14 @@ export async function evaluateAndApplyStrategyStability({
           concurrencyError: err.message
         };
       }
+
+      if (typeof onStateTransition === 'function') {
+        try {
+          onStateTransition(STRATEGY_LIFECYCLE_STATES.REVIEW_REQUIRED);
+        } catch {
+          // safe
+        }
+      }
       throw err;
     }
 
@@ -618,7 +626,69 @@ export async function evaluateAndApplyStrategyStability({
         concurrencyError: err.message
       };
     }
-    throw err;
+
+    // Durable publication failed (e.g. RPC unavailable / DB error with real client)
+    // Old published strategy remains authoritative; record FAILED assessment and preserve REVIEW_REQUIRED
+    if (typeof onStateTransition === 'function') {
+      try {
+        onStateTransition(STRATEGY_LIFECYCLE_STATES.REVIEW_REQUIRED);
+      } catch {
+        // safe
+      }
+    }
+
+    const assessmentId = `asmt_${nowMs}_${createHash('sha256').update(`FAIL_PUB:${currentStrategy.strategyId}:${nowIso}`).digest('hex').slice(0, 12)}`;
+    const failedAssessment = createStrategyAssessment({
+      assessmentId,
+      strategyId: currentStrategy.strategyId,
+      assessedAt: nowIso,
+      dataAsOf: factPacket.dataAsOf || currentStrategy.dataAsOf,
+      evidenceFingerprint: snapshotEvidenceFingerprint,
+      previousEvidenceFingerprint: lastAssessment?.evidenceFingerprint || currentStrategy.evidenceFingerprint,
+      decisionFingerprint: currentStrategy.decisionFingerprint,
+      confidence: currentStrategy.confidence,
+      previousConfidence: currentStrategy.confidence,
+      result: ASSESSMENT_RESULTS.KEEP,
+      evaluationStatus: EVALUATION_STATUSES.FAILED,
+      triggerReason: gateResult.reasons[0] || {},
+      limitations: `Lỗi xuất bản bền vững (durable publication failed): ${err.message}`,
+      lifecycleState: STRATEGY_LIFECYCLE_STATES.REVIEW_REQUIRED,
+      dataQualityState: gateResult.dataQualityState,
+      watchReasons: gateResult.watchReasons || [],
+      shockOverride: gateResult.shockOverride || null,
+      confirmationKeys: gateResult.confirmationKeys || [],
+      idempotencyKey,
+      policyVersion: STABILITY_POLICY_VERSION,
+      runManifestId: candidateOutput?.runId || null
+    });
+
+    try {
+      await persistStrategyAssessment(failedAssessment, client);
+    } catch {
+      // Best-effort persistence for assessment record
+    }
+
+    return {
+      ...(currentStrategy.rawOutput || {}),
+      ...currentStrategy,
+      publishedAt: currentStrategy.publishedAt,
+      strategyPublishedAt: currentStrategy.publishedAt,
+      latestAssessmentAt: failedAssessment.assessedAt,
+      latestAssessmentResult: null,
+      latestAssessmentStatus: EVALUATION_STATUSES.FAILED,
+      lifecycleState: STRATEGY_LIFECYCLE_STATES.REVIEW_REQUIRED,
+      reviewPending: true,
+      dataQualityState: gateResult.dataQualityState,
+      watchReasons: failedAssessment.watchReasons,
+      shockOverride: failedAssessment.shockOverride,
+      confirmationKeys: failedAssessment.confirmationKeys,
+      currentConfidence: currentStrategy.confidence,
+      dataAsOf: factPacket.dataAsOf || currentStrategy.dataAsOf,
+      decisionFingerprint: currentStrategy.decisionFingerprint,
+      evidenceFingerprint: snapshotEvidenceFingerprint,
+      lastAssessment: failedAssessment,
+      publicationError: err.message
+    };
   }
 
   // Record PUBLISH_NEW assessment
