@@ -176,7 +176,8 @@ test('V1.3 AI Market Strategist Runtime Hotfix End-to-End Suite', async (t) => {
   });
 
   await t.test('4. Cold-start strategy version row omits shock_override property completely', () => {
-    const version = createStrategyVersion({
+    // 4a. Explicit null
+    const versionNull = createStrategyVersion({
       strategyId: 'strat_cold_start_001',
       previousStrategyId: null,
       generatedAt: '2026-09-04T16:30:00.000Z',
@@ -190,26 +191,48 @@ test('V1.3 AI Market Strategist Runtime Hotfix End-to-End Suite', async (t) => {
       shockOverride: null
     });
 
-    const row = strategyVersionToRow(version);
-    assert.ok(row, 'Row must be produced');
-
-    // Crucial check: shock_override key must NOT be present on the row object
+    const rowNull = strategyVersionToRow(versionNull);
+    assert.ok(rowNull, 'Row must be produced');
     assert.equal(
-      Object.prototype.hasOwnProperty.call(row, 'shock_override'),
+      Object.prototype.hasOwnProperty.call(rowNull, 'shock_override'),
       false,
       'shock_override key must NOT be present when null'
     );
-
-    // Serialization check: JSON.stringify must not serialize "shock_override":null
-    const serialized = JSON.stringify(row);
     assert.equal(
-      serialized.includes('"shock_override"'),
+      JSON.stringify(rowNull).includes('"shock_override"'),
+      false,
+      'JSON stringified row must not contain "shock_override"'
+    );
+
+    // 4b. Undefined
+    const versionUndef = createStrategyVersion({
+      strategyId: 'strat_cold_start_undef',
+      previousStrategyId: null,
+      generatedAt: '2026-09-04T16:30:00.000Z',
+      publishedAt: '2026-09-04T16:30:00.000Z',
+      dataAsOf: '2026-09-04T16:30:00.000Z',
+      evidenceFingerprint: 'fp_abc123',
+      decisionFingerprint: 'dfp_xyz789',
+      confidence: 'HIGH',
+      regime: { label: 'Tăng trưởng ổn định', status: 'STABLE' },
+      executiveDecision: { headline: 'Thị trường khả quan', summary: 'Tổng quan tích cực' }
+    });
+
+    const rowUndef = strategyVersionToRow(versionUndef);
+    assert.ok(rowUndef, 'Row must be produced');
+    assert.equal(
+      Object.prototype.hasOwnProperty.call(rowUndef, 'shock_override'),
+      false,
+      'shock_override key must NOT be present when undefined'
+    );
+    assert.equal(
+      JSON.stringify(rowUndef).includes('"shock_override"'),
       false,
       'JSON stringified row must not contain "shock_override"'
     );
   });
 
-  await t.test('5. Valid shock_override is preserved on row and serializes as JSON object', () => {
+  await t.test('5. Valid shock_override is preserved on row and serializes as JSON object; primitives throw', () => {
     const shockObj = {
       type: 'CURRENCY_DEVALUATION',
       magnitude: 'EXTREME',
@@ -241,6 +264,23 @@ test('V1.3 AI Market Strategist Runtime Hotfix End-to-End Suite', async (t) => {
 
     const serialized = JSON.parse(JSON.stringify(row));
     assert.deepEqual(serialized.shock_override, shockObj);
+
+    // JS-level tests: primitive/array rejection throwing TypeError
+    assert.throws(() => {
+      strategyVersionToRow({ ...version, shockOverride: 'INVALID_STRING_PRIMITIVE' });
+    }, /TypeError.*strategyVersionToRow.*shockOverride must be a valid non-array object/);
+
+    assert.throws(() => {
+      strategyVersionToRow({ ...version, shockOverride: 12345 });
+    }, /TypeError.*strategyVersionToRow.*shockOverride must be a valid non-array object/);
+
+    assert.throws(() => {
+      strategyVersionToRow({ ...version, shockOverride: true });
+    }, /TypeError.*strategyVersionToRow.*shockOverride must be a valid non-array object/);
+
+    assert.throws(() => {
+      strategyVersionToRow({ ...version, shockOverride: ['invalid', 'array'] });
+    }, /TypeError.*strategyVersionToRow.*shockOverride must be a valid non-array object/);
   });
 
   await t.test('6. publishStrategyVersionAtomic with mock RPC client receives row without shock_override', async () => {
@@ -288,28 +328,87 @@ test('V1.3 AI Market Strategist Runtime Hotfix End-to-End Suite', async (t) => {
     );
   });
 
-  await t.test('7. Database migration SQL CASE expression simulation handles all shock_override variants', () => {
-    function simulateDbShockOverrideClause(p_new_version) {
-      const shockVal = p_new_version.shock_override;
-      if (shockVal === undefined) return null;
-      if (shockVal === null) return null;
-      if (typeof shockVal !== 'object' || Array.isArray(shockVal)) return null;
-      return shockVal;
+  await t.test('7. Database migration SQL CASE expression enforces fail-closed trust boundary', () => {
+    // Simulates the PostgreSQL DB trust boundary:
+    // 1. RPC CASE expression (forward migration 20260906040000):
+    //    CASE
+    //      WHEN p_new_version->'shock_override' IS NULL
+    //        OR p_new_version->'shock_override' = 'null'::jsonb
+    //      THEN NULL
+    //      ELSE p_new_version->'shock_override'
+    //    END
+    // 2. Table constraint (strategy_versions):
+    //    CHECK (shock_override IS NULL OR jsonb_typeof(shock_override) = 'object')
+    function simulateDbPublicationShockOverride(p_new_version) {
+      const hasKey = Object.prototype.hasOwnProperty.call(p_new_version, 'shock_override');
+      const rawVal = p_new_version.shock_override;
+
+      // In Postgres JSONB:
+      // - key omitted / undefined -> p_new_version->'shock_override' IS NULL -> CASE evaluates to NULL
+      // - value null -> p_new_version->'shock_override' = 'null'::jsonb -> CASE evaluates to NULL
+      // - any other value -> CASE evaluates to rawVal
+      let evaluatedVal;
+      if (!hasKey || rawVal === undefined || rawVal === null) {
+        evaluatedVal = null;
+      } else {
+        evaluatedVal = rawVal;
+      }
+
+      // Check constraint: shock_override IS NULL OR jsonb_typeof(shock_override) = 'object'
+      if (evaluatedVal === null) {
+        return { success: true, value: null };
+      }
+
+      if (typeof evaluatedVal === 'object' && !Array.isArray(evaluatedVal)) {
+        return { success: true, value: evaluatedVal };
+      }
+
+      // Check constraint 23514 violation (FAIL CLOSED)
+      const err = new Error(
+        'new row for relation "strategy_versions" violates check constraint "strategy_versions_shock_override_check"'
+      );
+      err.code = '23514';
+      throw err;
     }
 
-    // Case A: omitted (as strategyVersionToRow does now)
-    assert.strictEqual(simulateDbShockOverrideClause({}), null);
+    // 1. Omitted shock_override → SQL NULL / accepted
+    const resOmitted = simulateDbPublicationShockOverride({});
+    assert.strictEqual(resOmitted.success, true);
+    assert.strictEqual(resOmitted.value, null);
 
-    // Case B: legacy client sending JSON null
-    assert.strictEqual(simulateDbShockOverrideClause({ shock_override: null }), null);
+    // 2. JSON null → SQL NULL / accepted
+    const resJsonNull = simulateDbPublicationShockOverride({ shock_override: null });
+    assert.strictEqual(resJsonNull.success, true);
+    assert.strictEqual(resJsonNull.value, null);
 
-    // Case C: invalid primitive
-    assert.strictEqual(simulateDbShockOverrideClause({ shock_override: 'extreme' }), null);
-    assert.strictEqual(simulateDbShockOverrideClause({ shock_override: 123 }), null);
-    assert.strictEqual(simulateDbShockOverrideClause({ shock_override: ['invalid'] }), null);
-
-    // Case D: valid object
+    // 3. Valid JSON object → preserved / accepted
     const validShock = { type: 'LIQUIDITY_SQUEEZE', magnitude: 'HIGH' };
-    assert.deepEqual(simulateDbShockOverrideClause({ shock_override: validShock }), validShock);
+    const resValid = simulateDbPublicationShockOverride({ shock_override: validShock });
+    assert.strictEqual(resValid.success, true);
+    assert.deepEqual(resValid.value, validShock);
+
+    // 4. String primitive → REJECTED (fail closed)
+    assert.throws(
+      () => simulateDbPublicationShockOverride({ shock_override: 'extreme' }),
+      /violates check constraint.*strategy_versions_shock_override_check/
+    );
+
+    // 5. Number primitive → REJECTED (fail closed)
+    assert.throws(
+      () => simulateDbPublicationShockOverride({ shock_override: 123 }),
+      /violates check constraint.*strategy_versions_shock_override_check/
+    );
+
+    // 6. Boolean primitive → REJECTED (fail closed)
+    assert.throws(
+      () => simulateDbPublicationShockOverride({ shock_override: true }),
+      /violates check constraint.*strategy_versions_shock_override_check/
+    );
+
+    // 7. Array → REJECTED (fail closed)
+    assert.throws(
+      () => simulateDbPublicationShockOverride({ shock_override: ['invalid', 'array'] }),
+      /violates check constraint.*strategy_versions_shock_override_check/
+    );
   });
 });

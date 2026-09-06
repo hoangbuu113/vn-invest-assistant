@@ -114,7 +114,6 @@ BEGIN
         CASE
             WHEN p_new_version->'shock_override' IS NULL
               OR p_new_version->'shock_override' = 'null'::jsonb
-              OR jsonb_typeof(p_new_version->'shock_override') != 'object'
             THEN NULL
             ELSE p_new_version->'shock_override'
         END,
