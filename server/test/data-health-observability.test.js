@@ -326,6 +326,8 @@ test('10. cold restart persistence: loading from database reconstitutes exact te
 });
 
 test('11. database failure safety: production mode with DB error does not silently mask failure as memory success', async () => {
+  clearDataHealthMemoryStore();
+
   const failingDb = {
     from() {
       return {
@@ -344,6 +346,14 @@ test('11. database failure safety: production mode with DB error does not silent
   // In production / non-test mode simulation:
   const origNodeEnv = process.env.NODE_ENV;
   try {
+    // Seed explicit offline memory first. A production DB error must still win.
+    await recordJobHealth({
+      jobName: OBSERVED_JOBS.ALERT_SCHEDULER,
+      status: HEALTH_STATES.HEALTHY,
+      client: null,
+      now: new Date('2026-09-06T11:45:00.000Z')
+    });
+
     process.env.NODE_ENV = 'production';
 
     await assert.rejects(async () => {
@@ -361,6 +371,111 @@ test('11. database failure safety: production mode with DB error does not silent
   } finally {
     process.env.NODE_ENV = origNodeEnv;
   }
+});
+
+test('11A. recovery path: failed durable write cannot seed fake HEALTHY memory or override an empty DB read', async () => {
+  clearDataHealthMemoryStore();
+
+  const failingWriteDb = {
+    from() {
+      return {
+        upsert() {
+          return {
+            select: async () => ({
+              data: null,
+              error: { message: 'Connection to Supabase timed out', code: 'PGRST000' }
+            })
+          };
+        }
+      };
+    }
+  };
+
+  const recoveredEmptyDb = {
+    from() {
+      return {
+        select: async () => ({ data: [], error: null })
+      };
+    }
+  };
+
+  const origNodeEnv = process.env.NODE_ENV;
+  try {
+    process.env.NODE_ENV = 'production';
+
+    await assert.rejects(async () => {
+      await recordJobHealth({
+        jobName: OBSERVED_JOBS.VN_MARKET_CONTEXT_COLLECTOR,
+        status: HEALTH_STATES.HEALTHY,
+        client: failingWriteDb,
+        now: new Date('2026-09-06T12:00:00.000Z')
+      });
+    }, /DATA_HEALTH_PERSISTENCE_FAILED/);
+
+    // Explicit memory inspection proves the failed write never populated cache.
+    const offlineView = await getSystemDataHealth({
+      client: null,
+      now: new Date('2026-09-06T12:01:00.000Z')
+    });
+    const offlineJob = offlineView.jobs.find(
+      (job) => job.jobName === OBSERVED_JOBS.VN_MARKET_CONTEXT_COLLECTOR
+    );
+    assert.equal(offlineJob.status, HEALTH_STATES.UNKNOWN);
+
+    // Once DB connectivity recovers, an authoritative empty result remains UNKNOWN.
+    const recoveredView = await getSystemDataHealth({
+      client: recoveredEmptyDb,
+      now: new Date('2026-09-06T12:02:00.000Z')
+    });
+    const recoveredJob = recoveredView.jobs.find(
+      (job) => job.jobName === OBSERVED_JOBS.VN_MARKET_CONTEXT_COLLECTOR
+    );
+    assert.equal(recoveredJob.status, HEALTH_STATES.UNKNOWN);
+    assert.equal(recoveredView.systemStatus, HEALTH_STATES.UNKNOWN);
+  } finally {
+    process.env.NODE_ENV = origNodeEnv;
+  }
+});
+
+test('11B. successful durable write mirrors its checkpoint to explicit offline memory', async () => {
+  clearDataHealthMemoryStore();
+  const durableRows = new Map();
+  const durableDb = {
+    from(table) {
+      assert.equal(table, 'market_context_collector_checkpoints');
+      return {
+        upsert(row) {
+          durableRows.set(row.source_key, { ...row });
+          return {
+            select: async () => ({ data: [{ ...row }], error: null })
+          };
+        },
+        select: async () => ({ data: Array.from(durableRows.values()), error: null })
+      };
+    }
+  };
+
+  const persisted = await recordJobHealth({
+    jobName: OBSERVED_JOBS.CLAIMS_RECONCILIATION,
+    status: HEALTH_STATES.HEALTHY,
+    recordsRead: 4,
+    recordsWritten: 4,
+    client: durableDb,
+    now: new Date('2026-09-06T12:10:00.000Z')
+  });
+  assert.equal(persisted.isDurable, true);
+  assert.equal(durableRows.size, 1);
+
+  const offlineView = await getSystemDataHealth({
+    client: null,
+    now: new Date('2026-09-06T12:11:00.000Z')
+  });
+  const mirroredJob = offlineView.jobs.find(
+    (job) => job.jobName === OBSERVED_JOBS.CLAIMS_RECONCILIATION
+  );
+  assert.equal(mirroredJob.status, HEALTH_STATES.HEALTHY);
+  assert.equal(mirroredJob.recordsRead, 4);
+  assert.equal(mirroredJob.recordsWritten, 4);
 });
 
 test('12. error normalizer maps network timeouts, provider access denied, and database errors accurately', () => {
@@ -392,7 +507,7 @@ test('13. HTTP endpoint: GET /api/system/data-health returns 200, requires no au
     now: new Date('2026-09-06T10:00:00.000Z')
   });
 
-  const app = createApp();
+  const app = createApp({ supabaseAuthClient: null });
   const server = app.listen(0);
   const port = server.address().port;
 
@@ -435,7 +550,7 @@ test('14. HTTP endpoint: GET /api/system/data-health returns 503 when systemStat
     now: new Date('2026-09-06T10:15:00.000Z')
   });
 
-  const app = createApp();
+  const app = createApp({ supabaseAuthClient: null });
   const server = app.listen(0);
   const port = server.address().port;
 

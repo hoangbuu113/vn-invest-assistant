@@ -178,11 +178,17 @@ export async function recordJobHealth({
   // Sanitize any extra metadata
   const sanitizedMeta = sanitizeOperationalMetadata(metadata);
 
-  // Retrieve prior success timestamp if available from memory
-  const prev = memoryJobHealth.get(jobName) || {};
-  let resolvedLastSuccessAt = status === HEALTH_STATES.HEALTHY
+  const isMemoryMode = client === null
+    || (client === undefined && isTestEnvironment() && !testClientOverride);
+
+  // Process memory is authoritative only in explicit offline/test mode. A
+  // DB-backed write must never derive durable state from a memory checkpoint.
+  const previousMemoryHealth = isMemoryMode
+    ? (memoryJobHealth.get(jobName) || {})
+    : {};
+  const resolvedLastSuccessAt = status === HEALTH_STATES.HEALTHY
     ? nowIso
-    : (prev.lastSuccessAt || null);
+    : (previousMemoryHealth.lastSuccessAt || null);
 
   const structuredHealth = {
     jobName,
@@ -200,15 +206,9 @@ export async function recordJobHealth({
     updatedAt: nowIso
   };
 
-  // Always update memory store for fast testing/offline reads
-  memoryJobHealth.set(jobName, structuredHealth);
-
-  // Check client resolution
-  if (client === null) {
-    return { isDurable: false, health: structuredHealth };
-  }
-
-  if (client === undefined && isTestEnvironment() && !testClientOverride) {
+  // Explicit offline/test mode is the only path where memory is authoritative.
+  if (isMemoryMode) {
+    memoryJobHealth.set(jobName, structuredHealth);
     return { isDurable: false, health: structuredHealth };
   }
 
@@ -267,12 +267,18 @@ export async function recordJobHealth({
     }
 
     const savedRow = data?.[0] || dbRow;
+    const durableHealth = {
+      ...structuredHealth,
+      lastSuccessAt: savedRow.last_success_at || (status === HEALTH_STATES.HEALTHY ? nowIso : null)
+    };
+
+    // DB-backed paths cross the trust boundary only after durable persistence.
+    // Memory may mirror the durable checkpoint, but can never precede it.
+    memoryJobHealth.set(jobName, durableHealth);
+
     return {
       isDurable: true,
-      health: {
-        ...structuredHealth,
-        lastSuccessAt: savedRow.last_success_at || resolvedLastSuccessAt
-      }
+      health: durableHealth
     };
   } catch (err) {
     if (!isTestEnvironment()) {
@@ -388,11 +394,12 @@ export async function getSystemDataHealth({
 
   // Construct job telemetry for each observed job
   const jobs = ALL_OBSERVED_JOBS.map((jobName) => {
-    // Check DB rows first, then in-memory fallback
+    // DB-backed reads treat the durable store as authoritative. A missing row
+    // means UNKNOWN; process memory is consulted only in explicit offline mode.
     if (rowsByJob.has(jobName)) {
       return rowToJobHealth(rowsByJob.get(jobName), jobName);
     }
-    if (memoryJobHealth.has(jobName)) {
+    if (isMemoryMode && memoryJobHealth.has(jobName)) {
       const mem = memoryJobHealth.get(jobName);
       return {
         jobName,
