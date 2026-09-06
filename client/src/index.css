@@ -4690,6 +4690,7 @@ body {
   align-items: center;
   padding: 0.2rem 0.5rem;
   border-radius: 4px;
+  color: #93c5fd;
   font-size: 0.65rem;
   font-weight: 750;
   letter-spacing: 0.02em;
@@ -4707,9 +4708,10 @@ body {
   color: #15803d;
 }
 
+.strategist-command .strategist-change-summary,
 .strategist-change-summary {
   margin: 0;
-  color: #334155;
+  color: var(--color-slate-300, #cbd5e1);
   font-size: 0.78rem;
   line-height: 1.55;
 }
