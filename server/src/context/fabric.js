@@ -84,6 +84,26 @@ export function buildPulseMetrics(pillars) {
   return pulse;
 }
 
+function buildFabricResult(pillars, source, metadata = {}) {
+  const pulseMetrics = buildPulseMetrics(pillars);
+  const facts = [
+    ...pillars.macro,
+    ...pillars.monetary,
+    ...pillars.market,
+    ...pillars.intermarket
+  ];
+  return { pillars, pulseMetrics, facts, source, ...metadata };
+}
+
+function pillarsFromCache(cachedByPillar, now) {
+  return Object.fromEntries(PILLARS_LIST.map((pillar) => [
+    pillar,
+    (cachedByPillar[pillar]?.data || []).map((observation) => applyRuntimeFreshness(observation, now))
+  ]));
+}
+
+const PILLARS_LIST = Object.freeze(['macro', 'monetary', 'market', 'intermarket']);
+
 /**
  * Fast public reader for Market Context Fabric.
  * Invariant: Reads strictly from in-memory cache and durable persistence.
@@ -93,44 +113,45 @@ export async function getMarketContextFabric(clientOrOptions = {}, options = {})
   let client;
   let now;
   let cache;
+  let fetchPersisted;
 
   if (clientOrOptions && (typeof clientOrOptions.from === 'function' || clientOrOptions === null)) {
     client = clientOrOptions;
     now = options.now || new Date();
     cache = options.cache || globalContextCache;
+    fetchPersisted = options.fetchLatestPersistedObservationsFn || fetchLatestPersistedObservations;
   } else {
     client = clientOrOptions?.client !== undefined ? clientOrOptions.client : privateSupabase;
     now = clientOrOptions?.now || new Date();
     cache = clientOrOptions?.cache || globalContextCache;
+    fetchPersisted = clientOrOptions?.fetchLatestPersistedObservationsFn || fetchLatestPersistedObservations;
   }
 
-  // 1. Try in-memory cache
-  const macroCached = cache.get('macro', now);
-  const monetaryCached = cache.get('monetary', now);
-  const marketCached = cache.get('market', now);
-  const intermarketCached = cache.get('intermarket', now);
+  // 1. Fresh L1 entries may satisfy the read without touching persistence.
+  const cachedByPillar = Object.fromEntries(
+    PILLARS_LIST.map((pillar) => [pillar, cache.get(pillar, now)])
+  );
+  const hasCompleteFreshCache = PILLARS_LIST.every(
+    (pillar) => cachedByPillar[pillar]?.cacheStatus === 'fresh'
+  );
 
-  const hasMemoryCache = macroCached && monetaryCached && marketCached && intermarketCached;
-
-  if (hasMemoryCache) {
-    const pillars = {
-      macro: (macroCached.data || []).map((observation) => applyRuntimeFreshness(observation, now)),
-      monetary: (monetaryCached.data || []).map((observation) => applyRuntimeFreshness(observation, now)),
-      market: (marketCached.data || []).map((observation) => applyRuntimeFreshness(observation, now)),
-      intermarket: (intermarketCached.data || []).map((observation) => applyRuntimeFreshness(observation, now))
-    };
-    const pulseMetrics = buildPulseMetrics(pillars);
-    const facts = [
-      ...pillars.macro,
-      ...pillars.monetary,
-      ...pillars.market,
-      ...pillars.intermarket
-    ];
-    return { pillars, pulseMetrics, facts, source: 'memory_cache' };
+  if (hasCompleteFreshCache) {
+    return buildFabricResult(pillarsFromCache(cachedByPillar, now), 'memory_cache', {
+      cacheStatus: 'fresh'
+    });
   }
 
-  // 2. Read from durable storage (database / fallback store) with dynamic runtime freshness
-  const persisted = await fetchLatestPersistedObservations(client, now);
+  // 2. An expired L1 entry is retained only as LKG. Persistence regains read
+  // authority before stale memory can be returned.
+  let persisted = [];
+  let persistenceReadFailed = false;
+  try {
+    persisted = await fetchPersisted(client, now, {
+      allowMemoryFallback: !client
+    });
+  } catch {
+    persistenceReadFailed = true;
+  }
 
   if (Array.isArray(persisted) && persisted.length > 0) {
     const pillars = groupObservationsByPillar(persisted);
@@ -141,17 +162,22 @@ export async function getMarketContextFabric(clientOrOptions = {}, options = {})
     if (pillars.market.length > 0) cache.set('market', pillars.market, now);
     if (pillars.intermarket.length > 0) cache.set('intermarket', pillars.intermarket, now);
 
-    const pulseMetrics = buildPulseMetrics(pillars);
-    const facts = [
-      ...pillars.macro,
-      ...pillars.monetary,
-      ...pillars.market,
-      ...pillars.intermarket
-    ];
-    return { pillars, pulseMetrics, facts, source: 'durable_persistence' };
+    return buildFabricResult(pillars, 'durable_persistence', {
+      cacheStatus: 'refreshed'
+    });
   }
 
-  // 3. Storage is empty: strictly return truthful empty/unavailable state without triggering collection
+  // 3. Durable persistence failed or has no usable observations. Only now may
+  // retained L1 data serve as explicit last-known-good fallback.
+  const hasLastKnownGood = PILLARS_LIST.some((pillar) => cachedByPillar[pillar]);
+  if (hasLastKnownGood) {
+    return buildFabricResult(pillarsFromCache(cachedByPillar, now), 'memory_cache_stale_fallback', {
+      cacheStatus: 'stale',
+      persistenceStatus: persistenceReadFailed ? 'failed' : 'unavailable'
+    });
+  }
+
+  // 4. Storage and L1 are empty: return truthful unavailable state without collection.
   const emptyPillars = { macro: [], monetary: [], market: [], intermarket: [] };
   return {
     pillars: emptyPillars,

@@ -190,7 +190,11 @@ export async function persistMarketObservations(observations, client = privateSu
  * Guaranteed to return fast from persistence without contacting live third-party APIs.
  * Applies runtime freshness recalculation dynamically based on metric cadence and current time.
  */
-export async function fetchLatestPersistedObservations(client = privateSupabase, now = new Date()) {
+export async function fetchLatestPersistedObservations(
+  client = privateSupabase,
+  now = new Date(),
+  { allowMemoryFallback = true } = {}
+) {
   let observations = [];
 
   if (client) {
@@ -203,16 +207,24 @@ export async function fetchLatestPersistedObservations(client = privateSupabase,
         .order('observed_at', { ascending: false, nullsFirst: false })
         .order('fetched_at', { ascending: false });
 
-      if (!error && Array.isArray(data) && data.length > 0) {
+      if (error) {
+        throw Object.assign(new Error('Market context persistence read failed'), {
+          code: error.code || 'MARKET_CONTEXT_PERSISTENCE_READ_FAILED'
+        });
+      }
+
+      if (Array.isArray(data) && data.length > 0) {
         observations = selectLatestObservationPerFact(data.map(rowToObservation).filter(Boolean));
       }
-    } catch {
-      // Fallback to in-process memory store if DB unreachable
+    } catch (error) {
+      if (!allowMemoryFallback) throw error;
+      // Explicit offline/legacy callers may fall back to the repository's
+      // in-process store when durable persistence is unreachable.
     }
   }
 
   // Fallback to in-memory store if DB query returned nothing
-  if (observations.length === 0 && memoryStore.size > 0) {
+  if (observations.length === 0 && memoryStore.size > 0 && (!client || allowMemoryFallback)) {
     observations = selectLatestObservationPerFact(Array.from(memoryStore.values()));
   }
 
