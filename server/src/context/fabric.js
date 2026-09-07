@@ -3,6 +3,7 @@ import { globalContextCache } from './cache.js';
 import { fetchLatestPersistedObservations } from './repository.js';
 import { runMarketContextCollector } from './collector.js';
 import { privateSupabase } from '../supabase.js';
+import { applyRuntimeFreshness } from './freshnessPolicy.js';
 
 export function groupObservationsByPillar(observations) {
   const pillars = {
@@ -113,10 +114,10 @@ export async function getMarketContextFabric(clientOrOptions = {}, options = {})
 
   if (hasMemoryCache) {
     const pillars = {
-      macro: macroCached.data || [],
-      monetary: monetaryCached.data || [],
-      market: marketCached.data || [],
-      intermarket: intermarketCached.data || []
+      macro: (macroCached.data || []).map((observation) => applyRuntimeFreshness(observation, now)),
+      monetary: (monetaryCached.data || []).map((observation) => applyRuntimeFreshness(observation, now)),
+      market: (marketCached.data || []).map((observation) => applyRuntimeFreshness(observation, now)),
+      intermarket: (intermarketCached.data || []).map((observation) => applyRuntimeFreshness(observation, now))
     };
     const pulseMetrics = buildPulseMetrics(pillars);
     const facts = [

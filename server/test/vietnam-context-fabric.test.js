@@ -34,7 +34,12 @@ import {
   rowToObservation,
   observationToRow
 } from '../src/context/repository.js';
-import { runMarketContextCollector, mergeWithLastKnownGood, normalizeMacroObservations } from '../src/context/collector.js';
+import {
+  runMarketContextCollector,
+  mergeWithLastKnownGood,
+  normalizeMacroObservations,
+  normalizeMonetaryObservations
+} from '../src/context/collector.js';
 import { evaluateObservationFreshness, CADENCE_POLICIES } from '../src/context/freshnessPolicy.js';
 import { getMarketContextFabric } from '../src/context/fabric.js';
 import { createApp } from '../index.js';
@@ -440,6 +445,21 @@ describe('V1.2 Improvement 02 — Vietnam Context Data Fabric', () => {
       assert.equal(merged[0].value, 1850.00);
       assert.equal(merged[0].status, 'stale');
       assert.equal(merged[0].freshness, 'stale');
+    });
+
+    test('10b. Official SBV WAF denial remains an explicit source-access blocker', () => {
+      const observations = normalizeMonetaryObservations({
+        status: 'unavailable',
+        reason: 'BLOCKED_BY_SOURCE_ACCESS',
+        vndOvernightRatePct: null,
+        provenance: { source: 'Ngân hàng Nhà nước Việt Nam (SBV)' }
+      }, null, new Date('2026-09-07T00:00:00.000Z'));
+
+      const officialRate = observations.find((item) => item.factId === 'vn.monetary.rate.vnd_overnight');
+      assert.equal(officialRate.status, 'unavailable');
+      assert.equal(officialRate.value, null);
+      assert.equal(officialRate.statusReason, 'BLOCKED_BY_SOURCE_ACCESS');
+      assert.equal(officialRate.provenance.reason, 'BLOCKED_BY_SOURCE_ACCESS');
     });
   });
 
@@ -873,6 +893,81 @@ describe('V1.2 Improvement 02 — Vietnam Context Data Fabric', () => {
       // Monday Sept 7, 20:00 ICT (after Monday session close + grace)
       const mondayNight = new Date('2026-09-07T13:00:00.000Z');
       assert.equal(evaluateObservationFreshness(vnindexFriday, mondayNight).freshness, 'stale', 'Friday close becomes stale once Monday session closes');
+    });
+
+    test('F2. Expired cache TTL never overrides cadence-valid market freshness', async () => {
+      const cachedAt = new Date('2026-09-04T08:05:00.000Z');
+      const sunday = new Date('2026-09-06T13:00:00.000Z');
+      const mondayMorning = new Date('2026-09-07T03:00:00.000Z');
+      const mondayAfterClose = new Date('2026-09-07T13:00:00.000Z');
+      const cache = new ContextCache({
+        macro: { freshTtlMs: 1, staleTtlMs: 7 * 24 * 60 * 60 * 1000 },
+        monetary: { freshTtlMs: 1, staleTtlMs: 7 * 24 * 60 * 60 * 1000 },
+        market: { freshTtlMs: 1, staleTtlMs: 7 * 24 * 60 * 60 * 1000 },
+        intermarket: { freshTtlMs: 1, staleTtlMs: 7 * 24 * 60 * 60 * 1000 }
+      });
+
+      const fridayClose = createMarketObservation({
+        factId: 'vn.market.vnindex.close',
+        id: 'market.vnindex',
+        pillar: PILLARS.MARKET,
+        label: 'VN-Index',
+        value: 1853.08,
+        unit: 'điểm',
+        referenceTime: '2026-09-04',
+        observedAt: '2026-09-04T08:00:00.000Z',
+        publishedAt: '2026-09-04T08:05:00.000Z'
+      });
+      const supportingPillars = {
+        macro: createMarketObservation({
+          factId: 'vn.macro.cpi.yoy', pillar: PILLARS.MACRO, label: 'CPI YoY',
+          value: 4.89, unit: '%', referenceTime: '2026-08', publishedAt: '2026-08-31T02:00:00.000Z'
+        }),
+        monetary: createMarketObservation({
+          factId: 'vn.monetary.rate.vnd_overnight', pillar: PILLARS.MONETARY, label: 'Lãi suất VND qua đêm',
+          value: 4.25, unit: '%', referenceTime: '2026-08-31', publishedAt: '2026-09-01T02:00:00.000Z',
+          authorityLevel: AUTHORITY_LEVELS.REGULATORY_OFFICIAL
+        }),
+        intermarket: createMarketObservation({
+          factId: 'global.intermarket.dxy.quote', pillar: PILLARS.INTERMARKET, label: 'DXY',
+          value: 98.25, observedAt: '2026-09-04T08:00:00.000Z'
+        })
+      };
+
+      cache.set('macro', [supportingPillars.macro], cachedAt);
+      cache.set('monetary', [supportingPillars.monetary], cachedAt);
+      cache.set('market', [fridayClose], cachedAt);
+      cache.set('intermarket', [supportingPillars.intermarket], cachedAt);
+
+      const expiredCacheEntry = cache.get('market', sunday);
+      assert.equal(expiredCacheEntry.cacheStatus, 'stale', 'cache payload is due for refresh');
+      assert.equal(expiredCacheEntry.data[0].freshness, 'fresh', 'cache TTL must not mutate economic freshness');
+
+      const sundayFabric = await getMarketContextFabric({ client: null, now: sunday, cache });
+      assert.equal(sundayFabric.pillars.market[0].freshness, 'fresh', 'Friday close remains cadence-valid on Sunday');
+
+      const mondayMorningFabric = await getMarketContextFabric({ client: null, now: mondayMorning, cache });
+      assert.equal(mondayMorningFabric.pillars.market[0].freshness, 'fresh', 'Friday close remains valid before Monday replacement close');
+
+      const staleFabric = await getMarketContextFabric({ client: null, now: mondayAfterClose, cache });
+      assert.equal(staleFabric.pillars.market[0].freshness, 'stale', 'genuinely stale Friday close is rejected after the next session');
+
+      const mondayClose = createMarketObservation({
+        factId: 'vn.market.vnindex.close',
+        id: 'market.vnindex',
+        pillar: PILLARS.MARKET,
+        label: 'VN-Index',
+        referenceTime: '2026-09-07',
+        value: 1860.12,
+        unit: 'điểm',
+        observedAt: '2026-09-07T08:00:00.000Z',
+        publishedAt: '2026-09-07T08:05:00.000Z'
+      });
+      cache.set('market', [mondayClose], new Date('2026-09-07T08:05:00.000Z'));
+
+      const supersededFabric = await getMarketContextFabric({ client: null, now: mondayAfterClose, cache });
+      assert.equal(supersededFabric.pillars.market[0].referenceTime, '2026-09-07');
+      assert.equal(supersededFabric.pillars.market[0].freshness, 'fresh', 'next valid close supersedes the prior session');
     });
 
     test('G. Cold DB read dynamically recalculates freshness based on current time', async () => {

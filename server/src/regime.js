@@ -71,7 +71,9 @@ export function mapFabricToLegacyInflation(macroObs) {
 
 export function mapFabricToLegacyMoneyMarket(monetaryObs) {
   if (!monetaryObs || monetaryObs.value === null || monetaryObs.status === 'unavailable') {
-    return unavailableMoneyMarket();
+    return unavailableMoneyMarket(
+      monetaryObs?.statusReason || monetaryObs?.provenance?.reason || 'OFFICIAL_DATA_UNAVAILABLE'
+    );
   }
   return {
     status: monetaryObs.status === 'stale' ? 'stale' : 'available',

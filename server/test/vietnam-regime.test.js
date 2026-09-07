@@ -13,6 +13,7 @@ import {
   unavailableInflation
 } from '../src/regime/providers/nso.js';
 import {
+  SBV_RELEASE_INDEX_URL,
   buildMoneyMarketDomain,
   fetchSbvMoneyMarket,
   parseSbvWeeklyRelease,
@@ -176,12 +177,13 @@ describe('Feature 27B — Vietnam market regime foundation', () => {
     });
   });
 
-  test('fetchSbvMoneyMarket gracefully returns unavailable on WAF block response without throwing', async () => {
+  test('fetchSbvMoneyMarket fails closed with an explicit source-access blocker on WAF rejection', async () => {
     const domain = await fetchSbvMoneyMarket({
       fetchFn: async () => response('<html><head><title>Request Rejected</title></head><body>The requested URL was rejected.</body></html>', { status: 200 })
     });
     assert.equal(domain.status, 'unavailable');
-    assert.equal(domain.reason, 'OFFICIAL_DATA_UNAVAILABLE');
+    assert.equal(domain.reason, 'BLOCKED_BY_SOURCE_ACCESS');
+    assert.equal(domain.provenance.indexUrl, SBV_RELEASE_INDEX_URL);
     assert.equal(domain.vndOvernightRatePct, null);
   });
 
@@ -223,7 +225,7 @@ describe('Feature 27B — Vietnam market regime foundation', () => {
   });
 
   test('uses an official PDF extraction path and rejects malformed SBV source data', async () => {
-    const indexUrl = 'https://www.sbv.gov.vn/vi/thong-cao-bao-chi';
+    const indexUrl = SBV_RELEASE_INDEX_URL;
     const releaseUrl = 'https://www.sbv.gov.vn/vi/w/dien-bien-thi-truong-lien-ngan-hang-1';
     const pdfUrl = 'https://www.sbv.gov.vn/documents/20117/week-1.pdf/official';
     const pages = new Map([

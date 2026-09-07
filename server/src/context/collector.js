@@ -223,7 +223,7 @@ export function normalizeMonetaryObservations(sbvResult, usdVndResult, now = new
       status: sbvResult.status === 'stale' ? OBSERVATION_STATUS.STALE : OBSERVATION_STATUS.AVAILABLE
     }));
   } else {
-    observations.push(createUnavailableObservation('monetary.vnd_overnight_rate', PILLARS.MONETARY, 'Lãi suất VND qua đêm', 'OFFICIAL_DATA_UNAVAILABLE', {
+    observations.push(createUnavailableObservation('monetary.vnd_overnight_rate', PILLARS.MONETARY, 'Lãi suất VND qua đêm', sbvResult?.reason || 'OFFICIAL_DATA_UNAVAILABLE', {
       factId: onFactId,
       metric: 'Lãi suất bình quân liên ngân hàng kỳ hạn qua đêm (SBV)',
       source: 'SBV',
@@ -474,8 +474,8 @@ export async function runMarketContextCollector({
 
   if (sbvDue) {
     const isSbvAccessDenied =
-      (sbvRes.status === 'fulfilled' && (sbvRes.value?.reason === 'PROVIDER_ACCESS_DENIED' || sbvRes.value?.status === 'blocked')) ||
-      (sbvOfficialRes.status === 'fulfilled' && (sbvOfficialRes.value?.status === 'blocked' || sbvOfficialRes.value?.reason === 'PROVIDER_ACCESS_DENIED')) ||
+      (sbvRes.status === 'fulfilled' && (['PROVIDER_ACCESS_DENIED', 'BLOCKED_BY_SOURCE_ACCESS'].includes(sbvRes.value?.reason) || sbvRes.value?.status === 'blocked')) ||
+      (sbvOfficialRes.status === 'fulfilled' && (sbvOfficialRes.value?.status === 'blocked' || ['PROVIDER_ACCESS_DENIED', 'BLOCKED_BY_SOURCE_ACCESS'].includes(sbvOfficialRes.value?.reason))) ||
       (sbvRes.status === 'rejected' && (sbvRes.reason?.code === 'PROVIDER_ACCESS_DENIED' || String(sbvRes.reason).includes('Request Rejected'))) ||
       (sbvOfficialRes.status === 'rejected' && (sbvOfficialRes.reason?.code === 'PROVIDER_ACCESS_DENIED' || String(sbvOfficialRes.reason).includes('Request Rejected')));
 
@@ -484,7 +484,7 @@ export async function runMarketContextCollector({
         status: CHECKPOINT_STATUS.BLOCKED_ACCESS_DENIED,
         client,
         now,
-        metadata: { error: 'PROVIDER_ACCESS_DENIED', reason: 'SBV government WAF rejected automated access' }
+        metadata: { error: 'BLOCKED_BY_SOURCE_ACCESS', reason: 'SBV government WAF rejected automated access' }
       });
     } else if ((sbvRes.status === 'fulfilled' && sbvRes.value && sbvRes.value.status !== 'unavailable') || (sbvOfficialRes.status === 'fulfilled' && sbvOfficialRes.value && sbvOfficialRes.value.length > 0)) {
       await recordCheckpoint(SOURCE_KEYS.SBV_FX_CENTRAL, { status: CHECKPOINT_STATUS.SUCCESS, client, now });
@@ -602,7 +602,7 @@ export async function runMarketContextCollector({
     if (macroDue || sbvDue) {
       const isOfficialFailed = (macroDue && macroRes.status === 'rejected') || (sbvDue && sbvRes.status === 'rejected');
       const isOfficialBlocked = sbvDue && (
-        (sbvRes.status === 'fulfilled' && (sbvRes.value?.reason === 'PROVIDER_ACCESS_DENIED' || sbvRes.value?.status === 'blocked')) ||
+        (sbvRes.status === 'fulfilled' && (['PROVIDER_ACCESS_DENIED', 'BLOCKED_BY_SOURCE_ACCESS'].includes(sbvRes.value?.reason) || sbvRes.value?.status === 'blocked')) ||
         (sbvRes.status === 'rejected' && sbvRes.reason?.code === 'PROVIDER_ACCESS_DENIED')
       );
       const officialHealthStatus = isOfficialFailed
@@ -618,7 +618,7 @@ export async function runMarketContextCollector({
           recordsWritten: validToPersist.filter((o) => o.pillar === PILLARS.MACRO || o.pillar === PILLARS.MONETARY).length,
           dataAsOf: now.toISOString(),
           policyVersion: 'v1.3',
-          errorCode: isOfficialBlocked ? 'PROVIDER_ACCESS_DENIED' : (isOfficialFailed ? 'OFFICIAL_SOURCE_FAILED' : null),
+          errorCode: isOfficialBlocked ? 'BLOCKED_BY_SOURCE_ACCESS' : (isOfficialFailed ? 'OFFICIAL_SOURCE_FAILED' : null),
           errorCategory: (isOfficialBlocked || isOfficialFailed) ? ERROR_CATEGORIES.UPSTREAM_PROVIDER : null,
           client,
           now

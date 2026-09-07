@@ -38,30 +38,6 @@ function hasUsableObservations(data) {
   return data.some((obs) => obs && (obs.status === 'available' || Number.isFinite(obs.value)));
 }
 
-function markObservationsStale(data) {
-  if (Array.isArray(data)) {
-    return data.map((obs) => ({
-      ...obs,
-      freshness: 'stale',
-      provenance: {
-        ...(obs.provenance || {}),
-        cache: 'stale'
-      }
-    }));
-  }
-  if (data && typeof data === 'object') {
-    return {
-      ...data,
-      freshness: 'stale',
-      provenance: {
-        ...(data.provenance || {}),
-        cache: 'stale'
-      }
-    };
-  }
-  return data;
-}
-
 export class ContextCache {
   constructor(configs = DOMAIN_CACHE_CONFIGS) {
     this.configs = { ...DOMAIN_CACHE_CONFIGS, ...configs };
@@ -75,10 +51,12 @@ export class ContextCache {
     if (!entry) return null;
 
     if (nowMs <= entry.freshUntilMs) {
-      return { data: entry.data, freshness: 'fresh' };
+      return { data: entry.data, cacheStatus: 'fresh' };
     }
     if (nowMs <= entry.staleUntilMs) {
-      return { data: markObservationsStale(entry.data), freshness: 'stale' };
+      // Cache freshness controls refresh/re-fetch behavior only. Economic
+      // observation freshness is evaluated separately by the cadence policy.
+      return { data: entry.data, cacheStatus: 'stale' };
     }
 
     this.entries.delete(key);
@@ -98,7 +76,7 @@ export class ContextCache {
 
   async fetchWithCache(key, fetchFn, { now = new Date() } = {}) {
     const cached = this.get(key, now);
-    if (cached?.freshness === 'fresh') return cached.data;
+    if (cached?.cacheStatus === 'fresh') return cached.data;
 
     // In-flight coalescing
     if (this.inFlight.has(key)) return this.inFlight.get(key);
@@ -110,12 +88,12 @@ export class ContextCache {
           this.set(key, live, now);
           return live;
         }
-        if (cached?.freshness === 'stale') {
+        if (cached?.cacheStatus === 'stale') {
           return cached.data;
         }
         return live;
       } catch {
-        if (cached?.freshness === 'stale') {
+        if (cached?.cacheStatus === 'stale') {
           return cached.data;
         }
         return null;
@@ -135,4 +113,3 @@ export class ContextCache {
 }
 
 export const globalContextCache = new ContextCache();
-

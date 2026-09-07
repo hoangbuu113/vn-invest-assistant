@@ -6,7 +6,7 @@ import {
   textFromHtml
 } from './common.js';
 
-export const SBV_RELEASE_INDEX_URL = 'https://www.sbv.gov.vn/vi/thong-cao-bao-chi';
+export const SBV_RELEASE_INDEX_URL = 'https://sbv.gov.vn/vi/th%C3%B4ng-tin-v%E1%BB%81-ho%E1%BA%A1t-%C4%91%E1%BB%99ng-ng%C3%A2n-h%C3%A0ng-trong-tu%E1%BA%A7n';
 const SBV_HOST = 'sbv.gov.vn';
 const SBV_SOURCE_NAME = 'Ngân hàng Nhà nước Việt Nam';
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -248,6 +248,7 @@ export async function fetchSbvMoneyMarket({
     return buildMoneyMarketDomain(observations);
   } catch (error) {
     if (error?.message === 'OFFICIAL_SOURCE_TIMEOUT') return unavailableMoneyMarket('OFFICIAL_SOURCE_TIMEOUT');
+    if (error?.code === 'PROVIDER_ACCESS_DENIED') return unavailableMoneyMarket('BLOCKED_BY_SOURCE_ACCESS');
     return unavailableMoneyMarket('OFFICIAL_DATA_UNAVAILABLE');
   }
 }
