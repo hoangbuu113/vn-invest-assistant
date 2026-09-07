@@ -85,6 +85,7 @@ import {
   getPublishedEquityOpportunities,
   runVietnamEquityOpportunityRefresh
 } from './src/equityOpportunities/index.js';
+import { importManualOfficialMonetaryEvidence } from './src/monetaryEvidence.js';
 
 dotenv.config();
 
@@ -184,6 +185,7 @@ export function createApp(services = {}) {
     getOpportunitiesFn = getOpportunities,
     getInvestmentBriefFn = getInvestmentBrief,
     getMarketStrategistFn = getMarketStrategist,
+    importManualOfficialMonetaryEvidenceFn = importManualOfficialMonetaryEvidence,
     getWatchlistFn = getWatchlist,
     addToWatchlistFn = addToWatchlist,
     removeFromWatchlistFn = removeFromWatchlist,
@@ -1701,6 +1703,43 @@ export function createApp(services = {}) {
       return res.status(500).json({
         status: 'error',
         message: 'Failed to refresh market context observations'
+      });
+    }
+  });
+
+  // Controlled manual ingestion of a preserved official SBV document artifact.
+  // Numeric observations are parsed from the artifact; direct number entry is rejected.
+  app.post('/api/internal/monetary-evidence/import', requireAlertScheduler, async (req, res) => {
+    try {
+      const result = await importManualOfficialMonetaryEvidenceFn(req.body, {
+        now: new Date(),
+        client: supabaseAuthClient
+      });
+      return res.status(result.isDurable ? 201 : 503).json({
+        status: result.isDurable ? 'ok' : 'degraded',
+        data: {
+          vintageId: result.vintage.vintageId,
+          observationId: result.vintage.observationId,
+          factId: result.vintage.factId,
+          systemKnowableAt: result.vintage.systemKnowableAt
+        }
+      });
+    } catch (error) {
+      const validationCodes = new Set([
+        'RAW_NUMBER_CANNOT_BECOME_OFFICIAL_EVIDENCE',
+        'INVALID_OFFICIAL_MONETARY_PROVENANCE',
+        'INVALID_OFFICIAL_MONETARY_ATTACHMENT',
+        'OFFICIAL_DOCUMENT_ID_REQUIRED',
+        'OFFICIAL_SOURCE_ARTIFACT_REQUIRED',
+        'OFFICIAL_ISSUER_NOT_VERIFIED',
+        'TRUSTED_SOURCE_AVAILABILITY_REQUIRED',
+        'MONETARY_PARSER_PROFILE_UNCONFIGURED',
+        'OFFICIAL_MONETARY_ARTIFACT_VALIDATION_FAILED'
+      ]);
+      return res.status(validationCodes.has(error?.code) ? 400 : 503).json({
+        status: 'error',
+        code: validationCodes.has(error?.code) ? error.code : 'MONETARY_EVIDENCE_IMPORT_FAILED',
+        message: 'Official monetary evidence import was not accepted'
       });
     }
   });

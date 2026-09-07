@@ -80,6 +80,17 @@ const UPGRADE_LABELS = Object.freeze({
   ESTABLISH_APPLICABLE_VALIDATED_CALIBRATION: 'Hoàn tất kiểm chứng lịch sử phù hợp với phạm vi và chính sách hiện tại.'
 });
 
+const MONETARY_REQUIREMENT_LABELS = Object.freeze({
+  REQ_VN_MONETARY_POLICY_CONTEXT: 'Bối cảnh chính sách tiền tệ',
+  REQ_VN_MONETARY_TRANSMISSION_CONTEXT: 'Dẫn truyền chính sách và điều kiện kinh tế',
+  REQ_VN_MONETARY_FX_ADMIN_REFERENCE: 'Tỷ giá điều hành chính thức',
+  REQ_VN_MONETARY_FX_MARKET_REFERENCE: 'Tỷ giá tham chiếu thị trường',
+  REQ_VN_MONETARY_INTERBANK_CONDITIONS: 'Điều kiện liên ngân hàng',
+  REQ_VN_MONETARY_OMO_OPERATIONS: 'Nghiệp vụ thị trường mở',
+  REQ_VN_MONETARY_CREDIT_CONDITIONS: 'Điều kiện tín dụng',
+  REQ_VN_MONETARY_OFFICIAL_POLICY_STATEMENT: 'Quyết định/tuyên bố chính sách chính thức'
+});
+
 function confidenceReasonText(reason) {
   return CONFIDENCE_REASON_LABELS[reason?.code] || reason?.messageKey || reason?.code || '';
 }
@@ -94,6 +105,17 @@ export function buildConfidenceAssessmentViewModel(raw) {
   if (!raw || typeof raw !== 'object') return null;
   const assessed = raw.assessmentStatus === 'ASSESSED';
   const reasons = Array.isArray(raw.reasons) ? raw.reasons : [];
+  const upgradesRaw = Array.isArray(raw.upgradeRequirements) ? raw.upgradeRequirements : [];
+  const monetaryDiagnostics = (Array.isArray(raw.gateResults) ? raw.gateResults : [])
+    .filter((item) => String(item?.requirementId || '').startsWith('REQ_VN_MONETARY_'))
+    .map((item) => ({
+      requirementId: item.requirementId,
+      label: MONETARY_REQUIREMENT_LABELS[item.requirementId] || item.requirementId,
+      status: item.passed ? 'SUPPORTED' : 'MISSING',
+      pathId: item.pathId || null,
+      evidenceIds: Array.isArray(item.evidenceIds) ? item.evidenceIds : [],
+      remediation: upgradesRaw.find((upgrade) => upgrade?.requirementId === item.requirementId)?.code || null
+    }));
   return {
     assessmentId: raw.assessmentId || null,
     assessmentStatus: raw.assessmentStatus || 'NOT_ASSESSED',
@@ -107,7 +129,8 @@ export function buildConfidenceAssessmentViewModel(raw) {
     calibrationStatusLabel: CALIBRATION_STATUS_LABELS[raw.calibrationStatus] || 'Chưa kiểm chứng',
     strengths: reasons.filter((item) => item?.severity === 'POSITIVE').map(confidenceReasonText).filter(Boolean),
     limitations: reasons.filter((item) => item?.severity === 'LIMITATION' || item?.severity === 'BLOCKING').map(confidenceReasonText).filter(Boolean),
-    upgrades: (Array.isArray(raw.upgradeRequirements) ? raw.upgradeRequirements : []).map(upgradeRequirementText).filter(Boolean),
+    upgrades: upgradesRaw.map(upgradeRequirementText).filter(Boolean),
+    monetaryDiagnostics,
     disclaimer: 'Đây là độ vững của cơ sở phân tích, không phải xác suất đầu tư có lãi.'
   };
 }

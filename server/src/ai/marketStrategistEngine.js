@@ -30,6 +30,7 @@ import {
   SOURCE_FAMILIES,
   DEPENDENCY_GROUPS
 } from '../claims/index.js';
+import { resolveMonetaryDependencies } from './monetaryEvidencePolicy.js';
 
 export const STRATEGIST_CACHE_TTL_MS = 15 * 60 * 1000; // 15 minutes
 export const STRATEGIST_COOLDOWN_MS = 15 * 1000;       // 15 seconds
@@ -46,13 +47,15 @@ export function buildMarketStrategistFactPacket({
   marketObservations = [],
   newsArticles = [],
   claims: customClaims = null,
+  strategyMetadata = null,
   now = new Date()
 } = {}) {
   // Security guard: Ensure zero private data is passed
   const allInputs = [
     ...marketObservations,
     ...newsArticles,
-    ...(Array.isArray(customClaims) ? customClaims : [])
+    ...(Array.isArray(customClaims) ? customClaims : []),
+    ...(strategyMetadata ? [strategyMetadata] : [])
   ];
   for (const item of allInputs) {
     if (!item || typeof item !== 'object') continue;
@@ -89,6 +92,7 @@ export function buildMarketStrategistFactPacket({
       pillar: obs.pillar || 'market',
       label: obs.label || obs.metric || observationId,
       value: obs.value ?? null,
+      previousValue: obs.previousValue ?? null,
       unit: obs.unit || null,
       change: obs.change ?? null,
       changeUnit: obs.changeUnit || null,
@@ -107,10 +111,22 @@ export function buildMarketStrategistFactPacket({
       revision: obs.revision || obs.quality || 'verified',
       limitations: obs.limitations || null,
       authorityLevel: obs.authorityLevel || obs.authority_level || null,
+      originIssuer: obs.originIssuer || obs.provenance?.originIssuer || null,
+      publisher: obs.publisher || obs.provenance?.publisher || obs.provenance?.authority || null,
+      deliveryProvider: obs.deliveryProvider || obs.provenance?.deliveryProvider || obs.source || null,
+      provenanceFamily: obs.provenanceFamily || obs.provenance?.provenanceFamily || null,
+      dependencyGroup: obs.dependencyGroup || obs.provenance?.dependencyGroup || null,
+      supportScope: obs.supportScope || obs.provenance?.supportScope || null,
+      supportPathId: obs.supportPathId || obs.provenance?.supportPathId || null,
       sourceContentHash: obs.sourceContentHash || obs.source_content_hash || null,
       cadenceValidCarryForward: obs.cadenceValidCarryForward === true,
       freshnessDecision: obs.freshnessDecision || null,
       eventStillEffective: obs.eventStillEffective === true,
+      policyInstrument: obs.policyInstrument || null,
+      effectiveFrom: obs.effectiveFrom || null,
+      operationType: obs.operationType || null,
+      maturityDate: obs.maturityDate || null,
+      netEffect: obs.netEffect ?? null,
       conflictStatus: obs.conflictStatus || null,
       normalizedConflict: obs.normalizedConflict || null
     });
@@ -209,6 +225,11 @@ export function buildMarketStrategistFactPacket({
   // Reconcile claims deterministically
   const observationClaimItems = marketObservations.flatMap(extractClaimsFromObservation);
   const articleClaimItems = selectedNews.flatMap(extractClaimsFromArticle);
+  const observationClaimIds = new Set(observationClaimItems.map((item) => item?.claim?.claimId).filter(Boolean));
+  const trustedCustomClaimIds = new Set((Array.isArray(customClaims) ? customClaims : [])
+    .filter((claim) => claim?.dependencyMetadata?.source === 'DETERMINISTIC_SERVER')
+    .map((claim) => claim.claimId)
+    .filter(Boolean));
   const candidateClaims = [
     ...observationClaimItems.map((i) => i.claim),
     ...articleClaimItems.map((i) => i.claim),
@@ -279,10 +300,15 @@ export function buildMarketStrategistFactPacket({
     independentFamilies: independentFamilies || [],
     revisionOf: claim.revisionOf,
     limitations: claim.limitations,
-    confidenceDimensions: claim.confidenceDimensions
+    confidenceDimensions: claim.confidenceDimensions,
+    monetaryDependencyEligible: observationClaimIds.has(claim.claimId) || trustedCustomClaimIds.has(claim.claimId)
   }));
 
   const validClaimIds = new Set(claims.map((c) => c.claimId));
+  const decisionMetadata = strategyMetadata?.source === 'DETERMINISTIC_SERVER'
+    ? Object.freeze({ source: 'DETERMINISTIC_SERVER', monetaryRequirementIds: Object.freeze([...(strategyMetadata.monetaryRequirementIds || [])]) })
+    : null;
+  const monetaryDependencies = resolveMonetaryDependencies({ claims, derivedSignals, evidence, decisionMetadata });
 
   return {
     now,
@@ -292,6 +318,8 @@ export function buildMarketStrategistFactPacket({
     untrustedNews,
     derivedSignals,
     claims,
+    monetaryDependencies,
+    decisionMetadata,
     validFactIds,
     validArticleIds,
     validArticleVersionIds,

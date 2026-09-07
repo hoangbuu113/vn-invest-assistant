@@ -4649,6 +4649,33 @@ body {
   line-height: 1.45;
 }
 
+.strategist-monetary-diagnostics {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.strategist-monetary-diagnostics ul {
+  display: grid;
+  gap: 8px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.strategist-monetary-diagnostics li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 12px;
+  font-size: 0.78rem;
+}
+
+.strategist-monetary-diagnostics li small {
+  grid-column: 1 / -1;
+  overflow-wrap: anywhere;
+  color: #94a3b8;
+}
+
 .strategist-core-view {
   max-width: 760px;
   margin-top: 1rem;

@@ -100,6 +100,13 @@ function classifyEvidenceGroup(item) {
   return null;
 }
 
+function matchesRegisteredFact(item, path) {
+  const factId = String(item?.factId || '');
+  const exact = Array.isArray(path.factIds) && path.factIds.includes(factId);
+  const prefix = Array.isArray(path.factPrefixes) && path.factPrefixes.some((candidate) => factId.startsWith(candidate));
+  return exact || prefix;
+}
+
 function deduplicateEvidence(evidence) {
   const exact = new Map();
   const log = [];
@@ -117,14 +124,16 @@ function deduplicateEvidence(evidence) {
   const currentFacts = new Map();
   const others = [];
   for (const item of exact.values()) {
-    if (!item.factId) {
+    if (!item.factId || String(item.status || '').toLowerCase() === 'unavailable') {
       others.push(item);
       continue;
     }
-    const current = currentFacts.get(item.factId);
+    const lineageKey = item.supportPathId || item.dependencyGroup || item.provenanceFamily || item.authorityLevel || 'unscoped';
+    const factKey = `${item.factId}:${lineageKey}`;
+    const current = currentFacts.get(factKey);
     if (!current || compareResolvedEvidence(item, current) < 0) {
       if (current) log.push({ reasonCode: CONFIDENCE_REASON_CODES.DUPLICATE_EVIDENCE_IGNORED, ignoredEvidenceId: evidenceId(current), retainedEvidenceId: evidenceId(item) });
-      currentFacts.set(item.factId, item);
+      currentFacts.set(factKey, item);
     } else {
       log.push({ reasonCode: CONFIDENCE_REASON_CODES.DUPLICATE_EVIDENCE_IGNORED, ignoredEvidenceId: evidenceId(item), retainedEvidenceId: evidenceId(current) });
     }
@@ -164,8 +173,27 @@ function freshnessDecision(item, path) {
 }
 
 function pathEvidence(item, path) {
-  if (classifyEvidenceGroup(item) !== path.evidenceGroup) return null;
+  if (path.evidenceGroup === 'MONETARY_SCOPED') {
+    if (!matchesRegisteredFact(item, path)) return null;
+  } else if (classifyEvidenceGroup(item) !== path.evidenceGroup) return null;
   if (path.authorityLevels?.length && !path.authorityLevels.includes(item.authorityLevel || item.sourceAuthority)) return null;
+  if (path.originIssuers?.length) {
+    const inferredIssuer = item.originIssuer || (String(item.source || '').toUpperCase().includes('SBV') ? 'SBV' : null);
+    if (!path.originIssuers.includes(inferredIssuer)) return null;
+  }
+  if (path.supportScope && item.supportScope && item.supportScope !== path.supportScope) return null;
+  if (item.supportPathId && item.supportPathId !== path.pathId) return null;
+  if (path.requiredEvidenceFields?.some((field) => {
+    const value = item[field];
+    return value === null || value === undefined || value === '';
+  })) return null;
+  if (path.requiredFiniteFields?.some((field) => !(typeof item[field] === 'number' && Number.isFinite(item[field])))) return null;
+  if (path.requiresDirectionalComparison && !(
+    typeof item.change === 'number'
+    && Number.isFinite(item.change)
+    && typeof item.changeBasis === 'string'
+    && item.changeBasis.trim()
+  )) return null;
   const freshness = freshnessDecision(item, path);
   return freshness.valid ? { item, freshness } : { item, freshness, invalid: true };
 }
@@ -230,8 +258,10 @@ export function evaluateSupportGraph(asOfEvidence = [], profile, { analyticRevie
       passed: Boolean(hit),
       pathId: hit?.pathId || null,
       evidenceIds: hit?.evidenceIds || Object.freeze([]),
+      claimIds: Object.freeze([...(requirement.claimDependencies || [])].map((item) => item.claimId).filter(Boolean).sort()),
       supportChain: hit ? Object.freeze({
         observations: hit.evidenceIds,
+        claims: Object.freeze([...(requirement.claimDependencies || [])].map((item) => Object.freeze({ claimId: item.claimId, subject: item.subject, sourceType: item.sourceType }))),
         claim: Object.freeze({ requirementId: requirement.requirementId, pathId: hit.pathId }),
         pillar: Object.freeze({ scope: requirement.scope }),
         strategy: Object.freeze({ targetType: profile.targetType, scope: profile.scope })
@@ -422,6 +452,8 @@ export function assessConfidence({ targetType, targetId, scope, horizon = null, 
     participatingEvidenceIds: supportGraph.participatingEvidence.map(evidenceId),
     profileVersion: profile.profileVersion,
     policyVersion: profile.policyVersion,
+    monetaryPolicyVersion: profile.monetaryPolicyVersion || null,
+    activeRequirements: (profile.essentialRequirements || []).map((item) => item.requirementId).sort(),
     analyticReview: analyticReview || null,
     calibration
   });

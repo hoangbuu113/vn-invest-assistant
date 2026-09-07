@@ -1,6 +1,7 @@
 import { assessConfidence } from './confidenceEngine.js';
 import { CONFIDENCE_TARGET_TYPES } from './confidenceModel.js';
 import { PROFILE_MARKET_STRATEGY_VN_MEDIUM_HORIZON_V1 } from './confidenceProfiles.js';
+import { resolveMonetaryConfidenceProfile } from './monetaryEvidencePolicy.js';
 import {
   listCalibrationManifests,
   persistConfidenceAssessment
@@ -36,23 +37,24 @@ export async function attachMarketStrategyConfidence({
     throw new TypeError('Confidence integration requires an explicit valid now Date');
   }
   const targetId = strategyResult?.strategyId || `unpublished:${factPacket?.evidenceFingerprint || 'market-strategy'}`;
-  const manifests = profile
+  const resolvedProfile = profile ? resolveMonetaryConfidenceProfile(profile, factPacket) : null;
+  const manifests = resolvedProfile
     ? await listCalibrationManifestsFn({
-        targetType: profile.targetType,
-        scope: profile.scope,
-        policyVersion: profile.policyVersion,
+        targetType: resolvedProfile.targetType,
+        scope: resolvedProfile.scope,
+        policyVersion: resolvedProfile.policyVersion,
         client
       })
     : [];
   const assessment = assessConfidence({
     targetType: CONFIDENCE_TARGET_TYPES.MARKET_STRATEGY,
     targetId,
-    scope: profile?.scope || 'MARKET_STRATEGY_VN_MEDIUM_HORIZON',
-    horizon: profile?.horizon || 'medium',
+    scope: resolvedProfile?.scope || 'MARKET_STRATEGY_VN_MEDIUM_HORIZON',
+    horizon: resolvedProfile?.horizon || 'medium',
     cutoff: now,
     asOf: now,
     evidence: factPacket?.evidence || [],
-    profile,
+    profile: resolvedProfile,
     calibrationManifests: manifests,
     analyticReview: analyticReview || buildDeterministicAnalyticReview(strategyResult),
     strategyAssessmentId: strategyResult?.lastAssessment?.assessmentId || null,

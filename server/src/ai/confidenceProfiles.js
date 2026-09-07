@@ -1,6 +1,6 @@
 import { CONFIDENCE_ASSESSMENT_POLICY_VERSION, CONFIDENCE_TARGET_TYPES } from './confidenceModel.js';
 
-export const REQUIREMENT_PROFILE_VERSION = 'vn-market-strategy-confidence-profile-v1';
+export const REQUIREMENT_PROFILE_VERSION = 'vn-market-strategy-confidence-profile-v2';
 
 export const EVIDENCE_GROUPS = Object.freeze({
   OFFICIAL_MACRO: 'OFFICIAL_MACRO',
@@ -60,12 +60,8 @@ export const PROFILE_MARKET_STRATEGY_VN_MEDIUM_HORIZON_V1 = Object.freeze({
         freshnessBehavior: FRESHNESS_BEHAVIOR.ALLOW_CADENCE_VALID_CARRY_FORWARD
       })
     ], 'confidence.requirement.vn_macro_context'),
-    requirement('REQ_VN_MONETARY_CONTEXT', 'vn_monetary', [
-      supportPath('PATH_OFFICIAL_VN_MONETARY', EVIDENCE_GROUPS.MONETARY_POLICY, {
-        authorityLevels: ['REGULATORY_OFFICIAL'],
-        freshnessBehavior: FRESHNESS_BEHAVIOR.EVENT_DRIVEN
-      })
-    ], 'confidence.requirement.vn_monetary_context')
+    // Monetary requirements are activated claim-by-claim by
+    // resolveMonetaryConfidenceProfile. The legacy monolithic gate is removed.
   ]),
   highOnlyRequirements: Object.freeze([
     Object.freeze({

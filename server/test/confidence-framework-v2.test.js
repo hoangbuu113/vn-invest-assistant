@@ -63,6 +63,7 @@ function evidence(overrides = {}) {
     status: 'available',
     freshness: 'fresh',
     authorityLevel: 'MARKET_DIRECT',
+    source: factId.startsWith('vn.monetary.') ? 'SBV' : 'TEST_SOURCE',
     sourceContentHash: `hash:${id}`,
     sourceAvailableAt: EARLIER,
     firstSeenAt: EARLIER,
@@ -168,7 +169,7 @@ test('D: irrelevant evidence cannot increase the grade', () => {
 });
 
 test('E: missing essential support is INSUFFICIENT_EVIDENCE, never LOW', () => {
-  const result = assess({ evidence: strongEvidence().slice(0, 2) });
+  const result = assess({ evidence: strongEvidence().filter((item) => !item.factId.startsWith('vn.macro.')) });
   assert.equal(result.evidenceSupport, 'INSUFFICIENT');
   assert.equal(result.candidateGrade, ANALYTIC_CONFIDENCE.INSUFFICIENT_EVIDENCE);
   assert.equal(result.publicGrade, ANALYTIC_CONFIDENCE.INSUFFICIENT_EVIDENCE);

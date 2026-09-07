@@ -209,6 +209,22 @@ export function InvestmentBriefPanel() {
                       </div>
                     )}
                   </div>
+                  {strategistView.confidenceAssessment.monetaryDiagnostics.length > 0 && (
+                    <div className="strategist-monetary-diagnostics" aria-label="Bằng chứng tiền tệ theo phạm vi nhận định">
+                      <strong>Bằng chứng tiền tệ đang áp dụng</strong>
+                      <ul>
+                        {strategistView.confidenceAssessment.monetaryDiagnostics.map((item) => (
+                          <li key={item.requirementId}>
+                            <span>{item.label}</span>
+                            <strong>{item.status === 'SUPPORTED' ? 'Đã hỗ trợ' : 'Còn thiếu'}</strong>
+                            {item.pathId && <small>{item.pathId}</small>}
+                            {item.evidenceIds.length > 0 && <small>{item.evidenceIds.join(', ')}</small>}
+                            {item.remediation && <small>{item.remediation}</small>}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
                   <p className="strategist-confidence-disclaimer">{strategistView.confidenceAssessment.disclaimer}</p>
                 </div>
               )}

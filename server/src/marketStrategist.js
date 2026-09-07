@@ -14,6 +14,7 @@ import {
 } from './ai/strategyStabilityRepository.js';
 import { recordJobHealth, HEALTH_STATES, OBSERVED_JOBS, ERROR_CATEGORIES } from './observability/dataHealth.js';
 import { attachMarketStrategyConfidence } from './ai/confidenceService.js';
+import { listManualOfficialMonetaryEvidence } from './monetaryEvidence.js';
 
 export {
   buildMarketStrategistFactPacket,
@@ -50,7 +51,8 @@ export async function getMarketStrategist({
   client = undefined,
   isReadOnly = false,
   idempotencyKey = null,
-  attachConfidenceFn = attachMarketStrategyConfidence
+  attachConfidenceFn = attachMarketStrategyConfidence,
+  listManualOfficialMonetaryEvidenceFn = listManualOfficialMonetaryEvidence
 } = {}) {
   const startTime = Date.now();
   // 1. Fetch validated market context facts from the fabric (L1 cache / persistence only)
@@ -62,6 +64,13 @@ export async function getMarketStrategist({
       : [];
   } catch {
     marketObservations = [];
+  }
+  try {
+    const importedMonetary = await listManualOfficialMonetaryEvidenceFn({ cutoff: now, client });
+    const seen = new Set(marketObservations.map((item) => item?.observationId || item?.id));
+    marketObservations = [...marketObservations, ...importedMonetary.filter((item) => !seen.has(item?.observationId || item?.id))];
+  } catch {
+    // The official manual path is optional until its forward migration is applied.
   }
 
   // 2. Fetch normalized news articles from the reader (L1 cache / persistence only)
@@ -93,6 +102,13 @@ export async function getMarketStrategist({
           freshObs = Array.isArray(freshFabric?.facts) ? freshFabric.facts : [];
         } catch {
           freshObs = [];
+        }
+        try {
+          const importedMonetary = await listManualOfficialMonetaryEvidenceFn({ cutoff: revalNow, client });
+          const seen = new Set(freshObs.map((item) => item?.observationId || item?.id));
+          freshObs = [...freshObs, ...importedMonetary.filter((item) => !seen.has(item?.observationId || item?.id))];
+        } catch {
+          // Optional until the forward migration is applied.
         }
 
         let freshNews = [];
