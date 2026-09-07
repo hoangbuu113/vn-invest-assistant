@@ -24,7 +24,7 @@ export async function runScheduledAlertEvaluation(env, options = {}) {
     throw schedulerError('ALERT_SCHEDULER_NOT_CONFIGURED', 'Alert scheduler secret is not configured');
   }
 
-  const fetchFn = options.fetchFn || fetch;
+  const fetchFn = options.fetchFn || globalThis.fetch.bind(globalThis);
   const timeoutMs = Number.isFinite(options.timeoutMs) && options.timeoutMs > 0
     ? options.timeoutMs
     : 120_000;
@@ -39,7 +39,7 @@ export async function runScheduledAlertEvaluation(env, options = {}) {
         'Content-Type': 'application/json'
       },
       body: '{}',
-      redirect: 'error',
+      redirect: 'manual',
       signal: controller.signal
     });
 
@@ -52,6 +52,10 @@ export async function runScheduledAlertEvaluation(env, options = {}) {
       throw schedulerError('ALERT_SCHEDULER_MALFORMED_RESPONSE', 'Alert evaluator returned malformed data');
     }
     return payload.data;
+  } catch (error) {
+    throw error?.code
+      ? error
+      : schedulerError('ALERT_SCHEDULER_TRANSPORT_ERROR', 'Alert evaluator transport failed');
   } finally {
     clearTimeout(timeout);
   }
@@ -63,7 +67,7 @@ export async function runScheduledContextRefresh(env, options = {}) {
     throw schedulerError('CONTEXT_SCHEDULER_NOT_CONFIGURED', 'Context scheduler secret is not configured');
   }
 
-  const fetchFn = options.fetchFn || fetch;
+  const fetchFn = options.fetchFn || globalThis.fetch.bind(globalThis);
   const timeoutMs = Number.isFinite(options.timeoutMs) && options.timeoutMs > 0
     ? options.timeoutMs
     : 120_000;
@@ -78,7 +82,7 @@ export async function runScheduledContextRefresh(env, options = {}) {
         'Content-Type': 'application/json'
       },
       body: '{}',
-      redirect: 'error',
+      redirect: 'manual',
       signal: controller.signal
     });
 
@@ -91,6 +95,10 @@ export async function runScheduledContextRefresh(env, options = {}) {
       throw schedulerError('CONTEXT_SCHEDULER_MALFORMED_RESPONSE', 'Context refresh returned malformed data');
     }
     return payload.data;
+  } catch (error) {
+    throw error?.code
+      ? error
+      : schedulerError('CONTEXT_SCHEDULER_TRANSPORT_ERROR', 'Context refresh transport failed');
   } finally {
     clearTimeout(timeout);
   }
@@ -102,7 +110,7 @@ export async function runScheduledNewsRefresh(env, options = {}) {
     throw schedulerError('NEWS_SCHEDULER_NOT_CONFIGURED', 'News scheduler secret is not configured');
   }
 
-  const fetchFn = options.fetchFn || fetch;
+  const fetchFn = options.fetchFn || globalThis.fetch.bind(globalThis);
   const timeoutMs = Number.isFinite(options.timeoutMs) && options.timeoutMs > 0
     ? options.timeoutMs
     : 120_000;
@@ -117,7 +125,7 @@ export async function runScheduledNewsRefresh(env, options = {}) {
         'Content-Type': 'application/json'
       },
       body: '{}',
-      redirect: 'error',
+      redirect: 'manual',
       signal: controller.signal
     });
 
@@ -130,6 +138,10 @@ export async function runScheduledNewsRefresh(env, options = {}) {
       throw schedulerError('NEWS_SCHEDULER_MALFORMED_RESPONSE', 'News refresh returned malformed data');
     }
     return payload.data;
+  } catch (error) {
+    throw error?.code
+      ? error
+      : schedulerError('NEWS_SCHEDULER_TRANSPORT_ERROR', 'News refresh transport failed');
   } finally {
     clearTimeout(timeout);
   }

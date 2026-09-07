@@ -120,13 +120,11 @@ export async function persistMarketObservations(observations, client = privateSu
     });
   }
 
-  // Update in-memory fallback store
-  for (const obs of validObservations) {
-    memoryStore.set(obs.observationId, obs);
-  }
-
   // If no durable client provided (in-memory execution)
   if (!client) {
+    for (const obs of validObservations) {
+      memoryStore.set(obs.observationId, obs);
+    }
     return Object.assign([...validObservations], {
       isDurable: false,
       durablyPersisted: 0,
@@ -152,7 +150,7 @@ export async function persistMarketObservations(observations, client = privateSu
       return Object.assign([], {
         isDurable: false,
         durablyPersisted: 0,
-        memoryAccepted: validObservations.length,
+        memoryAccepted: 0,
         failedPersistence: validObservations.length,
         persisted: [],
         failed: validObservations,
@@ -178,7 +176,7 @@ export async function persistMarketObservations(observations, client = privateSu
     return Object.assign([], {
       isDurable: false,
       durablyPersisted: 0,
-      memoryAccepted: validObservations.length,
+      memoryAccepted: 0,
       failedPersistence: validObservations.length,
       persisted: [],
       failed: validObservations,

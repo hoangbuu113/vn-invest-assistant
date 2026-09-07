@@ -372,6 +372,7 @@ describe('V1.1 Improvement 04 — reliable background price alerts', () => {
           assert.equal(url, `${APP_API_BASE_URL}/api/internal/context/refresh`);
           assert.equal(options.method, 'POST');
           assert.equal(options.headers.Authorization, `Bearer ${SCHEDULER_TOKEN}`);
+          assert.equal(options.redirect, 'manual', 'Cloudflare Workers does not support redirect=error');
           return {
             ok: true,
             status: 200,
@@ -386,6 +387,24 @@ describe('V1.1 Improvement 04 — reliable background price alerts', () => {
 
     assert.equal(calls, 1);
     assert.deepEqual(data, { success: true, persisted: 8 });
+  });
+
+  test('context scheduler rejects redirects without forwarding its credential', async () => {
+    let calls = 0;
+    await assert.rejects(
+      () => runScheduledContextRefresh(
+        { ALERT_SCHEDULER_TOKEN: SCHEDULER_TOKEN },
+        {
+          fetchFn: async (_url, options) => {
+            calls++;
+            assert.equal(options.redirect, 'manual');
+            return { ok: false, status: 302 };
+          }
+        }
+      ),
+      (error) => error.code === 'CONTEXT_SCHEDULER_HTTP_ERROR'
+    );
+    assert.equal(calls, 1, 'manual redirect mode must not follow the credential to another URL');
   });
 
   test('news scheduler uses the existing token and the protected collector endpoint', async () => {

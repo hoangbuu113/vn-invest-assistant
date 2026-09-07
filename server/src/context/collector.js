@@ -16,13 +16,121 @@ import {
 } from './repository.js';
 import { fetchNsoInflation } from '../regime/providers/nso.js';
 import { fetchSbvMoneyMarket } from '../regime/providers/sbv.js';
-import { fetchVietnamMarketPillar } from './providers/vndirectMarket.js';
+import { fetchVietnamMarketPillar, VIETNAM_INDICES } from './providers/vndirectMarket.js';
 import { fetchGlobalMarketPillar, fetchUsdVndObservation } from './providers/globalMarket.js';
 import { normalizeNsoMacroFacts } from './providers/nsoMacro.js';
 import { normalizeSbvMonetaryFacts } from './providers/sbvMonetary.js';
 import { isSourceDue, recordCheckpoint, SOURCE_KEYS, CHECKPOINT_STATUS } from './collectorCheckpoints.js';
 import { recordJobHealth, HEALTH_STATES, OBSERVED_JOBS, ERROR_CATEGORIES } from '../observability/dataHealth.js';
 import { privateSupabase } from '../supabase.js';
+
+export const VN_MARKET_REFRESH_STATUS = Object.freeze({
+  SUCCESS: 'SUCCESS',
+  DEGRADED: 'DEGRADED',
+  FAILED: 'FAILED'
+});
+
+/**
+ * Verifies that the collector obtained and durably persisted one cadence-valid
+ * completed-session observation for every canonical Vietnam market index.
+ * Persisting unrelated context facts can never satisfy this market-specific gate.
+ */
+export function assessVietnamMarketRefresh({
+  marketObservations = [],
+  persistResult = null,
+  providerStatus = 'fulfilled',
+  now = new Date()
+} = {}) {
+  const requiredFactIds = VIETNAM_INDICES.map((item) => item.factId);
+  const rawByFactId = new Map(
+    (Array.isArray(marketObservations) ? marketObservations : [])
+      .filter((item) => item?.factId)
+      .map((item) => [item.factId, item])
+  );
+  const persistedRows = Array.isArray(persistResult?.persisted)
+    ? persistResult.persisted
+    : (Array.isArray(persistResult) ? persistResult : []);
+  const persistedIds = new Set(persistedRows.map((item) => item?.observationId).filter(Boolean));
+
+  const missingFactIds = [];
+  const unavailableFactIds = [];
+  const staleFactIds = [];
+  const persistenceMissingFactIds = [];
+  const usable = [];
+
+  for (const factId of requiredFactIds) {
+    const observation = rawByFactId.get(factId);
+    if (!observation) {
+      missingFactIds.push(factId);
+      continue;
+    }
+    if (
+      observation.status === OBSERVATION_STATUS.UNAVAILABLE ||
+      typeof observation.value !== 'number' ||
+      !Number.isFinite(observation.value)
+    ) {
+      unavailableFactIds.push(factId);
+      continue;
+    }
+
+    const currentObservation = applyRuntimeFreshness(observation, now);
+    if (currentObservation.status !== OBSERVATION_STATUS.AVAILABLE) {
+      staleFactIds.push(factId);
+      continue;
+    }
+    usable.push(currentObservation);
+
+    if (!persistResult?.isDurable || !persistedIds.has(observation.observationId)) {
+      persistenceMissingFactIds.push(factId);
+    }
+  }
+
+  const referencePeriods = [...new Set(usable.map((item) => item.referenceTime).filter(Boolean))];
+  const sessionMismatch = referencePeriods.length > 1;
+  const complete = providerStatus === 'fulfilled' &&
+    missingFactIds.length === 0 &&
+    unavailableFactIds.length === 0 &&
+    staleFactIds.length === 0 &&
+    persistenceMissingFactIds.length === 0 &&
+    !sessionMismatch &&
+    usable.length === requiredFactIds.length;
+
+  let errorCode = null;
+  let errorCategory = null;
+  if (providerStatus !== 'fulfilled' || missingFactIds.length > 0 || unavailableFactIds.length > 0) {
+    errorCode = 'VN_MARKET_PROVIDER_INCOMPLETE';
+    errorCategory = ERROR_CATEGORIES.UPSTREAM_PROVIDER;
+  } else if (staleFactIds.length > 0 || sessionMismatch) {
+    errorCode = 'VN_MARKET_SESSION_INCOMPLETE';
+    errorCategory = ERROR_CATEGORIES.VALIDATION;
+  } else if (persistenceMissingFactIds.length > 0) {
+    errorCode = 'VN_MARKET_PERSISTENCE_FAILED';
+    errorCategory = ERROR_CATEGORIES.DATABASE;
+  }
+
+  const usableCount = usable.length;
+  return {
+    status: complete
+      ? VN_MARKET_REFRESH_STATUS.SUCCESS
+      : (usableCount > 0 ? VN_MARKET_REFRESH_STATUS.DEGRADED : VN_MARKET_REFRESH_STATUS.FAILED),
+    complete,
+    requiredFactIds,
+    persistedFactIds: usable
+      .filter((item) => persistedIds.has(item.observationId))
+      .map((item) => item.factId),
+    missingFactIds,
+    unavailableFactIds,
+    staleFactIds,
+    persistenceMissingFactIds,
+    referenceTime: referencePeriods.length === 1 ? referencePeriods[0] : null,
+    observedAt: referencePeriods.length === 1
+      ? usable.map((item) => item.observedAt).filter(Boolean).sort().at(-1) || null
+      : null,
+    sessionMismatch,
+    errorCode,
+    errorCategory
+  };
+}
 
 /**
  * Normalizes NSO inflation and macroeconomic data into standard MarketObservation instances.
@@ -546,11 +654,24 @@ export async function runMarketContextCollector({
   // 4. Persist newly fetched observations to DB with visible failure reporting
   const persistResult = await persistMarketObservations(validToPersist, client);
 
-  // 5. Merge raw observations with persisted last-known-good with strict pillar isolation
-  const mergedMacro = mergeWithLastKnownGood(rawMacro, lastKnownGood, now, PILLARS.MACRO);
-  const mergedMonetary = mergeWithLastKnownGood(rawMonetary, lastKnownGood, now, PILLARS.MONETARY);
-  const mergedMarket = mergeWithLastKnownGood(rawMarket, lastKnownGood, now, PILLARS.MARKET);
-  const mergedIntermarket = mergeWithLastKnownGood(rawIntermarket, lastKnownGood, now, PILLARS.INTERMARKET);
+  const marketRefresh = assessVietnamMarketRefresh({
+    marketObservations: rawMarket,
+    persistResult,
+    providerStatus: marketRes.status,
+    now
+  });
+
+  // 5. Merge only durable new facts into production cache. Explicit offline mode
+  // may use memory; a failed DB write must retain durable LKG instead of exposing
+  // an uncommitted observation to downstream confidence evaluation.
+  const mayPromoteFetchedFacts = Boolean(persistResult.isDurable) || client === null;
+  const cacheable = (observations) => mayPromoteFetchedFacts
+    ? observations
+    : observations.filter((item) => item?.status === OBSERVATION_STATUS.UNAVAILABLE);
+  const mergedMacro = mergeWithLastKnownGood(cacheable(rawMacro), lastKnownGood, now, PILLARS.MACRO);
+  const mergedMonetary = mergeWithLastKnownGood(cacheable(rawMonetary), lastKnownGood, now, PILLARS.MONETARY);
+  const mergedMarket = mergeWithLastKnownGood(cacheable(rawMarket), lastKnownGood, now, PILLARS.MARKET);
+  const mergedIntermarket = mergeWithLastKnownGood(cacheable(rawIntermarket), lastKnownGood, now, PILLARS.INTERMARKET);
 
   const allObservations = [
     ...mergedMacro,
@@ -574,7 +695,11 @@ export async function runMarketContextCollector({
   if (recordHealth) {
     // Record operational health for VN market context collector
     let contextHealthStatus = HEALTH_STATES.HEALTHY;
-    if (durablyPersistedCount === 0 && failedPersistenceCount > 0) {
+    if (marketRefresh.status === VN_MARKET_REFRESH_STATUS.FAILED) {
+      contextHealthStatus = HEALTH_STATES.FAILED;
+    } else if (marketRefresh.status === VN_MARKET_REFRESH_STATUS.DEGRADED) {
+      contextHealthStatus = HEALTH_STATES.DEGRADED;
+    } else if (durablyPersistedCount === 0 && failedPersistenceCount > 0) {
       contextHealthStatus = HEALTH_STATES.FAILED;
     } else if (!isDurable || failedPersistenceCount > 0) {
       contextHealthStatus = HEALTH_STATES.DEGRADED;
@@ -587,10 +712,10 @@ export async function runMarketContextCollector({
         durationMs,
         recordsRead: allObservations.length,
         recordsWritten: durablyPersistedCount,
-        dataAsOf: now.toISOString(),
+        dataAsOf: marketRefresh.observedAt,
         policyVersion: 'v1.3',
-        errorCode: failedPersistenceCount > 0 ? (durablyPersistedCount === 0 ? 'PERSISTENCE_FAILED' : 'PARTIAL_PERSISTENCE') : null,
-        errorCategory: failedPersistenceCount > 0 ? ERROR_CATEGORIES.DATABASE : null,
+        errorCode: marketRefresh.errorCode || (failedPersistenceCount > 0 ? (durablyPersistedCount === 0 ? 'PERSISTENCE_FAILED' : 'PARTIAL_PERSISTENCE') : null),
+        errorCategory: marketRefresh.errorCategory || (failedPersistenceCount > 0 ? ERROR_CATEGORIES.DATABASE : null),
         client,
         now
       });
@@ -630,7 +755,7 @@ export async function runMarketContextCollector({
   }
 
   return {
-    success: isDurable,
+    success: isDurable && failedPersistenceCount === 0 && marketRefresh.complete,
     isDurable,
     fetched: allObservations.length,
     validated: validToPersist.length,
@@ -640,6 +765,7 @@ export async function runMarketContextCollector({
     totalPersisted: durablyPersistedCount,
     failedPersistence: failedPersistenceCount,
     persistenceError: persistResult.error || null,
+    marketRefresh,
     timestamp: now.toISOString()
   };
 } catch (err) {

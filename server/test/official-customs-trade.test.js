@@ -35,6 +35,7 @@ import {
 
 import {
   compareObservationVintages,
+  createMarketObservation,
   OBSERVATION_STATUS,
   OBSERVATION_FRESHNESS,
   PILLARS,
@@ -49,6 +50,7 @@ import {
 } from '../src/context/freshnessPolicy.js';
 import { deriveMarketSignals } from '../src/ai/derivedSignals.js';
 import { runMarketContextCollector } from '../src/context/collector.js';
+import { VIETNAM_INDICES } from '../src/context/providers/vndirectMarket.js';
 
 test('1. monthly exports extracted correctly', () => {
   const result = parseCustomsTradeDocumentText(VALID_EXPORT_TEXT_FEB_2026, {
@@ -345,7 +347,9 @@ test('21. Customs failure preserves LKG timestamps', async () => {
       select: () => ({
         order: () => Promise.resolve({ data: [priorValidTradeObs], error: null })
       }),
-      upsert: () => Promise.resolve({ data: [], error: null })
+      upsert: (rows) => ({
+        select: () => Promise.resolve({ data: Array.isArray(rows) ? rows : [rows], error: null })
+      })
     })
   };
 
@@ -353,12 +357,28 @@ test('21. Customs failure preserves LKG timestamps', async () => {
   const failingCustomsFetch = () => Promise.reject(new Error('Customs server timeout or unavailable'));
 
   const now = new Date('2026-09-05T12:00:00Z');
+  const currentMarket = VIETNAM_INDICES.map((definition, index) => createMarketObservation({
+    id: definition.id,
+    factId: definition.factId,
+    pillar: PILLARS.MARKET,
+    label: definition.label,
+    value: 1800 + index,
+    referenceTime: '2026-09-04',
+    observedAt: '2026-09-04T08:00:00.000Z',
+    fetchedAt: now.toISOString(),
+    source: 'VNDIRECT',
+    authorityLevel: 'MARKET_DIRECT'
+  }));
   const result = await runMarketContextCollector({
     now,
     client: mockClient,
     fetchCustomsTradeFn: failingCustomsFetch,
     fetchNsoMacroFn: () => Promise.resolve([]),
     fetchSbvOfficialFn: () => Promise.resolve([]),
+    fetchMarketPillarFn: () => Promise.resolve(currentMarket),
+    fetchGlobalPillarFn: () => Promise.resolve([]),
+    fetchUsdVndFn: () => Promise.resolve(null),
+    fetchLatestPersistedObservationsFn: () => Promise.resolve([priorValidTradeObs]),
     forceRefresh: false
   });
 

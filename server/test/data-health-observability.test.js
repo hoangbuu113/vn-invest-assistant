@@ -666,22 +666,29 @@ test('16. production wiring: runMarketContextCollector records HEALTHY on succes
     }
   };
 
-  const sampleObs = createMarketObservation({
-    id: 'vn.market.vnindex.close',
-    factId: 'vn.market.vnindex.close',
+  const sampleObservations = [
+    ['vn.market.vnindex.close', 'VN-Index', 1250.5],
+    ['vn.market.vn30.close', 'VN30', 1301.25],
+    ['vn.market.hnx.close', 'HNX-Index', 245.75]
+  ].map(([factId, label, value]) => createMarketObservation({
+    id: factId,
+    factId,
     pillar: 'market',
-    label: 'VN-Index',
-    metric: 'VN-Index Close',
-    value: 1250.5,
+    label,
+    metric: `${label} Close`,
+    value,
     unit: 'points',
+    referenceTime: '2026-09-04',
+    observedAt: '2026-09-04T08:00:00.000Z',
+    fetchedAt: testNow.toISOString(),
     status: 'available'
-  });
+  }));
 
   // 1. Successful run with recordHealth: true
   const summary = await runMarketContextCollector({
     now: testNow,
     client: mockDbClient,
-    fetchMarketPillarFn: async () => [sampleObs],
+    fetchMarketPillarFn: async () => sampleObservations,
     fetchGlobalPillarFn: async () => [],
     fetchUsdVndFn: async () => null,
     fetchNsoInflationFn: async () => null,

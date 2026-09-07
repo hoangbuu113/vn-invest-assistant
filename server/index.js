@@ -1674,10 +1674,10 @@ export function createApp(services = {}) {
         client: supabaseAuthClient,
         recordHealth: true
       });
-      if (!summary.isDurable || summary.failedPersistence > 0) {
+      if (!summary.success || !summary.isDurable || summary.failedPersistence > 0) {
         return res.status(503).json({
           status: 'degraded',
-          message: 'Durable persistence failed or degraded during context refresh',
+          message: 'Required Vietnam market context refresh did not complete durably',
           data: summary
         });
       }
