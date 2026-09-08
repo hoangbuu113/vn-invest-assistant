@@ -79,6 +79,11 @@ export function InvestmentBriefPanel() {
                 Cập nhật: {view.generatedAt}
               </span>
             ) : null}
+            {view?.strategyDataAsOfLabel && view.strategyDataAsOf !== view.currentEvidenceDataAsOf && (
+              <span className="market-brief-timestamp strategist-publication-timestamp">
+                {view.strategyDataAsOfLabel}
+              </span>
+            )}
             {view?.generationBadge && (
               <span className="market-brief-cadence-badge" title={view.modeLabel}>
                 {view.generationBadge}

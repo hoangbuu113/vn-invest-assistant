@@ -534,6 +534,7 @@ test('T: real strategist and Express route preserve NOT_ASSESSED and INSUFFICIEN
       const body = await response.json();
       assert.equal(response.status, 200);
       const confidenceAssessment = body.data.confidenceAssessment;
+      assert.deepEqual(body.data.currentBrief.confidenceAssessment, confidenceAssessment);
       assert.equal(confidenceAssessment.assessmentStatus, scenario.expectedStatus);
       assert.equal(confidenceAssessment.publicGrade, scenario.expectedGrade);
       assert.equal(confidenceAssessment.evidenceSupport, scenario.expectedSupport);

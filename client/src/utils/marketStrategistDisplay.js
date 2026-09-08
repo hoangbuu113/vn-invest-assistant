@@ -189,22 +189,28 @@ export function formatEvidenceValue(item) {
 export function buildMarketStrategistViewModel(raw) {
   const data = raw?.data || raw;
   if (!data || typeof data !== 'object') return null;
+  const currentData = data.currentBrief && typeof data.currentBrief === 'object'
+    ? data.currentBrief
+    : data;
+  const publishedData = data.publishedStrategy && typeof data.publishedStrategy === 'object'
+    ? data.publishedStrategy
+    : null;
 
   // Support structured brief, new strategist shape, and legacy brief shape
   const isStrategist = Boolean(
-    (data.brief || data.marketOverview) &&
-    (data.executiveDecision || data.investmentOrientation || data.marketView)
+    (currentData.brief || currentData.marketOverview || data.marketOverview) &&
+    (currentData.executiveDecision || data.executiveDecision || data.investmentOrientation || currentData.marketView)
   );
 
   if (!isStrategist) {
     return null;
   }
 
-  const stance = data.executiveDecision?.stance || data.investmentOrientation?.stance || data.marketView?.stance || 'neutral';
+  const stance = currentData.executiveDecision?.stance || data.executiveDecision?.stance || data.investmentOrientation?.stance || currentData.marketView?.stance || 'neutral';
   const stanceLabel = formatStrategistStance(stance);
   const stanceClass = STANCE_CLASSES[stance] || 'stance-neutral';
 
-  const conviction = data.executiveDecision?.conviction || data.marketView?.conviction || 'medium';
+  const conviction = currentData.executiveDecision?.conviction || data.executiveDecision?.conviction || currentData.marketView?.conviction || 'medium';
   const convictionLabel = CONVICTION_LABELS[conviction] || 'Trung bình';
 
   const isLlm = data.generationMode === 'llm' || data.generationMode === 'live_ai' || data.generationMode === 'gemini';
@@ -225,8 +231,8 @@ export function buildMarketStrategistViewModel(raw) {
 
   const generatedAt = data.generatedAt ? formatPublishedTime(data.generatedAt) : 'Vừa xong';
 
-  const confidence = data.executiveDecision?.confidence || data.confidence || (conviction === 'insufficient_evidence' ? 'INSUFFICIENT_EVIDENCE' : 'MEDIUM');
-  const confidenceAssessment = buildConfidenceAssessmentViewModel(data.confidenceAssessment);
+  const confidence = currentData.executiveDecision?.confidence || data.executiveDecision?.confidence || data.confidence || (conviction === 'insufficient_evidence' ? 'INSUFFICIENT_EVIDENCE' : 'MEDIUM');
+  const confidenceAssessment = buildConfidenceAssessmentViewModel(currentData.confidenceAssessment || data.confidenceAssessment);
   const confidenceLabel = CONFIDENCE_LABELS[confidence] || 'Trung bình';
 
   const executiveDecision = {
@@ -237,11 +243,11 @@ export function buildMarketStrategistViewModel(raw) {
     convictionLabel,
     confidence,
     confidenceLabel,
-    oneLineDecision: data.executiveDecision?.oneLineDecision || data.marketView?.headline || data.investmentOrientation?.rationale || '',
-    actionNow: data.executiveDecision?.actionNow || data.marketView?.explanation || data.investmentOrientation?.rationale || ''
+    oneLineDecision: currentData.executiveDecision?.oneLineDecision || currentData.marketView?.headline || data.executiveDecision?.oneLineDecision || data.investmentOrientation?.rationale || '',
+    actionNow: currentData.executiveDecision?.actionNow || currentData.marketView?.explanation || data.executiveDecision?.actionNow || data.investmentOrientation?.rationale || ''
   };
 
-  const rawAssetStrategy = Array.isArray(data.assetStrategy) ? data.assetStrategy : [];
+  const rawAssetStrategy = Array.isArray(currentData.assetStrategy) ? currentData.assetStrategy : [];
   const assetStrategy = rawAssetStrategy.map((item) => ({
     assetClass: item.assetClass,
     assetClassLabel: ASSET_CLASS_LABELS[item.assetClass] || item.assetClass,
@@ -254,31 +260,31 @@ export function buildMarketStrategistViewModel(raw) {
     evidenceIds: Array.isArray(item.evidenceIds) ? item.evidenceIds : []
   }));
 
-  const preferredThemes = Array.isArray(data.preferredThemes)
-    ? data.preferredThemes.map((item) => typeof item === 'string'
+  const preferredThemes = Array.isArray(currentData.preferredThemes)
+    ? currentData.preferredThemes.map((item) => typeof item === 'string'
       ? { theme: item, stance: 'prefer', rationale: '', evidenceIds: [] }
       : item
     )
     : [];
 
-  const avoidOrUnderweight = Array.isArray(data.avoidOrUnderweight)
-    ? data.avoidOrUnderweight.map((item) => typeof item === 'string'
+  const avoidOrUnderweight = Array.isArray(currentData.avoidOrUnderweight)
+    ? currentData.avoidOrUnderweight.map((item) => typeof item === 'string'
       ? { theme: item, reason: '', evidenceIds: [] }
       : item
     )
     : [];
 
-  const keyDrivers = Array.isArray(data.keyDrivers) ? data.keyDrivers : [];
-  const rawWatchNext = Array.isArray(data.watchNext) ? data.watchNext : [];
+  const keyDrivers = Array.isArray(currentData.keyDrivers) ? currentData.keyDrivers : [];
+  const rawWatchNext = Array.isArray(currentData.watchNext) ? currentData.watchNext : [];
 
-  const brief = data.brief || null;
-  const rawMarketView = data.marketView || brief?.marketView || null;
-  const rawWhy = data.why || brief?.why || null;
-  const rawWhatChanged = data.whatChanged || brief?.whatChanged || null;
-  const rawRisks = data.risks || brief?.risks || null;
-  const rawWhatToWatch = data.whatToWatch || brief?.whatToWatch || null;
-  const rawDataContext = data.dataContext || brief?.dataContext || null;
-  const rawSources = data.sources || brief?.sources || null;
+  const brief = currentData.brief || null;
+  const rawMarketView = currentData.marketView || brief?.marketView || null;
+  const rawWhy = currentData.why || brief?.why || null;
+  const rawWhatChanged = currentData.whatChanged || brief?.whatChanged || null;
+  const rawRisks = currentData.risks || brief?.risks || null;
+  const rawWhatToWatch = currentData.whatToWatch || brief?.whatToWatch || null;
+  const rawDataContext = currentData.dataContext || brief?.dataContext || null;
+  const rawSources = currentData.sources || brief?.sources || null;
 
   const marketView = {
     stance,
@@ -322,10 +328,22 @@ export function buildMarketStrategistViewModel(raw) {
       : rawWatchNext.map((w) => typeof w === 'string' ? { item: w, priority: 'medium', monitorCadence: 'daily' } : w)
   };
 
-  const evidenceCoverage = data.evidenceCoverage || null;
-  const dataAsOf = data.dataAsOf || evidenceCoverage?.dataAsOf || rawDataContext?.dataAsOf || null;
+  const evidenceCoverage = currentData.evidenceCoverage || data.evidenceCoverage || null;
+  const currentEvidenceDataAsOf = data.currentEvidenceDataAsOf
+    || currentData.currentEvidenceDataAsOf
+    || rawDataContext?.dataAsOf
+    || evidenceCoverage?.dataAsOf
+    || data.dataAsOf
+    || null;
+  const strategyDataAsOf = data.strategyDataAsOf || publishedData?.strategyDataAsOf || null;
+  const dataAsOf = currentEvidenceDataAsOf;
   const hasMixedCadence = Boolean(evidenceCoverage?.hasMixedCadence || rawDataContext?.hasMixedCadence);
-  const dataAsOfLabel = dataAsOf ? `Dữ liệu mới nhất: ${formatPublishedTime(dataAsOf)}` : null;
+  const dataAsOfLabel = currentEvidenceDataAsOf
+    ? `Bằng chứng hiện tại cập nhật đến: ${formatPublishedTime(currentEvidenceDataAsOf)}`
+    : null;
+  const strategyDataAsOfLabel = strategyDataAsOf
+    ? `Chiến lược công bố theo dữ liệu đến: ${formatPublishedTime(strategyDataAsOf)}`
+    : null;
   const mixedCadenceNotice = hasMixedCadence ? 'Nguồn có độ trễ khác nhau' : null;
   const cadenceLimitations = Array.isArray(evidenceCoverage?.cadenceLimitations)
     ? evidenceCoverage.cadenceLimitations
@@ -338,14 +356,18 @@ export function buildMarketStrategistViewModel(raw) {
     limitations: cadenceLimitations
   };
 
-  const evidence = Array.isArray(data.evidence) && data.evidence.length > 0
-    ? data.evidence
+  const evidence = Array.isArray(currentData.evidence) && currentData.evidence.length > 0
+    ? currentData.evidence
     : (Array.isArray(rawSources?.evidence) ? rawSources.evidence : []);
 
   return {
     isStrategist: true,
     runId: data.runId || null,
     strategyId: data.strategyId || null,
+    publishedStrategy: publishedData,
+    strategyDataAsOf,
+    strategyDataAsOfLabel,
+    currentEvidenceDataAsOf,
     dataAsOf,
     dataAsOfLabel,
     hasMixedCadence,
@@ -370,8 +392,8 @@ export function buildMarketStrategistViewModel(raw) {
     preferredThemes,
     avoidOrUnderweight,
     marketOverview: {
-      vietnam: data.marketOverview?.vietnam || '',
-      global: data.marketOverview?.global || ''
+      vietnam: currentData.marketOverview?.vietnam || '',
+      global: currentData.marketOverview?.global || ''
     },
     keyDrivers,
     investmentOrientation: {
@@ -381,19 +403,19 @@ export function buildMarketStrategistViewModel(raw) {
       preferredThemes: preferredThemes.map((t) => t.theme),
       pressuredThemes: avoidOrUnderweight.map((t) => t.theme),
       rationale: executiveDecision.actionNow || executiveDecision.oneLineDecision,
-      evidenceIds: Array.isArray(data.investmentOrientation?.evidenceIds)
-        ? data.investmentOrientation.evidenceIds
+      evidenceIds: Array.isArray(currentData.investmentOrientation?.evidenceIds)
+        ? currentData.investmentOrientation.evidenceIds
         : []
     },
     risksAndInvalidation: {
       keyRisks: risks.keyRisks,
       invalidationConditions: risks.invalidationConditions,
-      evidenceIds: Array.isArray(data.risksAndInvalidation?.evidenceIds)
-        ? data.risksAndInvalidation.evidenceIds
+      evidenceIds: Array.isArray(currentData.risksAndInvalidation?.evidenceIds)
+        ? currentData.risksAndInvalidation.evidenceIds
         : []
     },
     watchNext: whatToWatch.items,
-    citations: data.citations || rawSources?.citations || { factObservationIds: [], articleIds: [] },
+    citations: currentData.citations || rawSources?.citations || { factObservationIds: [], articleIds: [] },
     evidence
   };
 }

@@ -28,6 +28,91 @@ import {
 } from './marketStrategistEngine.js';
 import { buildDeterministicMarketBrief } from './marketStrategistBrief.js';
 
+function buildPublishedStrategyProjection(strategy) {
+  if (!strategy) return null;
+  return {
+    strategyId: strategy.strategyId,
+    previousStrategyId: strategy.previousStrategyId || null,
+    publishedAt: strategy.publishedAt || null,
+    generatedAt: strategy.generatedAt || null,
+    strategyDataAsOf: strategy.dataAsOf || null,
+    regime: strategy.regime || {},
+    executiveDecision: strategy.executiveDecision || {},
+    assetStrategy: Array.isArray(strategy.assetStrategy) ? strategy.assetStrategy : [],
+    preferredThemes: Array.isArray(strategy.preferredThemes) ? strategy.preferredThemes : [],
+    avoidOrUnderweight: Array.isArray(strategy.avoidOrUnderweight) ? strategy.avoidOrUnderweight : [],
+    riskOverlay: strategy.riskOverlay || {},
+    horizon: strategy.horizon || null,
+    invalidationConditions: Array.isArray(strategy.invalidationConditions) ? strategy.invalidationConditions : [],
+    evidenceFingerprint: strategy.evidenceFingerprint || null,
+    decisionFingerprint: strategy.decisionFingerprint || null,
+    runManifestId: strategy.runManifestId || null,
+    policyVersion: strategy.policyVersion || null,
+    methodologyVersion: strategy.methodologyVersion || null,
+    citations: strategy.rawOutput?.citations || strategy.citations || null,
+    evidence: Array.isArray(strategy.rawOutput?.evidence)
+      ? strategy.rawOutput.evidence
+      : (Array.isArray(strategy.evidence) ? strategy.evidence : [])
+  };
+}
+
+function buildCurrentStrategistProjection({ strategy, briefData, factPacket }) {
+  const strategyDataAsOf = strategy?.dataAsOf || null;
+  const currentEvidenceDataAsOf = factPacket?.dataAsOf || briefData?.dataContext?.dataAsOf || null;
+  const currentBrief = {
+    brief: briefData.brief,
+    marketView: briefData.marketView,
+    executiveDecision: briefData.executiveDecision,
+    why: briefData.why,
+    whatChanged: briefData.whatChanged,
+    risks: briefData.risks,
+    whatToWatch: briefData.whatToWatch,
+    dataContext: briefData.dataContext,
+    sources: briefData.sources,
+    marketOverview: briefData.marketOverview,
+    keyDrivers: briefData.keyDrivers,
+    assetStrategy: briefData.assetStrategy,
+    preferredThemes: briefData.preferredThemes,
+    avoidOrUnderweight: briefData.avoidOrUnderweight,
+    risksAndInvalidation: briefData.risksAndInvalidation,
+    watchNext: briefData.watchNext,
+    citations: briefData.citations,
+    evidence: briefData.evidence,
+    evidenceCoverage: briefData.evidenceCoverage,
+    currentEvidenceDataAsOf
+  };
+
+  return {
+    publishedStrategy: buildPublishedStrategyProjection(strategy),
+    currentBrief,
+    strategyDataAsOf,
+    currentEvidenceDataAsOf,
+    // Backward compatibility: top-level dataAsOf now unambiguously means the
+    // evidence cutoff for current read-only commentary. Publication-time data
+    // is exposed only as strategyDataAsOf / publishedStrategy.strategyDataAsOf.
+    dataAsOf: currentEvidenceDataAsOf,
+    executiveDecision: currentBrief.executiveDecision,
+    brief: currentBrief.brief,
+    marketView: currentBrief.marketView,
+    why: currentBrief.why,
+    whatChanged: currentBrief.whatChanged,
+    risks: currentBrief.risks,
+    whatToWatch: currentBrief.whatToWatch,
+    dataContext: currentBrief.dataContext,
+    sources: currentBrief.sources,
+    marketOverview: currentBrief.marketOverview,
+    keyDrivers: currentBrief.keyDrivers,
+    assetStrategy: currentBrief.assetStrategy,
+    preferredThemes: currentBrief.preferredThemes,
+    avoidOrUnderweight: currentBrief.avoidOrUnderweight,
+    risksAndInvalidation: currentBrief.risksAndInvalidation,
+    watchNext: currentBrief.watchNext,
+    citations: currentBrief.citations,
+    evidence: currentBrief.evidence,
+    evidenceCoverage: currentBrief.evidenceCoverage
+  };
+}
+
 /**
  * Orchestrates the Strategy Stability lifecycle (Two Clocks):
  * 1. Checks exact idempotency retries.
@@ -72,6 +157,16 @@ export async function evaluateAndApplyStrategyStability({
     if (existing) {
       const current = await getCurrentPublishedStrategy(client);
       const isExistingCompleted = existing.evaluationStatus === EVALUATION_STATUSES.COMPLETED;
+      const briefData = current ? buildDeterministicMarketBrief({
+        currentStrategy: current,
+        assessment: existing,
+        lastAssessment: existing,
+        factPacket,
+        now
+      }) : null;
+      const projection = current && briefData
+        ? buildCurrentStrategistProjection({ strategy: current, briefData, factPacket })
+        : {};
       return {
         ...(current?.rawOutput || {}),
         ...(current || {}),
@@ -88,11 +183,11 @@ export async function evaluateAndApplyStrategyStability({
         idempotencyKey: existing.idempotencyKey,
         reviewPending: !isExistingCompleted,
         currentConfidence: current?.confidence || existing.confidence,
-        dataAsOf: existing.dataAsOf,
         decisionFingerprint: existing.decisionFingerprint,
         evidenceFingerprint: existing.evidenceFingerprint,
         lastAssessment: existing,
-        isIdempotentReplay: true
+        isIdempotentReplay: true,
+        ...projection
       };
     }
   }
@@ -135,25 +230,11 @@ export async function evaluateAndApplyStrategyStability({
       factPacket,
       now
     });
+    const projection = buildCurrentStrategistProjection({ strategy: currentStrategy, briefData, factPacket });
 
     return {
       ...(currentStrategy.rawOutput || {}),
-      ...briefData,
       ...currentStrategy,
-      brief: briefData.brief,
-      marketView: briefData.marketView,
-      why: briefData.why,
-      whatChanged: briefData.whatChanged,
-      risks: briefData.risks,
-      whatToWatch: briefData.whatToWatch,
-      dataContext: briefData.dataContext,
-      sources: briefData.sources,
-      evidence: briefData.evidence,
-      citations: briefData.citations,
-      marketOverview: currentStrategy.rawOutput?.marketOverview || briefData.marketOverview,
-      keyDrivers: currentStrategy.rawOutput?.keyDrivers || briefData.keyDrivers,
-      risksAndInvalidation: currentStrategy.rawOutput?.risksAndInvalidation || briefData.risksAndInvalidation,
-      watchNext: currentStrategy.rawOutput?.watchNext || briefData.watchNext,
       publishedAt: currentStrategy.publishedAt,
       strategyPublishedAt: currentStrategy.publishedAt,
       latestAssessmentAt: lastAssessment?.assessedAt || currentStrategy.publishedAt,
@@ -165,10 +246,10 @@ export async function evaluateAndApplyStrategyStability({
       shockOverride: lastAssessment?.shockOverride || currentStrategy.shockOverride || null,
       reviewPending: !isCompleted ? true : gateResult.requiresReview,
       currentConfidence: currentStrategy.confidence,
-      dataAsOf: currentStrategy.dataAsOf,
       decisionFingerprint: currentStrategy.decisionFingerprint,
       evidenceFingerprint: currentStrategy.evidenceFingerprint,
-      lastAssessment: lastAssessment || null
+      lastAssessment: lastAssessment || null,
+      ...projection
     };
   }
 
@@ -220,25 +301,11 @@ export async function evaluateAndApplyStrategyStability({
       factPacket,
       now
     });
+    const projection = buildCurrentStrategistProjection({ strategy: currentStrategy, briefData, factPacket });
 
     return {
       ...(currentStrategy.rawOutput || {}),
-      ...briefData,
       ...currentStrategy,
-      brief: briefData.brief,
-      marketView: briefData.marketView,
-      why: briefData.why,
-      whatChanged: briefData.whatChanged,
-      risks: briefData.risks,
-      whatToWatch: briefData.whatToWatch,
-      dataContext: briefData.dataContext,
-      sources: briefData.sources,
-      evidence: briefData.evidence,
-      citations: briefData.citations,
-      marketOverview: briefData.marketOverview,
-      keyDrivers: briefData.keyDrivers,
-      risksAndInvalidation: briefData.risksAndInvalidation,
-      watchNext: briefData.watchNext,
       publishedAt: currentStrategy.publishedAt,
       strategyPublishedAt: currentStrategy.publishedAt,
       latestAssessmentAt: assessment.assessedAt,
@@ -250,10 +317,10 @@ export async function evaluateAndApplyStrategyStability({
       shockOverride: assessment.shockOverride,
       confirmationKeys: assessment.confirmationKeys,
       currentConfidence: currentStrategy.confidence,
-      dataAsOf: factPacket.dataAsOf || currentStrategy.dataAsOf,
       decisionFingerprint: currentStrategy.decisionFingerprint,
       evidenceFingerprint,
-      lastAssessment: assessment
+      lastAssessment: assessment,
+      ...projection
     };
   }
 
@@ -325,25 +392,11 @@ export async function evaluateAndApplyStrategyStability({
         factPacket,
         now
       });
+      const projection = buildCurrentStrategistProjection({ strategy: currentStrategy, briefData, factPacket });
 
       return {
         ...(currentStrategy.rawOutput || {}),
-        ...briefData,
         ...currentStrategy,
-        brief: briefData.brief,
-        marketView: briefData.marketView,
-        why: briefData.why,
-        whatChanged: briefData.whatChanged,
-        risks: briefData.risks,
-        whatToWatch: briefData.whatToWatch,
-        dataContext: briefData.dataContext,
-        sources: briefData.sources,
-        evidence: briefData.evidence,
-        citations: briefData.citations,
-        marketOverview: briefData.marketOverview,
-        keyDrivers: briefData.keyDrivers,
-        risksAndInvalidation: briefData.risksAndInvalidation,
-        watchNext: briefData.watchNext,
         publishedAt: currentStrategy.publishedAt,
         strategyPublishedAt: currentStrategy.publishedAt,
         latestAssessmentAt: failedAssessment.assessedAt,
@@ -356,11 +409,11 @@ export async function evaluateAndApplyStrategyStability({
         shockOverride: failedAssessment.shockOverride,
         confirmationKeys: failedAssessment.confirmationKeys,
         currentConfidence: currentStrategy.confidence,
-        dataAsOf: factPacket.dataAsOf || currentStrategy.dataAsOf,
         decisionFingerprint: currentStrategy.decisionFingerprint,
         evidenceFingerprint: snapshotEvidenceFingerprint,
         lastAssessment: failedAssessment,
-        providerError: errorDetails
+        providerError: errorDetails,
+        ...projection
       };
     } else {
       // Cold start with complete failure: throw unavailable
@@ -418,25 +471,11 @@ export async function evaluateAndApplyStrategyStability({
       factPacket,
       now
     });
+    const projection = buildCurrentStrategistProjection({ strategy: currentStrategy, briefData, factPacket });
 
     return {
       ...(currentStrategy.rawOutput || {}),
-      ...briefData,
       ...currentStrategy,
-      brief: briefData.brief,
-      marketView: briefData.marketView,
-      why: briefData.why,
-      whatChanged: briefData.whatChanged,
-      risks: briefData.risks,
-      whatToWatch: briefData.whatToWatch,
-      dataContext: briefData.dataContext,
-      sources: briefData.sources,
-      evidence: briefData.evidence,
-      citations: briefData.citations,
-      marketOverview: briefData.marketOverview,
-      keyDrivers: briefData.keyDrivers,
-      risksAndInvalidation: briefData.risksAndInvalidation,
-      watchNext: briefData.watchNext,
       publishedAt: currentStrategy.publishedAt,
       strategyPublishedAt: currentStrategy.publishedAt,
       latestAssessmentAt: deferredAssessment.assessedAt,
@@ -449,11 +488,11 @@ export async function evaluateAndApplyStrategyStability({
       shockOverride: deferredAssessment.shockOverride,
       confirmationKeys: deferredAssessment.confirmationKeys,
       currentConfidence: currentStrategy.confidence,
-      dataAsOf: currentStrategy.dataAsOf,
       decisionFingerprint: currentStrategy.decisionFingerprint,
       evidenceFingerprint: snapshotEvidenceFingerprint,
       lastAssessment: deferredAssessment,
-      isDeferred: true
+      isDeferred: true,
+      ...projection
     };
   }
 
@@ -640,25 +679,11 @@ export async function evaluateAndApplyStrategyStability({
       factPacket,
       now
     });
+    const projection = buildCurrentStrategistProjection({ strategy: currentStrategy, briefData, factPacket });
 
     return {
       ...(currentStrategy.rawOutput || candidateOutput || {}),
-      ...briefData,
       ...currentStrategy,
-      brief: candidateOutput?.brief || briefData.brief,
-      marketView: candidateOutput?.marketView || briefData.marketView,
-      why: candidateOutput?.why || briefData.why,
-      whatChanged: candidateOutput?.whatChanged || briefData.whatChanged,
-      risks: candidateOutput?.risks || briefData.risks,
-      whatToWatch: candidateOutput?.whatToWatch || briefData.whatToWatch,
-      dataContext: candidateOutput?.dataContext || briefData.dataContext,
-      sources: candidateOutput?.sources || briefData.sources,
-      evidence: candidateOutput?.evidence || briefData.evidence,
-      citations: candidateOutput?.citations || briefData.citations,
-      marketOverview: candidateOutput?.marketOverview || briefData.marketOverview,
-      keyDrivers: candidateOutput?.keyDrivers || briefData.keyDrivers,
-      risksAndInvalidation: candidateOutput?.risksAndInvalidation || briefData.risksAndInvalidation,
-      watchNext: candidateOutput?.watchNext || briefData.watchNext,
       publishedAt: currentStrategy.publishedAt,
       strategyPublishedAt: currentStrategy.publishedAt,
       latestAssessmentAt: assessment.assessedAt,
@@ -670,11 +695,11 @@ export async function evaluateAndApplyStrategyStability({
       shockOverride: gateResult.shockOverride || null,
       confirmationKeys: assessment.confirmationKeys,
       currentConfidence: candidateConfidence,
-      dataAsOf: assessment.dataAsOf,
       decisionFingerprint: currentStrategy.decisionFingerprint,
       evidenceFingerprint: snapshotEvidenceFingerprint,
       materialChanges,
-      lastAssessment: assessment
+      lastAssessment: assessment,
+      ...projection
     };
   }
 
@@ -734,6 +759,15 @@ export async function evaluateAndApplyStrategyStability({
       err.message?.includes('idx_strategy_versions_single_published')
     ) {
       const refreshed = await getCurrentPublishedStrategy(client);
+      const briefData = buildDeterministicMarketBrief({
+        currentStrategy: refreshed,
+        assessment: lastAssessment,
+        lastAssessment,
+        gateResult,
+        factPacket,
+        now
+      });
+      const projection = buildCurrentStrategistProjection({ strategy: refreshed, briefData, factPacket });
       return {
         ...(refreshed?.rawOutput || {}),
         ...(refreshed || {}),
@@ -745,7 +779,8 @@ export async function evaluateAndApplyStrategyStability({
         lifecycleState: STRATEGY_LIFECYCLE_STATES.REVIEW_REQUIRED,
         reviewPending: true,
         conflict: true,
-        concurrencyError: err.message
+        concurrencyError: err.message,
+        ...projection
       };
     }
 
@@ -790,6 +825,16 @@ export async function evaluateAndApplyStrategyStability({
       // Best-effort persistence for assessment record
     }
 
+    const briefData = buildDeterministicMarketBrief({
+      currentStrategy,
+      assessment: failedAssessment,
+      lastAssessment,
+      gateResult,
+      factPacket,
+      now
+    });
+    const projection = buildCurrentStrategistProjection({ strategy: currentStrategy, briefData, factPacket });
+
     return {
       ...(currentStrategy.rawOutput || {}),
       ...currentStrategy,
@@ -805,11 +850,11 @@ export async function evaluateAndApplyStrategyStability({
       shockOverride: failedAssessment.shockOverride,
       confirmationKeys: failedAssessment.confirmationKeys,
       currentConfidence: currentStrategy.confidence,
-      dataAsOf: factPacket.dataAsOf || currentStrategy.dataAsOf,
       decisionFingerprint: currentStrategy.decisionFingerprint,
       evidenceFingerprint: snapshotEvidenceFingerprint,
       lastAssessment: failedAssessment,
-      publicationError: err.message
+      publicationError: err.message,
+      ...projection
     };
   }
 

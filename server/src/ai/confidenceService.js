@@ -62,10 +62,21 @@ export async function attachMarketStrategyConfidence({
     strategyVersion: strategyResult?.policyVersion || null
   });
 
-  if (isReadOnly) {
-    return { ...strategyResult, confidenceAssessment: assessment };
-  }
+  const withCurrentConfidence = () => ({
+    ...strategyResult,
+    confidenceAssessment: assessment,
+    ...(strategyResult?.currentBrief
+      ? {
+          currentBrief: {
+            ...strategyResult.currentBrief,
+            confidenceAssessment: assessment
+          }
+        }
+      : {})
+  });
+
+  if (isReadOnly) return withCurrentConfidence();
 
   await persistConfidenceAssessmentFn(assessment, client);
-  return { ...strategyResult, confidenceAssessment: assessment };
+  return withCurrentConfidence();
 }

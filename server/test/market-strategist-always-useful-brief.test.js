@@ -16,7 +16,9 @@ import {
 } from '../src/ai/strategyStabilityService.js';
 import {
   clearStabilityMemoryStore,
-  getCurrentPublishedStrategy
+  getCurrentPublishedStrategy,
+  getStrategyVersionById,
+  listStrategyAssessments
 } from '../src/ai/strategyStabilityRepository.js';
 import {
   buildMarketStrategistViewModel
@@ -503,5 +505,169 @@ describe('V1.4 — 01A Always-Useful Market Strategist Brief Test Suite', { conc
     assert.ok(Array.isArray(res.brief.whatToWatch.items));
     assert.ok(typeof res.brief.dataContext.freshness === 'string');
     assert.ok(Array.isArray(res.brief.sources.citations.factObservationIds));
+  });
+
+  test('K. published strategy and current evidence use separate clocks without mixed numeric vintages', async () => {
+    const publishedAt = new Date('2026-09-05T10:00:00.000Z');
+    const currentAt = new Date('2026-09-08T10:00:00.000Z');
+    const makeObservation = ({ factId, label, value, unit = 'điểm', date, change = null }) => ({
+      id: `${factId}:${date}:pub_1`,
+      observationId: `${factId}:${date}:pub_1`,
+      factId,
+      label,
+      metric: label,
+      value,
+      unit,
+      change,
+      status: 'available',
+      freshness: 'fresh',
+      source: 'TEST_AUTHORITY',
+      observedAt: `${date}T08:00:00.000Z`,
+      publishedAt: `${date}T08:30:00.000Z`,
+      firstSeenAt: `${date}T09:00:00.000Z`
+    });
+    const publishedObservations = [
+      makeObservation({ factId: 'vn.market.vnindex.close', label: 'VN-Index', value: 1853.08, date: '2026-09-04', change: 25.4 }),
+      makeObservation({ factId: 'vn.market.vn30.close', label: 'VN30', value: 1984.89, date: '2026-09-04', change: 23.5 }),
+      makeObservation({ factId: 'vn.market.hnx.close', label: 'HNX', value: 284.11, date: '2026-09-04', change: 1.2 }),
+      makeObservation({ factId: 'vn.monetary.fx.usd_vnd', label: 'USD/VND', value: 26070, unit: 'VND', date: '2026-09-04', change: 18 }),
+      makeObservation({ factId: 'global.intermarket.dxy.quote', label: 'DXY', value: 99.16, date: '2026-09-04', change: 0.2 }),
+      makeObservation({ factId: 'global.intermarket.brent.futures', label: 'Brent', value: 95.42, unit: 'USD/thùng', date: '2026-09-04', change: 1.1 }),
+      makeObservation({ factId: 'global.intermarket.gold_spot.price', label: 'Gold', value: 4450.25, unit: 'USD/oz', date: '2026-09-04', change: 2.1 }),
+      makeObservation({ factId: 'global.intermarket.us10y.yield', label: 'US10Y', value: 4.81, unit: '%', date: '2026-09-04', change: 0.03 }),
+      makeObservation({ factId: 'vn.macro.cpi.yoy', label: 'CPI', value: 4.82, unit: '%', date: '2026-08-01' })
+    ];
+    const currentObservations = [
+      makeObservation({ factId: 'vn.market.vnindex.close', label: 'VN-Index', value: 1821.64, date: '2026-09-07', change: -31.44 }),
+      makeObservation({ factId: 'vn.market.vn30.close', label: 'VN30', value: 1963.01, date: '2026-09-07', change: -21.88 }),
+      makeObservation({ factId: 'vn.market.hnx.close', label: 'HNX', value: 280.6, date: '2026-09-07', change: -3.51 }),
+      makeObservation({ factId: 'vn.monetary.fx.usd_vnd', label: 'USD/VND', value: 26054, unit: 'VND', date: '2026-09-07', change: -16 }),
+      makeObservation({ factId: 'global.intermarket.dxy.quote', label: 'DXY', value: 98.91, date: '2026-09-07', change: -0.76 }),
+      makeObservation({ factId: 'global.intermarket.brent.futures', label: 'Brent', value: 96.28, unit: 'USD/thùng', date: '2026-09-07', change: 1.72 }),
+      makeObservation({ factId: 'global.intermarket.gold_spot.price', label: 'Gold', value: 4476.6, unit: 'USD/oz', date: '2026-09-07', change: 2.96 }),
+      makeObservation({ factId: 'global.intermarket.us10y.yield', label: 'US10Y', value: 4.78, unit: '%', date: '2026-09-07', change: -0.03 }),
+      makeObservation({ factId: 'vn.macro.cpi.yoy', label: 'CPI', value: 4.89, unit: '%', date: '2026-09-01' })
+    ];
+
+    const publishedPacket = buildMarketStrategistFactPacket({
+      marketObservations: publishedObservations,
+      newsArticles: [],
+      now: publishedAt
+    });
+    const initial = await evaluateAndApplyStrategyStability({
+      factPacket: publishedPacket,
+      now: publishedAt,
+      client: null,
+      isReadOnly: false,
+      generateLlmFn: async () => {
+        const candidate = generateDeterministicMarketStrategist({ factPacket: publishedPacket, now: publishedAt });
+        return {
+          ...candidate,
+          assetStrategy: candidate.assetStrategy.map((item) => {
+            if (item.assetClass === 'vietnam_equities') {
+              return { ...item, rationale: 'VN-Index 1853.08 và VN30 1984.89 hỗ trợ định hướng đã công bố.' };
+            }
+            if (item.assetClass === 'usd') {
+              return { ...item, rationale: 'DXY 99.16 là dữ kiện tại thời điểm công bố.' };
+            }
+            return item;
+          }),
+          preferredThemes: [{
+            theme: 'Năng lượng',
+            stance: 'prefer',
+            rationale: 'Brent 95.42 USD/thùng là luận cứ tại thời điểm công bố.',
+            evidenceIds: ['global.intermarket.brent.futures:2026-09-04:pub_1']
+          }],
+          avoidOrUnderweight: [{
+            theme: 'Nhạy cảm USD',
+            reason: 'DXY 99.16 là luận cứ tại thời điểm công bố.',
+            evidenceIds: ['global.intermarket.dxy.quote:2026-09-04:pub_1']
+          }],
+          invalidationConditions: ['Rà soát nếu VN-Index rời mốc 1853.08 điểm.']
+        };
+      }
+    });
+    const keep = await evaluateAndApplyStrategyStability({
+      factPacket: publishedPacket,
+      now: new Date('2026-09-05T10:05:00.000Z'),
+      client: null,
+      isReadOnly: false,
+      allowLlm: false
+    });
+    assert.equal(keep.latestAssessmentResult, 'KEEP');
+    assert.equal(keep.strategyId, initial.strategyId);
+    const beforeVersion = await getStrategyVersionById(initial.strategyId, null);
+    const beforeAssessmentCount = (await listStrategyAssessments(initial.strategyId, null)).length;
+    const publishedDecision = structuredClone(beforeVersion.executiveDecision);
+    const publishedAssetDecisions = beforeVersion.assetStrategy.map(({ assetClass, stance, priority }) => ({ assetClass, stance, priority }));
+
+    const currentPacket = buildMarketStrategistFactPacket({
+      marketObservations: currentObservations,
+      newsArticles: [],
+      now: currentAt
+    });
+    let providerCalls = 0;
+    const result = await evaluateAndApplyStrategyStability({
+      factPacket: currentPacket,
+      now: currentAt,
+      client: null,
+      isReadOnly: true,
+      allowLlm: false,
+      generateLlmFn: async () => {
+        providerCalls += 1;
+        throw new Error('read-only GET must not call Gemini');
+      }
+    });
+
+    assert.equal(providerCalls, 0);
+    assert.equal(result.strategyId, initial.strategyId);
+    assert.equal(result.latestAssessmentResult, 'KEEP');
+    assert.equal(result.publishedStrategy.strategyId, initial.strategyId);
+    assert.deepEqual(result.publishedStrategy.executiveDecision, publishedDecision);
+    assert.deepEqual(
+      result.publishedStrategy.assetStrategy.map(({ assetClass, stance, priority }) => ({ assetClass, stance, priority })),
+      publishedAssetDecisions
+    );
+    assert.deepEqual(
+      result.currentBrief.assetStrategy.map(({ assetClass, stance, priority }) => ({ assetClass, stance, priority })),
+      publishedAssetDecisions
+    );
+
+    const currentJson = JSON.stringify(result.currentBrief);
+    const publishedJson = JSON.stringify(result.publishedStrategy);
+    for (const staleValue of ['1853.08', '1984.89', '284.11', '99.16', '26070', '95.42', '4450.25', '4.81', '4.82']) {
+      assert.equal(currentJson.includes(staleValue), false, `stale publication value ${staleValue} leaked into currentBrief`);
+    }
+    for (const currentValue of ['1821.64', '1963.01', '280.6', '98.91', '26054', '96.28', '4476.6', '4.78', '4.89']) {
+      assert.equal(currentJson.includes(currentValue), true, `current value ${currentValue} missing from currentBrief`);
+    }
+    assert.equal(publishedJson.includes('1853.08'), true);
+    assert.equal(publishedJson.includes('1984.89'), true);
+    assert.equal(publishedJson.includes('99.16'), true);
+
+    const currentEvidenceIds = new Set(currentPacket.evidence.map((item) => item.id));
+    for (const item of result.currentBrief.assetStrategy) {
+      for (const evidenceId of item.evidenceIds || []) assert.equal(currentEvidenceIds.has(evidenceId), true);
+    }
+    for (const item of [...result.currentBrief.preferredThemes, ...result.currentBrief.avoidOrUnderweight]) {
+      for (const evidenceId of item.evidenceIds || []) assert.equal(currentEvidenceIds.has(evidenceId), true);
+    }
+
+    assert.equal(result.strategyDataAsOf, publishedPacket.dataAsOf);
+    assert.equal(result.currentEvidenceDataAsOf, currentPacket.dataAsOf);
+    assert.notEqual(result.strategyDataAsOf, result.currentEvidenceDataAsOf);
+    assert.equal(result.dataAsOf, result.currentEvidenceDataAsOf, 'legacy dataAsOf must mean current evidence cutoff');
+
+    const view = buildMarketStrategistViewModel(result);
+    assert.equal(view.currentEvidenceDataAsOf, result.currentEvidenceDataAsOf);
+    assert.equal(view.dataAsOf, result.currentEvidenceDataAsOf);
+    assert.match(view.dataAsOfLabel, /Bằng chứng hiện tại cập nhật đến:/);
+    assert.match(view.strategyDataAsOfLabel, /Chiến lược công bố theo dữ liệu đến:/);
+    assert.equal(JSON.stringify(view.assetStrategy).includes('1853.08'), false);
+
+    const afterVersion = await getStrategyVersionById(initial.strategyId, null);
+    const afterAssessmentCount = (await listStrategyAssessments(initial.strategyId, null)).length;
+    assert.deepEqual(afterVersion, beforeVersion, 'read-only projection must not mutate the immutable StrategyVersion');
+    assert.equal(afterAssessmentCount, beforeAssessmentCount, 'read-only projection must not create an assessment or StrategyVersion');
   });
 });

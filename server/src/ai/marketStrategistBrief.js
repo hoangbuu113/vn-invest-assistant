@@ -50,13 +50,135 @@ export function extractKeyObservations(evidence = []) {
 
   return {
     vnIndex: obsByFactId.get('vn.market.vnindex.close') || null,
+    vn30: obsByFactId.get('vn.market.vn30.close') || null,
+    hnx: obsByFactId.get('vn.market.hnx.close') || null,
     cpi: obsByFactId.get('vn.macro.cpi.yoy') || null,
     usdVnd: obsByFactId.get('vn.monetary.fx.usd_vnd') || null,
     dxy: obsByFactId.get('global.intermarket.dxy.quote') || null,
     us10y: obsByFactId.get('global.intermarket.us10y.yield') || null,
     brent: obsByFactId.get('global.intermarket.brent.futures') || null,
+    goldSpot: obsByFactId.get('global.intermarket.gold_spot.price') || null,
+    goldFutures: obsByFactId.get('global.intermarket.gold_futures.price') || null,
     allById: obsByFactId
   };
+}
+
+const CURRENT_ASSET_FACT_IDS = Object.freeze({
+  vietnam_equities: Object.freeze([
+    'vn.market.vnindex.close',
+    'vn.market.vn30.close',
+    'vn.market.hnx.close'
+  ]),
+  gold: Object.freeze([
+    'global.intermarket.gold_spot.price',
+    'global.intermarket.gold_futures.price',
+    'global.intermarket.dxy.quote',
+    'global.intermarket.us10y.yield'
+  ]),
+  usd: Object.freeze([
+    'vn.monetary.fx.usd_vnd',
+    'global.intermarket.dxy.quote'
+  ]),
+  crypto: Object.freeze([
+    'global.intermarket.dxy.quote',
+    'global.intermarket.us10y.yield'
+  ]),
+  cash: Object.freeze([
+    'vn.macro.cpi.yoy',
+    'vn.monetary.interbank.vnd.overnight.daily_avg_rate',
+    'global.intermarket.us10y.yield'
+  ])
+});
+
+function getObservationId(observation) {
+  return observation?.observationId || observation?.id || null;
+}
+
+function isUsableObservation(observation) {
+  return Boolean(
+    observation
+    && typeof observation === 'object'
+    && getObservationId(observation)
+    && observation.value !== null
+    && observation.value !== undefined
+    && observation.status !== 'unavailable'
+  );
+}
+
+function formatCurrentObservation(observation) {
+  const label = observation.label || observation.metric || observation.factId || 'Dữ kiện';
+  const value = typeof observation.value === 'number'
+    ? observation.value.toLocaleString('vi-VN', { maximumFractionDigits: 4 })
+    : String(observation.value);
+  const unit = typeof observation.unit === 'string' && observation.unit.trim()
+    ? ` ${observation.unit.trim()}`
+    : '';
+  return `${label} ${value}${unit}`;
+}
+
+function collectCurrentAssetEvidence(assetClass, evidence) {
+  const acceptedFactIds = new Set(CURRENT_ASSET_FACT_IDS[assetClass] || []);
+  return (Array.isArray(evidence) ? evidence : [])
+    .filter((item) => acceptedFactIds.has(item?.factId) && isUsableObservation(item));
+}
+
+function currentObservationForPublishedId(publishedId, evidence) {
+  if (!publishedId || !Array.isArray(evidence)) return null;
+  return evidence.find((item) => {
+    if (!isUsableObservation(item)) return false;
+    const currentId = getObservationId(item);
+    return currentId === publishedId
+      || (item.factId && String(publishedId).startsWith(`${item.factId}:`));
+  }) || null;
+}
+
+function rebuildCurrentAssetStrategy(publishedItems, fallbackItems, evidence) {
+  if (!Array.isArray(publishedItems) || publishedItems.length === 0) return fallbackItems;
+  return publishedItems.map((item) => {
+    const currentEvidence = collectCurrentAssetEvidence(item?.assetClass, evidence);
+    const evidenceIds = currentEvidence.map(getObservationId).filter(Boolean);
+    const rationale = currentEvidence.length > 0
+      ? `Dữ kiện hiện tại liên quan: ${currentEvidence.map(formatCurrentObservation).join('; ')}. Định hướng đã công bố được giữ nguyên cho đến khi có đánh giá chiến lược mới.`
+      : 'Định hướng đã công bố được giữ nguyên; chưa có dữ kiện hiện tại đủ trực tiếp để cập nhật luận cứ định lượng.';
+
+    return {
+      assetClass: item?.assetClass,
+      stance: item?.stance,
+      priority: item?.priority || 'medium',
+      rationale,
+      evidenceIds,
+      signalIds: [],
+      conclusionType: item?.conclusionType || 'ASSET_BIAS',
+      supportStatus: currentEvidence.length > 0 ? 'supported' : 'conditional',
+      currentEvidenceStatus: currentEvidence.length > 0 ? 'available' : 'unavailable'
+    };
+  });
+}
+
+function rebuildCurrentThemeItems(publishedItems, evidence, narrativeField) {
+  if (!Array.isArray(publishedItems)) return [];
+  return publishedItems.map((item) => {
+    const normalized = typeof item === 'string' ? { theme: item } : (item || {});
+    const currentEvidence = (Array.isArray(normalized.evidenceIds) ? normalized.evidenceIds : [])
+      .map((id) => currentObservationForPublishedId(id, evidence))
+      .filter(Boolean);
+    const deduplicated = [...new Map(currentEvidence.map((entry) => [getObservationId(entry), entry])).values()];
+    const evidenceIds = deduplicated.map(getObservationId).filter(Boolean);
+    const currentNarrative = deduplicated.length > 0
+      ? `Dữ kiện hiện tại liên quan: ${deduplicated.map(formatCurrentObservation).join('; ')}. Luận điểm chủ đề vẫn thuộc chiến lược đã công bố.`
+      : 'Luận điểm chủ đề thuộc chiến lược đã công bố; chưa có ánh xạ dữ kiện hiện tại đủ trực tiếp để cập nhật luận cứ.';
+
+    return {
+      theme: normalized.theme || normalized.name || '',
+      ...(normalized.stance ? { stance: normalized.stance } : {}),
+      [narrativeField]: currentNarrative,
+      evidenceIds,
+      signalIds: [],
+      conclusionType: normalized.conclusionType || (narrativeField === 'reason' ? 'THEME_UNDERWEIGHT' : 'THEME_PREFERENCE'),
+      supportStatus: deduplicated.length > 0 ? 'supported' : 'conditional',
+      currentEvidenceStatus: deduplicated.length > 0 ? 'available' : 'unavailable'
+    };
+  });
 }
 
 /**
@@ -408,8 +530,12 @@ export function buildDeterministicMarketBrief({
     keyRisks.push('Rủi ro từ các cú sốc thanh khoản bất ngờ hoặc căng thẳng địa chính trị quốc tế tác động gián đoạn chuỗi cung ứng.');
   }
 
-  const invalidationConditions = Array.isArray(activeStrategy?.invalidationConditions) && activeStrategy.invalidationConditions.length > 0
-    ? activeStrategy.invalidationConditions
+  const hasPublishedInvalidationFramework = Array.isArray(activeStrategy?.invalidationConditions)
+    && activeStrategy.invalidationConditions.length > 0;
+  const invalidationConditions = hasPublishedInvalidationFramework
+    ? [
+        'Khung điều kiện vô hiệu hóa của chiến lược đã công bố vẫn được bảo lưu; các ngưỡng gốc được trình bày riêng trong ảnh chụp chiến lược công bố.'
+      ]
     : [
         'Tỷ giá USD/VND hoặc chỉ số DXY bứt phá mạnh vượt khỏi vùng kiểm soát dự báo.',
         'Chỉ số giá tiêu dùng CPI vượt ngưỡng mục tiêu kiểm soát vĩ mô chính thức.',
@@ -489,7 +615,11 @@ export function buildDeterministicMarketBrief({
   // -------------------------------------------------------------
   // Backward-Compatible Core Output Fields
   // -------------------------------------------------------------
-  const executiveDecision = activeStrategy?.executiveDecision || {
+  // Current commentary is rebuilt from the current fact packet. The exact
+  // publication-time wording remains available on the immutable
+  // publishedStrategy projection assembled by Strategy Stability.
+  const executiveDecision = {
+    ...(activeStrategy?.executiveDecision || {}),
     stance,
     conviction,
     confidence,
@@ -497,9 +627,7 @@ export function buildDeterministicMarketBrief({
     actionNow: marketView.explanation
   };
 
-  const assetStrategy = Array.isArray(activeStrategy?.assetStrategy) && activeStrategy.assetStrategy.length > 0
-    ? activeStrategy.assetStrategy
-    : [
+  const defaultAssetStrategy = [
         {
           assetClass: 'vietnam_equities',
           stance: (!obs.vnIndex || confidence === 'LOW') ? 'watch' : (stance === 'selective_risk_on' ? 'increase' : 'hold'),
@@ -559,7 +687,13 @@ export function buildDeterministicMarketBrief({
         }
       ];
 
-  const preferredThemes = Array.isArray(activeStrategy?.preferredThemes) ? activeStrategy.preferredThemes : (
+  const assetStrategy = rebuildCurrentAssetStrategy(
+    activeStrategy?.assetStrategy,
+    defaultAssetStrategy,
+    evidence
+  );
+
+  const fallbackPreferredThemes = (
     (citedArticleIds.length > 0 && obs.vnIndex) ? [
       {
         theme: 'Doanh nghiệp đầu ngành dòng tiền mạnh và nợ thấp',
@@ -573,8 +707,11 @@ export function buildDeterministicMarketBrief({
       }
     ] : []
   );
+  const preferredThemes = Array.isArray(activeStrategy?.preferredThemes)
+    ? rebuildCurrentThemeItems(activeStrategy.preferredThemes, evidence, 'rationale')
+    : fallbackPreferredThemes;
 
-  const avoidOrUnderweight = Array.isArray(activeStrategy?.avoidOrUnderweight) ? activeStrategy.avoidOrUnderweight : (
+  const fallbackAvoidOrUnderweight = (
     (obs.usdVnd || obs.dxy) ? [
       {
         theme: 'Nhóm doanh nghiệp chịu chi phí nợ ngoại tệ cao hoặc đầu cơ đòn bẩy',
@@ -587,6 +724,9 @@ export function buildDeterministicMarketBrief({
       }
     ] : []
   );
+  const avoidOrUnderweight = Array.isArray(activeStrategy?.avoidOrUnderweight)
+    ? rebuildCurrentThemeItems(activeStrategy.avoidOrUnderweight, evidence, 'reason')
+    : fallbackAvoidOrUnderweight;
 
   const vnProse = obs.vnIndex?.value
     ? `Chỉ số VN-Index ghi nhận mức ${obs.vnIndex.value} điểm (${obs.vnIndex.change !== null && obs.vnIndex.change >= 0 ? '+' : ''}${obs.vnIndex.change ?? 0} điểm), phản ánh tâm lý giao dịch có sự phân hóa giữa các nhóm ngành.`
