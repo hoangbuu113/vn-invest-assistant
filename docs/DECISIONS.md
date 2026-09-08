@@ -48,8 +48,8 @@ The following architectural and product decisions are confirmed and authoritativ
   - Market data and history fetching require an explicit provider mapping in `public.asset_provider_mappings`.
   - Implicit symbol manipulation (such as automatically appending `.VN`) is completely removed. Unknown assets without explicit mappings fail safely without provider calls.
 - **Multi-Asset Accounting Guard**:
-  - The current single cash ledger and portfolio transaction engine operate strictly in `VND`.
-  - Non-VND BUY/SELL transactions are blocked at the database trigger level (`enforce_vnd_portfolio_transaction_asset`) until multi-currency FX accounting is implemented. No silent currency conversion is permitted.
+  - The single cash ledger remains strictly `VND`; the transaction ledger preserves native execution metadata while its authoritative accounting unit price and cost basis remain VND.
+  - Non-VND assets require explicit governed execution currency, VND accounting basis, settlement mode, and FX provenance where applicable. `USDT` is never silently treated as `USD`, and no multi-currency cash balance is implied.
 - **Zero-Loss Data Migration**:
   - Existing asset UUIDs are preserved in place without deletion or re-creation.
   - All existing holdings, portfolio transactions, cash ledger entries, watchlist items, and price alerts remain linked to their original asset UUIDs.
@@ -95,7 +95,8 @@ The following architectural and product decisions are confirmed and authoritativ
   - Missing or invalid FX produces explicit partial valuation, never assumed 1:1 fallback or fake 0 prices.
   - No currency inversion or multi-hop FX conversion in V1.
   - FX resolution is provider-neutral and executed on demand without a persistent FX database table or caching subsystem in Feature 19.
-  - Non-VND cost basis and unrealized P/L remain unavailable until acquisition-time FX accounting exists; current FX rates must never be used to fabricate historical acquisition-cost P/L.
+  - Non-VND transaction/opening-position records may carry an explicit authoritative VND acquisition basis; current FX rates must never be used to fabricate a missing historical acquisition basis.
+  - Historical non-VND portfolio performance remains unavailable without authoritative historical FX aligned to the performance timeline.
   - Portfolio Composition consumes authoritative Feature 05 reporting values and never computes FX conversions independently.
 - **Market Provider Abstraction (Feature 18)**:
   - Provider-specific market acquisition is decoupled behind provider adapters (`server/src/providers/`).
@@ -110,7 +111,7 @@ The following architectural and product decisions are confirmed and authoritativ
   - **Alpha Vantage**: Production provider for Gold Spot (`XAU/USD`) using `GOLD_SILVER_SPOT` with `symbol=XAU` (spot bullion, NOT COMEX `GC=F` futures).
   - **Yahoo Finance**: Retained as production provider for Vietnamese equities and exchange-traded ETFs (`FUEVFVND.VN`, `FUESSVFL.VN`).
   - Canonical `USD/VND` asset is market context only; it is not a cash account and does not enable holding USD cash.
-  - Non-VND asset onboarding does not enable trading; non-VND BUY/SELL transactions remain blocked at the database trigger level (`enforce_vnd_portfolio_transaction_asset`).
+  - Asset onboarding alone does not authorize accounting. Later governed cross-currency transaction support requires explicit VND basis and settlement metadata; it does not create foreign-currency cash accounts.
   - Asset calendar policies: crypto uses `CONTINUOUS_24_7` with `UTC` timezone; Gold Spot uses `GLOBAL_24_5` with `UTC` timezone.
   - Crypto and gold spot historical bars remain explicitly unsupported (`UNSUPPORTED_MARKET_POLICY`) until Feature 21.
   - Open-ended NAV mutual funds remain deferred.
@@ -317,7 +318,7 @@ $$\text{Source Adapter} \longrightarrow \text{Canonical Validation / Sanitizatio
 - Stale universal `~15 phút` text is removed from Gold, Crypto, Alerts, Watchlist, and Portfolio; replaced with truthful provider-neutral wording: *"Dữ liệu theo thời điểm cập nhật của nhà cung cấp"*.
 
 ### G. Ledger Authority & Non-VND Gating
-- BUY/SELL and opening positions remain strictly VND-only at DB trigger/RPC level; frontend gates non-VND assets before submit with clear visible notices. Cash ledger remains VND-only.
+- BUY/SELL and opening positions for non-VND assets require the governed VND-basis cross-currency contract and explicit settlement semantics. Cash settlement and cash balances remain VND-only; Binance `USDT` reference prices never become canonical USD accounting values.
 
 ---
 
@@ -412,3 +413,43 @@ $$\text{Source Adapter} \longrightarrow \text{Canonical Validation / Sanitizatio
 - **AI Explanation Boundary**: AI generates explanations bounded strictly by candidate evidence. Any ungrounded numbers, schema violations, speculative language, or forbidden actions (`buy`, `sell`, `hold`, `mua`, `bán`, `giữ`, `target price`, `giá mục tiêu`, `probability`, `xác suất`, `confidence`, `expected return`) are deterministically rejected and fall back to evidence-linked deterministic prose.
 - **Qualification Immutability**: AI explanation failure or rejection never alters or promotes `candidate.qualificationStatus`.
 - **Route Namespace Preservation**: Public deterministic engine operates on `GET /api/equity-opportunities` and `GET /api/equity-opportunities/:symbol`. The existing private portfolio-aware `GET /api/opportunities` is fully preserved without modification.
+
+---
+
+## 15. Portfolio V1 Product & Methodology Contract
+
+### A. Page Information Order
+- Portfolio information order is governed as: **Summary → Holdings → Performance → Allocation → Activity**.
+- Summary must foreground total portfolio value, cash, invested-asset market value, and the current valuation/data state.
+
+### B. Performance Authority
+- Time-weighted return (TWR) is the primary portfolio performance measure. A daily chained end-of-day implementation must disclose its timing convention and estimation limits.
+- Accounting P/L is a separate measure and must not be presented as TWR or MWR.
+- Money-weighted return (MWR/XIRR) is secondary/detail information. Failed or undefined XIRR is unavailable, never zero.
+- Annualized performance must not be displayed for a history shorter than one year.
+- Drawdown is conditional on a valid, sufficiently supported performance series; it is not a mandatory headline for every portfolio state.
+- No claim of GIPS compliance is permitted.
+
+### C. Benchmark Contract
+- Benchmark selection is user-controlled and includes an explicit **no benchmark** state.
+- A benchmark comparison is valid only when period, currency treatment, and return basis are compatible and visible.
+- A simple portfolio-return minus benchmark-return result is labelled as a difference in **percentage points**, never as alpha.
+- Price-return benchmarks must be explicitly labelled as price return. A currency-mismatched series may be shown only as clearly marked reference-only context, not as a directly comparable result.
+
+### D. Data Completeness & Freshness
+- Portfolio data states are: `AVAILABLE`, `PARTIAL`, `STALE`, `NOT_APPLICABLE`, `INSUFFICIENT_HISTORY`, and `UNAVAILABLE`.
+- Missing, invalid, unavailable, or errored data must never silently become `0`, `0%`, an empty success result, or a ready state.
+- `priceAsOf`, `fxAsOf`, portfolio valuation time, last successful refresh, last attempted refresh, and refresh outcome are distinct concepts.
+
+### E. Accounting Boundaries
+- Existing financial-authority decisions in Sections 4 and 5 remain canonical. For Portfolio V1 presentation and performance, deposits/withdrawals are external capital flows, tracked-cash BUY/SELL are internal transfers, and an opening position is cash-neutral known state.
+- Dividends are investment income, not external contribution. Fees, taxes, income, adjustments, and transfers remain unsupported until explicitly modeled; they must not be inferred.
+- Backend services are authoritative for governed financial calculations. The frontend may format and project returned values but must not independently recalculate portfolio metrics.
+
+### F. Reconciled Snapshot Contract
+- Summary, holdings, and allocation must reconcile to the same portfolio snapshot and ledger revision.
+- A portfolio projection must expose enough identity and timing metadata to prove this reconciliation; separate request-time calculations are not considered one snapshot.
+
+### G. Transaction Safety
+- Financial writes require an idempotency contract so network retries cannot silently create duplicate economic events.
+- Corrections and reversals must be explicit, auditable events or governed state transitions. Immutable ledger history must not be overwritten or deleted to conceal a correction.

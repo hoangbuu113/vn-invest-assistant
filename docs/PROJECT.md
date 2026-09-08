@@ -1,7 +1,9 @@
 # Project Overview: VN Invest Assistant
 
 ## 1. Purpose
-A public multi-user, Vietnam-focused multi-asset market intelligence and tracking showcase application. Its primary focus is delivering institutional-grade market intelligence, monitoring, multi-source news, macroeconomic regime context, price alerts, watchlists, cross-asset context, and future AI synthesis for Vietnam and priority global asset classes. Portfolio tracking and accounting operate as a supporting/demo capability.
+A public multi-user, Vietnam-focused multi-asset market intelligence and tracking application. Its primary focus is market intelligence, monitoring, multi-source news, macroeconomic context, price alerts, watchlists, cross-asset context, and evidence-bounded AI synthesis for Vietnam and priority global asset classes.
+
+Portfolio is a personal multi-asset tracking capability that supports this broader market-intelligence product. Its purpose is to help each user know what they own, understand accounting P/L and portfolio performance, and understand the quality, coverage, and freshness of the data behind those values.
 
 ## 2. Target User & Architecture
 - Public multi-user platform with Supabase authentication and strictly isolated per-profile data.
@@ -25,9 +27,14 @@ A public multi-user, Vietnam-focused multi-asset market intelligence and trackin
 ## 5. Reporting Currency
 - **VND** (all portfolio valuations and summaries normalize to Vietnamese Đồng; native quote currencies are preserved and converted via explicit FX rates).
 
+### Portfolio V1 Scope
+- Long-only assets plus cash.
+- Holdings, cash movements, opening positions, and immutable BUY/SELL records are tracked per authenticated profile.
+- Margin, short selling, derivatives, leverage, broker execution, and broker custody synchronization are not supported unless a later governed scope explicitly adds them.
+
 ## 6. Core Product Goals
 - **Primary**: Deliver public market intelligence, macroeconomic regime tracking, multi-asset context, multi-source news, watchlists, price alerts, and future AI synthesis.
-- **Supporting**: Track user holdings, immutable transaction history, and auditable cash flows within isolated user profiles.
+- **Supporting**: Track personal holdings, immutable transaction history, and auditable cash flows within isolated user profiles, with truthful valuation and freshness states.
 - Provide deterministic quantitative analysis, trends, and comparisons across Vietnam equities, crypto, gold, and FX.
 - Maintain transparent data integrity (never fabricate missing prices, timestamps, or FX rates; missing is never zero).
 

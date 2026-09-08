@@ -146,3 +146,42 @@ Comprehensive cross-feature golden regression tests are executed at strategic in
 - At major phase boundaries.
 - Prior to production releases.
 - Immediately following any change to core financial invariants.
+
+---
+
+## 7. Portfolio V1 Redesign Phase
+
+Portfolio V1 remains a supporting personal tracking capability inside the broader market-intelligence product. Work must proceed from accounting/data authority to API projection and only then to UI restructuring.
+
+### P0 — Correctness, Contracts, and Core UX
+1. Repair chronological migration reproducibility with a forward-only correction and a fresh-database migration test.
+2. Audit and lock authoritative accounting/data invariants for cash, holdings projection, transactions, opening positions, current price, and FX.
+3. Enforce portfolio asset eligibility at the server/database trust boundary so reference-only instruments cannot bypass UI filtering.
+4. Implement the governed completeness/freshness states: `AVAILABLE`, `PARTIAL`, `STALE`, `NOT_APPLICABLE`, `INSUFFICIENT_HISTORY`, `UNAVAILABLE`.
+5. Produce one reconciled portfolio projection so Summary, Holdings, and Allocation share a snapshot ID, ledger revision, valuation time, and source timestamps.
+6. Rebuild Summary around total portfolio value, cash, invested market value, and valuation/data state.
+7. Move Holdings directly after Summary and expose truthful price, FX, valuation, P/L, weight, and as-of state per position.
+8. Build a compact cash-only experience that does not fill the page with inapplicable investment analytics.
+9. Consolidate Performance around primary TWR, separate accounting P/L, conditional MWR/drawdown, and the no-annualization-below-one-year rule.
+10. Enforce benchmark eligibility and add user-selected/no-benchmark behavior with explicit currency/return-basis compatibility.
+11. Simplify Allocation and Activity, preserving known-value-only and immutable-ledger semantics without duplicate totals.
+
+### P1 — Accounting Detail and Reconciliation
+- Realized/unrealized P/L decomposition by asset and period.
+- Explicit income/dividend and fee/tax detail after governed ledger event types exist.
+- Richer transaction history with idempotent writes and auditable correction/reversal semantics.
+- Secondary MWR and drawdown detail with eligibility explanations.
+- Export and reconciliation artifacts for cash, positions, transactions, prices, and FX.
+
+### P2 — Advanced Portfolio Analysis
+- Contribution analytics.
+- Governed composite benchmark support.
+- Target allocation and drift tracking.
+- Deeper portfolio analytics built only on reconciled snapshots and authoritative history.
+
+### Deferred / Requires New Authoritative Data
+- Sharpe ratio, beta, correlation, and diversification scores.
+- Liquidity scoring.
+- Sector/geographic analytics without authoritative classification metadata.
+- Automatic tax estimation.
+- Margin, short, leverage, and derivative analytics.

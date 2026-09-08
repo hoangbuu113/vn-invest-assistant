@@ -1,114 +1,91 @@
 # Current Project Status
 
-## LATEST VERIFIED CHECKPOINT
-- **Release Status**: V1.3 CLOSED LOCALLY (READY FOR MIGRATION & DEPLOYMENT)
-- **Production Status**: Production runs V1.1/V1.2 baseline (`origin/main` at commit `b998e10`). V1.3 changes are staged and verified locally across 27 commits ahead of `origin/main`. No remote push or deployment has been performed.
-- **Final Local Baseline**: `356d5c2 fix: separate opportunity health and explanation grounding`
-- **Branch**: `main`
-- **Architecture**: Cloudflare Workers Static Assets frontend (with API proxy and 15m scheduled cron) + Render Node.js Express backend + Supabase PostgreSQL database
-- **Automated Test Suite**:
-  - Full Backend & Integration Regression: **1,327 / 1,327 PASS** across **163 test suites** (`npm test --prefix server`)
-  - Focused Critical Suites:
-    - Historical As-Of Replay (`historical-as-of-replay.test.js`): 30/30 PASS
-    - Strategy Stability Production Integrity (`strategy-stability-phase2-1.test.js`): 32/32 PASS
-    - Strategy Stability Memory Fallback Removal (`strategy-stability-phase2-2.test.js`): 15/15 PASS
-    - Strategy Shadow Replay (`strategy-shadow-replay.test.js`): 16/16 PASS
-    - Observability & Data Health (`data-health-observability.test.js`): 22/22 PASS
-    - Vietnam Equity Evidence (`equity-evidence.test.js`): 18/18 PASS
-    - Deterministic Equity Opportunity Engine (`equity-opportunity-engine.test.js`): 24/24 PASS
-  - Client Build: PASS (Vite production bundle & Cloudflare SSR worker built in ~250ms, 0 errors, 0 warnings)
-  - Git Diff & Formatting: `git diff --check` PASS (clean)
-- **Working Tree**: CLEAN (with untracked `server/artifacts/` preserved untouched)
+## Latest Verified Repository Checkpoint
+- Portfolio V1 rebaseline/audit baseline: `5f88167 style: improve strategist change summary`.
+- Branch: `main`, two commits ahead of `origin/main` at the start of this audit.
+- Tracked working tree was clean before this documentation task; pre-existing untracked `server/artifacts/` remains preserved and untouched.
+- Runtime architecture remains Cloudflare Workers Static Assets/frontend proxy and scheduler, Render Node.js/Express backend, and Supabase PostgreSQL/Auth.
+- This checkpoint records repository behavior inspected on 2026-09-08. Exact production migration parity and deployment revision were not queried in this documentation phase.
 
----
+## Current Phase
+Portfolio V1 documentation rebaseline and existing-implementation audit. The Portfolio redesign is **not implemented** in this phase.
 
-## CURRENT PHASE
-V1.3 — Advanced Market Intelligence, Evidence Replay & Stability Engine (LOCAL COMPLETE)
+## Portfolio — Verified Working Today
+- Supabase Auth user identity resolves through `investor_profile.user_id` to private `investor_profile.id`; protected Express routes pass that profile ID to service-role data access and profile-scoped financial RPCs.
+- VND is the reporting currency. Native quote currency is retained, and non-VND current valuation requires explicit supported FX evidence.
+- Cash ledger records opening balance, deposits, withdrawals, and cash-settled BUY/SELL effects. BUY/SELL, holdings projection, linked cash entry, and cached profile cash update execute in one PostgreSQL function transaction.
+- Portfolio transactions are immutable BUY/SELL records. Cost basis uses weighted average; partial SELL preserves average cost; realized P/L uses `(VND execution basis - pre-sale average cost) × sold quantity`.
+- Opening positions establish cash-neutral known state, can be corrected/cancelled before ledger activity, and lock after a transaction.
+- Portfolio overview returns cash, holdings, current VND market value, cost basis, unrealized P/L, FX metadata, and partial-valuation states without valuing an unpriced holding at zero.
+- Composition derives from one overview inside its own request and distinguishes complete, partial, unavailable, and cash-only allocation bases.
+- Performance exposes daily chained end-of-day TWR, XIRR/MWR, wealth-index drawdown, accounting P/L, coverage reasons, and completed-date series for 1W/1M/3M/6M/1Y.
+- Benchmark comparison supports VN-Index price return (VND comparable) and S&P 500 price return (USD reference-only), using common dates and Base100 normalization.
 
----
+## Portfolio — Partial
+- Overview, composition, performance, and benchmark are separate requests. They do not share a portfolio snapshot ID, ledger revision, valuation timestamp, or atomic read boundary.
+- Historical performance supports only holdings that can be valued directly in VND. Historical non-VND performance remains unavailable because authoritative historical FX is not integrated.
+- Performance carries the latest completed close forward without a bounded market-calendar staleness rule.
+- The current XIRR path annualizes any solvable positive date span; the governed no-annualization-below-one-year rule is not implemented.
+- Benchmark choice is component-local and defaults to VN-Index. There is no persisted user selection and no explicit no-benchmark state.
+- Portfolio UI currently orders Performance before Summary/Holdings and spreads related values across independently refreshed blocks.
+- Transaction entry supports cross-currency execution metadata, but transaction-history rendering presents the VND accounting price as though it were the only execution price/currency.
 
-## V1.3 COMPLETED FEATURES SUMMARY
+## Portfolio — Missing
+- One reconciled Summary/Holdings/Allocation snapshot contract with `snapshotId`, ledger revision, valuation time, and refresh metadata.
+- Unified portfolio states: `AVAILABLE`, `PARTIAL`, `STALE`, `NOT_APPLICABLE`, `INSUFFICIENT_HISTORY`, `UNAVAILABLE`.
+- Idempotency keys for financial writes and auditable transaction correction/reversal flows.
+- Governed fee, tax, dividend/income, adjustment, and asset-transfer ledger events.
+- Daily P/L and unified total/accounting P/L in the overview API.
+- Historical FX authority for non-VND portfolio performance.
 
-### 1. Strategy Stability & Publication Safety (01C)
-- **Two-Clock Lifecycle**: Decoupled continuous fast-clock evidence evaluation from patient slow-clock strategy publication. Lifecycle state machine: `STABLE`, `WATCH`, `REVIEW_REQUIRED`, `EVALUATING`.
-- **Deterministic Materiality**: State changes occur strictly upon evaluated evidence changes, verified shocks, or confirmed multi-source consensus. Unchanged evidence or identical evaluations yield deterministic `KEEP`.
-- **Atomic Publication RPC**: Created `publish_strategy_version_atomic(p_new_version, p_expected_current_strategy_id)` in PostgreSQL. Guarantees transactional supersession of the expected current strategy and insertion of the new version with zero-published prevention, concurrency locking (`FOR UPDATE`), and automatic rollback on failure.
-- **Production Memory Fallback Removal**: Database failure (`PGRST202` or connection error) in production throws explicit errors and halts; never silently seeds or falls back to in-memory strategy publication.
-- **Shadow Replay & Calibration Framework**: Replay harness simulates chronological evidence sequences with zero lookahead bias.
-- **Hysteresis Thresholds Policy**: Numeric hysteresis thresholds were intentionally **NOT** calibrated due to partial historical coverage across complete economic cycles; quantitative stability is governed deterministically without arbitrary fabricated thresholds.
+## Portfolio — Unverified Runtime Facts
+- Provider availability and current price/FX freshness were not live-probed.
+- Exact production DDL and migration contents were not remotely queried.
+- The task authority reports the current portfolio as approximately 200,000,000 VND cash with zero holdings; this audit did not mutate or independently query that private production record.
 
-### 2. Historical As-Of Evidence Replay (01D)
-- **Replay Safety Contract**: Implemented historical as-of evidence projection engine. All evidence evaluations evaluate state strictly as-of an explicit timestamp $T$ with zero lookahead bias.
-- **System-Knowable Timestamp Authority**: An observation is knowable to the system strictly when `asOf >= max(sourceAvailableAt, firstSeenAt)`. Publication timestamps alone cannot bypass system ingestion time, and future corrections or backfills never alter prior historical fingerprints.
-- **Claim Corroboration & Contradiction**: Structured claims track independent corroboration and contradictory evidence without discarding minority sources.
+## Broader Project State Preserved from the Previous Checkpoint
 
-### 3. Observability & Data Health (01E)
-- **Deterministic Health States**: `HEALTHY`, `DEGRADED`, `FAILED`, `UNKNOWN` with strict precedence (`FAILED` > `DEGRADED` > `UNKNOWN` > `HEALTHY`).
-- **Core Observed Pipelines (9 jobs)**:
-  1. `vn_market_context_collector`
-  2. `official_macro_monetary_collector`
-  3. `customs_trade_collector`
-  4. `news_refresh_collector`
-  5. `claims_reconciliation`
-  6. `market_strategist_refresh`
-  7. `alert_scheduler`
-  8. `vn_equity_evidence_refresh`
-  9. `vn_opportunity_engine_refresh`
-- **Domain vs Operational Health Invariant**: `job execution health != domain / data conclusion`. A collector or engine completing valid evaluation reporting empty or insufficient data is operationally `HEALTHY`. `DEGRADED` is strictly reserved for operational anomalies (partial persistence, WAF quarantine). `FAILED` is reserved for pipeline crashes, unhandled exceptions, or fatal DB failures.
-- **Durable Checkpoints**: State persists to `public.market_context_collector_checkpoints`. Production DB is strictly authoritative; memory store is used only in explicit offline/test mode.
-- **Public Observability Route**: `GET /api/system/data-health` reads durable checkpoints without external provider calls and returns HTTP 200 (or 503 if system status is `FAILED`), exposing zero secrets.
+### Strategy Stability & Publication Safety (01C)
+- Two-clock evidence evaluation and strategy publication remain separated. Lifecycle states remain `STABLE`, `WATCH`, `REVIEW_REQUIRED`, and `EVALUATING`; publication decisions remain deterministic `KEEP`, `REVIEW_REQUIRED`, or `PUBLISH_NEW` outcomes.
+- Atomic persistence remains governed by `publish_strategy_version_atomic(p_new_version, p_expected_current_strategy_id)`, including expected-current locking and rollback on failure.
+- Production strategy persistence is database-authoritative; silent memory publication fallback is not allowed.
+- Historical shadow replay remains lookahead-safe. Numeric hysteresis thresholds remain intentionally uncalibrated rather than fabricated from incomplete cycle history.
 
-### 4. Vietnam Equity Evidence (01F)
-- **Canonical Stock Evidence Foundation**: Model and repository (`public.vn_equity_evidence_observations`) storing immutable evidence vintages for canonical Vietnam equities (`VCB`, `FPT`, `HPG`, `VNM`, `E1VFVN30`, `FUEVFVND`, `FUESSVFL`).
-- **Replay-Safe Timestamp Invariants**: Enforces `system_knowable_at >= first_seen_at` and `system_knowable_at >= source_available_at`.
-- **Market Price Evidence**: Completed daily OHLCV bars ingested via backend collector with delayed freshness provenance.
-- **Unprovisioned Domains**: Stock fundamentals and official corporate disclosures remain truthfully declared as `SOURCE_NOT_PROVISIONED` without fabricating missing data.
-- **Public Route**: `GET /api/equity-evidence/:symbol` provides read-only access to persisted evidence vintages.
+### Historical As-Of Evidence Replay (01D)
+- Replay remains bounded by an explicit as-of time and trusted system knowability: evidence is not admitted before `max(sourceAvailableAt, firstSeenAt)`; publication timestamps and caller flags cannot bypass system ingestion time.
+- Structured claim corroboration and contradiction preservation remain part of the evidence model.
 
-### 5. Deterministic Equity Opportunity Engine (01G)
-- **Deterministic Authority**: Evaluates Vietnam equity universe against persisted evidence into explicit categories: `QUALIFIED`, `WATCH`, `INSUFFICIENT_EVIDENCE`, `REJECTED`.
-- **Policy Invariant**: Because no calibrated numeric qualification policy exists, `QUALIFIED` remains intentionally unused/reserved; current valid completed closes support `WATCH` only. Inactive assets evaluate to `REJECTED`.
-- **No Opaque Opportunity Scores**: Zero opaque numerical scoring, zero buy/sell/hold ratings, zero price targets, and zero probability estimates.
-- **AI Explanation Boundary**: AI generates explanations bounded strictly by candidate evidence. Any ungrounded numbers, schema violations, speculative language, or forbidden actions (`buy`, `sell`, `hold`, `mua`, `bán`, `giữ`, `target price`, `giá mục tiêu`, `probability`, `xác suất`, `confidence`, `expected return`) are deterministically rejected and fall back to evidence-linked deterministic prose.
-- **Qualification Immutability**: AI explanation failure or rejection never alters or promotes `candidate.qualificationStatus`.
-- **Route Namespace Preservation**: Public deterministic engine operates on `GET /api/equity-opportunities` and `GET /api/equity-opportunities/:symbol`. The existing private portfolio-aware `GET /api/opportunities` is fully preserved without modification.
+### Observability & Data Health (01E)
+- Job health states remain `FAILED > DEGRADED > UNKNOWN > HEALTHY` with durable production checkpoints and provider-free `GET /api/system/data-health`.
+- The nine observed paths remain market context, official macro/monetary, customs, news, claims reconciliation, market strategist, alerts, equity evidence, and opportunity refresh.
+- Job execution health remains distinct from domain/data conclusions. Production checkpoints remain database-authoritative; memory is limited to explicit offline/test operation.
 
----
+### Vietnam Equity Evidence (01F)
+- Immutable, replay-safe Vietnam equity evidence vintages remain persisted in `public.vn_equity_evidence_observations`; the public provider-free equity-evidence read path remains implemented.
+- Completed price evidence is supported; official fundamentals and issuer disclosures remain `SOURCE_NOT_PROVISIONED`.
 
-## UNAPPLIED MIGRATION AUDIT (LOCAL SEQUENCE)
-The following 6 migrations are created, verified, and committed locally, but remain **UNAPPLIED** on the remote Supabase database:
+### Deterministic Equity Opportunity Engine (01G)
+- Evidence-bounded deterministic categories remain `QUALIFIED`, `WATCH`, `INSUFFICIENT_EVIDENCE`, and `REJECTED`, separate from AI explanation. No opaque score, target price, probability, or AI mutation of qualification is permitted.
+- `QUALIFIED` remains reserved pending calibrated policy; supported evidence may yield `WATCH`.
+- Public deterministic equity opportunities remain separate from the private portfolio-aware `/api/opportunities` route.
 
-1. `20260905010000_create_collector_checkpoints.sql`
-   - Creates `public.market_context_collector_checkpoints` for pipeline observability and due-gating.
-2. `20260905020000_create_market_claims_and_evidence_links.sql`
-   - Creates `public.market_claims` and `public.claim_evidence_links` for claim corroboration.
-3. `20260906000000_create_strategy_stability_foundation.sql`
-   - Creates `public.strategy_versions` and append-only `public.strategy_assessments`.
-4. `20260906010000_harden_strategy_stability_publication.sql`
-   - Creates atomic RPC function `public.publish_strategy_version_atomic(p_new_version, p_expected_current_strategy_id)`.
-5. `20260906020000_create_vn_equity_evidence.sql`
-   - Creates `public.vn_equity_evidence_observations` for immutable equity evidence vintages.
-6. `20260906030000_create_vn_equity_opportunities.sql`
-   - Creates `public.vn_equity_opportunity_evaluations` for deterministic opportunity evaluations.
+### Market Strategist, Confidence, and Monetary Evidence
+- Immutable published strategy and current-evidence brief are separate projections with separate clocks.
+- Confidence v2 remains deterministic and calibration-gated; AI cannot upgrade grades or remove evidence caps.
+- Official monetary evidence uses scoped structured dependencies and replay-safe knowability. Source-access limitations remain explicit rather than substituted with unofficial evidence.
 
----
+## Known Cross-Project Limitations Preserved
+- Official Vietnam equity fundamentals and corporate disclosure providers remain unprovisioned.
+- Strategy-stability numeric hysteresis thresholds remain intentionally uncalibrated rather than backfit.
+- USD/VND historical bars/historical FX authority remain insufficient for non-VND portfolio performance.
+- Gold spot history remains close-only where the configured provider cannot supply authoritative OHLC.
 
-## KNOWN BLOCKERS & LIMITATIONS
-1. **Remote Migrations Pending**: Backend code in V1.3 requires the 6 migrations above. Migrations must be applied to Supabase before deploying backend code to Render.
-2. **Equity Fundamentals & Disclosures Unprovisioned**: No official provider for Vietnamese corporate financial statements (balance sheet, income statement) or regulatory filings is provisioned. Candidates report `OFFICIAL_FUNDAMENTALS_SOURCE_NOT_PROVISIONED`.
-3. **Strategy Stability Hysteresis Thresholds Uncalibrated**: Numeric thresholds remain intentionally uncalibrated; the engine enforces structural state machine stability without fabricating numeric thresholds.
-4. **USD/VND Historical Bars**: Daily history remains intentionally unsupported pending verified timezone boundary reconciliation.
-5. **Gold Spot History**: Remains close-only; OHLC metrics remain unavailable.
+## Verified Portfolio Audit Blockers
+1. Migration `20260901010000_v1_1_cross_currency_accounting_foundation.sql` references cash-ledger columns/sign conventions that do not match the earlier cash-ledger migration. Clean chronological replay is not trustworthy until a forward-only correction and fresh-database test exist.
+2. No reconciled portfolio snapshot/ledger-revision contract exists; independent Summary/Holdings/Allocation refreshes may describe different price/FX moments.
+3. Historical internal BUY/SELL reconstruction applies position changes by `executedAt` but tracked cash changes by later ledger `effectiveAt`; a transaction recorded today with an older execution date can create false interim portfolio values and drawdown.
+4. Short-history XIRR is annualized despite the newly governed Portfolio V1 methodology.
+5. The frontend excludes the `USD/VND` context pair from Portfolio entry, but the transaction/opening-position RPC trust boundary does not enforce the same non-investable asset rule; a direct authenticated API request can bypass the UI-only capability filter.
 
----
-
-## NEXT RELEASE STEPS
-When ready to release V1.3 to production:
-1. Apply the 6 migrations to Supabase production in exact chronological order (010000 -> 020000 -> 000000 -> 010000 -> 020000 -> 030000).
-2. Verify created database tables, unique constraints, append-only triggers, RLS policies, and RPC function `publish_strategy_version_atomic`.
-3. Push local commits to remote `origin/main` (`git push origin main`).
-4. Trigger or observe Render backend deployment; verify health at `https://vn-invest-assistant-api.onrender.com/api/health`, `/api/db-health`, and `/api/system/data-health`.
-5. Deploy Cloudflare Worker frontend (`npx wrangler deploy`); verify static assets and API proxy.
-6. Execute production smoke tests against public routes (`/api/system/data-health`, `/api/equity-opportunities`, `/api/market-context/vietnam`).
-7. Verify background scheduler evaluation runs cleanly via Cloudflare Worker cron (`*/15 * * * *`).
-8. Mark V1.3 production checkpoint complete.
+## Next Work
+Execute the Portfolio V1 P0 sequence in `docs/ROADMAP.md`, beginning with migration reproducibility, financial-state/completeness contracts, and a single reconciled backend portfolio projection. UI redesign must follow those authorities rather than precede them.
