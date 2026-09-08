@@ -11,9 +11,9 @@ describe('V1.1 Improvement 10 — State-Aware Portfolio Onboarding', () => {
   test('derives exact onboarding states according to cash and holdings conditions', () => {
     // State A: No capital & no holdings
     assert.equal(deriveOnboardingState({ cashAvailable: 0, holdingsCount: 0 }), ONBOARDING_STATES.STATE_A);
-    assert.equal(deriveOnboardingState({ cashAvailable: null, holdingsCount: 0 }), ONBOARDING_STATES.STATE_A);
-    assert.equal(deriveOnboardingState({ cashAvailable: -5000, holdingsCount: 0 }), ONBOARDING_STATES.STATE_A);
-    assert.equal(deriveOnboardingState({}), ONBOARDING_STATES.STATE_A);
+    assert.equal(deriveOnboardingState({ cashAvailable: null, holdingsCount: 0 }), ONBOARDING_STATES.CASH_UNAVAILABLE);
+    assert.equal(deriveOnboardingState({ cashAvailable: -5000, holdingsCount: 0 }), ONBOARDING_STATES.CASH_UNAVAILABLE);
+    assert.equal(deriveOnboardingState({}), ONBOARDING_STATES.CASH_UNAVAILABLE);
 
     // State B: Cash ready & no holdings (current production state: 20M cash, 0 holdings)
     assert.equal(deriveOnboardingState({ cashAvailable: 20000000, holdingsCount: 0 }), ONBOARDING_STATES.STATE_B);
@@ -41,6 +41,18 @@ describe('V1.1 Improvement 10 — State-Aware Portfolio Onboarding', () => {
     assert.equal(model.primaryActions[1].label, 'Khai báo vị thế đang có');
     assert.equal(model.secondaryAction.id, 'buy');
     assert.equal(model.secondaryAction.label, 'Ghi giao dịch mua');
+  });
+
+  test('missing cash remains an explicit unavailable onboarding state instead of zero cash', () => {
+    const model = buildPortfolioOnboardingViewModel({ cashAvailable: null, holdingsCount: 0 });
+    assert.equal(model.state, ONBOARDING_STATES.CASH_UNAVAILABLE);
+    assert.equal(model.formattedCash, null);
+    assert.equal(model.primaryActions.length, 0);
+    assert.match(model.description, /số dư có thẩm quyền/);
+    assert.match(
+      getPerformanceEmptyStateGuidance({ cashAvailable: null, holdingsCount: 0 }),
+      /không khả dụng/
+    );
   });
 
   test('builds accurate view model for STATE B (cash ready, no holdings - current 20M state)', () => {
@@ -93,4 +105,3 @@ describe('V1.1 Improvement 10 — State-Aware Portfolio Onboarding', () => {
     assert.match(guideC, /Hiệu suất sẽ xuất hiện/);
   });
 });
-

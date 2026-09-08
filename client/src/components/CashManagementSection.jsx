@@ -74,7 +74,10 @@ export default function CashManagementSection({
     return cashLedger;
   }, [cashLedger, filterType]);
 
-  const currentCash = cashOverview?.currentCash ?? 0;
+  const currentCash = typeof cashOverview?.currentCash === 'number'
+    && Number.isFinite(cashOverview.currentCash)
+    ? cashOverview.currentCash
+    : null;
 
   return (
     <motion.div variants={sectionItemVariants} className="fintech-card" style={{ padding: '1.25rem 1.5rem', marginBottom: '1.5rem' }}>
@@ -111,8 +114,10 @@ export default function CashManagementSection({
             <div style={{ fontSize: '1.45rem', fontWeight: 800, color: 'var(--color-slate-900)', marginTop: '2px' }}>
               {cashOverviewLoading ? (
                 <span style={{ fontSize: '1.1rem', color: 'var(--color-slate-400)' }}>Đang tải...</span>
-              ) : (
+              ) : currentCash !== null ? (
                 <CountUp value={currentCash} suffix=" ₫" />
+              ) : (
+                <span style={{ fontSize: '1rem', color: 'var(--color-slate-500)' }}>Chưa khả dụng</span>
               )}
             </div>
           </div>
@@ -493,4 +498,3 @@ export default function CashManagementSection({
     </motion.div>
   );
 }
-

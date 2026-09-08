@@ -362,7 +362,7 @@ function LoadingSkeleton() {
 }
 
 export function PortfolioPerformanceSection({
-  cashAvailable = 0,
+  cashAvailable = null,
   holdingsCount = 0,
   onNavigateToPortfolio
 } = {}) {
@@ -401,6 +401,13 @@ export function PortfolioPerformanceSection({
   }, [range]);
 
   useEffect(() => {
+    if (holdingsCount === 0) {
+      setBenchmark(null);
+      setBenchmarkLoading(false);
+      setBenchmarkError(null);
+      return undefined;
+    }
+
     const controller = new AbortController();
     let active = true;
     setBenchmark(null);
@@ -426,7 +433,7 @@ export function PortfolioPerformanceSection({
       active = false;
       controller.abort();
     };
-  }, [range, benchmarkId]);
+  }, [range, benchmarkId, holdingsCount]);
 
   const performanceStatus = getStatusMeta(performance?.status);
   const coverage = performance?.valuationCoverage;
@@ -608,7 +615,7 @@ export function PortfolioPerformanceSection({
                 <h4>Chỉ số tham chiếu</h4>
                 <p>Chuỗi ngày chung và Base100 do backend xác định.</p>
               </div>
-              <div className="performance-benchmark-selector" aria-label="Chọn chỉ số tham chiếu">
+              {holdingsCount > 0 && <div className="performance-benchmark-selector" aria-label="Chọn chỉ số tham chiếu">
                 {BENCHMARK_OPTIONS.map((option) => (
                   <button
                     type="button"
@@ -620,28 +627,35 @@ export function PortfolioPerformanceSection({
                     {option.label}
                   </button>
                 ))}
-              </div>
+              </div>}
             </div>
 
-            {isSp500 && (
+            {holdingsCount === 0 && (
+              <div className="performance-semantic-state">
+                <strong>Chỉ số tham chiếu không áp dụng</strong>
+                <span>Danh mục chỉ có tiền mặt nên không tạo so sánh hiệu suất với chỉ số thị trường.</span>
+              </div>
+            )}
+
+            {holdingsCount > 0 && isSp500 && (
               <div className="performance-reference-notice">
                 <span>USD</span>
                 <p><strong>S&P 500 là đường tham chiếu nguyên bản.</strong> Chỉ số được hiển thị theo USD, chưa điều chỉnh sang VND vì chưa có dữ liệu tỷ giá lịch sử.</p>
               </div>
             )}
 
-            {benchmarkLoading && !benchmark && (
+            {holdingsCount > 0 && benchmarkLoading && !benchmark && (
               <div className="performance-benchmark-loading skeleton-shimmer" aria-hidden="true" />
             )}
 
-            {benchmarkError && (
+            {holdingsCount > 0 && benchmarkError && (
               <div className="performance-semantic-state performance-benchmark-error">
                 <strong>Dữ liệu chỉ số tạm thời chưa khả dụng</strong>
                 <span>Hiệu suất danh mục phía trên vẫn được giữ nguyên và có thể sử dụng.</span>
               </div>
             )}
 
-            {benchmark && !benchmarkError && (
+            {holdingsCount > 0 && benchmark && !benchmarkError && (
               <>
                 {benchmarkLoading && <div className="performance-refresh-line skeleton-shimmer" />}
                 <div className="performance-benchmark-meta-row">

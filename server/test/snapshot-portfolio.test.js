@@ -1,7 +1,7 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { normalizeMarketSnapshot } from '../src/market.js';
-import { calculatePortfolioValuation } from '../src/portfolio.js';
+import { calculatePortfolioValuation, getPortfolioOverview } from '../src/portfolio.js';
 
 describe('Market Snapshot Integrity (Patch A & A2)', () => {
 
@@ -181,6 +181,69 @@ describe('Market Snapshot Integrity (Patch A & A2)', () => {
 });
 
 describe('Portfolio Valuation Integrity (Patch A & A2)', () => {
+
+  test('P0.2 missing or malformed cash is unavailable and never fabricated as zero', () => {
+    for (const profile of [null, {}, { cash_available: null }, { cash_available: 'bad' }]) {
+      const result = calculatePortfolioValuation(profile, [], {});
+      assert.equal(result.summary.cashAvailable, null);
+      assert.equal(result.summary.cashStatus, 'unavailable');
+      assert.equal(result.summary.cashReason, 'AUTHORITATIVE_CASH_UNAVAILABLE');
+      assert.equal(result.summary.totalPortfolioValue, null);
+      assert.equal(result.summary.valuationStatus, 'partial');
+    }
+
+    const confirmedZero = calculatePortfolioValuation({ cash_available: 0 }, [], {});
+    assert.equal(confirmedZero.summary.cashAvailable, 0);
+    assert.equal(confirmedZero.summary.cashStatus, 'available');
+    assert.equal(confirmedZero.summary.totalPortfolioValue, 0);
+    assert.equal(confirmedZero.summary.valuationStatus, 'complete');
+  });
+
+  test('P0.2 portfolio overview remains truthful and partial when cash authority fails', async () => {
+    const result = await getPortfolioOverview({
+      getCashOverviewFn: async () => {
+        throw new Error('cash authority unavailable');
+      },
+      getHoldingsFn: async () => [],
+      getMarketSnapshotFn: async () => {
+        throw new Error('cash-only overview must not fetch prices');
+      }
+    });
+
+    assert.equal(result.summary.cashAvailable, null);
+    assert.equal(result.summary.cashStatus, 'unavailable');
+    assert.equal(result.summary.totalPortfolioValue, null);
+    assert.equal(result.summary.valuationStatus, 'partial');
+  });
+
+  test('P0.2 stale provider price remains displayable but is never labelled current', () => {
+    const result = calculatePortfolioValuation(
+      { cash_available: 1_000 },
+      [{
+        id: 'h-stale',
+        quantity: 2,
+        average_cost: 80,
+        asset: { symbol: 'FPT', quote_currency: 'VND' }
+      }],
+      {
+        FPT: {
+          price: 100,
+          priceAsOf: '2026-08-20T08:00:00.000Z',
+          freshness: 'stale',
+          cacheStatus: 'stale'
+        }
+      }
+    );
+
+    assert.equal(result.holdings[0].marketValue, 200);
+    assert.equal(result.holdings[0].valuationStatus, 'stale');
+    assert.equal(result.holdings[0].valuationReason, 'STALE_MARKET_PRICE');
+    assert.equal(result.holdings[0].marketFreshness, 'stale');
+    assert.equal(result.summary.totalMarketValue, 200);
+    assert.equal(result.summary.totalPortfolioValue, 1_200);
+    assert.equal(result.summary.valuationStatus, 'stale');
+    assert.equal(result.summary.pnlCoverageStatus, 'stale');
+  });
 
   test('1. Valid priced holding math calculates full precision marketValue, PnL, PnL%', () => {
     const profile = { cash_available: 50000000 };

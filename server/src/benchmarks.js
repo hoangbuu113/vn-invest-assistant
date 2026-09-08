@@ -366,6 +366,12 @@ async function getBenchmarkHistory(def, fromDateKey, toDateKey, now, options = {
  */
 export function portfolioTwrIsValid(performance) {
   if (!performance) return { valid: false, reason: 'PORTFOLIO_PERFORMANCE_UNAVAILABLE' };
+  if (performance.benchmarkEligibility?.status === 'not_applicable') {
+    return {
+      valid: false,
+      reason: performance.benchmarkEligibility.reason || 'BENCHMARK_NOT_APPLICABLE'
+    };
+  }
   if (performance.valuationCoverage && performance.valuationCoverage.status !== 'complete') {
     return {
       valid: false,

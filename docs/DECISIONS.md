@@ -459,3 +459,11 @@ $$\text{Source Adapter} \longrightarrow \text{Canonical Validation / Sanitizatio
 - For tracked-cash BUY/SELL, the linked portfolio transaction `executedAt` is the economic time for both the position and matching cash effect. `createdAt` remains the system recording/audit time and is never backdated.
 - Historical reconstruction derives linked BUY/SELL cash timing from the immutable `portfolio_transaction_id` relationship. Missing, duplicate, profile-mismatched, or type-mismatched linkage is ambiguous and must fail closed; immutable historical rows are not rewritten.
 - `assets.portfolio_eligibility` is the canonical Portfolio capability. Current investable stocks, ETFs, funds, Gold, and Crypto are `PORTFOLIO_ELIGIBLE`; `USD/VND` is `REFERENCE_ONLY`. The server boundary and database triggers both enforce this rule.
+
+### I. P0.2 Data Correctness
+- Authoritative cash is a valid finite non-negative ledger result or it is unavailable; absent, malformed, non-finite, and negative values never normalize to zero. Confirmed zero remains valid.
+- Portfolio total value and allocation weights require authoritative cash. When cash is unavailable, priced-holding values may remain visible but total portfolio value and cash-inclusive weights remain null with partial/unavailable state.
+- XIRR remains an annualized secondary metric and requires at least 365 calendar days between first and terminal aggregated cash flows. Shorter history is `INSUFFICIENT_HISTORY`; ambiguous/no-root cases are unavailable, never zero.
+- Historical valuation marks may carry only across calendar dates that the canonical asset market policy identifies as weekend non-trading dates. A prior close cannot cross a missing expected trading session or a continuous-market date and remain performance-eligible.
+- Historical stale marks may remain inspectable as last-known observations, but cannot enter performance TWR, MWR, drawdown, or historical end-period unrealized P/L. Current stale snapshots may retain displayable valuation/P/L only with explicit stale state.
+- A cash-only portfolio requires no market-history acquisition. Cash and total remain valid when authoritative cash exists; invested value is zero, concentration and benchmark comparison are not applicable, and annualized MWR remains unavailable until sufficient history exists.

@@ -51,6 +51,7 @@ function formatPercentVN(val) {
 const COVERAGE_CONFIG = {
   complete: { text: 'Định giá đầy đủ', badgeClass: 'badge-gain' },
   partial: { text: 'Định giá một phần', badgeClass: 'badge-warn' },
+  stale: { text: 'Giá trị gần nhất đã cũ', badgeClass: 'badge-warn' },
   unavailable: { text: 'Chưa có đủ dữ liệu giá', badgeClass: 'badge-neutral' },
   not_applicable: { text: 'Chưa có tài sản', badgeClass: 'badge-neutral' }
 };

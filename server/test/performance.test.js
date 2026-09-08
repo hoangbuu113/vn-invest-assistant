@@ -4,8 +4,11 @@ import {
   calculatePortfolioPerformance,
   calendarDaysDifference,
   determineAuthorityStart,
+  generateDateSpan,
   getPerformanceCalendarWindow,
   getPerformanceRangeStart,
+  getPortfolioPerformance,
+  getValuationMark,
   reconstructCashBalance,
   reconstructHoldingsState,
   resolveCashEntryEconomicTimestamp,
@@ -25,7 +28,8 @@ describe('Feature 25B — VND Portfolio Performance Engine', () => {
     quoteCurrency: 'VND',
     quote_currency: 'VND',
     assetType: 'stock',
-    exchange: 'HOSE'
+    exchange: 'HOSE',
+    marketPolicy: 'VN_EXCHANGE'
   };
 
   const assetVcb = {
@@ -35,7 +39,8 @@ describe('Feature 25B — VND Portfolio Performance Engine', () => {
     quoteCurrency: 'VND',
     quote_currency: 'VND',
     assetType: 'stock',
-    exchange: 'HOSE'
+    exchange: 'HOSE',
+    marketPolicy: 'VN_EXCHANGE'
   };
 
   const assetBtc = {
@@ -45,10 +50,20 @@ describe('Feature 25B — VND Portfolio Performance Engine', () => {
     quoteCurrency: 'USD',
     quote_currency: 'USD',
     assetType: 'crypto',
-    exchange: null
+    exchange: null,
+    marketPolicy: 'CONTINUOUS_24_7'
   };
 
   const fixedNow = new Date('2026-08-29T10:00:00.000Z'); // Today is 2026-08-29 in Asia/Ho_Chi_Minh
+
+  function buildVnTradingBars(startDateKey, endDateKey, closeForDate) {
+    return generateDateSpan(startDateKey, endDateKey)
+      .filter((dateKey) => {
+        const day = new Date(`${dateKey}T00:00:00.000Z`).getUTCDay();
+        return day !== 0 && day !== 6;
+      })
+      .map((dateKey) => ({ date: dateKey, close: closeForDate(dateKey) }));
+  }
 
   // --------------------------------------------------
   // ORACLE 1 — ONE YEAR NO FLOW
@@ -69,10 +84,11 @@ describe('Feature 25B — VND Portfolio Performance Engine', () => {
     }];
 
     const priceHistoryMap = {
-      FPT: [
-        { date: '2025-08-28', close: 100 },
-        { date: '2026-08-28', close: 110 }
-      ]
+      FPT: buildVnTradingBars(
+        '2025-08-28',
+        '2026-08-28',
+        (dateKey) => dateKey === '2026-08-28' ? 110 : 100
+      )
     };
 
     const result = calculatePortfolioPerformance({
@@ -96,7 +112,7 @@ describe('Feature 25B — VND Portfolio Performance Engine', () => {
   // --------------------------------------------------
   // ORACLE 2 — 30 DAY NO FLOW
   // --------------------------------------------------
-  it('ORACLE 2: 30-day no-flow portfolio (100 -> 110 over 30 days)', () => {
+  it('ORACLE 2: 30-day TWR remains valid but MWR is not annualized', () => {
     const positionBaselines = [{
       assetId: assetFpt.id,
       openingQuantity: 1,
@@ -106,10 +122,11 @@ describe('Feature 25B — VND Portfolio Performance Engine', () => {
     }];
 
     const priceHistoryMap = {
-      FPT: [
-        { date: '2026-07-29', close: 100 },
-        { date: '2026-08-28', close: 110 }
-      ]
+      FPT: buildVnTradingBars(
+        '2026-07-29',
+        '2026-08-28',
+        (dateKey) => dateKey === '2026-08-28' ? 110 : 100
+      )
     };
 
     const result = calculatePortfolioPerformance({
@@ -127,9 +144,9 @@ describe('Feature 25B — VND Portfolio Performance Engine', () => {
     assert.equal(result.twr.status, 'available');
     assert.ok(Math.abs(result.twr.returnPct - 10.0) < 1e-4);
 
-    const expectedXirrAnnualized = (Math.pow(1.10, 365 / 30) - 1.0) * 100.0;
-    assert.equal(result.mwr.status, 'available');
-    assert.ok(Math.abs(result.mwr.annualizedReturnPct - expectedXirrAnnualized) < 1e-2);
+    assert.equal(result.mwr.status, 'insufficient_data');
+    assert.equal(result.mwr.annualizedReturnPct, null);
+    assert.equal(result.mwr.reason, 'INSUFFICIENT_HISTORY');
   });
 
   // --------------------------------------------------
@@ -353,7 +370,12 @@ describe('Feature 25B — VND Portfolio Performance Engine', () => {
       positionBaselines: [],
       transactions: [transaction],
       assets: [assetFpt],
-      priceHistoryMap: { FPT: [{ date: '2026-08-25', close: 40 }] }
+      priceHistoryMap: { FPT: [
+        { date: '2026-08-25', close: 40 },
+        { date: '2026-08-26', close: 40 },
+        { date: '2026-08-27', close: 40 },
+        { date: '2026-08-28', close: 40 }
+      ] }
     });
 
     assert.deepEqual(result.series.map((point) => point.portfolioValueVnd), [100, 100, 100, 100]);
@@ -633,7 +655,7 @@ describe('Feature 25B — VND Portfolio Performance Engine', () => {
       { dateKey: '2026-01-01', amount: -100 },
       { dateKey: '2026-06-01', amount: -10 },
       { dateKey: '2026-06-01', amount: 4 }, // Net = -6
-      { dateKey: '2026-12-31', amount: 120 }
+      { dateKey: '2027-01-01', amount: 120 }
     ];
 
     const result = solveXirr(flows);
@@ -649,7 +671,7 @@ describe('Feature 25B — VND Portfolio Performance Engine', () => {
       { dateKey: '2026-01-01', amount: -100 },
       { dateKey: '2026-04-01', amount: 50 },
       { dateKey: '2026-08-01', amount: -60 },
-      { dateKey: '2026-12-31', amount: 80 }
+      { dateKey: '2027-01-01', amount: 80 }
     ];
 
     const result = solveXirr(ambiguousFlows);
@@ -1034,10 +1056,9 @@ describe('Feature 25B — VND Portfolio Performance Engine', () => {
     assert.equal(result.twr.status, 'available');
     assert.ok(Math.abs(result.twr.returnPct) < 1e-6);
 
-    assert.equal(result.mwr.status, 'available');
-    // Terminal investor cash flow = 80 (ending portfolio) - (-20 NetExternalFlow) = 100
-    // Start CF = -100, End CF = +100 -> MWR = 0%
-    assert.ok(Math.abs(result.mwr.annualizedReturnPct) < 1e-6);
+    assert.equal(result.mwr.status, 'insufficient_data');
+    assert.equal(result.mwr.annualizedReturnPct, null);
+    assert.equal(result.mwr.reason, 'INSUFFICIENT_HISTORY');
   });
 
   it('REPAIR BOUNDARY: Terminal deposit on actualEndDate is correctly aggregated into terminal MWR cash flow', () => {
@@ -1071,10 +1092,9 @@ describe('Feature 25B — VND Portfolio Performance Engine', () => {
     assert.equal(result.twr.status, 'available');
     assert.ok(Math.abs(result.twr.returnPct) < 1e-6);
 
-    assert.equal(result.mwr.status, 'available');
-    // Terminal investor cash flow = 120 (ending portfolio) - (+20 NetExternalFlow) = 100
-    // Start CF = -100, End CF = +100 -> MWR = 0%
-    assert.ok(Math.abs(result.mwr.annualizedReturnPct) < 1e-6);
+    assert.equal(result.mwr.status, 'insufficient_data');
+    assert.equal(result.mwr.annualizedReturnPct, null);
+    assert.equal(result.mwr.reason, 'INSUFFICIENT_HISTORY');
   });
 
   it('REPAIR BOUNDARY: Start-date external flow is embedded in V_start and not double-counted', () => {
@@ -1107,8 +1127,9 @@ describe('Feature 25B — VND Portfolio Performance Engine', () => {
     assert.equal(result.series[0].portfolioValueVnd, 100);
     assert.equal(result.twr.status, 'available');
     assert.ok(Math.abs(result.twr.returnPct) < 1e-6);
-    assert.equal(result.mwr.status, 'available');
-    assert.ok(Math.abs(result.mwr.annualizedReturnPct) < 1e-6);
+    assert.equal(result.mwr.status, 'insufficient_data');
+    assert.equal(result.mwr.annualizedReturnPct, null);
+    assert.equal(result.mwr.reason, 'INSUFFICIENT_HISTORY');
   });
 
   it('REPAIR BOUNDARY: realizedPnlDuringPeriod strictly includes SELLs over (actualStartDate, actualEndDate]', () => {
@@ -1170,5 +1191,85 @@ describe('Feature 25B — VND Portfolio Performance Engine', () => {
     assert.equal(result.pnl.realizedPnlDuringPeriod, 20);
     // cumulativeRealizedPnlToEnd includes both SELL A and SELL B (10 + 20 = 30)
     assert.equal(result.pnl.cumulativeRealizedPnlToEnd, 30);
+  });
+
+  it('P0.2: cadence permits Friday weekend carry but rejects an old close on the next trading day', () => {
+    const friday = getValuationMark(
+      assetFpt,
+      '2026-08-23',
+      { FPT: [{ date: '2026-08-21', close: 100 }] }
+    );
+    assert.equal(friday.isEligible, true);
+    assert.equal(friday.isCarriedForward, true);
+    assert.equal(friday.isStale, false);
+
+    const monday = getValuationMark(
+      assetFpt,
+      '2026-08-24',
+      { FPT: [{ date: '2026-08-21', close: 100 }] }
+    );
+    assert.equal(monday.price, 100);
+    assert.equal(monday.priceDate, '2026-08-21');
+    assert.equal(monday.isEligible, false);
+    assert.equal(monday.isStale, true);
+    assert.equal(monday.reason, 'STALE_VALUATION_MARK');
+  });
+
+  it('P0.2: stale market prices do not enter TWR, MWR, drawdown, or end P/L', () => {
+    const result = calculatePortfolioPerformance({
+      range: '1W',
+      now: new Date('2026-08-25T10:00:00.000Z'),
+      cashActivation: { openingBalanceAmount: 0, activatedAt: '2026-08-21T09:00:00.000Z' },
+      cashEntries: [],
+      positionBaselines: [{
+        assetId: assetFpt.id,
+        openingQuantity: 1,
+        openingAverageCost: 100,
+        accountingCutoffAt: '2026-08-21T09:00:00.000Z',
+        cancelledAt: null
+      }],
+      transactions: [],
+      assets: [assetFpt],
+      priceHistoryMap: { FPT: [{ date: '2026-08-21', close: 100 }] }
+    });
+
+    assert.equal(result.status, 'partial');
+    assert.ok(result.valuationCoverage.reasons.includes('STALE_VALUATION_MARK'));
+    assert.equal(result.twr.returnPct, null);
+    assert.equal(result.mwr.annualizedReturnPct, null);
+    assert.equal(result.drawdown.maxDrawdownPct, null);
+    assert.equal(result.pnl.unrealizedPnlAtEnd, null);
+  });
+
+  it('P0.2: cash-only performance makes zero market-provider requests', async () => {
+    let historyCalls = 0;
+    const result = await getPortfolioPerformance({
+      range: '1W',
+      now: fixedNow,
+      client: {},
+      getCashActivationFn: async () => ({ openingBalanceAmount: 100, activatedAt: '2026-08-21T09:00:00.000Z' }),
+      getCashLedgerFn: async () => [],
+      getPositionOpeningBaselinesFn: async () => [],
+      getPortfolioTransactionsFn: async () => [],
+      getAssetsFn: async () => [assetFpt, assetVcb, assetBtc],
+      getMarketHistoryFn: async () => {
+        historyCalls += 1;
+        throw new Error('cash-only path must not call a market provider');
+      }
+    });
+
+    assert.equal(historyCalls, 0);
+    assert.equal(result.status, 'available');
+    assert.equal(result.series.at(-1).portfolioValueVnd, 100);
+    assert.equal(result.twr.returnPct, 0);
+    assert.equal(result.mwr.status, 'insufficient_data');
+    assert.equal(result.mwr.annualizedReturnPct, null);
+    assert.equal(result.mwr.reason, 'INSUFFICIENT_HISTORY');
+    assert.equal(result.drawdown.maxDrawdownPct, 0);
+    assert.equal(result.benchmark, undefined);
+    assert.deepEqual(result.benchmarkEligibility, {
+      status: 'not_applicable',
+      reason: 'CASH_ONLY_PORTFOLIO'
+    });
   });
 });

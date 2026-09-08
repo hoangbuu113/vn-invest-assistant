@@ -45,7 +45,8 @@ export function calculatePortfolioComposition(portfolioOverview) {
   }
 
   const cashValue = portfolioOverview.summary?.cashAvailable;
-  if (typeof cashValue !== 'number' || !Number.isFinite(cashValue) || cashValue < 0) {
+  const cashAvailable = typeof cashValue === 'number' && Number.isFinite(cashValue) && cashValue >= 0;
+  if (cashValue !== null && cashValue !== undefined && !cashAvailable) {
     throw new TypeError('Portfolio overview cashAvailable must be a finite non-negative number');
   }
 
@@ -65,7 +66,7 @@ export function calculatePortfolioComposition(portfolioOverview) {
     const hasValidMarketValue = typeof reportingMarketValue === 'number'
       && Number.isFinite(reportingMarketValue)
       && reportingMarketValue >= 0;
-    const isPriced = reportingValuationStatus === 'available' && hasValidMarketValue;
+    const isPriced = ['available', 'stale'].includes(reportingValuationStatus) && hasValidMarketValue;
 
     return {
       id: holding?.id ?? null,
@@ -76,16 +77,17 @@ export function calculatePortfolioComposition(portfolioOverview) {
       marketValue: isPriced ? reportingMarketValue : null,
       weightPct: null,
       isPriced,
-      pricingStatus: isPriced ? 'available' : 'unavailable'
+      pricingStatus: isPriced ? reportingValuationStatus : 'unavailable'
     };
   });
 
   const pricedHoldings = holdingAllocations.filter((holding) => holding.isPriced);
+  const hasStalePricing = pricedHoldings.some((holding) => holding.pricingStatus === 'stale');
   const pricedHoldingsMarketValue = pricedHoldings.reduce(
     (sum, holding) => sum + holding.marketValue,
     0
   );
-  const knownAllocationValue = cashValue + pricedHoldingsMarketValue;
+  const knownAllocationValue = cashAvailable ? cashValue + pricedHoldingsMarketValue : null;
 
   const totalHoldingsCount = holdingAllocations.length;
   const pricedHoldingsCount = pricedHoldings.length;
@@ -93,10 +95,12 @@ export function calculatePortfolioComposition(portfolioOverview) {
   const hasHoldings = totalHoldingsCount > 0;
 
   let valuationCoverageLevel;
-  if (!hasHoldings) {
+  if (!cashAvailable) {
+    valuationCoverageLevel = pricedHoldingsCount > 0 ? 'partial' : 'unavailable';
+  } else if (!hasHoldings) {
     valuationCoverageLevel = 'not_applicable';
   } else if (pricedHoldingsCount === totalHoldingsCount) {
-    valuationCoverageLevel = 'complete';
+    valuationCoverageLevel = hasStalePricing ? 'stale' : 'complete';
   } else if (pricedHoldingsCount > 0) {
     valuationCoverageLevel = 'partial';
   } else {
@@ -104,7 +108,9 @@ export function calculatePortfolioComposition(portfolioOverview) {
   }
 
   let allocationBasis;
-  if (!hasHoldings) {
+  if (!cashAvailable) {
+    allocationBasis = 'cash_unavailable';
+  } else if (!hasHoldings) {
     allocationBasis = cashValue > 0 ? 'cash_only' : 'no_known_value';
   } else if (unpricedHoldingsCount > 0) {
     allocationBasis = 'known_value_only';
@@ -112,16 +118,18 @@ export function calculatePortfolioComposition(portfolioOverview) {
     allocationBasis = 'full_portfolio_value';
   }
 
-  const allocationStatus = knownAllocationValue > 0 ? 'available' : 'unavailable';
-  const cashWeightPct = knownAllocationValue > 0
+  const allocationStatus = cashAvailable && knownAllocationValue > 0
+    ? (hasStalePricing ? 'stale' : 'available')
+    : 'unavailable';
+  const cashWeightPct = cashAvailable && knownAllocationValue > 0
     ? (cashValue / knownAllocationValue) * 100
     : null;
-  const pricedAssetsWeightPct = knownAllocationValue > 0
+  const pricedAssetsWeightPct = cashAvailable && knownAllocationValue > 0
     ? (pricedHoldingsMarketValue / knownAllocationValue) * 100
     : null;
 
   for (const holding of holdingAllocations) {
-    if (holding.isPriced && knownAllocationValue > 0) {
+    if (holding.isPriced && cashAvailable && knownAllocationValue > 0) {
       holding.weightPct = (holding.marketValue / knownAllocationValue) * 100;
     }
   }
@@ -145,7 +153,7 @@ export function calculatePortfolioComposition(portfolioOverview) {
 
   const assetTypeGroups = Array.from(assetTypeMap.values());
   for (const group of assetTypeGroups) {
-    if (knownAllocationValue > 0) {
+    if (cashAvailable && knownAllocationValue > 0) {
       group.weightPct = (group.marketValue / knownAllocationValue) * 100;
     }
   }
@@ -170,7 +178,7 @@ export function calculatePortfolioComposition(portfolioOverview) {
     : null;
 
   const top3Holdings = sortedPricedHoldings.slice(0, 3);
-  const top3HoldingsWeightPct = top3Holdings.length > 0 && knownAllocationValue > 0
+  const top3HoldingsWeightPct = top3Holdings.length > 0 && cashAvailable && knownAllocationValue > 0
     ? (top3Holdings.reduce((sum, holding) => sum + holding.marketValue, 0) / knownAllocationValue) * 100
     : null;
 
@@ -183,6 +191,7 @@ export function calculatePortfolioComposition(portfolioOverview) {
     allocationBasis,
     allocationStatus,
     cashValue,
+    cashStatus: cashAvailable ? 'available' : 'unavailable',
     pricedHoldingsMarketValue,
     knownAllocationValue,
     cashWeightPct,

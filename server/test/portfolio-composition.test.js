@@ -69,6 +69,36 @@ describe('Feature 10 — Portfolio Composition & Concentration', () => {
     assert.equal(result.top3HoldingsWeightPct, null);
   });
 
+  test('P0.2 unavailable cash cannot become a zero-valued allocation denominator', () => {
+    const result = calculatePortfolioComposition(makeOverview(null, []));
+
+    assert.equal(result.cashValue, null);
+    assert.equal(result.cashStatus, 'unavailable');
+    assert.equal(result.knownAllocationValue, null);
+    assert.equal(result.allocationBasis, 'cash_unavailable');
+    assert.equal(result.allocationStatus, 'unavailable');
+    assert.equal(result.cashWeightPct, null);
+    assert.equal(result.pricedAssetsWeightPct, null);
+    assert.equal(result.largestHolding, null);
+    assert.equal(result.top3HoldingsWeightPct, null);
+  });
+
+  test('P0.2 stale priced holdings stay displayable with stale allocation state', () => {
+    const overview = makeOverview(20, [{
+      ...makeHolding({ id: 'h1', assetId: 'a1', symbol: 'FPT', marketValue: 80 }),
+      pricingStatus: 'stale',
+      valuationStatus: 'stale'
+    }]);
+    const result = calculatePortfolioComposition(overview);
+
+    assert.equal(result.knownAllocationValue, 100);
+    assert.equal(result.holdingAllocations[0].marketValue, 80);
+    assert.equal(result.holdingAllocations[0].pricingStatus, 'stale');
+    assert.equal(result.holdingAllocations[0].weightPct, 80);
+    assert.equal(result.valuationCoverageLevel, 'stale');
+    assert.equal(result.allocationStatus, 'stale');
+  });
+
   test('C. One priced holding produces exact allocation and concentration values', () => {
     const overview = makeOverview(25, [
       makeHolding({ id: 'h1', assetId: 'a1', symbol: 'FPT', marketValue: 75 })

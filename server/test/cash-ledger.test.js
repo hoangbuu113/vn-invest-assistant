@@ -9,7 +9,8 @@ import {
   CASH_LEDGER_METHODOLOGY,
   createCashMovement,
   getCashLedger,
-  getCashOverview
+  getCashOverview,
+  normalizeCashOverview
 } from '../src/cash.js';
 import { getPortfolioOverview } from '../src/portfolio.js';
 import { updateInvestorProfile } from '../src/supabase.js';
@@ -20,6 +21,28 @@ const FOREIGN_PROFILE_ID = '22222222-2222-4222-8222-222222222222';
 const ASSET_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const ACTIVATED_AT = '2026-08-28T12:00:00.000Z';
 import { ownerFetch, TEST_OWNER_ACCESS_TOKEN as OWNER_ACCESS_TOKEN } from './helpers/owner-auth.js';
+
+test('P0.2 cash overview rejects missing or malformed authoritative cash but preserves confirmed zero', () => {
+  const base = {
+    opening_balance: 0,
+    total_deposits: 0,
+    total_withdrawals: 0,
+    buy_outflows: 0,
+    sell_inflows: 0,
+    entry_count: 0,
+    ledger_start_at: null
+  };
+
+  for (const currentCash of [null, undefined, '', false, {}, [], -1]) {
+    assert.throws(
+      () => normalizeCashOverview({ ...base, current_cash: currentCash }),
+      /invalid current cash/
+    );
+  }
+
+  assert.equal(normalizeCashOverview({ ...base, current_cash: 0 }).currentCash, 0);
+  assert.equal(normalizeCashOverview({ ...base, current_cash: '0' }).currentCash, 0);
+});
 
 function cloneRows(rows) {
   return rows.map(row => ({

@@ -2,7 +2,7 @@ import React from 'react';
 import { buildPortfolioOnboardingViewModel } from '../utils/portfolioOnboarding.js';
 
 export function PortfolioOnboardingGuide({
-  cashAvailable = 0,
+  cashAvailable = null,
   holdingsCount = 0,
   onOpenCashModal,
   onOpenOpeningPositionModal,
@@ -180,4 +180,3 @@ export function PortfolioOnboardingGuide({
 }
 
 export default PortfolioOnboardingGuide;
-

@@ -1,17 +1,24 @@
 import { formatVNDReporting } from './formatting.js';
 
 export const ONBOARDING_STATES = Object.freeze({
+  CASH_UNAVAILABLE: 'CASH_UNAVAILABLE',
   STATE_A: 'NO_CAPITAL_NO_HOLDINGS',
   STATE_B: 'CASH_READY_NO_HOLDINGS',
   STATE_C: 'HOLDINGS_EXIST'
 });
 
-export function deriveOnboardingState({ cashAvailable = 0, holdingsCount = 0 } = {}) {
-  const cash = typeof cashAvailable === 'number' && Number.isFinite(cashAvailable) ? cashAvailable : 0;
+export function deriveOnboardingState({ cashAvailable = null, holdingsCount = 0 } = {}) {
+  const hasAuthoritativeCash = typeof cashAvailable === 'number'
+    && Number.isFinite(cashAvailable)
+    && cashAvailable >= 0;
+  const cash = hasAuthoritativeCash ? cashAvailable : null;
   const count = typeof holdingsCount === 'number' && Number.isFinite(holdingsCount) ? holdingsCount : 0;
 
   if (count > 0) {
     return ONBOARDING_STATES.STATE_C;
+  }
+  if (!hasAuthoritativeCash) {
+    return ONBOARDING_STATES.CASH_UNAVAILABLE;
   }
   if (cash > 0) {
     return ONBOARDING_STATES.STATE_B;
@@ -19,14 +26,29 @@ export function deriveOnboardingState({ cashAvailable = 0, holdingsCount = 0 } =
   return ONBOARDING_STATES.STATE_A;
 }
 
-export function buildPortfolioOnboardingViewModel({ cashAvailable = 0, holdingsCount = 0 } = {}) {
+export function buildPortfolioOnboardingViewModel({ cashAvailable = null, holdingsCount = 0 } = {}) {
   const state = deriveOnboardingState({ cashAvailable, holdingsCount });
-  const cash = typeof cashAvailable === 'number' && Number.isFinite(cashAvailable) ? cashAvailable : 0;
+  const cash = typeof cashAvailable === 'number' && Number.isFinite(cashAvailable) && cashAvailable >= 0
+    ? cashAvailable
+    : null;
 
   if (state === ONBOARDING_STATES.STATE_C) {
     return {
       state,
       shouldRender: false
+    };
+  }
+
+  if (state === ONBOARDING_STATES.CASH_UNAVAILABLE) {
+    return {
+      state,
+      shouldRender: true,
+      badge: 'Dữ liệu chưa khả dụng',
+      title: 'Chưa xác nhận được số dư tiền mặt',
+      formattedCash: null,
+      description: 'Không thể xác định trạng thái khởi tạo danh mục cho đến khi số dư có thẩm quyền được tải thành công.',
+      primaryActions: [],
+      secondaryAction: null
     };
   }
 
@@ -92,8 +114,12 @@ export function buildPortfolioOnboardingViewModel({ cashAvailable = 0, holdingsC
   };
 }
 
-export function getPerformanceEmptyStateGuidance({ cashAvailable = 0, holdingsCount = 0 } = {}) {
+export function getPerformanceEmptyStateGuidance({ cashAvailable = null, holdingsCount = 0 } = {}) {
   const state = deriveOnboardingState({ cashAvailable, holdingsCount });
+
+  if (state === ONBOARDING_STATES.CASH_UNAVAILABLE) {
+    return 'Chưa thể xác định hiệu suất vì số dư tiền mặt có thẩm quyền hiện không khả dụng.';
+  }
 
   if (state === ONBOARDING_STATES.STATE_B) {
     return 'Bạn đã có tiền mặt. Hãy ghi giao dịch mua hoặc khai báo vị thế để bắt đầu theo dõi hiệu suất.';
@@ -103,4 +129,3 @@ export function getPerformanceEmptyStateGuidance({ cashAvailable = 0, holdingsCo
   }
   return 'Hiệu suất sẽ xuất hiện sau khi danh mục có dữ liệu để theo dõi.';
 }
-

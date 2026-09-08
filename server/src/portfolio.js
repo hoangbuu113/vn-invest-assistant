@@ -38,6 +38,10 @@ function providerCurrencyMismatch(snapshot, canonicalCurrency) {
   return snapshot.currency.trim().toUpperCase() !== canonicalCurrency;
 }
 
+function snapshotPriceIsStale(snapshot) {
+  return snapshot?.freshness === 'stale' || snapshot?.cacheStatus === 'stale';
+}
+
 function fxRateForCurrency(fxRatesMap, currency) {
   if (fxRatesMap instanceof Map) return fxRatesMap.get(currency);
   return fxRatesMap && typeof fxRatesMap === 'object' ? fxRatesMap[currency] : null;
@@ -59,7 +63,8 @@ function fxRateForCurrency(fxRatesMap, currency) {
  *    and expose valuation and P/L coverage independently.
  */
 export function calculatePortfolioValuation(profile, holdings, snapshotsMap = {}, fxRatesMap = {}) {
-  const cashAvailable = profile ? normalizeNonNegativeFinancialNumber(profile.cash_available) ?? 0 : 0;
+  const cashAvailable = profile ? normalizeNonNegativeFinancialNumber(profile.cash_available) : null;
+  const cashStatus = cashAvailable === null ? 'unavailable' : 'available';
 
   const holdingsWithMarket = (Array.isArray(holdings) ? holdings : []).map((holding) => {
     const quantity = normalizeNonNegativeFinancialNumber(holding.quantity);
@@ -77,6 +82,8 @@ export function calculatePortfolioValuation(profile, holdings, snapshotsMap = {}
     let unrealizedPnL = null;
     let unrealizedPnLPercent = null;
     let marketUpdatedAt = null;
+    let marketFreshness = null;
+    let marketCacheStatus = null;
     let pricingStatus = 'unavailable';
     let valuationStatus = 'unavailable';
     let valuationReason = 'MISSING_NATIVE_PRICE';
@@ -103,6 +110,8 @@ export function calculatePortfolioValuation(profile, holdings, snapshotsMap = {}
       nativePrice = snapshot.price;
       latestPrice = nativePrice;
       marketUpdatedAt = snapshot.priceAsOf || snapshot.updatedAt || null;
+      marketFreshness = snapshot.freshness || null;
+      marketCacheStatus = snapshot.cacheStatus || null;
     }
 
     if (quantity === null) {
@@ -134,11 +143,12 @@ export function calculatePortfolioValuation(profile, holdings, snapshotsMap = {}
       nativeMarketValue = quantity * nativePrice;
 
       if (nativeCurrency === REPORTING_CURRENCY) {
+        const isStale = snapshotPriceIsStale(snapshot);
         reportingMarketValue = nativeMarketValue;
         marketValue = reportingMarketValue;
-        pricingStatus = 'available';
-        valuationStatus = 'available';
-        valuationReason = null;
+        pricingStatus = isStale ? 'stale' : 'available';
+        valuationStatus = isStale ? 'stale' : 'available';
+        valuationReason = isStale ? 'STALE_MARKET_PRICE' : null;
 
         if (averageCost === null) {
           costBasis = null;
@@ -148,8 +158,8 @@ export function calculatePortfolioValuation(profile, holdings, snapshotsMap = {}
           costBasis = nativeCostBasis;
           unrealizedPnL = reportingMarketValue - costBasis;
           unrealizedPnLPercent = costBasis > 0 ? (unrealizedPnL / costBasis) * 100 : null;
-          pnlStatus = 'available';
-          pnlReason = null;
+          pnlStatus = isStale ? 'stale' : 'available';
+          pnlReason = isStale ? 'STALE_MARKET_PRICE' : null;
         }
       } else {
         const fxRate = normalizeFxRate(
@@ -163,11 +173,12 @@ export function calculatePortfolioValuation(profile, holdings, snapshotsMap = {}
         fxFreshness = fxRate.freshness;
 
         if (fxRate.availability === 'available') {
+          const isStale = snapshotPriceIsStale(snapshot) || fxRate.freshness === 'stale';
           reportingMarketValue = nativeMarketValue * fxRate.rate;
           marketValue = reportingMarketValue;
-          pricingStatus = 'available';
-          valuationStatus = 'available';
-          valuationReason = null;
+          pricingStatus = isStale ? 'stale' : 'available';
+          valuationStatus = isStale ? 'stale' : 'available';
+          valuationReason = isStale ? 'STALE_PRICE_OR_FX' : null;
 
           if (averageCost === null) {
             costBasis = null;
@@ -177,8 +188,8 @@ export function calculatePortfolioValuation(profile, holdings, snapshotsMap = {}
             costBasis = nativeCostBasis;
             unrealizedPnL = reportingMarketValue - costBasis;
             unrealizedPnLPercent = costBasis > 0 ? (unrealizedPnL / costBasis) * 100 : null;
-            pnlStatus = 'available';
-            pnlReason = null;
+            pnlStatus = isStale ? 'stale' : 'available';
+            pnlReason = isStale ? 'STALE_PRICE_OR_FX' : null;
           }
         } else {
           reportingMarketValue = null;
@@ -217,6 +228,8 @@ export function calculatePortfolioValuation(profile, holdings, snapshotsMap = {}
       unrealizedPnL: unrealizedPnL,
       unrealizedPnLPercent: unrealizedPnLPercent,
       marketUpdatedAt: marketUpdatedAt,
+      marketFreshness,
+      marketCacheStatus,
       pricingStatus: pricingStatus,
       valuationStatus,
       valuationReason,
@@ -231,21 +244,25 @@ export function calculatePortfolioValuation(profile, holdings, snapshotsMap = {}
   let totalMarketValue = 0;
   let pnlComparableMarketValue = 0;
   let hasUnavailablePricing = false;
-  let availablePnlCount = 0;
+  let hasStalePricing = false;
+  let comparablePnlCount = 0;
+  let hasStalePnl = false;
 
   for (const item of holdingsWithMarket) {
     if (typeof item.costBasis === 'number') {
       totalCostBasis += item.costBasis;
     }
-    if (item.valuationStatus === 'available' && typeof item.reportingMarketValue === 'number') {
+    if (['available', 'stale'].includes(item.valuationStatus) && typeof item.reportingMarketValue === 'number') {
       totalMarketValue += item.reportingMarketValue;
+      if (item.valuationStatus === 'stale') hasStalePricing = true;
     } else {
       hasUnavailablePricing = true;
     }
-    if (item.pnlStatus === 'available') {
+    if (['available', 'stale'].includes(item.pnlStatus)) {
       pricedCostBasis += item.costBasis;
       pnlComparableMarketValue += item.reportingMarketValue;
-      availablePnlCount += 1;
+      comparablePnlCount += 1;
+      if (item.pnlStatus === 'stale') hasStalePnl = true;
     }
   }
 
@@ -254,19 +271,27 @@ export function calculatePortfolioValuation(profile, holdings, snapshotsMap = {}
     ? (totalUnrealizedPnL / pricedCostBasis) * 100
     : null;
 
-  const totalPortfolioValue = cashAvailable + totalMarketValue;
-  const valuationStatus = hasUnavailablePricing ? 'partial' : 'complete';
+  const totalPortfolioValue = cashStatus === 'available'
+    ? cashAvailable + totalMarketValue
+    : null;
+  const valuationStatus = cashStatus === 'unavailable' || hasUnavailablePricing
+    ? 'partial'
+    : hasStalePricing
+      ? 'stale'
+      : 'complete';
   const pnlCoverageStatus = holdingsWithMarket.length === 0
     ? 'not_applicable'
-    : availablePnlCount === holdingsWithMarket.length
-      ? 'complete'
-      : availablePnlCount > 0
+    : comparablePnlCount === holdingsWithMarket.length
+      ? (hasStalePnl ? 'stale' : 'complete')
+      : comparablePnlCount > 0
         ? 'partial'
         : 'unavailable';
 
   return {
     summary: {
       cashAvailable: cashAvailable,
+      cashStatus,
+      cashReason: cashStatus === 'available' ? null : 'AUTHORITATIVE_CASH_UNAVAILABLE',
       reportingCurrency: REPORTING_CURRENCY,
       totalCostBasis: totalCostBasis,
       pricedCostBasis: pricedCostBasis,
@@ -294,7 +319,9 @@ export async function getPortfolioOverview({
   getFxRateFn = getFxRate
 } = {}) {
   const [cashOverview, holdings] = await Promise.all([
-    getCashOverviewFn(undefined, profileId ? { profileId } : {}),
+    Promise.resolve()
+      .then(() => getCashOverviewFn(undefined, profileId ? { profileId } : {}))
+      .catch(() => null),
     getHoldingsFn(undefined, profileId ? { profileId } : {})
   ]);
 
@@ -350,7 +377,7 @@ export async function getPortfolioOverview({
   const fxRatesMap = Object.fromEntries(fxRateEntries);
 
   return calculatePortfolioValuation(
-    { cash_available: cashOverview.currentCash },
+    { cash_available: cashOverview?.currentCash ?? null },
     holdings,
     snapshotsMap,
     fxRatesMap

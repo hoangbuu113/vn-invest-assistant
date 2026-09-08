@@ -118,6 +118,38 @@ function makeBars(entries) {
   return entries.map(([date, close]) => ({ date, close }));
 }
 
+describe('Portfolio V1 P0.2 — cash-only benchmark eligibility', () => {
+  it('returns not applicable before any benchmark provider request', async () => {
+    let providerCalls = 0;
+    const result = await getPortfolioBenchmark({
+      benchmarkId: 'VN_INDEX',
+      range: '1M',
+      now: FIXED_NOW,
+      getPortfolioPerformanceFn: async () => ({
+        ...makePortfolioPerf({
+          series: makeSeries([
+            ['2026-08-27', 100],
+            ['2026-08-28', 100]
+          ])
+        }),
+        benchmarkEligibility: {
+          status: 'not_applicable',
+          reason: 'CASH_ONLY_PORTFOLIO'
+        }
+      }),
+      getYahooHistoryFn: async () => {
+        providerCalls += 1;
+        return [];
+      }
+    });
+
+    assert.equal(result.status, 'unavailable');
+    assert.equal(result.reason, 'CASH_ONLY_PORTFOLIO');
+    assert.equal(result.benchmarkReturnPct, null);
+    assert.equal(providerCalls, 0);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // ORACLE 1 — Identical portfolio + benchmark returns
 // ---------------------------------------------------------------------------

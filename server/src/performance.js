@@ -29,6 +29,8 @@ export const PERFORMANCE_METHODOLOGY = Object.freeze({
   corporateActionsAdjusted: false
 });
 
+const WEEKEND_CARRY_POLICIES = new Set(['VN_EXCHANGE', 'GLOBAL_24_5']);
+
 const DATE_KEY_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
 
 function performanceError(message, code, status = 400) {
@@ -133,6 +135,37 @@ function normalizeTimestampToDateKey(timestamp) {
   return getCanonicalDate(timestamp, PERFORMANCE_TIMEZONE);
 }
 
+function requireAuthoritativeCashNumber(value, field) {
+  const isNumber = typeof value === 'number';
+  const isNumericString = typeof value === 'string' && value.trim().length > 0;
+  const normalized = isNumber ? value : (isNumericString ? Number(value.trim()) : NaN);
+  if (!Number.isFinite(normalized) || normalized < 0) {
+    throw performanceError(
+      `Authoritative ${field} is unavailable`,
+      'AUTHORITATIVE_CASH_UNAVAILABLE',
+      503
+    );
+  }
+  return normalized;
+}
+
+function isWeekendDateKey(dateKey) {
+  const parts = parseDateKey(dateKey);
+  if (!parts) return false;
+  const day = new Date(Date.UTC(parts.year, parts.month - 1, parts.day)).getUTCDay();
+  return day === 0 || day === 6;
+}
+
+function isCadenceEligibleCarryForward(priceDate, targetDate, marketPolicy) {
+  if (!WEEKEND_CARRY_POLICIES.has(marketPolicy) || priceDate >= targetDate) return false;
+  let cursor = addCalendarDays(priceDate, 1);
+  while (cursor <= targetDate) {
+    if (!isWeekendDateKey(cursor)) return false;
+    cursor = addCalendarDays(cursor, 1);
+  }
+  return true;
+}
+
 function cashEntryLinkId(entry) {
   return entry?.portfolioTransactionId
     || entry?.portfolio_transaction_id
@@ -191,16 +224,23 @@ export function resolveCashEntryEconomicTimestamp(entry, transactions = []) {
  * Reconstructs cash balance as of a given calendar date.
  */
 export function reconstructCashBalance(dateKey, cashActivation, cashEntries = [], transactions = []) {
-  if (!cashActivation) return 0;
-  let balance = typeof cashActivation.openingBalanceAmount === 'number'
-    ? cashActivation.openingBalanceAmount
-    : Number(cashActivation.openingBalanceAmount || 0);
+  if (!cashActivation) {
+    throw performanceError(
+      'Authoritative cash activation is unavailable',
+      'AUTHORITATIVE_CASH_UNAVAILABLE',
+      503
+    );
+  }
+  let balance = requireAuthoritativeCashNumber(
+    cashActivation.openingBalanceAmount ?? cashActivation.opening_balance_amount,
+    'opening cash balance'
+  );
 
   for (const entry of cashEntries) {
     const entryDate = normalizeTimestampToDateKey(resolveCashEntryEconomicTimestamp(entry, transactions));
     if (!entryDate || entryDate > dateKey) continue;
 
-    const amount = typeof entry.amount === 'number' ? entry.amount : Number(entry.amount || 0);
+    const amount = requireAuthoritativeCashNumber(entry.amount, 'cash ledger amount');
     const type = entry.entryType || entry.entry_type;
 
     if (type === 'DEPOSIT') {
@@ -320,7 +360,10 @@ export function getValuationMark(asset, dateKey, priceHistoryMap = {}) {
       price: null,
       priceDate: null,
       isCarriedForward: false,
+      isEligible: false,
+      isStale: false,
       isMissing: true,
+      reason: 'MISSING_VALUATION_MARK',
       quoteCurrency
     };
   }
@@ -328,12 +371,18 @@ export function getValuationMark(asset, dateKey, priceHistoryMap = {}) {
   // Latest bar on or before dateKey
   const latestBar = eligibleBars[eligibleBars.length - 1];
   const isCarriedForward = latestBar.date < dateKey;
+  const marketPolicy = asset?.marketPolicy || asset?.market_policy || null;
+  const isEligible = !isCarriedForward
+    || isCadenceEligibleCarryForward(latestBar.date, dateKey, marketPolicy);
 
   return {
     price: latestBar.close,
     priceDate: latestBar.date,
     isCarriedForward,
+    isEligible,
+    isStale: !isEligible,
     isMissing: false,
+    reason: isEligible ? null : 'STALE_VALUATION_MARK',
     quoteCurrency
   };
 }
@@ -409,7 +458,7 @@ export function findPerformanceInceptionDate({
       }
 
       const mark = getValuationMark(asset, dateKey, priceHistoryMap);
-      if (mark.isMissing || mark.price === null) {
+      if (mark.isMissing || !mark.isEligible || mark.price === null) {
         isComplete = false;
         break;
       }
@@ -482,6 +531,16 @@ export function solveXirr(cashFlows) {
   const terminalDateKey = aggregated[aggregated.length - 1].dateKey;
   if (baseDateKey >= terminalDateKey) {
     return { status: 'insufficient_data', annualizedReturnPct: null, reason: 'INSUFFICIENT_DATE_SPAN' };
+  }
+
+  if (calendarDaysDifference(baseDateKey, terminalDateKey) < 365) {
+    return {
+      status: 'insufficient_data',
+      annualizedReturnPct: null,
+      methodology: 'XIRR',
+      dayCountConvention: 'ACT/365',
+      reason: 'INSUFFICIENT_HISTORY'
+    };
   }
 
   // Sign feasibility & count transitions
@@ -736,6 +795,7 @@ export function calculatePortfolioPerformance({
   let totalCarriedForwardMarks = 0;
   let totalMissingMarks = 0;
   let hasCoverageDegradation = false;
+  let hasInvestedAssets = false;
 
   for (const dateKey of dateSpan) {
     const cash = reconstructCashBalance(dateKey, cashActivation, cashEntries, transactions);
@@ -747,7 +807,7 @@ export function calculatePortfolioPerformance({
     for (const entry of cashEntries) {
       const entryDate = normalizeTimestampToDateKey(entry.effectiveAt || entry.effective_at);
       if (entryDate === dateKey) {
-        const amount = typeof entry.amount === 'number' ? entry.amount : Number(entry.amount || 0);
+        const amount = requireAuthoritativeCashNumber(entry.amount, 'cash ledger amount');
         const type = entry.entryType || entry.entry_type;
         if (type === 'DEPOSIT') deposits += amount;
         if (type === 'WITHDRAWAL') withdrawals += amount;
@@ -764,6 +824,7 @@ export function calculatePortfolioPerformance({
 
     for (const [assetId, holding] of holdingsMap.entries()) {
       if (holding.quantity <= 0) continue;
+      hasInvestedAssets = true;
 
       const asset = assetMap[assetId];
       if (!asset) {
@@ -781,10 +842,10 @@ export function calculatePortfolioPerformance({
       }
 
       const mark = getValuationMark(asset, dateKey, priceHistoryMap);
-      if (mark.isMissing || mark.price === null) {
+      if (mark.isMissing || !mark.isEligible || mark.price === null) {
         dateHasMissing = true;
         totalMissingMarks += 1;
-        coverageReasons.add('MISSING_VALUATION_MARK');
+        coverageReasons.add(mark.reason || 'MISSING_VALUATION_MARK');
       } else {
         totalValuationMarks += 1;
         if (mark.isCarriedForward) {
@@ -1002,7 +1063,7 @@ export function calculatePortfolioPerformance({
     }
 
     const mark = getValuationMark(asset, actualEndDate, priceHistoryMap);
-    if (mark.isMissing || mark.price === null) {
+    if (mark.isMissing || !mark.isEligible || mark.price === null) {
       endPnlComplete = false;
       break;
     }
@@ -1058,6 +1119,9 @@ export function calculatePortfolioPerformance({
       reason: pnlReason
     },
     drawdown: drawdownResult,
+    benchmarkEligibility: hasInvestedAssets
+      ? { status: 'eligible', reason: null }
+      : { status: 'not_applicable', reason: 'CASH_ONLY_PORTFOLIO' },
     methodology: {
       feesIncluded: false,
       taxesIncluded: false,
@@ -1101,8 +1165,16 @@ export async function getPortfolioPerformance({
   ]);
 
   // 2. Identify all asset symbols that need historical price bars
+  const requiredAssetIds = new Set([
+    ...positionBaselines
+      .filter((baseline) => !baseline.cancelledAt && !baseline.cancelled_at)
+      .map((baseline) => baseline.assetId || baseline.asset_id),
+    ...transactions.map((transaction) => transaction.assetId || transaction.asset_id)
+  ].filter(Boolean));
+
+  const relevantAssets = assets.filter((asset) => requiredAssetIds.has(asset.id));
   const assetSymbols = Array.from(new Set(
-    assets
+    relevantAssets
       .map((a) => a.symbol)
       .filter((sym) => typeof sym === 'string' && sym.trim().length > 0)
   ));
@@ -1129,7 +1201,7 @@ export async function getPortfolioPerformance({
     cashEntries,
     positionBaselines,
     transactions,
-    assets,
+    assets: relevantAssets,
     priceHistoryMap
   });
 }

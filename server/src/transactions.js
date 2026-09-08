@@ -33,14 +33,19 @@ function requireDatabaseClient(client) {
   return client;
 }
 
-function normalizeDatabaseNumber(value, field, { nullable = false } = {}) {
+function normalizeDatabaseNumber(value, field, { nullable = false, nonNegative = false } = {}) {
   if (value === null || value === undefined) {
     if (nullable) return null;
     throw new Error(`Database returned missing ${field}`);
   }
 
-  const normalized = typeof value === 'number' ? value : Number(value);
-  if (!Number.isFinite(normalized)) {
+  const isNumber = typeof value === 'number';
+  const isNumericString = typeof value === 'string' && value.trim().length > 0;
+  if (!isNumber && !isNumericString) {
+    throw new Error(`Database returned invalid ${field}`);
+  }
+  const normalized = isNumber ? value : Number(value.trim());
+  if (!Number.isFinite(normalized) || (nonNegative && normalized < 0)) {
     throw new Error(`Database returned invalid ${field}`);
   }
   return normalized;
@@ -240,6 +245,6 @@ export async function createPortfolioTransaction({
     holding: normalizeHoldingState(data.holding),
     holdingRemoved: data.holdingRemoved === true,
     cashEntry: normalizeCashLedgerEntry(data.cashEntry),
-    currentCash: normalizeDatabaseNumber(data.currentCash, 'current cash')
+    currentCash: normalizeDatabaseNumber(data.currentCash, 'current cash', { nonNegative: true })
   };
 }

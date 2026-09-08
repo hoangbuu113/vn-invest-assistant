@@ -31,7 +31,7 @@ export default function CashMovementModal({
   isOpen,
   onClose,
   mode = 'DEPOSIT', // 'DEPOSIT' | 'WITHDRAWAL'
-  currentCash = 0,
+  currentCash = null,
   onMovementSuccess
 }) {
   const [amountInput, setAmountInput] = useState('');

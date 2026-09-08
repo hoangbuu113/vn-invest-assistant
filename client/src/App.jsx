@@ -1532,7 +1532,9 @@ function App({ onLogout }) {
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                               <span style={{ fontSize: '0.88rem', color: 'var(--color-slate-500)' }}>Tiền mặt:</span>
                               <strong style={{ fontSize: '0.95rem', color: 'var(--color-slate-900)' }}>
-                                {portfolioOverview.summary.cashAvailable.toLocaleString('vi-VN')} đ
+                                {typeof portfolioOverview.summary.cashAvailable === 'number'
+                                  ? `${portfolioOverview.summary.cashAvailable.toLocaleString('vi-VN')} đ`
+                                  : 'Chưa khả dụng'}
                               </strong>
                             </div>
 
@@ -1887,7 +1889,20 @@ function App({ onLogout }) {
                 <div className="fintech-banner banner-warning">
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                     <span>⚠️</span>
-                    <span><strong>Định giá một phần</strong> — một số tài sản chưa có dữ liệu giá thị trường từ sàn.</span>
+                    <span>
+                      <strong>Định giá một phần</strong> — {portfolioOverview.summary?.cashStatus === 'unavailable'
+                        ? 'số dư tiền mặt có thẩm quyền hiện chưa khả dụng.'
+                        : 'một số tài sản chưa có dữ liệu giá thị trường từ sàn.'}
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {!portfolioLoading && portfolioOverview && portfolioOverview.summary?.valuationStatus === 'stale' && (
+                <div className="fintech-banner banner-warning">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <span>⚠️</span>
+                    <span><strong>Định giá từ dữ liệu gần nhất</strong> — giá hoặc tỷ giá hiện có đã được nguồn đánh dấu là cũ.</span>
                   </div>
                 </div>
               )}
@@ -1895,7 +1910,7 @@ function App({ onLogout }) {
               {/* Feature 25D: Portfolio performance and benchmark comparison */}
               {!portfolioLoading && (
                 <PortfolioPerformanceSection
-                  cashAvailable={portfolioOverview?.summary?.cashAvailable || cashOverview?.currentCash || 0}
+                  cashAvailable={portfolioOverview?.summary?.cashAvailable ?? cashOverview?.currentCash ?? null}
                   holdingsCount={portfolioOverview?.holdings?.length || 0}
                   onNavigateToPortfolio={() => setActiveTab('portfolio')}
                 />
@@ -2039,7 +2054,7 @@ function App({ onLogout }) {
                     {portfolioOverview.holdings.length === 0 ? (
                       <div style={{ padding: '0 1rem 1rem 1rem' }}>
                         <PortfolioOnboardingGuide
-                          cashAvailable={portfolioOverview.summary?.cashAvailable || cashOverview?.currentCash || 0}
+                          cashAvailable={portfolioOverview.summary?.cashAvailable ?? cashOverview?.currentCash ?? null}
                           holdingsCount={portfolioOverview.holdings.length}
                           onOpenCashModal={() => {
                             setCashMovementType('DEPOSIT');
@@ -3877,7 +3892,9 @@ function App({ onLogout }) {
                           }}
                         >
                           <div style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--color-slate-900)' }}>
-                            <CountUp value={cashOverview?.currentCash ?? profile?.cash_available ?? 0} suffix=" ₫" />
+                            {typeof cashOverview?.currentCash === 'number'
+                              ? <CountUp value={cashOverview.currentCash} suffix=" ₫" />
+                              : 'Chưa khả dụng'}
                           </div>
                           <span className="fintech-badge badge-neutral" style={{ fontSize: '0.75rem', fontWeight: 700 }}>
                             Từ sổ dòng tiền
@@ -4283,7 +4300,7 @@ function App({ onLogout }) {
           isOpen={isCashModalOpen}
           onClose={() => setIsCashModalOpen(false)}
           mode={cashModalMode}
-          currentCash={cashOverview?.currentCash ?? profile?.cash_available ?? 0}
+          currentCash={cashOverview?.currentCash ?? null}
           onMovementSuccess={handleCashMovementSuccess}
         />
       </main>

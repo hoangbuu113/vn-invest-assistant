@@ -19,8 +19,14 @@ function requireDatabaseClient(client) {
 }
 
 function normalizeDatabaseNumber(value, field) {
-  const normalized = typeof value === 'number' ? value : Number(value);
-  if (!Number.isFinite(normalized)) {
+  const isNumber = typeof value === 'number';
+  const isNumericString = typeof value === 'string' && value.trim().length > 0;
+  if (!isNumber && !isNumericString) {
+    throw new Error(`Database returned invalid ${field}`);
+  }
+
+  const normalized = isNumber ? value : Number(value.trim());
+  if (!Number.isFinite(normalized) || normalized < 0) {
     throw new Error(`Database returned invalid ${field}`);
   }
   return normalized;
