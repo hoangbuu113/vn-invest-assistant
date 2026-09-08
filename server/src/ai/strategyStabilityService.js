@@ -9,6 +9,7 @@ import {
   SHOCK_STATUSES,
   STABILITY_POLICY_VERSION,
   computeDecisionFingerprint,
+  computeDecisionDelta,
   createStrategyVersion,
   createStrategyAssessment,
   assertZeroPrivateData
@@ -16,6 +17,7 @@ import {
 import { assessStrategyMateriality, MATERIALITY_TRIGGER_TYPES } from './strategyAssessmentGate.js';
 import {
   getCurrentPublishedStrategy,
+  getStrategyVersionById,
   getLatestStrategyAssessment,
   getLatestCompletedStrategyAssessment,
   getStrategyAssessmentByIdempotencyKey,
@@ -156,9 +158,13 @@ export async function evaluateAndApplyStrategyStability({
     const existing = await getStrategyAssessmentByIdempotencyKey(idempotencyKey, client);
     if (existing) {
       const current = await getCurrentPublishedStrategy(client);
+      const prior = current?.previousStrategyId
+        ? await getStrategyVersionById(current.previousStrategyId, client)
+        : null;
       const isExistingCompleted = existing.evaluationStatus === EVALUATION_STATUSES.COMPLETED;
       const briefData = current ? buildDeterministicMarketBrief({
         currentStrategy: current,
+        previousStrategy: prior,
         assessment: existing,
         lastAssessment: existing,
         factPacket,
@@ -194,6 +200,9 @@ export async function evaluateAndApplyStrategyStability({
 
   // 2. Retrieve current published strategy and assessments
   const currentStrategy = await getCurrentPublishedStrategy(client);
+  const previousStrategy = currentStrategy?.previousStrategyId
+    ? await getStrategyVersionById(currentStrategy.previousStrategyId, client)
+    : null;
   const lastAssessment = await getLatestStrategyAssessment(currentStrategy?.strategyId, client);
   const lastCompletedAssessment = await getLatestCompletedStrategyAssessment(currentStrategy?.strategyId, client);
 
@@ -224,6 +233,7 @@ export async function evaluateAndApplyStrategyStability({
     const isCompleted = lastAssessment?.evaluationStatus === EVALUATION_STATUSES.COMPLETED;
     const briefData = buildDeterministicMarketBrief({
       currentStrategy,
+      previousStrategy,
       assessment: lastAssessment,
       lastAssessment,
       gateResult,
@@ -295,6 +305,7 @@ export async function evaluateAndApplyStrategyStability({
 
     const briefData = buildDeterministicMarketBrief({
       currentStrategy,
+      previousStrategy,
       assessment,
       lastAssessment,
       gateResult,
@@ -386,6 +397,7 @@ export async function evaluateAndApplyStrategyStability({
 
       const briefData = buildDeterministicMarketBrief({
         currentStrategy,
+        previousStrategy,
         assessment: failedAssessment,
         lastAssessment,
         gateResult,
@@ -465,6 +477,7 @@ export async function evaluateAndApplyStrategyStability({
 
     const briefData = buildDeterministicMarketBrief({
       currentStrategy,
+      previousStrategy,
       assessment: deferredAssessment,
       lastAssessment,
       gateResult,
@@ -672,6 +685,7 @@ export async function evaluateAndApplyStrategyStability({
 
     const briefData = buildDeterministicMarketBrief({
       currentStrategy,
+      previousStrategy,
       candidateStrategy: candidateOutput,
       assessment,
       lastAssessment,
@@ -705,10 +719,7 @@ export async function evaluateAndApplyStrategyStability({
 
   // Case C: Decision fingerprint changed -> PUBLISH_NEW
   const newStrategyId = `strat_${nowMs}_${candidateDecisionFingerprint.slice(0, 12)}`;
-  const materialChanges = [
-    `REGIME:${currentStrategy.regime?.directionalStance || 'UNKNOWN'}->${candidateOutput.regime?.directionalStance || 'UNKNOWN'}`,
-    `EXECUTIVE_ACTION:${currentStrategy.executiveDecision?.stance || 'UNKNOWN'}->${candidateOutput.executiveDecision?.stance || 'UNKNOWN'}`
-  ];
+  const materialChanges = computeDecisionDelta(currentStrategy, candidateOutput).materialChanges;
 
   const newVersion = createStrategyVersion({
     strategyId: newStrategyId,
@@ -759,8 +770,12 @@ export async function evaluateAndApplyStrategyStability({
       err.message?.includes('idx_strategy_versions_single_published')
     ) {
       const refreshed = await getCurrentPublishedStrategy(client);
+      const refreshedPrevious = refreshed?.previousStrategyId
+        ? await getStrategyVersionById(refreshed.previousStrategyId, client)
+        : null;
       const briefData = buildDeterministicMarketBrief({
         currentStrategy: refreshed,
+        previousStrategy: refreshedPrevious,
         assessment: lastAssessment,
         lastAssessment,
         gateResult,
@@ -827,6 +842,7 @@ export async function evaluateAndApplyStrategyStability({
 
     const briefData = buildDeterministicMarketBrief({
       currentStrategy,
+      previousStrategy,
       assessment: failedAssessment,
       lastAssessment,
       gateResult,
@@ -886,6 +902,17 @@ export async function evaluateAndApplyStrategyStability({
 
   await persistStrategyAssessment(assessment, client);
 
+  const briefData = buildDeterministicMarketBrief({
+    currentStrategy: newVersion,
+    previousStrategy: currentStrategy,
+    assessment,
+    lastAssessment: assessment,
+    gateResult,
+    factPacket,
+    now
+  });
+  const projection = buildCurrentStrategistProjection({ strategy: newVersion, briefData, factPacket });
+
   return {
     ...candidateOutput,
     ...newVersion,
@@ -904,6 +931,7 @@ export async function evaluateAndApplyStrategyStability({
     dataAsOf: newVersion.dataAsOf,
     decisionFingerprint: candidateDecisionFingerprint,
     evidenceFingerprint: snapshotEvidenceFingerprint,
-    lastAssessment: assessment
+    lastAssessment: assessment,
+    ...projection
   };
 }

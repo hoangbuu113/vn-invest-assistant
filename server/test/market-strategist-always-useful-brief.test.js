@@ -312,13 +312,15 @@ describe('V1.4 — 01A Always-Useful Market Strategist Brief Test Suite', { conc
     assert.ok(resRefresh.brief, 'KEEP response must include refreshed brief');
     assert.ok(resRefresh.brief.whatChanged.summary.length > 30, 'whatChanged summary must be substantive');
     assert.equal(resRefresh.brief.whatChanged.hasMaterialChange, false);
-    assert.match(resRefresh.brief.whatChanged.summary, /Quan điểm thị trường hiện chưa thay đổi/);
+    assert.equal(resRefresh.brief.whatChanged.latestPublicationChanges.status, 'INITIAL_PUBLICATION');
+    assert.equal(resRefresh.brief.whatChanged.sincePublicationStatus.status, 'NO_FURTHER_MATERIAL_CHANGE');
+    assert.match(resRefresh.brief.whatChanged.summary, /chưa xuất hiện thay đổi đủ lớn để phát hành chiến lược mới/);
   });
 
   // =========================================================================
   // SCENARIO E: No material change -> brief explains unchanged view, not only "KEEP"
   // =========================================================================
-  test('E. No material change: brief explains unchanged view in Vietnamese, not merely "KEEP"', () => {
+  test('E. Initial publication and later KEEP are presented as separate concepts', () => {
     const factPacket = buildMarketStrategistFactPacket({
       marketObservations: MOCK_OBSERVATIONS,
       newsArticles: MOCK_NEWS,
@@ -327,7 +329,9 @@ describe('V1.4 — 01A Always-Useful Market Strategist Brief Test Suite', { conc
 
     const briefResult = buildDeterministicMarketBrief({
       currentStrategy: {
-        id: 'strat_v1',
+        strategyId: 'strat_v1',
+        previousStrategyId: null,
+        publishedAt: '2026-09-06T09:00:00.000Z',
         executiveDecision: {
           stance: 'selective_risk_on',
           conviction: 'medium',
@@ -336,6 +340,7 @@ describe('V1.4 — 01A Always-Useful Market Strategist Brief Test Suite', { conc
       },
       assessment: {
         result: 'KEEP',
+        assessedAt: '2026-09-06T09:30:00.000Z',
         materialChanges: []
       },
       factPacket,
@@ -347,11 +352,10 @@ describe('V1.4 — 01A Always-Useful Market Strategist Brief Test Suite', { conc
     assert.notEqual(brief.whatChanged.summary.trim(), 'KEEP');
     assert.ok(brief.whatChanged.summary.length > 50);
 
-    // Must mention actual market metrics in Vietnamese
-    assert.match(brief.whatChanged.summary, /Quan điểm thị trường hiện chưa thay đổi/);
-    assert.match(brief.whatChanged.summary, /VN-Index/);
-    assert.match(brief.whatChanged.summary, /CPI/);
-    assert.match(brief.whatChanged.summary, /USD\/VND/);
+    assert.equal(brief.whatChanged.latestPublicationChanges.status, 'INITIAL_PUBLICATION');
+    assert.equal(brief.whatChanged.sincePublicationStatus.status, 'NO_FURTHER_MATERIAL_CHANGE');
+    assert.match(brief.whatChanged.summary, /công bố lần đầu/);
+    assert.match(brief.whatChanged.summary, /chưa xuất hiện thay đổi đủ lớn/);
   });
 
   // =========================================================================

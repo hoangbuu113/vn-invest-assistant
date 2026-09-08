@@ -4,6 +4,7 @@ import {
   ALLOWED_CONFIDENCE_STATES,
   STRATEGIST_METHODOLOGY_VERSION
 } from './marketStrategistPrompt.js';
+import { computeDecisionDelta } from './strategyStabilityModel.js';
 
 export const BRIEF_SECTIONS = Object.freeze({
   MARKET_VIEW: 'marketView',
@@ -35,6 +36,174 @@ export const CONFIDENCE_VIETNAMESE = Object.freeze({
   LOW: 'Thấp',
   INSUFFICIENT_EVIDENCE: 'Chưa đủ dữ liệu'
 });
+
+const PUBLICATION_ASSET_LABELS = Object.freeze({
+  VIETNAM_EQUITIES: 'cổ phiếu Việt Nam',
+  GOLD: 'Vàng',
+  USD: 'USD',
+  CRYPTO: 'Crypto',
+  CASH: 'Tiền mặt'
+});
+
+const PUBLICATION_POSTURE_LABELS = Object.freeze({
+  INCREASE: 'Tăng tỷ trọng',
+  HOLD: 'Giữ vị thế',
+  WATCH: 'Theo dõi',
+  DECREASE: 'Giảm tỷ trọng',
+  AVOID: 'Hạn chế',
+  NONE: 'Không có'
+});
+
+const PUBLICATION_PRIORITY_LABELS = Object.freeze({
+  high: 'Cao',
+  medium: 'Vừa',
+  low: 'Thấp'
+});
+
+function publicationValueLabel(value) {
+  if (value === null || value === undefined || value === '') return 'Không có';
+  return String(value);
+}
+
+function describePublicationChange(change) {
+  if (change.type === 'ASSET_STRATEGY_CHANGED') {
+    const assetLabel = PUBLICATION_ASSET_LABELS[change.assetClass] || change.assetClass;
+    const previousPosture = PUBLICATION_POSTURE_LABELS[change.previous?.posture] || publicationValueLabel(change.previous?.posture);
+    const currentPosture = PUBLICATION_POSTURE_LABELS[change.current?.posture] || publicationValueLabel(change.current?.posture);
+    const priorityChanged = change.previous?.priority !== change.current?.priority;
+    const priorityText = priorityChanged
+      ? `; mức ưu tiên ${PUBLICATION_PRIORITY_LABELS[change.previous?.priority] || publicationValueLabel(change.previous?.priority)} → ${PUBLICATION_PRIORITY_LABELS[change.current?.priority] || publicationValueLabel(change.current?.priority)}`
+      : '';
+    return `${assetLabel}: ${previousPosture} → ${currentPosture}${priorityText}`;
+  }
+  if (change.type === 'PREFERRED_THEME_CHANGED') {
+    return `${change.change === 'added' ? 'Thêm' : 'Bỏ'} chủ đề ưu tiên “${change.value}”`;
+  }
+  if (change.type === 'UNDERWEIGHT_THEME_CHANGED') {
+    return `${change.change === 'added' ? 'Thêm' : 'Bỏ'} chủ đề hạn chế “${change.value}”`;
+  }
+  if (change.type === 'EXECUTIVE_DECISION_CHANGED') {
+    return `Định hướng điều hành: ${publicationValueLabel(change.previous)} → ${publicationValueLabel(change.current)}`;
+  }
+  if (change.type === 'REGIME_CHANGED') {
+    return `Trạng thái thị trường: ${publicationValueLabel(change.previous)} → ${publicationValueLabel(change.current)}`;
+  }
+  if (change.type === 'HORIZON_CHANGED') {
+    return `Khung thời gian: ${publicationValueLabel(change.previous)} → ${publicationValueLabel(change.current)}`;
+  }
+  if (change.change === 'added' || change.change === 'removed') {
+    return `${change.change === 'added' ? 'Thêm' : 'Bỏ'} ${publicationValueLabel(change.value)}`;
+  }
+  return `${change.field}: ${publicationValueLabel(change.previous)} → ${publicationValueLabel(change.current)}`;
+}
+
+function buildLatestPublicationChanges(activeStrategy, previousStrategy) {
+  if (!activeStrategy) {
+    return {
+      status: 'UNAVAILABLE',
+      strategyId: null,
+      previousStrategyId: null,
+      hasMaterialChange: false,
+      changes: [],
+      materialChanges: [],
+      summary: 'Chưa có chiến lược đã công bố để đối chiếu.'
+    };
+  }
+  if (!activeStrategy.previousStrategyId) {
+    return {
+      status: 'INITIAL_PUBLICATION',
+      strategyId: activeStrategy.strategyId || null,
+      previousStrategyId: null,
+      hasMaterialChange: false,
+      changes: [],
+      materialChanges: [],
+      summary: 'Đây là chiến lược thị trường được công bố lần đầu; chưa có phiên bản trước để so sánh.'
+    };
+  }
+  if (!previousStrategy || previousStrategy.strategyId !== activeStrategy.previousStrategyId) {
+    return {
+      status: 'PREVIOUS_VERSION_UNAVAILABLE',
+      strategyId: activeStrategy.strategyId || null,
+      previousStrategyId: activeStrategy.previousStrategyId,
+      hasMaterialChange: false,
+      changes: [],
+      materialChanges: [],
+      summary: 'Không tải được phiên bản chiến lược trước để đối chiếu thay đổi gần nhất.'
+    };
+  }
+
+  const delta = computeDecisionDelta(previousStrategy, activeStrategy);
+  if (!delta.hasMaterialChange) {
+    return {
+      status: 'NO_GOVERNED_CHANGE',
+      strategyId: activeStrategy.strategyId || null,
+      previousStrategyId: previousStrategy.strategyId,
+      ...delta,
+      summary: 'Lần công bố chiến lược gần nhất không thay đổi các trường quyết định được quản trị.'
+    };
+  }
+
+  return {
+    status: 'CHANGED',
+    strategyId: activeStrategy.strategyId || null,
+    previousStrategyId: previousStrategy.strategyId,
+    ...delta,
+    summary: `Ở lần cập nhật chiến lược gần nhất: ${delta.changes.map(describePublicationChange).join('; ')}.`
+  };
+}
+
+function buildSincePublicationStatus(activeStrategy, effectiveAssessment, gateResult, isInsufficient) {
+  const assessmentAt = effectiveAssessment?.assessedAt || null;
+  const assessedAfterPublication = Boolean(
+    assessmentAt
+    && activeStrategy?.publishedAt
+    && Date.parse(assessmentAt) > Date.parse(activeStrategy.publishedAt)
+  );
+  const isPublicationAssessment = Boolean(
+    effectiveAssessment?.result === 'PUBLISH_NEW'
+    && effectiveAssessment?.strategyId === activeStrategy?.strategyId
+    && !assessedAfterPublication
+  );
+
+  if (isInsufficient) {
+    return {
+      status: 'INSUFFICIENT_EVIDENCE',
+      assessmentResult: effectiveAssessment?.result || null,
+      assessedAt: assessmentAt,
+      summary: 'Kể từ lần công bố này, hiện chưa đủ bằng chứng để kết luận có thêm thay đổi chiến lược.'
+    };
+  }
+  if (gateResult?.requiresReview && !isPublicationAssessment) {
+    return {
+      status: 'REVIEW_REQUIRED',
+      assessmentResult: effectiveAssessment?.result || null,
+      assessedAt: assessmentAt,
+      summary: 'Kể từ lần công bố này, dữ kiện mới đang yêu cầu đánh giá lại trước khi kết luận về thay đổi tiếp theo.'
+    };
+  }
+  if (isPublicationAssessment) {
+    return {
+      status: 'NOT_ASSESSED',
+      assessmentResult: effectiveAssessment.result,
+      assessedAt: assessmentAt,
+      summary: 'Chưa có đánh giá mới kể từ lần công bố chiến lược này.'
+    };
+  }
+  if (assessedAfterPublication || gateResult) {
+    return {
+      status: 'NO_FURTHER_MATERIAL_CHANGE',
+      assessmentResult: effectiveAssessment?.result || null,
+      assessedAt: assessmentAt,
+      summary: 'Kể từ lần công bố này, chưa xuất hiện thay đổi đủ lớn để phát hành chiến lược mới.'
+    };
+  }
+  return {
+    status: 'NOT_ASSESSED',
+    assessmentResult: effectiveAssessment?.result || null,
+    assessedAt: assessmentAt,
+    summary: 'Chưa có đánh giá mới kể từ lần công bố chiến lược này.'
+  };
+}
 
 /**
  * Extracts key indicators from factPacket evidence.
@@ -233,6 +402,7 @@ function deriveDefaultStance({ vnIndex, cpi }) {
 export function buildDeterministicMarketBrief({
   strategy = null,
   currentStrategy = null,
+  previousStrategy = null,
   assessment = null,
   lastAssessment = null,
   gateResult = null,
@@ -268,8 +438,6 @@ export function buildDeterministicMarketBrief({
 
   // Active assessment outcomes
   const effectiveAssessment = assessment || lastAssessment || null;
-  const assessmentResult = effectiveAssessment?.result || (gateResult ? (gateResult.requiresReview ? 'REVIEW_REQUIRED' : 'KEEP') : null);
-  const isKeep = assessmentResult === 'KEEP' || (!gateResult?.requiresReview && Boolean(activeStrategy));
   const dataQualityState = gateResult?.dataQualityState || activeStrategy?.dataQualityState || 'HEALTHY';
   const isInsufficient = dataQualityState === 'INSUFFICIENT' || evidence.length === 0;
 
@@ -480,32 +648,15 @@ export function buildDeterministicMarketBrief({
   // -------------------------------------------------------------
   // 3. SECTION C: WHAT CHANGED
   // -------------------------------------------------------------
-  const materialChanges = Array.isArray(activeStrategy?.materialChanges) ? activeStrategy.materialChanges : [];
-  const assessmentChanges = Array.isArray(effectiveAssessment?.materialChanges) ? effectiveAssessment.materialChanges : [];
-  const allChanges = [...new Set([...materialChanges, ...assessmentChanges])].filter(
-    (c) => c && c !== 'INITIAL_PUBLICATION'
-  );
-
-  let whatChangedSummary = '';
-  const hasMaterialChange = allChanges.length > 0 && !isKeep;
-
-  if (isInsufficient) {
-    whatChangedSummary = 'Hiện chưa đủ bằng chứng tin cậy để đánh giá lại chiến lược thị trường. Dữ liệu đầu vào chưa đáp ứng yêu cầu xác thực đa chiều; hệ thống giữ nguyên định hướng bảo lưu.';
-  } else if (!hasMaterialChange || isKeep) {
-    const metricsMention = [];
-    if (obs.vnIndex?.value) metricsMention.push(`VN-Index (${obs.vnIndex.value} điểm)`);
-    if (obs.cpi?.value) metricsMention.push(`CPI (${obs.cpi.value}%)`);
-    if (obs.usdVnd?.value) metricsMention.push(`USD/VND (${Number(obs.usdVnd.value).toLocaleString('vi-VN')})`);
-
-    const metricsStr = metricsMention.length > 0 ? ` Các chỉ báo trọng yếu gồm ${metricsMention.join(', ')} tiếp tục vận động trong biên độ dự kiến.` : '';
-    whatChangedSummary = `Quan điểm thị trường hiện chưa thay đổi.${metricsStr} Chưa xuất hiện cú sốc ngoại sinh hay sự thay đổi cấu trúc đủ lớn để điều chỉnh chiến lược hiện tại. Hệ thống tiếp tục giữ nguyên định hướng phân bổ và theo dõi diễn biến dữ liệu tiếp theo.`;
-  } else {
-    whatChangedSummary = `Chiến lược thị trường ghi nhận sự thay đổi cấu trúc: ${allChanges.join(', ')}. Các biến số vĩ mô và thị trường mới cập nhật đã đáp ứng ngưỡng đánh giá lại định hướng phân bổ.`;
-  }
+  const latestPublicationChanges = buildLatestPublicationChanges(activeStrategy, previousStrategy);
+  const sincePublicationStatus = buildSincePublicationStatus(activeStrategy, effectiveAssessment, gateResult, isInsufficient);
+  const whatChangedSummary = `${latestPublicationChanges.summary} ${sincePublicationStatus.summary}`.trim();
 
   const whatChanged = {
-    hasMaterialChange,
-    materialChanges: allChanges,
+    hasMaterialChange: latestPublicationChanges.hasMaterialChange,
+    materialChanges: latestPublicationChanges.materialChanges,
+    latestPublicationChanges,
+    sincePublicationStatus,
     summary: whatChangedSummary
   };
 

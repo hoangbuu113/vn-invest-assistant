@@ -310,6 +310,8 @@ export function buildMarketStrategistViewModel(raw) {
     materialChanges: Array.isArray(rawWhatChanged?.materialChanges)
       ? rawWhatChanged.materialChanges
       : (Array.isArray(data.materialChanges) ? data.materialChanges : []),
+    latestPublicationChanges: rawWhatChanged?.latestPublicationChanges || null,
+    sincePublicationStatus: rawWhatChanged?.sincePublicationStatus || null,
     summary: rawWhatChanged?.summary || (data.latestAssessmentResult === 'KEEP' ? 'Quan điểm thị trường tiếp tục được bảo lưu ổn định.' : '')
   };
 

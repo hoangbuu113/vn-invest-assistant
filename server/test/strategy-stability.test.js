@@ -495,7 +495,17 @@ test('V1.3 Strategy Stability — Comprehensive 30-Scenario Specification Suite'
           stance: 'reduce'
         },
         ...baseCandidate9.assetStrategy.slice(1)
-      ]
+      ],
+      preferredThemes: [{
+        theme: 'Hạ tầng số',
+        stance: 'prefer',
+        rationale: 'Chủ đề quyết định được kiểm thử bằng dữ kiện hiện có.',
+        evidenceIds: [packetRevised.evidence[0].id],
+        signalIds: [],
+        conclusionType: 'THEME_PREFERENCE',
+        supportStatus: 'supported',
+        limitations: 'Chỉ dùng để kiểm thử thay đổi quyết định.'
+      }]
     };
 
     const result = await evaluateAndApplyStrategyStability({
@@ -509,6 +519,56 @@ test('V1.3 Strategy Stability — Comprehensive 30-Scenario Specification Suite'
     assert.notEqual(result.strategyId, initial.strategyId);
     assert.equal(result.previousStrategyId, initial.strategyId);
     assert.equal(result.latestAssessmentResult, ASSESSMENT_RESULTS.PUBLISH_NEW);
+    assert.equal(result.currentBrief.whatChanged.latestPublicationChanges.status, 'CHANGED');
+    assert.equal(result.currentBrief.whatChanged.sincePublicationStatus.status, 'NOT_ASSESSED');
+    assert.equal(
+      result.currentBrief.whatChanged.latestPublicationChanges.changes.some(
+        (change) => change.type === 'ASSET_STRATEGY_CHANGED'
+          && change.assetClass === candidateNewPosture.assetStrategy[0].assetClass.toUpperCase()
+      ),
+      true
+    );
+    assert.equal(
+      result.currentBrief.whatChanged.latestPublicationChanges.changes.some(
+        (change) => change.type === 'PREFERRED_THEME_CHANGED' && change.change === 'added'
+      ),
+      true
+    );
+    assert.doesNotMatch(result.materialChanges.join('|'), /UNKNOWN->UNKNOWN/);
+    assert.doesNotMatch(result.materialChanges.join('|'), /selective_risk_on->selective_risk_on/i);
+
+    const keep = await evaluateAndApplyStrategyStability({
+      factPacket: packetRevised,
+      now: new Date('2026-09-06T04:15:00.000Z'),
+      allowLlm: false,
+      client: null
+    });
+    assert.equal(keep.latestAssessmentResult, ASSESSMENT_RESULTS.KEEP);
+    assert.equal(keep.strategyId, result.strategyId);
+
+    const assessmentCountBeforeGet = (await listStrategyAssessments(result.strategyId, null)).length;
+    let providerCalls = 0;
+    const readOnly = await evaluateAndApplyStrategyStability({
+      factPacket: packetRevised,
+      now: new Date('2026-09-06T04:20:00.000Z'),
+      allowLlm: true,
+      generateLlmFn: async () => {
+        providerCalls += 1;
+        throw new Error('read-only projection must not call Gemini');
+      },
+      isReadOnly: true,
+      client: null
+    });
+    assert.equal(providerCalls, 0);
+    assert.equal(readOnly.strategyId, result.strategyId);
+    assert.equal(readOnly.latestAssessmentResult, ASSESSMENT_RESULTS.KEEP);
+    assert.equal(readOnly.currentBrief.whatChanged.latestPublicationChanges.status, 'CHANGED');
+    assert.equal(readOnly.currentBrief.whatChanged.latestPublicationChanges.hasMaterialChange, true);
+    assert.equal(readOnly.currentBrief.whatChanged.sincePublicationStatus.status, 'NO_FURTHER_MATERIAL_CHANGE');
+    assert.match(readOnly.currentBrief.whatChanged.summary, /Ở lần cập nhật chiến lược gần nhất/);
+    assert.match(readOnly.currentBrief.whatChanged.summary, /chưa xuất hiện thay đổi đủ lớn để phát hành chiến lược mới/);
+    assert.equal((await listStrategyAssessments(result.strategyId, null)).length, assessmentCountBeforeGet);
+    assert.equal((await getCurrentPublishedStrategy(null)).strategyId, result.strategyId);
   });
 
   // 10. regime changes -> PUBLISH_NEW

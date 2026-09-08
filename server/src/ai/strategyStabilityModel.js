@@ -152,7 +152,7 @@ export function canonicalizeAssetStrategy(items) {
 }
 
 /**
- * Computes deterministic decision fingerprint over ONLY decision-relevant content.
+ * Canonicalizes ONLY decision-relevant content.
  * Strictly excludes:
  * - Wording differences in prose commentary/explanations (including oneLineDecision, actionNow)
  * - Evidence citation IDs, observation IDs, article IDs, citation order
@@ -160,9 +160,9 @@ export function canonicalizeAssetStrategy(items) {
  * - Request IDs, wall clock time
  * - Internal validation receipts or LLM model names
  */
-export function computeDecisionFingerprint(strategyOrBrief) {
+export function canonicalizeDecisionPayload(strategyOrBrief) {
   if (!strategyOrBrief || typeof strategyOrBrief !== 'object') {
-    throw new TypeError('computeDecisionFingerprint requires a valid strategy or candidate object');
+    throw new TypeError('canonicalizeDecisionPayload requires a valid strategy or candidate object');
   }
 
   assertZeroPrivateData(strategyOrBrief, 'DECISION_FINGERPRINT');
@@ -211,7 +211,7 @@ export function computeDecisionFingerprint(strategyOrBrief) {
     strategyOrBrief.invalidationConditions || strategyOrBrief.invalidation_conditions
   );
 
-  const decisionPayload = {
+  return {
     regime: regimeCanonical,
     executiveDecision: executiveDecisionCanonical,
     assetStrategy: assetStrategyCanonical,
@@ -221,9 +221,112 @@ export function computeDecisionFingerprint(strategyOrBrief) {
     horizon,
     invalidationConditions
   };
+}
+
+/**
+ * Computes deterministic decision fingerprint over the canonical governed
+ * decision payload. Keep this as the sole fingerprint authority.
+ */
+export function computeDecisionFingerprint(strategyOrBrief) {
+  const decisionPayload = canonicalizeDecisionPayload(strategyOrBrief);
 
   const canonicalJson = canonicalJsonStringify(decisionPayload);
   return createHash('sha256').update(canonicalJson).digest('hex');
+}
+
+function appendScalarDecisionChange(changes, type, field, previous, current, extra = {}) {
+  if (canonicalJsonStringify(previous) === canonicalJsonStringify(current)) return;
+  changes.push({ type, field, previous, current, ...extra });
+}
+
+function appendSetDecisionChanges(changes, type, field, previousItems, currentItems) {
+  const previous = new Set(previousItems);
+  const current = new Set(currentItems);
+  for (const value of previousItems) {
+    if (!current.has(value)) changes.push({ type, field, change: 'removed', value });
+  }
+  for (const value of currentItems) {
+    if (!previous.has(value)) changes.push({ type, field, change: 'added', value });
+  }
+}
+
+function decisionChangeCode(change) {
+  const value = (input) => input === null || input === undefined || input === ''
+    ? 'NONE'
+    : (typeof input === 'object' ? canonicalJsonStringify(input) : String(input));
+  if (change.type === 'ASSET_STRATEGY_CHANGED') {
+    if (Array.isArray(change.previous) || Array.isArray(change.current)) {
+      return `ASSET_STRATEGY:${change.assetClass}:${value(change.previous)}->${value(change.current)}`;
+    }
+    const previous = change.previous || {};
+    const current = change.current || {};
+    return `ASSET_STRATEGY:${change.assetClass}:${value(previous.posture)}|${value(previous.action)}|${value(previous.priority)}->${value(current.posture)}|${value(current.action)}|${value(current.priority)}`;
+  }
+  if (change.change === 'added' || change.change === 'removed') {
+    return `${change.type}:${change.change.toUpperCase()}:${value(change.value)}`;
+  }
+  return `${change.type}:${value(change.previous)}->${value(change.current)}`;
+}
+
+/**
+ * Deterministically describes changes between two immutable StrategyVersions
+ * using exactly the governed inputs used by computeDecisionFingerprint.
+ * Generated prose, citations, timestamps, and evidence identifiers are excluded.
+ */
+export function computeDecisionDelta(previousStrategy, currentStrategy) {
+  if (!previousStrategy || !currentStrategy) {
+    return { hasMaterialChange: false, changes: [], materialChanges: [] };
+  }
+
+  const previous = canonicalizeDecisionPayload(previousStrategy);
+  const current = canonicalizeDecisionPayload(currentStrategy);
+  const changes = [];
+
+  for (const field of ['status', 'directionalStance', 'marketPhase']) {
+    appendScalarDecisionChange(changes, 'REGIME_CHANGED', `regime.${field}`, previous.regime[field], current.regime[field]);
+  }
+  for (const field of ['stance', 'primaryAction']) {
+    appendScalarDecisionChange(changes, 'EXECUTIVE_DECISION_CHANGED', `executiveDecision.${field}`, previous.executiveDecision[field], current.executiveDecision[field]);
+  }
+
+  const groupAssets = (items) => {
+    const grouped = new Map();
+    for (const item of items) {
+      if (!grouped.has(item.assetClass)) grouped.set(item.assetClass, []);
+      grouped.get(item.assetClass).push(item);
+    }
+    return grouped;
+  };
+  const previousAssets = groupAssets(previous.assetStrategy);
+  const currentAssets = groupAssets(current.assetStrategy);
+  const assetClasses = [...new Set([...previousAssets.keys(), ...currentAssets.keys()])].sort();
+  for (const assetClass of assetClasses) {
+    const previousItems = previousAssets.get(assetClass) || [];
+    const currentItems = currentAssets.get(assetClass) || [];
+    appendScalarDecisionChange(
+      changes,
+      'ASSET_STRATEGY_CHANGED',
+      'assetStrategy',
+      previousItems.length === 1 ? previousItems[0] : previousItems,
+      currentItems.length === 1 ? currentItems[0] : currentItems,
+      { assetClass }
+    );
+  }
+
+  appendSetDecisionChanges(changes, 'PREFERRED_THEME_CHANGED', 'preferredThemes', previous.preferredThemes, current.preferredThemes);
+  appendSetDecisionChanges(changes, 'UNDERWEIGHT_THEME_CHANGED', 'avoidOrUnderweight', previous.avoidOrUnderweight, current.avoidOrUnderweight);
+
+  appendScalarDecisionChange(changes, 'RISK_OVERLAY_CHANGED', 'riskOverlay.posture', previous.riskOverlay.posture, current.riskOverlay.posture);
+  appendSetDecisionChanges(changes, 'RISK_CONSTRAINT_CHANGED', 'riskOverlay.constraints', previous.riskOverlay.constraints, current.riskOverlay.constraints);
+  appendScalarDecisionChange(changes, 'RISK_BUDGET_CHANGED', 'riskOverlay.riskBudget', previous.riskOverlay.riskBudget, current.riskOverlay.riskBudget);
+  appendScalarDecisionChange(changes, 'HORIZON_CHANGED', 'horizon', previous.horizon, current.horizon);
+  appendSetDecisionChanges(changes, 'INVALIDATION_CONDITION_CHANGED', 'invalidationConditions', previous.invalidationConditions, current.invalidationConditions);
+
+  return {
+    hasMaterialChange: changes.length > 0,
+    changes,
+    materialChanges: changes.map(decisionChangeCode)
+  };
 }
 
 /**
