@@ -23,5 +23,8 @@
   },
   "overrides": {
     "qs": "^6.16.0"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8"
   }
 }

@@ -453,3 +453,9 @@ $$\text{Source Adapter} \longrightarrow \text{Canonical Validation / Sanitizatio
 ### G. Transaction Safety
 - Financial writes require an idempotency contract so network retries cannot silently create duplicate economic events.
 - Corrections and reversals must be explicit, auditable events or governed state transitions. Immutable ledger history must not be overwritten or deleted to conceal a correction.
+
+### H. P0.1 Accounting Foundation
+- Historical applied migrations remain immutable. Because the chronological migration directory lacks an initial-schema migration, authoritative blank-database rebuilds use the complete current `server/db/schema.sql` bootstrap; forward migrations are then applied normally. A disposable PostgreSQL test must keep this contract executable.
+- For tracked-cash BUY/SELL, the linked portfolio transaction `executedAt` is the economic time for both the position and matching cash effect. `createdAt` remains the system recording/audit time and is never backdated.
+- Historical reconstruction derives linked BUY/SELL cash timing from the immutable `portfolio_transaction_id` relationship. Missing, duplicate, profile-mismatched, or type-mismatched linkage is ambiguous and must fail closed; immutable historical rows are not rewritten.
+- `assets.portfolio_eligibility` is the canonical Portfolio capability. Current investable stocks, ETFs, funds, Gold, and Crypto are `PORTFOLIO_ELIGIBLE`; `USD/VND` is `REFERENCE_ONLY`. The server boundary and database triggers both enforce this rule.

@@ -14,7 +14,7 @@ export const TRANSACTION_METHODOLOGY = Object.freeze({
   costBasisMethod: 'weighted_average',
   realizedPnLMethod: '(sellPrice - preSellAverageCost) * sellQuantity',
   cashAmountMethod: 'quantity * price',
-  cashReconciliation: 'transactions recorded after Feature 15 activation affect current cash atomically at accounting time',
+  cashReconciliation: 'tracked-cash BUY/SELL affect holdings and cash atomically at executedAt; createdAt remains audit time',
   legacyTransactionsCashReconciled: false,
   feesIncluded: false,
   taxesIncluded: false,
@@ -141,7 +141,7 @@ function normalizeHoldingState(row) {
 function transactionDatabaseError(error, fallbackMessage) {
   const err = new Error(error?.message || fallbackMessage);
   err.code = error?.code;
-  if (['PT001', 'PT002', 'PT003', 'PT004', 'PT005', 'CL001'].includes(error?.code)) {
+  if (['PT001', 'PT002', 'PT003', 'PT004', 'PT005', 'PE001', 'CL001', 'CL004'].includes(error?.code)) {
     err.statusCode = 400;
   }
   return err;

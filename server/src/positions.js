@@ -76,7 +76,7 @@ function openingPositionDatabaseError(error, fallbackMessage) {
   const err = new Error(error?.message || fallbackMessage);
   err.code = error?.code;
 
-  if (['OP001', 'OP002', 'OP003', 'OP004'].includes(error?.code)) {
+  if (['OP001', 'OP002', 'OP003', 'OP004', 'PE001'].includes(error?.code)) {
     err.statusCode = 400;
   } else if (error?.code === 'OP005' || error?.code === 'OP007') {
     err.statusCode = 409;

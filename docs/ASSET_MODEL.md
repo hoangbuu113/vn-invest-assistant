@@ -41,6 +41,7 @@ Features 16 through 30 and V1.1 Improvements establish the canonical schema, led
     $$\text{Source Adapter} \longrightarrow \text{Sanitization} \longrightarrow \text{Deduplication} \longrightarrow \text{Relevance Engine} \longrightarrow \text{Canonical News Feed}$$
   - Universal reporting currency is strictly `VND`; native non-VND asset valuations are converted on demand via direct `quoteCurrency -> VND` FX rates.
   - Dual-settlement VND-basis cross-currency accounting foundation: Crypto and Gold spot current VND valuations operate through current USD/VND authority.
+  - Canonical Portfolio eligibility is explicit asset metadata: supported stocks, ETFs, funds, Gold, and Crypto are `PORTFOLIO_ELIGIBLE`; the `USD/VND` market-context pair is `REFERENCE_ONLY`. Server routes and database triggers enforce this authority.
   - Public Multi-User Supabase Auth: Every user has an isolated `investor_profile` (`user_id UUID NOT NULL UNIQUE REFERENCES auth.users(id)`). New profiles start empty with `cash_available = 0`, 0 holdings, and 0 transactions. Legacy 20M test data was completely purged.
   - Background Price Alert Scheduler & Web Push: Price alerts evaluate on a 15-minute background cron schedule (`POST /api/internal/alerts/evaluate`), triggering multi-device push notifications via first-party Web Push (`public.push_subscriptions`, `public.alert_notification_deliveries`).
   - Multi-asset calendar and historical bar engine (`server/src/history.js`) with calendar-window lookbacks (`1W`, `1M`, `3M`, `6M`, `1Y`) and current-day exclusivity.
@@ -52,8 +53,8 @@ Features 16 through 30 and V1.1 Improvements establish the canonical schema, led
   - USD/VND deterministic analysis remains unsupported until trustworthy completed historical capability exists.
   - Historical non-VND portfolio performance remains truthfully unavailable when historical FX authority is missing.
   - Gold Spot history remains close-only, so OHLC-dependent analysis metrics remain unavailable for Gold. Crypto uses completed Binance OHLCV history.
-  - Non-VND cost basis and unrealized P/L remain unavailable until acquisition-time FX accounting exists.
-  - Non-VND BUY/SELL transactions are strictly blocked at database trigger level.
+  - Non-VND BUY/SELL and opening positions require explicit VND accounting basis, native execution metadata, and governed FX/user-supplied provenance. They do not create foreign-currency cash balances and never assume USDT equals USD.
+  - Historical non-VND performance remains unavailable without authoritative dated FX, even though current VND valuation and transaction-time VND accounting basis are supported.
   - The single VND cash ledger remains authoritative for all cash operations (no multi-currency cash balances).
   - Open-ended mutual funds (NAV scheduled) remain deferred.
   - No article database persistence (news is dynamically cached in memory with per-source TTLs).
@@ -75,6 +76,7 @@ The internal canonical identity of an asset is strictly decoupled from third-par
 - **Base Currency**: Applicable for pairs such as FX or crypto pairs (e.g. `USD` in `USD/VND`, `BTC` in `BTC/USD`).
 - **Provider Mappings**: Adapter dictionary mapping internal assets to provider-specific identifiers.
 - **Market / Calendar Policy**: Associated trading hours and calendar evaluation rules.
+- **Portfolio Eligibility**: Explicit `PORTFOLIO_ELIGIBLE` or `REFERENCE_ONLY` capability; it is independent of provider snapshot/history support.
 
 > [!IMPORTANT]
 > Internal asset identity must **never** equal provider symbol identity. Business logic and client code must consume canonical assets, never provider-formatted ticker strings.

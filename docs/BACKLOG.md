@@ -37,17 +37,17 @@ The following design decisions are unresolved and intentionally deferred. They m
 
 ## 3. Portfolio V1 Concrete Work Items
 
-Statuses describe the repository state at the 2026-09-08 audit; they are not implementation claims.
+Statuses describe the repository state after the 2026-09-08 P0.1 implementation and do not imply deployment or remote migration.
 
 | Priority | Work item | Data dependency | Method dependency | Acceptance criteria | Status |
 |---|---|---|---|---|---|
-| P0 | Fresh-database migration reproducibility | All chronological Supabase migrations | Forward-only correction; immutable applied history | A blank database applies every migration in order; cash/transaction columns and amount signs match final RPCs; no financial backfill/fabrication | BLOCKED |
+| P0 | Fresh-database rebuild reproducibility | Current schema bootstrap plus forward migrations | Preserve immutable applied history; explicitly test historical replay debt | A blank database builds the authoritative current Portfolio schema; disposable PostgreSQL tests reproduce the old migration mismatch; no financial backfill/fabrication | COMPLETE_P0.1 |
 | P0 | Reconciled portfolio snapshot | Cash ledger revision, holdings projection revision, price/FX observations | One valuation boundary and stable `snapshotId` | Summary, holdings, and allocation carry the same snapshot/revision; repeated consumers cannot mix price/FX vintages | MISSING |
 | P0 | Completeness/freshness contract | Provider timestamps, FX timestamps, refresh attempts/results | Governed six-state vocabulary | Every portfolio metric returns an explicit state/reason; missing/error/NaN never becomes zero or ready | PARTIAL |
 | P0 | Cash validation trust boundary | `get_cash_overview` result | Fail closed on malformed/missing authority | Overview rejects unavailable/malformed authoritative cash rather than coercing it to zero | DEFECT |
 | P0 | Performance eligibility correction | Authority start, dated valuations, cash flows | No annualization below one year; explicit insufficient/not-applicable cases | Short history never displays annualized XIRR; failed XIRR remains null; cash-only and one-point cases have explicit states | DEFECT |
-| P0 | Historical transaction timing consistency | Transaction `executedAt`/`createdAt`, cash-ledger `effectiveAt`, opening cutoff | One governed accounting-time/reconstruction rule | A back-entered internal BUY/SELL cannot create a period where the position effect and matching cash effect occur on different dates | DEFECT |
-| P0 | Server-side portfolio asset eligibility | Canonical asset type/capabilities | Reference-only assets are never positions | Transaction and opening-position APIs/RPCs reject `USD/VND` and any non-investable canonical asset even when called outside the UI | DEFECT |
+| P0 | Historical transaction timing consistency | Transaction `executedAt`/`createdAt`, cash-ledger link, opening cutoff | Linked BUY/SELL use transaction execution as economic time; ambiguous history fails closed | A back-entered internal BUY/SELL cannot create a period where the position effect and matching cash effect occur on different dates | COMPLETE_P0.1 |
+| P0 | Server-side portfolio asset eligibility | Canonical `assets.portfolio_eligibility` | Reference-only assets are never positions | Transaction and opening-position APIs/RPCs reject `USD/VND` and any non-investable canonical asset even when called outside the UI | COMPLETE_P0.1 |
 | P0 | Benchmark eligibility and selection | Portfolio TWR series, benchmark bars, currency metadata | Same period/return basis/currency; explicit reference-only mode | User can select a compatible benchmark or none; price return labelled; percentage-point difference never called alpha | PARTIAL |
 | P0 | Summary + holdings-first API/UI | Reconciled snapshot | Governed page order | Summary → Holdings → Performance → Allocation → Activity; core values and data state visible without scrolling past performance | MISSING |
 | P0 | Cash-only experience | Cash authority and zero-position state | Applicability truth table | Approximately 200M VND cash/zero holdings shows known cash and 100% cash allocation without false investment, concentration, or annualized metrics | PARTIAL |

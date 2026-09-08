@@ -6,7 +6,7 @@ export const CASH_LEDGER_METHODOLOGY = Object.freeze({
   sourceOfTruth: 'cash_ledger',
   currentCashFormula: 'openingBalance + deposits - withdrawals - buyOutflows + sellInflows',
   legacyTransactionsReplayed: false,
-  historicalEntrySemantics: 'recorded transactions affect current cash at accounting time; no historical cash reconstruction',
+  historicalEntrySemantics: 'linked BUY/SELL cash effects use transaction executedAt; createdAt remains recording time',
   feesIncluded: false,
   taxesIncluded: false
 });

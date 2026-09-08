@@ -9,6 +9,7 @@ import {
 import {
   checkSupabaseConnection,
   getAssets,
+  getAssetById,
   getAssetBySymbol,
   getInvestorProfile,
   getProfileById,
@@ -26,6 +27,7 @@ import {
   evaluateAndPersistAlerts,
   privateSupabase
 } from './src/supabase.js';
+import { isPortfolioEligibleAsset } from './src/assets.js';
 import { getMarketSnapshot, getMarketHistory, getMarketRealtime } from './src/market.js';
 import { getNewsFeed, getPersonalizedNewsFeed, runNewsCollector } from './src/news.js';
 import { getPortfolioOverview } from './src/portfolio.js';
@@ -161,6 +163,7 @@ export function createApp(services = {}) {
     updateInvestorProfileFn = updateInvestorProfile,
     getHoldingsFn = getHoldings,
     getAssetsFn = getAssets,
+    getAssetByIdFn = getAssetById,
     getAssetBySymbolFn = getAssetBySymbol,
     getMarketSnapshotFn = getMarketSnapshot,
     getMarketHistoryFn = getMarketHistory,
@@ -241,6 +244,27 @@ export function createApp(services = {}) {
   function getProfileOptions(req, profileId) {
     const id = profileId || req.user?.profileId;
     return id ? { profileId: id } : {};
+  }
+
+  async function resolvePortfolioAsset({ assetId, symbol }) {
+    const asset = assetId
+      ? await getAssetByIdFn(assetId)
+      : await getAssetBySymbolFn(symbol);
+
+    if (!asset) {
+      const error = new Error('asset not found');
+      error.statusCode = 400;
+      error.code = 'PORTFOLIO_ASSET_NOT_FOUND';
+      throw error;
+    }
+    if (!isPortfolioEligibleAsset(asset)) {
+      const error = new Error('asset is reference-only and cannot be used in Portfolio');
+      error.statusCode = 400;
+      error.code = 'PORTFOLIO_ASSET_NOT_ELIGIBLE';
+      throw error;
+    }
+
+    return asset;
   }
 
   const resolveProfileForUser = async (userId) => {
@@ -524,6 +548,8 @@ export function createApp(services = {}) {
         });
       }
 
+      await resolvePortfolioAsset({ assetId: assetId.trim() });
+
       const openingPayload = {
         assetId: assetId.trim(),
         quantity,
@@ -759,6 +785,11 @@ export function createApp(services = {}) {
           errors
         });
       }
+
+      await resolvePortfolioAsset({
+        assetId: hasAssetId ? assetId.trim() : null,
+        symbol: hasSymbol ? symbol.trim().toUpperCase() : null
+      });
 
       const transactionPayload = {
         symbol: hasSymbol ? symbol.trim() : undefined,

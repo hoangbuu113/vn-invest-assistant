@@ -23,7 +23,8 @@ describe('V1.1 Improvement 06 — Asset Selector Capability Contracts', () => {
       quote_currency: 'VND',
       base_currency: 'VND',
       market_policy: 'VN_EXCHANGE',
-      exchange: 'HOSE'
+      exchange: 'HOSE',
+      portfolio_eligibility: 'PORTFOLIO_ELIGIBLE'
     },
     {
       id: 'asset_e1vfvn30',
@@ -33,7 +34,8 @@ describe('V1.1 Improvement 06 — Asset Selector Capability Contracts', () => {
       quote_currency: 'VND',
       base_currency: 'VND',
       market_policy: 'VN_EXCHANGE',
-      exchange: 'HOSE'
+      exchange: 'HOSE',
+      portfolio_eligibility: 'PORTFOLIO_ELIGIBLE'
     },
     {
       id: 'asset_xau_usd',
@@ -43,7 +45,8 @@ describe('V1.1 Improvement 06 — Asset Selector Capability Contracts', () => {
       quote_currency: 'USD',
       base_currency: 'XAU',
       market_policy: 'GLOBAL_24_5_GOLD',
-      exchange: 'COMMODITY'
+      exchange: 'COMMODITY',
+      portfolio_eligibility: 'PORTFOLIO_ELIGIBLE'
     },
     {
       id: 'asset_usd_vnd',
@@ -53,7 +56,8 @@ describe('V1.1 Improvement 06 — Asset Selector Capability Contracts', () => {
       quote_currency: 'VND',
       base_currency: 'USD',
       market_policy: 'GLOBAL_24_5_FX',
-      exchange: 'FOREX'
+      exchange: 'FOREX',
+      portfolio_eligibility: 'REFERENCE_ONLY'
     },
     {
       id: 'asset_btc',
@@ -63,7 +67,8 @@ describe('V1.1 Improvement 06 — Asset Selector Capability Contracts', () => {
       quote_currency: 'USD',
       base_currency: 'BTC',
       market_policy: 'CONTINUOUS_24_7',
-      exchange: 'CRYPTO'
+      exchange: 'CRYPTO',
+      portfolio_eligibility: 'PORTFOLIO_ELIGIBLE'
     },
     {
       id: 'asset_eth',
@@ -73,7 +78,8 @@ describe('V1.1 Improvement 06 — Asset Selector Capability Contracts', () => {
       quote_currency: 'USD',
       base_currency: 'ETH',
       market_policy: 'CONTINUOUS_24_7',
-      exchange: 'CRYPTO'
+      exchange: 'CRYPTO',
+      portfolio_eligibility: 'PORTFOLIO_ELIGIBLE'
     }
   ];
 
@@ -140,6 +146,17 @@ describe('V1.1 Improvement 06 — Asset Selector Capability Contracts', () => {
       assert.equal(isPortfolioTradeableAsset(usdVnd), false);
       assert.equal(isOpeningPositionSupported(usdVnd), false);
       assert.equal(isTransactionSupported(usdVnd), false);
+    });
+
+    it('uses canonical eligibility instead of inferring investability from asset type or symbol', () => {
+      assert.equal(isPortfolioTradeableAsset({
+        ...fpt,
+        portfolio_eligibility: 'REFERENCE_ONLY'
+      }), false);
+      assert.equal(isPortfolioTradeableAsset({
+        ...usdVnd,
+        portfolio_eligibility: 'PORTFOLIO_ELIGIBLE'
+      }), true);
     });
 
     it('filters representative assets down to 5 tradeable / opening-position assets', () => {

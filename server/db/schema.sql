@@ -84,6 +84,9 @@ CREATE POLICY "Allow public read access to asset_provider_mappings"
 CREATE TABLE IF NOT EXISTS public.investor_profile (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NULL UNIQUE REFERENCES auth.users(id) ON DELETE CASCADE,
+    -- Bootstrap compatibility for immutable pre-multi-user migrations. The
+    -- Feature 13B section below removes this legacy singleton authority.
+    singleton_key SMALLINT NOT NULL DEFAULT 1 CHECK (singleton_key = 1) UNIQUE,
     cash_available NUMERIC(15, 2) NOT NULL DEFAULT 0 CHECK (cash_available >= 0),
     risk_tolerance VARCHAR(20) NOT NULL CHECK (risk_tolerance IN ('low', 'moderate', 'high')),
     investment_horizon VARCHAR(20) NOT NULL CHECK (investment_horizon IN ('short', 'medium', 'long')),
@@ -6861,6 +6864,84 @@ GRANT SELECT, INSERT ON public.vn_equity_opportunity_evaluations TO service_role
 COMMIT;
 
 
+-- Strategy Stability foundation required by the current-schema bootstrap.
+CREATE TABLE IF NOT EXISTS public.strategy_versions (
+    strategy_id TEXT PRIMARY KEY,
+    previous_strategy_id TEXT REFERENCES public.strategy_versions(strategy_id),
+    generated_at TIMESTAMPTZ NOT NULL,
+    published_at TIMESTAMPTZ NOT NULL,
+    data_as_of TIMESTAMPTZ NOT NULL,
+    evidence_fingerprint TEXT NOT NULL,
+    decision_fingerprint TEXT NOT NULL,
+    trigger_reason JSONB NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(trigger_reason) = 'object'),
+    material_changes JSONB NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(material_changes) = 'array'),
+    confidence TEXT NOT NULL CHECK (confidence IN ('HIGH', 'MEDIUM', 'LOW', 'INSUFFICIENT_EVIDENCE')),
+    regime JSONB NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(regime) = 'object'),
+    executive_decision JSONB NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(executive_decision) = 'object'),
+    asset_strategy JSONB NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(asset_strategy) = 'array'),
+    preferred_themes JSONB NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(preferred_themes) = 'array'),
+    avoid_or_underweight JSONB NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(avoid_or_underweight) = 'array'),
+    risk_overlay JSONB NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(risk_overlay) = 'object'),
+    horizon TEXT NOT NULL,
+    invalidation_conditions JSONB NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(invalidation_conditions) = 'array'),
+    status TEXT NOT NULL CHECK (status IN ('published', 'superseded')),
+    policy_version TEXT NOT NULL,
+    run_manifest_id TEXT,
+    next_review_due_at TIMESTAMPTZ,
+    limitations TEXT,
+    lifecycle_state TEXT NOT NULL DEFAULT 'STABLE' CHECK (lifecycle_state IN ('STABLE', 'WATCH', 'REVIEW_REQUIRED', 'EVALUATING')),
+    data_quality_state TEXT NOT NULL DEFAULT 'HEALTHY' CHECK (data_quality_state IN ('HEALTHY', 'DEGRADED', 'INSUFFICIENT')),
+    watch_reasons JSONB NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(watch_reasons) = 'array'),
+    shock_override JSONB DEFAULT NULL CHECK (shock_override IS NULL OR jsonb_typeof(shock_override) = 'object'),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS public.strategy_assessments (
+    assessment_id TEXT PRIMARY KEY,
+    strategy_id TEXT NOT NULL REFERENCES public.strategy_versions(strategy_id),
+    assessed_at TIMESTAMPTZ NOT NULL,
+    data_as_of TIMESTAMPTZ NOT NULL,
+    evidence_fingerprint TEXT NOT NULL,
+    previous_evidence_fingerprint TEXT,
+    decision_fingerprint TEXT NOT NULL,
+    confidence TEXT NOT NULL CHECK (confidence IN ('HIGH', 'MEDIUM', 'LOW', 'INSUFFICIENT_EVIDENCE')),
+    previous_confidence TEXT CHECK (previous_confidence IS NULL OR previous_confidence IN ('HIGH', 'MEDIUM', 'LOW', 'INSUFFICIENT_EVIDENCE')),
+    result TEXT NOT NULL CHECK (result IN ('KEEP', 'DETAILS', 'CONFIDENCE', 'PUBLISH_NEW')),
+    evaluation_status TEXT NOT NULL CHECK (evaluation_status IN ('COMPLETED', 'FAILED', 'DEFERRED', 'SUPERSEDED')),
+    trigger_reason JSONB NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(trigger_reason) = 'object'),
+    material_changes JSONB NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(material_changes) = 'array'),
+    limitations TEXT,
+    policy_version TEXT NOT NULL,
+    run_manifest_id TEXT,
+    lifecycle_state TEXT NOT NULL DEFAULT 'STABLE' CHECK (lifecycle_state IN ('STABLE', 'WATCH', 'REVIEW_REQUIRED', 'EVALUATING')),
+    data_quality_state TEXT NOT NULL DEFAULT 'HEALTHY' CHECK (data_quality_state IN ('HEALTHY', 'DEGRADED', 'INSUFFICIENT')),
+    watch_reasons JSONB NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(watch_reasons) = 'array'),
+    shock_override JSONB DEFAULT NULL CHECK (shock_override IS NULL OR jsonb_typeof(shock_override) = 'object'),
+    confirmation_keys JSONB NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(confirmation_keys) = 'array'),
+    idempotency_key TEXT UNIQUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_strategy_versions_single_published
+    ON public.strategy_versions ((status)) WHERE status = 'published';
+CREATE INDEX IF NOT EXISTS idx_strategy_versions_status_published
+    ON public.strategy_versions (status, published_at DESC);
+CREATE INDEX IF NOT EXISTS idx_strategy_assessments_strategy
+    ON public.strategy_assessments (strategy_id, assessed_at DESC);
+
+ALTER TABLE public.strategy_versions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.strategy_assessments ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS strategy_versions_read ON public.strategy_versions;
+CREATE POLICY strategy_versions_read ON public.strategy_versions FOR SELECT USING (true);
+DROP POLICY IF EXISTS strategy_assessments_read ON public.strategy_assessments;
+CREATE POLICY strategy_assessments_read ON public.strategy_assessments FOR SELECT USING (true);
+REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON public.strategy_versions FROM PUBLIC, anon, authenticated;
+REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON public.strategy_assessments FROM PUBLIC, anon, authenticated;
+GRANT SELECT ON public.strategy_versions TO anon, authenticated;
+GRANT SELECT ON public.strategy_assessments TO anon, authenticated;
+GRANT ALL ON public.strategy_versions TO service_role;
+GRANT SELECT, INSERT ON public.strategy_assessments TO service_role;
+
 -- ============================================================================
 -- Schema Migration: 20260906040000_fix_market_strategist_publication_null.sql
 -- Purpose: Hardens publish_strategy_version_atomic shock_override null handling
@@ -7181,5 +7262,112 @@ ALTER TABLE public.official_monetary_evidence_vintages ENABLE ROW LEVEL SECURITY
 REVOKE ALL ON public.official_monetary_evidence_vintages FROM PUBLIC, anon, authenticated;
 REVOKE UPDATE, DELETE, TRUNCATE ON public.official_monetary_evidence_vintages FROM service_role;
 GRANT SELECT, INSERT ON public.official_monetary_evidence_vintages TO service_role;
+
+COMMIT;
+
+-- Portfolio V1 P0.1: accounting-time and asset-eligibility trust boundaries.
+-- Forward-only: no historical financial rows are rewritten.
+
+BEGIN;
+
+ALTER TABLE public.assets
+    ADD COLUMN IF NOT EXISTS portfolio_eligibility VARCHAR(32);
+
+UPDATE public.assets
+SET portfolio_eligibility = CASE
+    WHEN asset_type = 'fx' THEN 'REFERENCE_ONLY'
+    ELSE 'PORTFOLIO_ELIGIBLE'
+END
+WHERE portfolio_eligibility IS NULL;
+
+ALTER TABLE public.assets
+    ALTER COLUMN portfolio_eligibility SET NOT NULL,
+    DROP CONSTRAINT IF EXISTS assets_portfolio_eligibility_check,
+    ADD CONSTRAINT assets_portfolio_eligibility_check
+        CHECK (portfolio_eligibility IN ('PORTFOLIO_ELIGIBLE', 'REFERENCE_ONLY'));
+
+COMMENT ON COLUMN public.assets.portfolio_eligibility IS
+    'Canonical Portfolio capability. REFERENCE_ONLY assets may provide market context but cannot create holdings, opening positions, or trades.';
+
+CREATE OR REPLACE FUNCTION public.enforce_portfolio_transaction_asset_eligibility()
+RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
+DECLARE v_asset public.assets%ROWTYPE;
+BEGIN
+    SELECT * INTO v_asset FROM public.assets WHERE id = NEW.asset_id;
+    IF v_asset.id IS NULL THEN
+        RAISE EXCEPTION USING ERRCODE = 'PE001', MESSAGE = 'portfolio asset is unavailable';
+    END IF;
+    IF v_asset.is_active IS DISTINCT FROM TRUE
+        OR v_asset.portfolio_eligibility IS DISTINCT FROM 'PORTFOLIO_ELIGIBLE' THEN
+        RAISE EXCEPTION USING ERRCODE = 'PE001', MESSAGE = 'asset is not portfolio eligible';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_portfolio_transaction_asset_eligibility ON public.portfolio_transactions;
+CREATE TRIGGER trg_portfolio_transaction_asset_eligibility
+    BEFORE INSERT OR UPDATE OF asset_id ON public.portfolio_transactions
+    FOR EACH ROW EXECUTE FUNCTION public.enforce_portfolio_transaction_asset_eligibility();
+
+CREATE OR REPLACE FUNCTION public.enforce_opening_position_asset_eligibility()
+RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
+DECLARE v_asset public.assets%ROWTYPE;
+BEGIN
+    SELECT * INTO v_asset FROM public.assets WHERE id = NEW.asset_id;
+    IF v_asset.id IS NULL THEN
+        RAISE EXCEPTION USING ERRCODE = 'PE001', MESSAGE = 'portfolio asset is unavailable';
+    END IF;
+    IF v_asset.is_active IS DISTINCT FROM TRUE
+        OR v_asset.portfolio_eligibility IS DISTINCT FROM 'PORTFOLIO_ELIGIBLE' THEN
+        RAISE EXCEPTION USING ERRCODE = 'PE001', MESSAGE = 'asset is not portfolio eligible';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_opening_position_asset_eligibility ON public.position_opening_baselines;
+CREATE TRIGGER trg_opening_position_asset_eligibility
+    BEFORE INSERT OR UPDATE OF asset_id ON public.position_opening_baselines
+    FOR EACH ROW EXECUTE FUNCTION public.enforce_opening_position_asset_eligibility();
+
+CREATE OR REPLACE FUNCTION public.align_trade_cash_economic_time()
+RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
+DECLARE v_transaction public.portfolio_transactions%ROWTYPE;
+BEGIN
+    IF NEW.entry_type IN ('BUY', 'SELL') THEN
+        IF NEW.portfolio_transaction_id IS NULL THEN
+            RAISE EXCEPTION USING ERRCODE = 'CL004', MESSAGE = 'trade cash movement requires a linked portfolio transaction';
+        END IF;
+        SELECT * INTO v_transaction
+        FROM public.portfolio_transactions
+        WHERE id = NEW.portfolio_transaction_id AND profile_id = NEW.profile_id;
+        IF v_transaction.id IS NULL
+            OR v_transaction.transaction_type IS DISTINCT FROM NEW.entry_type
+            OR v_transaction.settlement_mode IS DISTINCT FROM 'INTERNAL_VND_CASH' THEN
+            RAISE EXCEPTION USING ERRCODE = 'CL004', MESSAGE = 'trade cash movement conflicts with its linked portfolio transaction';
+        END IF;
+        NEW.effective_at := v_transaction.executed_at;
+        NEW.metadata := COALESCE(NEW.metadata, '{}'::jsonb) || jsonb_build_object(
+            'economicTimeAuthority', 'portfolio_transaction.executed_at'
+        );
+    ELSIF NEW.portfolio_transaction_id IS NOT NULL THEN
+        RAISE EXCEPTION USING ERRCODE = 'CL004', MESSAGE = 'only BUY or SELL cash movements may link a portfolio transaction';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_align_trade_cash_economic_time ON public.cash_ledger_entries;
+CREATE TRIGGER trg_align_trade_cash_economic_time
+    BEFORE INSERT ON public.cash_ledger_entries
+    FOR EACH ROW EXECUTE FUNCTION public.align_trade_cash_economic_time();
+
+REVOKE ALL ON FUNCTION public.enforce_portfolio_transaction_asset_eligibility() FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.enforce_opening_position_asset_eligibility() FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.align_trade_cash_economic_time() FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.enforce_portfolio_transaction_asset_eligibility() TO service_role;
+GRANT EXECUTE ON FUNCTION public.enforce_opening_position_asset_eligibility() TO service_role;
+GRANT EXECUTE ON FUNCTION public.align_trade_cash_economic_time() TO service_role;
 
 COMMIT;

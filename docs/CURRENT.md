@@ -1,14 +1,14 @@
 # Current Project Status
 
 ## Latest Verified Repository Checkpoint
-- Portfolio V1 rebaseline/audit baseline: `5f88167 style: improve strategist change summary`.
-- Branch: `main`, two commits ahead of `origin/main` at the start of this audit.
+- Portfolio V1 P0.1 implementation baseline: `24bd932 docs: rebaseline portfolio v1`.
+- Branch: `main`; production/remote migration state is intentionally unchanged by this implementation task.
 - Tracked working tree was clean before this documentation task; pre-existing untracked `server/artifacts/` remains preserved and untouched.
 - Runtime architecture remains Cloudflare Workers Static Assets/frontend proxy and scheduler, Render Node.js/Express backend, and Supabase PostgreSQL/Auth.
 - This checkpoint records repository behavior inspected on 2026-09-08. Exact production migration parity and deployment revision were not queried in this documentation phase.
 
 ## Current Phase
-Portfolio V1 documentation rebaseline and existing-implementation audit. The Portfolio redesign is **not implemented** in this phase.
+Portfolio V1 P0.1 Accounting Foundation is implemented and locally verified. It establishes the rebuild, economic-time, and portfolio-eligibility trust boundaries; later reconciled-snapshot, completeness, performance, and UI phases remain pending.
 
 ## Portfolio — Verified Working Today
 - Supabase Auth user identity resolves through `investor_profile.user_id` to private `investor_profile.id`; protected Express routes pass that profile ID to service-role data access and profile-scoped financial RPCs.
@@ -20,6 +20,12 @@ Portfolio V1 documentation rebaseline and existing-implementation audit. The Por
 - Composition derives from one overview inside its own request and distinguishes complete, partial, unavailable, and cash-only allocation bases.
 - Performance exposes daily chained end-of-day TWR, XIRR/MWR, wealth-index drawdown, accounting P/L, coverage reasons, and completed-date series for 1W/1M/3M/6M/1Y.
 - Benchmark comparison supports VN-Index price return (VND comparable) and S&P 500 price return (USD reference-only), using common dates and Base100 normalization.
+
+## Portfolio P0.1 — Implemented and Verified Locally (Not Deployed)
+- The authoritative current-schema bootstrap can build Portfolio-critical objects on a blank PostgreSQL database. Immutable chronological migrations are preserved; the old migration directory is documented as requiring a base schema rather than being rewritten.
+- Linked tracked-cash BUY/SELL effects use the immutable transaction `executedAt` as economic time while `createdAt` remains the actual recording/audit time. Historical reads reconcile that authority through `portfolio_transaction_id` and fail closed if linkage is ambiguous.
+- Canonical `assets.portfolio_eligibility` governs Portfolio entry. Current stocks, ETFs, funds, Gold, and Crypto remain eligible; `USD/VND` is `REFERENCE_ONLY`. Express routes and PostgreSQL triggers both enforce the rule.
+- Migration `20260908000000_portfolio_v1_accounting_foundation.sql` remains unapplied remotely; no production database or deployment was changed.
 
 ## Portfolio — Partial
 - Overview, composition, performance, and benchmark are separate requests. They do not share a portfolio snapshot ID, ledger revision, valuation timestamp, or atomic read boundary.
@@ -80,12 +86,16 @@ Portfolio V1 documentation rebaseline and existing-implementation audit. The Por
 - USD/VND historical bars/historical FX authority remain insufficient for non-VND portfolio performance.
 - Gold spot history remains close-only where the configured provider cannot supply authoritative OHLC.
 
-## Verified Portfolio Audit Blockers
-1. Migration `20260901010000_v1_1_cross_currency_accounting_foundation.sql` references cash-ledger columns/sign conventions that do not match the earlier cash-ledger migration. Clean chronological replay is not trustworthy until a forward-only correction and fresh-database test exist.
-2. No reconciled portfolio snapshot/ledger-revision contract exists; independent Summary/Holdings/Allocation refreshes may describe different price/FX moments.
-3. Historical internal BUY/SELL reconstruction applies position changes by `executedAt` but tracked cash changes by later ledger `effectiveAt`; a transaction recorded today with an older execution date can create false interim portfolio values and drawdown.
-4. Short-history XIRR is annualized despite the newly governed Portfolio V1 methodology.
-5. The frontend excludes the `USD/VND` context pair from Portfolio entry, but the transaction/opening-position RPC trust boundary does not enforce the same non-investable asset rule; a direct authenticated API request can bypass the UI-only capability filter.
+## Portfolio P0.1 Verification and Remaining Blockers
+- Disposable PostgreSQL execution reproduces two historical rebuild facts: the chronological migration directory has no initial-schema migration, and the immutable cross-currency migration references cash-ledger columns absent from its historical predecessor. Production may still be correct because it was evolved from an existing base; no production data was queried or changed here.
+- The supported rebuild contract is the full current `server/db/schema.sql` bootstrap. Historical applied migrations remain audit history, and future changes continue through forward migrations. The new P0.1 forward migration changes no historical financial row.
+- P0.1 closes the linked BUY/SELL economic-time split and the UI-only portfolio-eligibility bypass for future writes, while historical reads reconcile immutable legacy linkage without rewriting ledger records.
+
+Remaining blockers:
+1. No reconciled portfolio snapshot/ledger-revision contract exists; independent Summary/Holdings/Allocation refreshes may describe different price/FX moments.
+2. Short-history XIRR is annualized despite the governed Portfolio V1 methodology.
+3. The six-state completeness/freshness contract and fail-closed cash validation remain incomplete.
+4. Historical FX authority for non-VND performance remains unavailable.
 
 ## Next Work
-Execute the Portfolio V1 P0 sequence in `docs/ROADMAP.md`, beginning with migration reproducibility, financial-state/completeness contracts, and a single reconciled backend portfolio projection. UI redesign must follow those authorities rather than precede them.
+Continue the Portfolio V1 P0 sequence in `docs/ROADMAP.md` with completeness/freshness and a single reconciled backend portfolio projection. UI redesign must follow those authorities rather than precede them.

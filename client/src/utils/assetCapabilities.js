@@ -15,6 +15,11 @@ export function normalizeAsset(asset) {
   const baseCurrency = String(asset.base_currency || asset.baseCurrency || '').trim().toUpperCase();
   const marketPolicy = String(asset.market_policy || asset.marketPolicy || '').trim();
   const exchange = String(asset.exchange || '').trim();
+  const suppliedPortfolioEligibility = String(
+    asset.portfolio_eligibility || asset.portfolioEligibility || ''
+  ).trim().toUpperCase();
+  const portfolioEligibility = suppliedPortfolioEligibility
+    || (assetType === 'fx' ? 'REFERENCE_ONLY' : 'PORTFOLIO_ELIGIBLE');
   const id = asset.id || symbol;
 
   return {
@@ -26,6 +31,7 @@ export function normalizeAsset(asset) {
     baseCurrency,
     marketPolicy,
     exchange,
+    portfolioEligibility,
     raw: asset
   };
 }
@@ -49,7 +55,7 @@ export function isHoldableVndAsset(asset) {
 export function isPortfolioTradeableAsset(asset) {
   const norm = normalizeAsset(asset);
   if (!norm || !norm.symbol) return false;
-  return norm.assetType !== 'fx' && norm.symbol !== 'USD/VND';
+  return norm.portfolioEligibility === 'PORTFOLIO_ELIGIBLE';
 }
 
 export function isOpeningPositionSupported(asset) {

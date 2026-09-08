@@ -18,6 +18,7 @@ const FOREIGN_PROFILE_ID = '22222222-2222-4222-8222-222222222222';
 const FPT_ASSET_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const VCB_ASSET_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const BTC_ASSET_ID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+const USD_VND_ASSET_ID = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
 
 function cloneRows(rows) {
   return rows.map(row => ({ ...row }));
@@ -29,9 +30,10 @@ function createFakeTransactionDatabase({
   failAfterTransactionInsert = false
 } = {}) {
   const assets = [
-    { id: FPT_ASSET_ID, symbol: 'FPT', name: 'FPT Corporation', asset_type: 'stock', quote_currency: 'VND' },
-    { id: VCB_ASSET_ID, symbol: 'VCB', name: 'Vietcombank', asset_type: 'stock', quote_currency: 'VND' },
-    { id: BTC_ASSET_ID, symbol: 'BTC/USD', name: 'Bitcoin / US Dollar', asset_type: 'crypto', quote_currency: 'USD' }
+    { id: FPT_ASSET_ID, symbol: 'FPT', name: 'FPT Corporation', asset_type: 'stock', quote_currency: 'VND', is_active: true, portfolio_eligibility: 'PORTFOLIO_ELIGIBLE' },
+    { id: VCB_ASSET_ID, symbol: 'VCB', name: 'Vietcombank', asset_type: 'stock', quote_currency: 'VND', is_active: true, portfolio_eligibility: 'PORTFOLIO_ELIGIBLE' },
+    { id: BTC_ASSET_ID, symbol: 'BTC/USD', name: 'Bitcoin / US Dollar', asset_type: 'crypto', quote_currency: 'USD', is_active: true, portfolio_eligibility: 'PORTFOLIO_ELIGIBLE' },
+    { id: USD_VND_ASSET_ID, symbol: 'USD/VND', name: 'US Dollar / Vietnamese Dong', asset_type: 'fx', quote_currency: 'VND', is_active: true, portfolio_eligibility: 'REFERENCE_ONLY' }
   ];
 
   const state = {
@@ -202,7 +204,7 @@ function createFakeTransactionDatabase({
       entry_type: transactionType,
       amount: cashAmount,
       portfolio_transaction_id: transaction.id,
-      effective_at: createdAt,
+      effective_at: transaction.executed_at,
       created_at: createdAt,
       metadata: {},
       symbol: asset.symbol
@@ -231,7 +233,8 @@ function createFakeTransactionDatabase({
 
   return {
     client: { rpc },
-    state
+    state,
+    assets
   };
 }
 
@@ -409,6 +412,21 @@ describe('Feature 14 — Transaction Ledger Core + Atomic Production Path', () =
     assert.equal(result.transaction.profileId, SINGLETON_PROFILE_ID);
   });
 
+  test('P0.1 future write contract aligns linked cash economic time without backdating audit time', async () => {
+    const { client } = createFakeTransactionDatabase();
+    const result = await createPortfolioTransaction({
+      symbol: 'FPT',
+      transactionType: 'BUY',
+      quantity: 1,
+      price: 10,
+      executedAt: '2026-08-20T00:00:00.000Z'
+    }, client);
+
+    assert.equal(result.transaction.executedAt, '2026-08-20T00:00:00.000Z');
+    assert.equal(result.cashEntry.effectiveAt, result.transaction.executedAt);
+    assert.notEqual(result.cashEntry.createdAt, result.cashEntry.effectiveAt);
+  });
+
   test('N. listing is deterministic newest-first and supports normalized symbol filtering', async () => {
     const { client } = createFakeTransactionDatabase();
     await createPortfolioTransaction({
@@ -520,7 +538,12 @@ describe('Feature 14 — Actual Express Routes + Actual Production Data Access',
 
   before(async () => {
     fake = createFakeTransactionDatabase();
-    const app = createApp({ transactionClient: fake.client, ownerAccessToken: OWNER_ACCESS_TOKEN });
+    const app = createApp({
+      transactionClient: fake.client,
+      ownerAccessToken: OWNER_ACCESS_TOKEN,
+      getAssetByIdFn: async (id) => fake.assets.find((asset) => asset.id === id) || null,
+      getAssetBySymbolFn: async (symbol) => fake.assets.find((asset) => asset.symbol === symbol) || null
+    });
     server = http.createServer(app);
     await new Promise(resolve => server.listen(0, resolve));
     baseUrl = `http://127.0.0.1:${server.address().port}`;
@@ -632,5 +655,23 @@ describe('Feature 14 — Actual Express Routes + Actual Production Data Access',
       })
     });
     assert.equal(nonexistentHolding.status, 400);
+  });
+
+  test('reference-only FX is rejected at the authenticated API boundary before any RPC mutation', async () => {
+    const before = JSON.stringify(fake.state);
+    const response = await ownerFetch(`${baseUrl}/api/transactions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        assetId: USD_VND_ASSET_ID,
+        transactionType: 'BUY',
+        quantity: 1,
+        price: 25000
+      })
+    });
+    const body = await response.json();
+    assert.equal(response.status, 400);
+    assert.match(body.message, /reference-only/i);
+    assert.equal(JSON.stringify(fake.state), before);
   });
 });

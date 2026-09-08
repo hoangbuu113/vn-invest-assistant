@@ -154,9 +154,9 @@ Comprehensive cross-feature golden regression tests are executed at strategic in
 Portfolio V1 remains a supporting personal tracking capability inside the broader market-intelligence product. Work must proceed from accounting/data authority to API projection and only then to UI restructuring.
 
 ### P0 — Correctness, Contracts, and Core UX
-1. Repair chronological migration reproducibility with a forward-only correction and a fresh-database migration test.
-2. Audit and lock authoritative accounting/data invariants for cash, holdings projection, transactions, opening positions, current price, and FX.
-3. Enforce portfolio asset eligibility at the server/database trust boundary so reference-only instruments cannot bypass UI filtering.
+1. **COMPLETE (P0.1)** Establish an authoritative current-schema blank-database bootstrap, preserve immutable historical migrations, and prove the historical replay defect with disposable PostgreSQL tests.
+2. **PARTIAL (P0.1 accounting-time scope complete)** Linked tracked-cash BUY/SELL and position reconstruction now align on transaction `executedAt`, with `createdAt` preserved as audit time and ambiguous history failing closed. Remaining authoritative current-price, FX, cash-validation, and completeness invariants continue in later P0 phases.
+3. **COMPLETE (P0.1)** Enforce canonical portfolio asset eligibility at both server and database trust boundaries so reference-only instruments cannot bypass UI filtering.
 4. Implement the governed completeness/freshness states: `AVAILABLE`, `PARTIAL`, `STALE`, `NOT_APPLICABLE`, `INSUFFICIENT_HISTORY`, `UNAVAILABLE`.
 5. Produce one reconciled portfolio projection so Summary, Holdings, and Allocation share a snapshot ID, ledger revision, valuation time, and source timestamps.
 6. Rebuild Summary around total portfolio value, cash, invested market value, and valuation/data state.

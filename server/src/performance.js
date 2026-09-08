@@ -133,17 +133,71 @@ function normalizeTimestampToDateKey(timestamp) {
   return getCanonicalDate(timestamp, PERFORMANCE_TIMEZONE);
 }
 
+function cashEntryLinkId(entry) {
+  return entry?.portfolioTransactionId
+    || entry?.portfolio_transaction_id
+    || entry?.transactionId
+    || null;
+}
+
+function transactionId(transaction) {
+  return transaction?.id || transaction?.transactionId || transaction?.transaction_id || null;
+}
+
+/**
+ * Resolves the governed economic timestamp for a cash-ledger entry.
+ * Linked BUY/SELL cash movements inherit the immutable transaction execution
+ * time; createdAt remains only the recording/audit time.
+ */
+export function resolveCashEntryEconomicTimestamp(entry, transactions = []) {
+  const type = entry?.entryType || entry?.entry_type;
+  const linkId = cashEntryLinkId(entry);
+
+  if (!linkId || !['BUY', 'SELL'].includes(type)) {
+    return entry?.effectiveAt || entry?.effective_at || null;
+  }
+
+  const matches = transactions.filter((candidate) => transactionId(candidate) === linkId);
+  if (matches.length !== 1) {
+    throw performanceError(
+      'Linked cash movement cannot be reconciled to exactly one portfolio transaction',
+      'AMBIGUOUS_LINKED_CASH_EVENT',
+      503
+    );
+  }
+
+  const linked = matches[0];
+  const linkedType = linked.transactionType || linked.transaction_type;
+  const cashProfileId = entry.profileId || entry.profile_id || null;
+  const transactionProfileId = linked.profileId || linked.profile_id || null;
+  const executedAt = linked.executedAt || linked.executed_at || null;
+
+  if (
+    linkedType !== type
+    || (cashProfileId && transactionProfileId && cashProfileId !== transactionProfileId)
+    || !normalizeTimestampToDateKey(executedAt)
+  ) {
+    throw performanceError(
+      'Linked cash movement conflicts with its authoritative portfolio transaction',
+      'AMBIGUOUS_LINKED_CASH_EVENT',
+      503
+    );
+  }
+
+  return executedAt;
+}
+
 /**
  * Reconstructs cash balance as of a given calendar date.
  */
-export function reconstructCashBalance(dateKey, cashActivation, cashEntries = []) {
+export function reconstructCashBalance(dateKey, cashActivation, cashEntries = [], transactions = []) {
   if (!cashActivation) return 0;
   let balance = typeof cashActivation.openingBalanceAmount === 'number'
     ? cashActivation.openingBalanceAmount
     : Number(cashActivation.openingBalanceAmount || 0);
 
   for (const entry of cashEntries) {
-    const entryDate = normalizeTimestampToDateKey(entry.effectiveAt || entry.effective_at);
+    const entryDate = normalizeTimestampToDateKey(resolveCashEntryEconomicTimestamp(entry, transactions));
     if (!entryDate || entryDate > dateKey) continue;
 
     const amount = typeof entry.amount === 'number' ? entry.amount : Number(entry.amount || 0);
@@ -331,7 +385,7 @@ export function findPerformanceInceptionDate({
   const candidateDates = generateDateSpan(authStartDateKey, completedEndDate);
 
   for (const dateKey of candidateDates) {
-    const cash = reconstructCashBalance(dateKey, cashActivation, cashEntries);
+    const cash = reconstructCashBalance(dateKey, cashActivation, cashEntries, transactions);
     const holdingsMap = reconstructHoldingsState(dateKey, positionBaselines, transactions);
 
     let isComplete = true;
@@ -377,7 +431,7 @@ export function findPerformanceInceptionDate({
   // 2. If no complete valuation date exists (e.g. portfolio contains non-VND assets or unpriced assets),
   // anchor inception to the first date with non-zero state so coverage degradation is reported truthfully.
   for (const dateKey of candidateDates) {
-    const cash = reconstructCashBalance(dateKey, cashActivation, cashEntries);
+    const cash = reconstructCashBalance(dateKey, cashActivation, cashEntries, transactions);
     const holdingsMap = reconstructHoldingsState(dateKey, positionBaselines, transactions);
 
     let hasAnyPositions = false;
@@ -684,7 +738,7 @@ export function calculatePortfolioPerformance({
   let hasCoverageDegradation = false;
 
   for (const dateKey of dateSpan) {
-    const cash = reconstructCashBalance(dateKey, cashActivation, cashEntries);
+    const cash = reconstructCashBalance(dateKey, cashActivation, cashEntries, transactions);
     const holdingsMap = reconstructHoldingsState(dateKey, positionBaselines, transactions);
 
     // Compute external flows on this date

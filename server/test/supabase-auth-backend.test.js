@@ -92,6 +92,23 @@ describe('Public Multi-User Supabase Authentication Backend', () => {
       alertSchedulerToken: SCHEDULER_TOKEN,
       supabaseAuthClient: mockSupabaseAuthClient,
 
+      getAssetByIdFn: async (id) => ({
+        id,
+        symbol: id === 'asset-vcb' ? 'VCB' : 'FPT',
+        asset_type: 'stock',
+        quote_currency: 'VND',
+        is_active: true,
+        portfolio_eligibility: 'PORTFOLIO_ELIGIBLE'
+      }),
+      getAssetBySymbolFn: async (symbol) => ({
+        id: `asset-${symbol.toLowerCase()}`,
+        symbol,
+        asset_type: 'stock',
+        quote_currency: 'VND',
+        is_active: true,
+        portfolio_eligibility: 'PORTFOLIO_ELIGIBLE'
+      }),
+
       getInvestorProfileFn: async () => profiles[0] || null,
       getProfileByIdFn: async (id) => profiles.find(p => p.id === id) || null,
       getProfileByUserIdFn: async (userId) => profiles.find(p => p.user_id === userId) || null,

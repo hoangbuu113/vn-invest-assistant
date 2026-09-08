@@ -78,6 +78,7 @@ const ASSET_SELECT_FIELDS = [
   'market_policy',
   'market_timezone',
   'quantity_unit',
+  'portfolio_eligibility',
   'is_active',
   'created_at'
 ].join(', ');
@@ -752,7 +753,7 @@ export async function deleteHolding(id, profileIdOrClient = privateSupabase, cli
   return { id, deleted: true };
 }
 
-const CANONICAL_ASSET_PROJECTION = 'id, symbol, name, asset_type, exchange, market_code, quote_currency, base_currency, market_policy, market_timezone, quantity_unit';
+const CANONICAL_ASSET_PROJECTION = 'id, symbol, name, asset_type, exchange, market_code, quote_currency, base_currency, market_policy, market_timezone, quantity_unit, portfolio_eligibility';
 const WATCHLIST_SELECT = `id, profile_id, asset_id, created_at, assets (${CANONICAL_ASSET_PROJECTION})`;
 const ALERT_SELECT = `id, profile_id, asset_id, direction, target_price, status, last_evaluated_price, last_evaluated_at, triggered_at, created_at, assets (${CANONICAL_ASSET_PROJECTION})`;
 
@@ -766,6 +767,7 @@ function normalizeCanonicalAssetProjection(asset) {
   const marketPolicy = asset.marketPolicy ?? asset.market_policy ?? null;
   const marketTimezone = asset.marketTimezone ?? asset.market_timezone ?? null;
   const quantityUnit = asset.quantityUnit ?? asset.quantity_unit ?? null;
+  const portfolioEligibility = asset.portfolioEligibility ?? asset.portfolio_eligibility ?? null;
 
   return {
     ...asset,
@@ -777,7 +779,8 @@ function normalizeCanonicalAssetProjection(asset) {
     baseCurrency,
     marketPolicy,
     marketTimezone,
-    quantityUnit
+    quantityUnit,
+    portfolioEligibility
   };
 }
 

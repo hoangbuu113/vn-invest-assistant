@@ -82,7 +82,22 @@ describe('Public Multi-User HTTP & Security Boundary', () => {
       getWatchlistFn: async () => [],
       getAlertsFn: async () => [],
       getAssetsFn: async () => [],
-      getAssetBySymbolFn: async (symbol) => ({ id: symbol, symbol }),
+      getAssetByIdFn: async (id) => ({
+        id,
+        symbol: id,
+        asset_type: 'stock',
+        quote_currency: 'VND',
+        is_active: true,
+        portfolio_eligibility: 'PORTFOLIO_ELIGIBLE'
+      }),
+      getAssetBySymbolFn: async (symbol) => ({
+        id: symbol,
+        symbol,
+        asset_type: 'stock',
+        quote_currency: 'VND',
+        is_active: true,
+        portfolio_eligibility: 'PORTFOLIO_ELIGIBLE'
+      }),
       getMarketSnapshotFn: async (symbol) => ({ symbol, price: 1 }),
       getMarketRealtimeFn: async (symbol) => ({ symbol, price: 1 }),
       getMarketHistoryFn: async (symbol, range) => ({ symbol, range, bars: [] }),

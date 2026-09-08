@@ -8,6 +8,7 @@ import {
   getPerformanceRangeStart,
   reconstructCashBalance,
   reconstructHoldingsState,
+  resolveCashEntryEconomicTimestamp,
   solveXirr,
   PERFORMANCE_TIMEZONE
 } from '../src/performance.js';
@@ -313,6 +314,125 @@ describe('Feature 25B — VND Portfolio Performance Engine', () => {
     assert.equal(result.twr.status, 'available');
     assert.ok(Math.abs(result.twr.returnPct) < 1e-6);
     assert.equal(result.pnl.cumulativeRealizedPnlToEnd, 10);
+  });
+
+  it('P0.1: back-entered linked BUY uses executedAt for both cash and position economics', () => {
+    const transaction = {
+      id: 'tx-backdated-buy',
+      profileId: 'profile-1',
+      assetId: assetFpt.id,
+      transactionType: 'BUY',
+      quantity: 1,
+      price: 40,
+      executedAt: '2026-08-26T10:00:00.000Z',
+      createdAt: '2026-08-28T10:00:00.000Z'
+    };
+    const cashEntry = {
+      profileId: 'profile-1',
+      entryType: 'BUY',
+      amount: 40,
+      portfolioTransactionId: transaction.id,
+      effectiveAt: '2026-08-28T10:00:00.000Z',
+      createdAt: '2026-08-28T10:00:00.000Z'
+    };
+
+    assert.equal(
+      resolveCashEntryEconomicTimestamp(cashEntry, [transaction]),
+      transaction.executedAt
+    );
+    assert.equal(
+      reconstructCashBalance('2026-08-26', { openingBalanceAmount: 100 }, [cashEntry], [transaction]),
+      60
+    );
+
+    const result = calculatePortfolioPerformance({
+      range: '1W',
+      now: fixedNow,
+      cashActivation: { openingBalanceAmount: 100, activatedAt: '2026-08-25T09:00:00.000Z' },
+      cashEntries: [cashEntry],
+      positionBaselines: [],
+      transactions: [transaction],
+      assets: [assetFpt],
+      priceHistoryMap: { FPT: [{ date: '2026-08-25', close: 40 }] }
+    });
+
+    assert.deepEqual(result.series.map((point) => point.portfolioValueVnd), [100, 100, 100, 100]);
+    assert.equal(result.twr.returnPct, 0);
+    assert.equal(result.drawdown.maxDrawdownPct, 0);
+  });
+
+  it('P0.1: back-entered linked SELL uses executedAt and remains an internal TWR flow', () => {
+    const transaction = {
+      id: 'tx-backdated-sell',
+      profileId: 'profile-1',
+      assetId: assetFpt.id,
+      transactionType: 'SELL',
+      quantity: 1,
+      price: 40,
+      realizedPnL: 0,
+      executedAt: '2026-08-26T10:00:00.000Z',
+      createdAt: '2026-08-28T10:00:00.000Z'
+    };
+    const cashEntry = {
+      profileId: 'profile-1',
+      entryType: 'SELL',
+      amount: 40,
+      portfolioTransactionId: transaction.id,
+      effectiveAt: '2026-08-28T10:00:00.000Z',
+      createdAt: '2026-08-28T10:00:00.000Z'
+    };
+    const result = calculatePortfolioPerformance({
+      range: '1W',
+      now: fixedNow,
+      cashActivation: { openingBalanceAmount: 60, activatedAt: '2026-08-25T09:00:00.000Z' },
+      cashEntries: [cashEntry],
+      positionBaselines: [{
+        assetId: assetFpt.id,
+        openingQuantity: 1,
+        openingAverageCost: 40,
+        accountingCutoffAt: '2026-08-25T09:00:00.000Z',
+        cancelledAt: null
+      }],
+      transactions: [transaction],
+      assets: [assetFpt],
+      priceHistoryMap: { FPT: [{ date: '2026-08-25', close: 40 }] }
+    });
+
+    assert.deepEqual(result.series.map((point) => point.portfolioValueVnd), [100, 100, 100, 100]);
+    assert.ok(result.series.every((point) => point.netExternalFlowVnd === 0));
+    assert.equal(result.twr.returnPct, 0);
+    assert.equal(result.drawdown.maxDrawdownPct, 0);
+  });
+
+  it('P0.1: ambiguous linked cash history fails closed instead of guessing economic time', () => {
+    assert.throws(
+      () => reconstructCashBalance('2026-08-28', { openingBalanceAmount: 100 }, [{
+        entryType: 'BUY',
+        amount: 40,
+        portfolioTransactionId: 'missing-transaction',
+        effectiveAt: '2026-08-28T10:00:00.000Z'
+      }], []),
+      (error) => error.code === 'AMBIGUOUS_LINKED_CASH_EVENT' && error.status === 503
+    );
+
+    assert.throws(
+      () => resolveCashEntryEconomicTimestamp({
+        profileId: 'profile-1',
+        entryType: 'BUY',
+        portfolioTransactionId: 'duplicated-transaction'
+      }, [{
+        id: 'duplicated-transaction',
+        profileId: 'profile-1',
+        transactionType: 'BUY',
+        executedAt: '2026-08-26T10:00:00.000Z'
+      }, {
+        id: 'duplicated-transaction',
+        profileId: 'profile-1',
+        transactionType: 'BUY',
+        executedAt: '2026-08-26T10:00:00.000Z'
+      }]),
+      (error) => error.code === 'AMBIGUOUS_LINKED_CASH_EVENT'
+    );
   });
 
   // --------------------------------------------------

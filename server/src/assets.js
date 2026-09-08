@@ -8,6 +8,13 @@ export const MARKET_POLICIES = Object.freeze([
   'INSTRUMENT_DEFINED'
 ]);
 
+export const PORTFOLIO_ELIGIBILITY = Object.freeze({
+  ELIGIBLE: 'PORTFOLIO_ELIGIBLE',
+  REFERENCE_ONLY: 'REFERENCE_ONLY'
+});
+
+const PORTFOLIO_ELIGIBILITY_VALUES = new Set(Object.values(PORTFOLIO_ELIGIBILITY));
+
 const CURRENCY_CODE_PATTERN = /^[A-Z][A-Z0-9]{0,11}$/;
 const PROVIDER_PATTERN = /^[a-z][a-z0-9_-]*$/;
 const PROVIDER_CAPABILITIES = new Set(['snapshot', 'history', 'analysis', 'realtime']);
@@ -44,6 +51,9 @@ export function normalizeAsset(row) {
   const marketPolicy = optionalTrimmedString(firstDefined(row, 'marketPolicy', 'market_policy'));
   const marketTimezone = optionalTrimmedString(firstDefined(row, 'marketTimezone', 'market_timezone'));
   const quantityUnit = optionalTrimmedString(firstDefined(row, 'quantityUnit', 'quantity_unit'));
+  const suppliedPortfolioEligibility = optionalTrimmedString(
+    firstDefined(row, 'portfolioEligibility', 'portfolio_eligibility')
+  );
   const isActiveValue = firstDefined(row, 'isActive', 'is_active');
   const isActive = typeof isActiveValue === 'boolean' ? isActiveValue : true;
   const symbol = optionalTrimmedString(row.symbol)?.toUpperCase() || null;
@@ -68,6 +78,14 @@ export function normalizeAsset(row) {
     throw assetContractError(`Unsupported market policy '${marketPolicy}'`);
   }
 
+  // Controlled fixtures and pre-migration metadata keep semantic compatibility.
+  // Once deployed, the database column is the canonical eligibility authority.
+  const portfolioEligibility = suppliedPortfolioEligibility
+    || (assetType === 'fx' ? PORTFOLIO_ELIGIBILITY.REFERENCE_ONLY : PORTFOLIO_ELIGIBILITY.ELIGIBLE);
+  if (!PORTFOLIO_ELIGIBILITY_VALUES.has(portfolioEligibility)) {
+    throw assetContractError(`Unsupported portfolio eligibility '${portfolioEligibility}'`);
+  }
+
   return {
     id: row.id,
     symbol,
@@ -80,6 +98,7 @@ export function normalizeAsset(row) {
     market_policy: marketPolicy,
     market_timezone: marketTimezone,
     quantity_unit: quantityUnit,
+    portfolio_eligibility: portfolioEligibility,
     is_active: isActive,
     created_at: row.created_at,
     assetType,
@@ -89,8 +108,15 @@ export function normalizeAsset(row) {
     marketPolicy,
     marketTimezone,
     quantityUnit,
+    portfolioEligibility,
     isActive
   };
+}
+
+export function isPortfolioEligibleAsset(asset) {
+  const normalized = normalizeAsset(asset);
+  return normalized.isActive
+    && normalized.portfolioEligibility === PORTFOLIO_ELIGIBILITY.ELIGIBLE;
 }
 
 export function normalizeProviderMapping(row) {

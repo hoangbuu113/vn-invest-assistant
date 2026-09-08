@@ -41,7 +41,9 @@ function createFakeAccountingDatabase({
     symbol: 'FPT',
     name: 'FPT Corporation',
     asset_type: 'stock',
-    quote_currency: 'VND'
+    quote_currency: 'VND',
+    is_active: true,
+    portfolio_eligibility: 'PORTFOLIO_ELIGIBLE'
   };
   const openingEntries = cashAvailable > 0
     ? [{
@@ -197,6 +199,7 @@ function createFakeAccountingDatabase({
     }
 
     const accountedAt = nextAccountingTime();
+    const executedAt = args.p_executed_at || accountedAt;
     const transaction = {
       id: `transaction-${sequence}`,
       profile_id: PROFILE_ID,
@@ -205,7 +208,7 @@ function createFakeAccountingDatabase({
       quantity,
       price,
       realized_pnl: realizedPnL,
-      executed_at: args.p_executed_at || accountedAt,
+      executed_at: executedAt,
       created_at: accountedAt,
       asset
     };
@@ -257,9 +260,9 @@ function createFakeAccountingDatabase({
       entry_type: transactionType,
       amount: cashAmount,
       portfolio_transaction_id: transaction.id,
-      effective_at: accountedAt,
+      effective_at: executedAt,
       created_at: accountedAt,
-      metadata: { accountingSemantics: 'recorded_now_affects_current_cash' },
+      metadata: { accountingSemantics: 'transaction_executed_at_is_economic_time' },
       symbol: asset.symbol
     };
     stagedCashLedger.push(cashEntry);
@@ -358,6 +361,8 @@ describe('Feature 15 — Cash / Capital Ledger Accounting Core', () => {
     assert.equal(result.cashEntry.entryType, 'BUY');
     assert.equal(result.cashEntry.amount, 10000000);
     assert.equal(result.cashEntry.transactionId, result.transaction.id);
+    assert.equal(result.transaction.executedAt, result.transaction.createdAt);
+    assert.equal(result.cashEntry.effectiveAt, result.transaction.executedAt);
     assert.equal(state.holdings.length, 1);
     assert.equal(state.transactions.length, 1);
   });
@@ -412,7 +417,7 @@ describe('Feature 15 — Cash / Capital Ledger Accounting Core', () => {
     assert.equal(result.currentCash, 100000500);
   });
 
-  test('J. historical executedAt changes current cash once at accounting time without reconstruction', async () => {
+  test('J. linked transaction cash uses executedAt as economic time while current cash changes once', async () => {
     const { client } = createFakeAccountingDatabase();
     const result = await createPortfolioTransaction({
       symbol: 'FPT',
@@ -423,9 +428,10 @@ describe('Feature 15 — Cash / Capital Ledger Accounting Core', () => {
     }, client);
     const overview = await getCashOverview(client);
     assert.equal(result.transaction.executedAt, '2020-01-02T03:00:00.000Z');
-    assert.notEqual(result.cashEntry.effectiveAt, result.transaction.executedAt);
+    assert.equal(result.cashEntry.effectiveAt, result.transaction.executedAt);
+    assert.notEqual(result.cashEntry.createdAt, result.transaction.executedAt);
     assert.equal(overview.currentCash, 99998000);
-    assert.match(CASH_LEDGER_METHODOLOGY.historicalEntrySemantics, /accounting time/);
+    assert.match(CASH_LEDGER_METHODOLOGY.historicalEntrySemantics, /executedAt/);
   });
 
   test('K. existing immutable transactions are not given retroactive cash entries', async () => {
@@ -528,6 +534,24 @@ describe('Feature 15 — Production Cash Routes', () => {
       cashClient: fake.client,
       transactionClient: fake.client,
       getInvestorProfileFn: async () => ({ ...fake.state.profile }),
+      getAssetByIdFn: async (id) => id === ASSET_ID ? fake.state.holdings[0]?.asset || {
+        id: ASSET_ID,
+        symbol: 'FPT',
+        name: 'FPT Corporation',
+        asset_type: 'stock',
+        quote_currency: 'VND',
+        is_active: true,
+        portfolio_eligibility: 'PORTFOLIO_ELIGIBLE'
+      } : null,
+      getAssetBySymbolFn: async (symbol) => symbol === 'FPT' ? {
+        id: ASSET_ID,
+        symbol: 'FPT',
+        name: 'FPT Corporation',
+        asset_type: 'stock',
+        quote_currency: 'VND',
+        is_active: true,
+        portfolio_eligibility: 'PORTFOLIO_ELIGIBLE'
+      } : null,
       updateInvestorProfileFn: input => updateInvestorProfile(input, fake.client),
       ownerAccessToken: OWNER_ACCESS_TOKEN,
       getPortfolioOverviewFn: () => getPortfolioOverview({

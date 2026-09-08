@@ -13,6 +13,7 @@ const FPT_ID = '22222222-2222-4222-8222-222222222222';
 const VCB_ID = '33333333-3333-4333-8333-333333333333';
 const BTC_ID = '44444444-4444-4444-8444-444444444444';
 const INACTIVE_ID = '55555555-5555-4555-8555-555555555555';
+const USD_VND_ID = '66666666-6666-4666-8666-666666666666';
 import { ownerFetch, TEST_OWNER_ACCESS_TOKEN as OWNER_ACCESS_TOKEN } from './helpers/owner-auth.js';
 
 function cloneRows(rows) {
@@ -33,10 +34,11 @@ function createFakePositionDatabase({
   failTransactionAfterLedger = false
 } = {}) {
   const assets = [
-    { id: FPT_ID, symbol: 'FPT', name: 'FPT Corporation', asset_type: 'stock', is_active: true, quote_currency: 'VND' },
-    { id: VCB_ID, symbol: 'VCB', name: 'Vietcombank', asset_type: 'stock', is_active: true, quote_currency: 'VND' },
-    { id: BTC_ID, symbol: 'BTC/USD', name: 'Bitcoin / US Dollar', asset_type: 'crypto', is_active: true, quote_currency: 'USD' },
-    { id: INACTIVE_ID, symbol: 'OLD', name: 'Inactive Asset', asset_type: 'fund', is_active: false, quote_currency: 'VND' }
+    { id: FPT_ID, symbol: 'FPT', name: 'FPT Corporation', asset_type: 'stock', is_active: true, quote_currency: 'VND', portfolio_eligibility: 'PORTFOLIO_ELIGIBLE' },
+    { id: VCB_ID, symbol: 'VCB', name: 'Vietcombank', asset_type: 'stock', is_active: true, quote_currency: 'VND', portfolio_eligibility: 'PORTFOLIO_ELIGIBLE' },
+    { id: BTC_ID, symbol: 'BTC/USD', name: 'Bitcoin / US Dollar', asset_type: 'crypto', is_active: true, quote_currency: 'USD', portfolio_eligibility: 'PORTFOLIO_ELIGIBLE' },
+    { id: INACTIVE_ID, symbol: 'OLD', name: 'Inactive Asset', asset_type: 'fund', is_active: false, quote_currency: 'VND', portfolio_eligibility: 'PORTFOLIO_ELIGIBLE' },
+    { id: USD_VND_ID, symbol: 'USD/VND', name: 'US Dollar / Vietnamese Dong', asset_type: 'fx', is_active: true, quote_currency: 'VND', portfolio_eligibility: 'REFERENCE_ONLY' }
   ];
   let sequence = 0;
   const state = {
@@ -285,7 +287,7 @@ function createFakePositionDatabase({
         entry_type: args.p_transaction_type,
         amount: cashAmount,
         portfolio_transaction_id: transaction.id,
-        effective_at: accountedAt,
+        effective_at: transaction.executed_at,
         created_at: accountedAt,
         metadata: {},
         symbol: asset.symbol
@@ -323,7 +325,9 @@ async function withServer(fake, callback) {
     positionClient: fake.client,
     transactionClient: fake.client,
     ownerAccessToken: OWNER_ACCESS_TOKEN,
-    getHoldingsFn: async () => fake.state.holdings
+    getHoldingsFn: async () => fake.state.holdings,
+    getAssetByIdFn: async (id) => fake.assets.find((asset) => asset.id === id) || null,
+    getAssetBySymbolFn: async (symbol) => fake.assets.find((asset) => asset.symbol === symbol) || null
   });
   const server = http.createServer(app);
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -437,6 +441,25 @@ describe('Feature 17A — opening position and ledger authority', () => {
       assert.equal(fake.state.cashLedger.length, 0);
       assert.equal(fake.state.cashAvailable, 100000000);
     }
+  });
+
+  test('reference-only FX opening position is rejected by the server boundary with zero mutation', async () => {
+    const fake = createFakePositionDatabase();
+    await withServer(fake, async (baseUrl) => {
+      const response = await ownerFetch(`${baseUrl}/api/positions/opening`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ assetId: USD_VND_ID, quantity: 1, averageCost: 25000 })
+      });
+      const body = await response.json();
+      assert.equal(response.status, 400);
+      assert.match(body.message, /reference-only/i);
+    });
+    assert.equal(fake.state.rpcCalls.length, 0);
+    assert.equal(fake.state.baselines.length, 0);
+    assert.equal(fake.state.holdings.length, 0);
+    assert.equal(fake.state.cashLedger.length, 0);
+    assert.equal(fake.state.transactions.length, 0);
   });
 
   test('G. pre-trade correction atomically updates baseline and holding only', async () => {
