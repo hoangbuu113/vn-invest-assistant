@@ -6896,6 +6896,9 @@ CREATE TABLE IF NOT EXISTS public.strategy_versions (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+COMMENT ON TABLE public.strategy_versions IS
+    'Immutable published market strategy decisions. Strictly non-private global market intelligence.';
+
 CREATE TABLE IF NOT EXISTS public.strategy_assessments (
     assessment_id TEXT PRIMARY KEY,
     strategy_id TEXT NOT NULL REFERENCES public.strategy_versions(strategy_id),
@@ -6922,12 +6925,39 @@ CREATE TABLE IF NOT EXISTS public.strategy_assessments (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+COMMENT ON TABLE public.strategy_assessments IS
+    'Append-only evaluation log assessing incoming evidence packets against active strategy versions. Strictly non-private.';
+
 CREATE UNIQUE INDEX IF NOT EXISTS idx_strategy_versions_single_published
     ON public.strategy_versions ((status)) WHERE status = 'published';
 CREATE INDEX IF NOT EXISTS idx_strategy_versions_status_published
     ON public.strategy_versions (status, published_at DESC);
+CREATE INDEX IF NOT EXISTS idx_strategy_versions_decision_fp
+    ON public.strategy_versions (decision_fingerprint);
+CREATE INDEX IF NOT EXISTS idx_strategy_versions_evidence_fp
+    ON public.strategy_versions (evidence_fingerprint);
 CREATE INDEX IF NOT EXISTS idx_strategy_assessments_strategy
     ON public.strategy_assessments (strategy_id, assessed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_strategy_assessments_assessed_at
+    ON public.strategy_assessments (assessed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_strategy_assessments_evidence_fp
+    ON public.strategy_assessments (evidence_fingerprint);
+CREATE INDEX IF NOT EXISTS idx_strategy_assessments_idempotency
+    ON public.strategy_assessments (idempotency_key)
+    WHERE (idempotency_key IS NOT NULL);
+
+CREATE OR REPLACE FUNCTION public.prevent_strategy_assessments_mutation()
+RETURNS TRIGGER AS $$
+BEGIN
+    RAISE EXCEPTION 'strategy_assessments is append-only: UPDATE and DELETE operations are forbidden.';
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_prevent_strategy_assessments_mutation ON public.strategy_assessments;
+CREATE TRIGGER trg_prevent_strategy_assessments_mutation
+    BEFORE UPDATE OR DELETE ON public.strategy_assessments
+    FOR EACH ROW
+    EXECUTE FUNCTION public.prevent_strategy_assessments_mutation();
 
 ALTER TABLE public.strategy_versions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.strategy_assessments ENABLE ROW LEVEL SECURITY;

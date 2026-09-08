@@ -253,6 +253,96 @@ describe('Portfolio V1 P0.1 database rebuild contract', () => {
         'trg_portfolio_transaction_asset_eligibility'
       ]);
 
+      const strategyIndexes = await db.query(`
+        SELECT indexname
+        FROM pg_indexes
+        WHERE schemaname = 'public'
+          AND indexname IN (
+            'idx_strategy_versions_single_published',
+            'idx_strategy_versions_status_published',
+            'idx_strategy_versions_decision_fp',
+            'idx_strategy_versions_evidence_fp',
+            'idx_strategy_assessments_strategy',
+            'idx_strategy_assessments_assessed_at',
+            'idx_strategy_assessments_evidence_fp',
+            'idx_strategy_assessments_idempotency'
+          )
+        ORDER BY indexname
+      `);
+      assert.deepEqual(strategyIndexes.rows.map((row) => row.indexname), [
+        'idx_strategy_assessments_assessed_at',
+        'idx_strategy_assessments_evidence_fp',
+        'idx_strategy_assessments_idempotency',
+        'idx_strategy_assessments_strategy',
+        'idx_strategy_versions_decision_fp',
+        'idx_strategy_versions_evidence_fp',
+        'idx_strategy_versions_single_published',
+        'idx_strategy_versions_status_published'
+      ]);
+
+      const strategyAssessmentTrigger = await db.query(`
+        SELECT DISTINCT trigger_name
+        FROM information_schema.triggers
+        WHERE event_object_schema = 'public'
+          AND event_object_table = 'strategy_assessments'
+          AND trigger_name = 'trg_prevent_strategy_assessments_mutation'
+      `);
+      assert.deepEqual(strategyAssessmentTrigger.rows, [{
+        trigger_name: 'trg_prevent_strategy_assessments_mutation'
+      }]);
+
+      await db.exec(`
+        INSERT INTO public.strategy_versions (
+          strategy_id, generated_at, published_at, data_as_of,
+          evidence_fingerprint, decision_fingerprint, confidence,
+          horizon, status, policy_version
+        ) VALUES (
+          'strategy-bootstrap-test',
+          '2026-09-08T00:00:00Z',
+          '2026-09-08T00:00:00Z',
+          '2026-09-08T00:00:00Z',
+          'evidence-bootstrap-test',
+          'decision-bootstrap-test',
+          'MEDIUM',
+          'medium',
+          'published',
+          'bootstrap-test-v1'
+        );
+
+        INSERT INTO public.strategy_assessments (
+          assessment_id, strategy_id, assessed_at, data_as_of,
+          evidence_fingerprint, decision_fingerprint, confidence,
+          result, evaluation_status, policy_version
+        ) VALUES (
+          'assessment-bootstrap-test',
+          'strategy-bootstrap-test',
+          '2026-09-08T00:00:00Z',
+          '2026-09-08T00:00:00Z',
+          'evidence-bootstrap-test',
+          'decision-bootstrap-test',
+          'MEDIUM',
+          'KEEP',
+          'COMPLETED',
+          'bootstrap-test-v1'
+        );
+      `);
+
+      await assert.rejects(
+        db.query(`
+          UPDATE public.strategy_assessments
+          SET limitations = 'mutation must be rejected'
+          WHERE assessment_id = 'assessment-bootstrap-test'
+        `),
+        /strategy_assessments is append-only/i
+      );
+      await assert.rejects(
+        db.query(`
+          DELETE FROM public.strategy_assessments
+          WHERE assessment_id = 'assessment-bootstrap-test'
+        `),
+        /strategy_assessments is append-only/i
+      );
+
       await db.exec(`
         INSERT INTO auth.users (id) VALUES ('11111111-1111-4111-8111-111111111111');
         INSERT INTO public.investor_profile (
