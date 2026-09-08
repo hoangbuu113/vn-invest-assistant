@@ -165,6 +165,115 @@ export const PRIORITY_LABELS = Object.freeze({
   low: 'Thấp'
 });
 
+const CHANGE_POSTURE_LABELS = Object.freeze({
+  INCREASE: 'Tăng tỷ trọng',
+  HOLD: 'Giữ vị thế',
+  WATCH: 'Theo dõi',
+  REDUCE: 'Giảm tỷ trọng',
+  DECREASE: 'Giảm tỷ trọng',
+  AVOID: 'Hạn chế',
+  NONE: 'Không có'
+});
+
+const CHANGE_TYPE_LABELS = Object.freeze({
+  REGIME_CHANGED: 'Trạng thái thị trường',
+  EXECUTIVE_DECISION_CHANGED: 'Định hướng điều hành',
+  RISK_OVERLAY_CHANGED: 'Khẩu vị rủi ro',
+  RISK_BUDGET_CHANGED: 'Ngân sách rủi ro',
+  HORIZON_CHANGED: 'Khung thời gian'
+});
+
+function publicationChangeValue(value, labels = null) {
+  if (value === null || value === undefined || value === '') return 'Không có';
+  return labels?.[String(value)] || String(value);
+}
+
+function publicationChipValue(value) {
+  const text = publicationChangeValue(value).trim();
+  return text ? `${text.charAt(0).toLocaleUpperCase('vi-VN')}${text.slice(1)}` : text;
+}
+
+function buildPublicationChangeDisplay(rawWhatChanged) {
+  const publication = rawWhatChanged?.latestPublicationChanges;
+  if (!publication || typeof publication !== 'object') return null;
+
+  const changes = Array.isArray(publication.changes) ? publication.changes : [];
+  const assetChanges = [];
+  const preferredThemeChanges = [];
+  const restrictedThemeChanges = [];
+  const riskChanges = [];
+  const otherChanges = [];
+
+  changes.forEach((change, index) => {
+    if (!change || typeof change !== 'object') return;
+    const key = `${change.type || 'change'}-${change.assetClass || change.field || change.value || index}-${index}`;
+
+    if (change.type === 'ASSET_STRATEGY_CHANGED') {
+      const normalizedAssetClass = String(change.assetClass || '').toLowerCase();
+      const previousPriority = change.previous?.priority;
+      const currentPriority = change.current?.priority;
+      assetChanges.push({
+        key,
+        label: ASSET_CLASS_LABELS[normalizedAssetClass] || change.assetClass || 'Tài sản',
+        previousPosture: publicationChangeValue(change.previous?.posture, CHANGE_POSTURE_LABELS),
+        currentPosture: publicationChangeValue(change.current?.posture, CHANGE_POSTURE_LABELS),
+        previousPriority: previousPriority === null || previousPriority === undefined
+          ? null
+          : publicationChangeValue(String(previousPriority).toLowerCase(), PRIORITY_LABELS),
+        currentPriority: currentPriority === null || currentPriority === undefined
+          ? null
+          : publicationChangeValue(String(currentPriority).toLowerCase(), PRIORITY_LABELS),
+        priorityChanged: previousPriority !== currentPriority
+      });
+      return;
+    }
+
+    const chip = {
+      key,
+      label: `${change.change === 'removed' ? '−' : '+'} ${publicationChipValue(change.value)}`
+    };
+    if (change.type === 'PREFERRED_THEME_CHANGED') {
+      preferredThemeChanges.push({
+        ...chip,
+        tone: change.change === 'removed' ? 'removed' : 'added'
+      });
+      return;
+    }
+    if (change.type === 'UNDERWEIGHT_THEME_CHANGED') {
+      restrictedThemeChanges.push({
+        ...chip,
+        tone: change.change === 'removed' ? 'relieved' : 'restricted'
+      });
+      return;
+    }
+    if (change.type === 'RISK_CONSTRAINT_CHANGED' || change.type === 'INVALIDATION_CONDITION_CHANGED') {
+      riskChanges.push({
+        ...chip,
+        tone: change.change === 'removed' ? 'relieved' : 'restricted'
+      });
+      return;
+    }
+
+    otherChanges.push({
+      key,
+      label: CHANGE_TYPE_LABELS[change.type] || change.field || 'Điều chỉnh',
+      previous: publicationChangeValue(change.previous),
+      current: publicationChangeValue(change.current)
+    });
+  });
+
+  return {
+    status: publication.status || null,
+    assetChanges,
+    preferredThemeChanges,
+    restrictedThemeChanges,
+    riskChanges,
+    otherChanges,
+    publicationNotice: changes.length === 0 ? publication.summary || null : null,
+    sincePublicationSummary: rawWhatChanged?.sincePublicationStatus?.summary || null
+  };
+}
+
 export function formatStrategistStance(stance) {
   return STANCE_LABELS[stance] || 'Trung lập';
 }
@@ -312,6 +421,7 @@ export function buildMarketStrategistViewModel(raw) {
       : (Array.isArray(data.materialChanges) ? data.materialChanges : []),
     latestPublicationChanges: rawWhatChanged?.latestPublicationChanges || null,
     sincePublicationStatus: rawWhatChanged?.sincePublicationStatus || null,
+    display: buildPublicationChangeDisplay(rawWhatChanged),
     summary: rawWhatChanged?.summary || (data.latestAssessmentResult === 'KEEP' ? 'Quan điểm thị trường tiếp tục được bảo lưu ổn định.' : '')
   };
 

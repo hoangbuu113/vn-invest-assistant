@@ -183,7 +183,82 @@ export function InvestmentBriefPanel() {
                   <div className="strategist-change-badge">
                     <span>Thay đổi mới nhất:</span>
                   </div>
-                  <p className="strategist-change-summary">{strategistView.whatChanged.summary}</p>
+                  {strategistView.whatChanged.display ? (
+                    <div className="strategist-change-content">
+                      {strategistView.whatChanged.display.assetChanges.length > 0 && (
+                        <div className="strategist-change-assets" role="list" aria-label="Thay đổi phân bổ tài sản">
+                          {strategistView.whatChanged.display.assetChanges.map((change) => (
+                            <div key={change.key} className="strategist-change-asset" role="listitem">
+                              <strong>{change.label}</strong>
+                              <div className="strategist-change-values">
+                                <span>{change.previousPosture}</span>
+                                <span aria-hidden="true">→</span>
+                                <span>{change.currentPosture}</span>
+                              </div>
+                              {change.priorityChanged && (
+                                <small>
+                                  Ưu tiên: {change.previousPriority} <span aria-hidden="true">→</span> {change.currentPriority}
+                                </small>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {strategistView.whatChanged.display.preferredThemeChanges.length > 0 && (
+                        <div className="strategist-change-group">
+                          <span className="strategist-change-group-label">Chủ đề</span>
+                          <div className="strategist-change-chips">
+                            {strategistView.whatChanged.display.preferredThemeChanges.map((change) => (
+                              <span key={change.key} className={`strategist-change-chip is-${change.tone}`}>{change.label}</span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {strategistView.whatChanged.display.restrictedThemeChanges.length > 0 && (
+                        <div className="strategist-change-group">
+                          <span className="strategist-change-group-label">Chủ đề hạn chế</span>
+                          <div className="strategist-change-chips">
+                            {strategistView.whatChanged.display.restrictedThemeChanges.map((change) => (
+                              <span key={change.key} className={`strategist-change-chip is-${change.tone}`}>{change.label}</span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {strategistView.whatChanged.display.riskChanges.length > 0 && (
+                        <div className="strategist-change-group">
+                          <span className="strategist-change-group-label">Rủi ro / điều kiện</span>
+                          <div className="strategist-change-chips">
+                            {strategistView.whatChanged.display.riskChanges.map((change) => (
+                              <span key={change.key} className={`strategist-change-chip is-${change.tone}`}>{change.label}</span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {strategistView.whatChanged.display.otherChanges.length > 0 && (
+                        <div className="strategist-change-other" role="list" aria-label="Các thay đổi chiến lược khác">
+                          {strategistView.whatChanged.display.otherChanges.map((change) => (
+                            <div key={change.key} role="listitem">
+                              <strong>{change.label}</strong>
+                              <span>{change.previous} → {change.current}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {strategistView.whatChanged.display.publicationNotice && (
+                        <p className="strategist-change-note">{strategistView.whatChanged.display.publicationNotice}</p>
+                      )}
+                      {strategistView.whatChanged.display.sincePublicationSummary && (
+                        <p className="strategist-change-status">{strategistView.whatChanged.display.sincePublicationSummary}</p>
+                      )}
+                    </div>
+                  ) : (
+                    <p className="strategist-change-summary">{strategistView.whatChanged.summary}</p>
+                  )}
                 </div>
               )}
 
