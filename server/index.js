@@ -514,11 +514,11 @@ export function createApp(services = {}) {
         errors.push('quantity must be a finite number greater than 0');
       }
 
-      if (averageCost !== undefined && !isValidFinancialNumber(averageCost, { allowZero: true })) {
+      if (averageCost !== undefined && averageCost !== null && !isValidFinancialNumber(averageCost, { allowZero: true })) {
         errors.push('averageCost must be a non-negative finite number');
       }
 
-      if (executionUnitPrice !== undefined && !isValidFinancialNumber(executionUnitPrice, { allowZero: true })) {
+      if (executionUnitPrice !== undefined && executionUnitPrice !== null && !isValidFinancialNumber(executionUnitPrice, { allowZero: true })) {
         errors.push('executionUnitPrice must be a non-negative finite number');
       }
 
@@ -548,7 +548,35 @@ export function createApp(services = {}) {
         });
       }
 
-      await resolvePortfolioAsset({ assetId: assetId.trim() });
+      const asset = await resolvePortfolioAsset({ assetId: assetId.trim() });
+      const rawAssetQuoteCurrency = asset.quote_currency ?? asset.quoteCurrency;
+      const assetQuoteCurrency = typeof rawAssetQuoteCurrency === 'string'
+        ? rawAssetQuoteCurrency.trim().toUpperCase()
+        : null;
+
+      if (assetQuoteCurrency === 'VND' && !isValidFinancialNumber(averageCost, { allowZero: true })) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'Invalid opening position data',
+          errors: ['averageCost is required for a VND opening position']
+        });
+      }
+      if (assetQuoteCurrency !== 'VND') {
+        const nativeErrors = [];
+        if (priceCurrency === undefined || priceCurrency === null || !String(priceCurrency).trim()) {
+          nativeErrors.push('priceCurrency is required for a non-VND opening position');
+        }
+        if (!isValidFinancialNumber(executionUnitPrice, { allowZero: true })) {
+          nativeErrors.push('executionUnitPrice is required for a non-VND opening position');
+        }
+        if (nativeErrors.length > 0) {
+          return res.status(400).json({
+            status: 'error',
+            message: 'Invalid opening position data',
+            errors: nativeErrors
+          });
+        }
+      }
 
       const openingPayload = {
         assetId: assetId.trim(),
@@ -584,7 +612,15 @@ export function createApp(services = {}) {
       const profileId = requireProfile(req, res);
       if (!profileId) return;
 
-      const { quantity, averageCost } = req.body || {};
+      const {
+        quantity,
+        averageCost,
+        executionUnitPrice,
+        priceCurrency,
+        fxRateToVnd,
+        fxProvenance,
+        fxObservedAt
+      } = req.body || {};
       const errors = [];
 
       if (!id || typeof id !== 'string' || id.trim() === '') {
@@ -595,8 +631,30 @@ export function createApp(services = {}) {
         errors.push('quantity must be a finite number greater than 0');
       }
 
-      if (!isValidFinancialNumber(averageCost, { allowZero: true })) {
+      if (averageCost !== undefined && averageCost !== null && !isValidFinancialNumber(averageCost, { allowZero: true })) {
         errors.push('averageCost must be a non-negative finite number');
+      }
+
+      if (executionUnitPrice !== undefined && executionUnitPrice !== null && !isValidFinancialNumber(executionUnitPrice, { allowZero: true })) {
+        errors.push('executionUnitPrice must be a non-negative finite number');
+      }
+
+      if (priceCurrency !== undefined && (typeof priceCurrency !== 'string' || !priceCurrency.trim())) {
+        errors.push('priceCurrency must be a non-empty string when provided');
+      }
+
+      if (fxRateToVnd !== undefined && fxRateToVnd !== null && !isValidFinancialNumber(fxRateToVnd, { allowZero: false })) {
+        errors.push('fxRateToVnd must be a finite number greater than 0');
+      }
+
+      validateFxProvenance(fxProvenance, errors);
+
+      let normalizedFxObservedAt;
+      if (fxObservedAt !== undefined && fxObservedAt !== null) {
+        normalizedFxObservedAt = normalizeExplicitTimestamp(fxObservedAt);
+        if (!normalizedFxObservedAt) {
+          errors.push('fxObservedAt must be a valid timestamp with an explicit Z or UTC offset');
+        }
       }
 
       if (errors.length > 0) {
@@ -607,11 +665,24 @@ export function createApp(services = {}) {
         });
       }
 
-      const result = await correctOpeningPositionFn({
+      const correctionPayload = {
         id: id.trim(),
         quantity,
         averageCost
-      }, positionClient, getProfileOptions(req, profileId));
+      };
+      if (executionUnitPrice !== undefined) correctionPayload.executionUnitPrice = executionUnitPrice;
+      if (priceCurrency !== undefined && typeof priceCurrency === 'string' && priceCurrency.trim()) {
+        correctionPayload.priceCurrency = priceCurrency.trim().toUpperCase();
+      }
+      if (fxRateToVnd !== undefined) correctionPayload.fxRateToVnd = fxRateToVnd;
+      if (fxProvenance !== undefined) correctionPayload.fxProvenance = fxProvenance;
+      if (normalizedFxObservedAt !== undefined) correctionPayload.fxObservedAt = normalizedFxObservedAt;
+
+      const result = await correctOpeningPositionFn(
+        correctionPayload,
+        positionClient,
+        getProfileOptions(req, profileId)
+      );
 
       return res.json({
         status: 'ok',

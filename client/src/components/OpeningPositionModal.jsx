@@ -92,15 +92,19 @@ export default function OpeningPositionModal({
       const opening = targetHolding.opening_position;
       setAssetId(targetHolding.asset_id || '');
       setQuantity(opening?.opening_quantity !== undefined ? String(opening.opening_quantity) : String(targetHolding.quantity || ''));
-      setAverageCost(opening?.opening_average_cost !== undefined ? String(opening.opening_average_cost) : String(targetHolding.average_cost || ''));
+      setAverageCost(opening?.opening_average_cost !== undefined && opening?.opening_average_cost !== null
+        ? String(opening.opening_average_cost)
+        : (targetHolding.average_cost !== null && targetHolding.average_cost !== undefined ? String(targetHolding.average_cost) : ''));
       setExecutionUnitPrice(opening?.execution_unit_price !== undefined && opening?.execution_unit_price !== null ? String(opening.execution_unit_price) : '');
       setPriceCurrency(opening?.price_currency || 'VND');
     } else if (mode === 'CANCEL' && targetHolding) {
       setAssetId(targetHolding.asset_id || '');
       setQuantity(String(targetHolding.quantity || ''));
-      setAverageCost(String(targetHolding.average_cost || ''));
-      setExecutionUnitPrice('');
-      setPriceCurrency('VND');
+      setAverageCost(targetHolding.average_cost !== null && targetHolding.average_cost !== undefined ? String(targetHolding.average_cost) : '');
+      setExecutionUnitPrice(targetHolding.opening_position?.execution_unit_price !== null && targetHolding.opening_position?.execution_unit_price !== undefined
+        ? String(targetHolding.opening_position.execution_unit_price)
+        : '');
+      setPriceCurrency(targetHolding.opening_position?.price_currency || 'VND');
     } else {
       setAssetId('');
       setQuantity('');
@@ -195,17 +199,18 @@ export default function OpeningPositionModal({
       return;
     }
 
-    const numAverageCost = Number(averageCost);
-    if (averageCost === '' || isNaN(numAverageCost) || !Number.isFinite(numAverageCost) || numAverageCost < 0) {
-      setError('Giá vốn trung bình quy đổi VND phải là số không âm.');
-      return;
-    }
-
+    let numAverageCost = null;
     let numExecPrice = null;
-    if (isNonVnd && executionUnitPrice.trim()) {
-      numExecPrice = Number(executionUnitPrice.trim());
-      if (isNaN(numExecPrice) || !Number.isFinite(numExecPrice) || numExecPrice <= 0) {
-        setError(`Giá mua ban đầu (${priceCurrency}) phải là số dương lớn hơn 0.`);
+    if (isNonVnd) {
+      numExecPrice = Number(executionUnitPrice);
+      if (executionUnitPrice === '' || !Number.isFinite(numExecPrice) || numExecPrice < 0) {
+        setError(`Giá mua trung bình (${priceCurrency}) phải là số không âm.`);
+        return;
+      }
+    } else {
+      numAverageCost = Number(averageCost);
+      if (averageCost === '' || !Number.isFinite(numAverageCost) || numAverageCost < 0) {
+        setError('Giá mua trung bình (VND) phải là số không âm.');
         return;
       }
     }
@@ -225,7 +230,6 @@ export default function OpeningPositionModal({
           if (numExecPrice !== null) {
             payload.executionUnitPrice = numExecPrice;
           }
-          payload.fxProvenance = 'USER_SUPPLIED_OPENING_VND_BASIS';
         }
 
         const res = await apiFetch('/api/positions/opening', {
@@ -255,7 +259,11 @@ export default function OpeningPositionModal({
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             quantity: numQuantity,
-            averageCost: numAverageCost
+            averageCost: numAverageCost,
+            ...(isNonVnd ? {
+              executionUnitPrice: numExecPrice,
+              priceCurrency: priceCurrency || (isCrypto ? 'USDT' : 'USD')
+            } : {})
           })
         });
         const json = await res.json();
@@ -497,90 +505,57 @@ export default function OpeningPositionModal({
                   </div>
                 </div>
 
-                {/* Optional Original Execution Price for Non-VND */}
-                {isNonVnd && mode === 'CREATE' && (
-                  <div
-                    style={{
-                      backgroundColor: 'var(--color-slate-50, #f8fafc)',
-                      padding: '0.85rem',
-                      borderRadius: '10px',
-                      border: '1px solid var(--color-slate-200, #e2e8f0)'
-                    }}
-                  >
-                    <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '10px' }}>
-                      <div>
-                        <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 600, color: 'var(--color-slate-600)', marginBottom: '0.3rem' }}>
-                          Giá mua ban đầu (tùy chọn)
-                        </label>
-                        <input
-                          type="number"
-                          step="any"
-                          min="0.00000001"
-                          placeholder={`Ví dụ: ${isGold ? '2500' : '90000'}`}
-                          value={executionUnitPrice}
-                          onChange={(e) => setExecutionUnitPrice(e.target.value)}
-                          disabled={loading}
-                          className="fintech-input"
-                          style={{ width: '100%', fontSize: '0.85rem' }}
-                        />
-                      </div>
-                      <div>
-                        <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 600, color: 'var(--color-slate-600)', marginBottom: '0.3rem' }}>
-                          Đồng tiền
-                        </label>
-                        <select
-                          value={priceCurrency}
-                          onChange={(e) => setPriceCurrency(e.target.value)}
-                          disabled={loading}
-                          className="fintech-select"
-                          style={{ width: '100%', fontSize: '0.85rem', fontWeight: 700 }}
-                        >
-                          {isCrypto ? (
-                            <>
-                              <option value="USDT">USDT</option>
-                              <option value="USD">USD</option>
-                            </>
-                          ) : (
-                            <>
-                              <option value="USD">USD</option>
-                              <option value="USDT">USDT</option>
-                            </>
-                          )}
-                        </select>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* 3. Authoritative Average Cost in VND */}
+                {/* 3. Average purchase price in its actual purchase currency */}
                 <div>
                   <label style={{ display: 'block', fontSize: '0.84rem', fontWeight: 700, color: 'var(--color-slate-700)', marginBottom: '0.35rem' }}>
-                    {isNonVnd ? 'Giá vốn trung bình quy đổi VND (₫/đơn vị) *' : 'Giá vốn trung bình (VNĐ) *'}
+                    Giá mua trung bình *
                   </label>
-                  <input
-                    type="number"
-                    min="0"
-                    step="any"
-                    placeholder={isGold ? 'Ví dụ: 65000000' : 'Ví dụ: 35000'}
-                    value={averageCost}
-                    onChange={(e) => {
-                      setAverageCost(e.target.value);
-                      setError(null);
-                    }}
-                    required
-                    disabled={loading}
-                    className="fintech-input"
-                    style={{ width: '100%' }}
-                  />
+                  <div style={{ display: 'grid', gridTemplateColumns: isNonVnd ? 'minmax(0, 2fr) minmax(90px, 1fr)' : '1fr', gap: '10px' }}>
+                    <input
+                      type="number"
+                      min="0"
+                      step="any"
+                      placeholder={isGold ? 'Ví dụ: 2500' : (isCrypto ? 'Ví dụ: 0.82' : 'Ví dụ: 35000')}
+                      value={isNonVnd ? executionUnitPrice : averageCost}
+                      onChange={(e) => {
+                        if (isNonVnd) setExecutionUnitPrice(e.target.value);
+                        else setAverageCost(e.target.value);
+                        setError(null);
+                      }}
+                      required
+                      disabled={loading}
+                      className="fintech-input"
+                      style={{ width: '100%' }}
+                    />
+                    {isNonVnd && (
+                      <select
+                        value={priceCurrency}
+                        onChange={(e) => setPriceCurrency(e.target.value)}
+                        disabled={loading}
+                        className="fintech-select"
+                        aria-label="Đồng tiền mua"
+                        style={{ width: '100%', fontWeight: 700 }}
+                      >
+                        {isCrypto ? (
+                          <>
+                            <option value="USDT">USDT</option>
+                            <option value="USD">USD</option>
+                          </>
+                        ) : (
+                          <option value="USD">USD</option>
+                        )}
+                      </select>
+                    )}
+                  </div>
                   <div style={{ fontSize: '0.75rem', color: 'var(--color-slate-400)', marginTop: '3px' }}>
                     {isNonVnd
-                      ? 'Giá vốn tiền đồng bình quân làm cơ sở tính giá trị danh mục và lãi/lỗ.'
-                      : 'Giá vốn trung bình khi bạn mua tài sản này từ trước.'}
+                      ? 'Nhập đúng đồng tiền bạn đã dùng khi mua. Không cần tự quy đổi sang VND.'
+                      : 'Giá mua trung bình theo VND.'}
                   </div>
                 </div>
 
                 {/* Calculation preview */}
-                {Number(quantity) > 0 && Number(averageCost) >= 0 && (
+                {Number(quantity) > 0 && Number(isNonVnd ? executionUnitPrice : averageCost) >= 0 && (
                   <div
                     style={{
                       padding: '0.65rem 0.9rem',
@@ -592,9 +567,9 @@ export default function OpeningPositionModal({
                       alignItems: 'center'
                     }}
                   >
-                    <span style={{ fontSize: '0.82rem', color: 'var(--color-slate-600)' }}>Tổng giá trị vốn ban đầu:</span>
+                    <span style={{ fontSize: '0.82rem', color: 'var(--color-slate-600)' }}>Tổng giá mua ban đầu:</span>
                     <span style={{ fontSize: '0.95rem', fontWeight: 800, color: 'var(--color-brand-600)' }}>
-                      {(Number(quantity) * Number(averageCost)).toLocaleString('vi-VN')} ₫
+                      {(Number(quantity) * Number(isNonVnd ? executionUnitPrice : averageCost)).toLocaleString('vi-VN')} {isNonVnd ? priceCurrency : '₫'}
                     </span>
                   </div>
                 )}
@@ -617,7 +592,15 @@ export default function OpeningPositionModal({
                     {selectedAsset?.symbol} — {selectedAsset?.name}
                   </div>
                   <div style={{ fontSize: '0.82rem', color: 'var(--color-slate-600)', marginTop: '4px' }}>
-                    Số lượng: <strong>{Number(targetHolding?.quantity || 0).toLocaleString('vi-VN')}</strong> • Giá vốn TB: <strong>{Number(targetHolding?.average_cost || 0).toLocaleString('vi-VN')} ₫</strong>
+                    Số lượng: <strong>{Number(targetHolding?.quantity || 0).toLocaleString('vi-VN')}</strong> • Giá mua TB:{' '}
+                    <strong>
+                      {targetHolding?.opening_position?.execution_unit_price !== null
+                        && targetHolding?.opening_position?.execution_unit_price !== undefined
+                        ? `${Number(targetHolding.opening_position.execution_unit_price).toLocaleString('vi-VN')} ${targetHolding.opening_position.price_currency || ''}`
+                        : (targetHolding?.average_cost !== null && targetHolding?.average_cost !== undefined
+                            ? `${Number(targetHolding.average_cost).toLocaleString('vi-VN')} ₫`
+                            : '—')}
+                    </strong>
                   </div>
                 </div>
               </div>

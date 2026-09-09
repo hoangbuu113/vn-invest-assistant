@@ -32,13 +32,23 @@ export function normalizeOpeningPosition(row) {
     profileId: row.profile_id || row.profileId,
     assetId: row.asset_id || row.assetId,
     openingQuantity: normalizeDatabaseNumber(row.opening_quantity ?? row.openingQuantity, 'opening quantity'),
-    openingAverageCost: normalizeDatabaseNumber(row.opening_average_cost ?? row.openingAverageCost, 'opening average cost'),
+    openingAverageCost: normalizeDatabaseNumber(
+      row.opening_average_cost ?? row.openingAverageCost,
+      'opening average cost',
+      { nullable: true }
+    ),
     executionUnitPrice: normalizeDatabaseNumber(
       row.execution_unit_price ?? row.executionUnitPrice,
       'execution unit price',
       { nullable: true }
     ),
-    priceCurrency: row.price_currency || row.priceCurrency || 'VND',
+    priceCurrency: row.price_currency || row.priceCurrency || null,
+    nativeAverageCost: normalizeDatabaseNumber(
+      row.execution_unit_price ?? row.executionUnitPrice,
+      'native average cost',
+      { nullable: true }
+    ),
+    nativeCostCurrency: row.price_currency || row.priceCurrency || null,
     fxRateToVnd: normalizeDatabaseNumber(
       row.fx_rate_to_vnd ?? row.fxRateToVnd,
       'fx rate to vnd',
@@ -66,7 +76,11 @@ function normalizeHolding(row) {
     assetId: row.asset_id || row.assetId,
     openingPositionId: row.opening_position_id || row.openingPositionId || null,
     quantity: normalizeDatabaseNumber(row.quantity, 'holding quantity'),
-    averageCost: normalizeDatabaseNumber(row.average_cost ?? row.averageCost, 'holding average cost'),
+    averageCost: normalizeDatabaseNumber(
+      row.average_cost ?? row.averageCost,
+      'holding average cost',
+      { nullable: true }
+    ),
     createdAt: row.created_at || row.createdAt,
     updatedAt: row.updated_at || row.updatedAt
   };
@@ -145,7 +159,17 @@ export async function createOpeningPosition({
   return normalizeOpeningResult(data);
 }
 
-export async function correctOpeningPosition({ profileId: payloadProfileId, id, quantity, averageCost } = {}, client = privateSupabase, options = {}) {
+export async function correctOpeningPosition({
+  profileId: payloadProfileId,
+  id,
+  quantity,
+  averageCost,
+  executionUnitPrice,
+  priceCurrency,
+  fxRateToVnd,
+  fxProvenance,
+  fxObservedAt
+} = {}, client = privateSupabase, options = {}) {
   const db = requireDatabaseClient(client);
   const profileId = options?.profileId || payloadProfileId || null;
 
@@ -156,6 +180,21 @@ export async function correctOpeningPosition({ profileId: payloadProfileId, id, 
   };
   if (profileId) {
     rpcArgs.p_profile_id = profileId;
+  }
+  if (executionUnitPrice !== undefined && executionUnitPrice !== null) {
+    rpcArgs.p_execution_unit_price = executionUnitPrice;
+  }
+  if (priceCurrency !== undefined && priceCurrency !== null) {
+    rpcArgs.p_price_currency = typeof priceCurrency === 'string' ? priceCurrency.trim().toUpperCase() : priceCurrency;
+  }
+  if (fxRateToVnd !== undefined && fxRateToVnd !== null) {
+    rpcArgs.p_fx_rate_to_vnd = fxRateToVnd;
+  }
+  if (fxProvenance !== undefined && fxProvenance !== null) {
+    rpcArgs.p_fx_provenance = fxProvenance;
+  }
+  if (fxObservedAt !== undefined && fxObservedAt !== null) {
+    rpcArgs.p_fx_observed_at = fxObservedAt;
   }
 
   const { data, error } = await db.rpc('correct_opening_position', rpcArgs);

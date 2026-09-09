@@ -53,7 +53,7 @@ Features 16 through 30 and V1.1 Improvements establish the canonical schema, led
   - USD/VND deterministic analysis remains unsupported until trustworthy completed historical capability exists.
   - Historical non-VND portfolio performance remains truthfully unavailable when historical FX authority is missing.
   - Gold Spot history remains close-only, so OHLC-dependent analysis metrics remain unavailable for Gold. Crypto uses completed Binance OHLCV history.
-  - Non-VND BUY/SELL and opening positions require explicit VND accounting basis, native execution metadata, and governed FX/user-supplied provenance. They do not create foreign-currency cash balances and never assume USDT equals USD.
+  - Non-VND BUY/SELL transactions retain the governed VND accounting and settlement contract. Cash-neutral opening positions may retain supported native acquisition price/currency with an unknown (`NULL`) historical VND basis; current FX is never used to backfill that basis. They do not create foreign-currency cash balances and never assume USDT equals USD.
   - Historical non-VND performance remains unavailable without authoritative dated FX, even though current VND valuation and transaction-time VND accounting basis are supported.
   - The single VND cash ledger remains authoritative for all cash operations (no multi-currency cash balances).
   - Open-ended mutual funds (NAV scheduled) remain deferred.

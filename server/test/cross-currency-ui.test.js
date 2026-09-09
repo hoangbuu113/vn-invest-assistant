@@ -136,7 +136,8 @@ describe('V1.1 Improvement 07E — Cross-Currency User-Facing Activation & Valua
 
     it('OpeningPositionModal preserves cash neutrality notice for opening positions', () => {
       assert.match(openingModalSrc, /không làm thay đổi số dư tiền mặt/);
-      assert.match(openingModalSrc, /USER_SUPPLIED_OPENING_VND_BASIS/);
+      assert.match(openingModalSrc, /Không cần tự quy đổi sang VND/);
+      assert.doesNotMatch(openingModalSrc, /USER_SUPPLIED_OPENING_VND_BASIS/);
     });
 
     it('Neither modal contains browser localStorage or raw credential leaks', () => {
@@ -331,7 +332,7 @@ describe('V1.1 Improvement 07E — Cross-Currency User-Facing Activation & Valua
       assert.equal(result.summary.totalUnrealizedPnL, 1000000);
     });
 
-    it('Malformed holding quantity or averageCost degrades safely to unavailable', () => {
+    it('Malformed quantity and explicitly unknown VND cost degrade safely without zero fabrication', () => {
       const holdings = [
         {
           id: 'holding-bad-qty',
@@ -362,7 +363,7 @@ describe('V1.1 Improvement 07E — Cross-Currency User-Facing Activation & Valua
 
       assert.equal(result.holdings[1].valuationStatus, 'available');
       assert.equal(result.holdings[1].pnlStatus, 'unavailable');
-      assert.equal(result.holdings[1].pnlReason, 'MALFORMED_HOLDING_COST');
+      assert.equal(result.holdings[1].pnlReason, 'VND_COST_BASIS_UNKNOWN');
     });
   });
 });

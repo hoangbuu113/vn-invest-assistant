@@ -49,7 +49,7 @@ The following architectural and product decisions are confirmed and authoritativ
   - Implicit symbol manipulation (such as automatically appending `.VN`) is completely removed. Unknown assets without explicit mappings fail safely without provider calls.
 - **Multi-Asset Accounting Guard**:
   - The single cash ledger remains strictly `VND`; the transaction ledger preserves native execution metadata while its authoritative accounting unit price and cost basis remain VND.
-  - Non-VND assets require explicit governed execution currency, VND accounting basis, settlement mode, and FX provenance where applicable. `USDT` is never silently treated as `USD`, and no multi-currency cash balance is implied.
+  - Non-VND BUY/SELL requires explicit governed execution currency, VND accounting basis, settlement mode, and FX provenance where applicable. A cash-neutral existing-position baseline may instead preserve supported native acquisition cost with its VND basis unknown. `USDT` is never silently treated as `USD`, and no multi-currency cash balance is implied.
 - **Zero-Loss Data Migration**:
   - Existing asset UUIDs are preserved in place without deletion or re-creation.
   - All existing holdings, portfolio transactions, cash ledger entries, watchlist items, and price alerts remain linked to their original asset UUIDs.
@@ -95,7 +95,7 @@ The following architectural and product decisions are confirmed and authoritativ
   - Missing or invalid FX produces explicit partial valuation, never assumed 1:1 fallback or fake 0 prices.
   - No currency inversion or multi-hop FX conversion in V1.
   - FX resolution is provider-neutral and executed on demand without a persistent FX database table or caching subsystem in Feature 19.
-  - Non-VND transaction/opening-position records may carry an explicit authoritative VND acquisition basis; current FX rates must never be used to fabricate a missing historical acquisition basis.
+  - Non-VND transaction records may carry an explicit authoritative VND acquisition basis. Cash-neutral opening positions may instead retain only their supported native acquisition price/currency and leave the authoritative VND basis null; current FX rates must never be used to fabricate missing historical acquisition cost.
   - Historical non-VND portfolio performance remains unavailable without authoritative historical FX aligned to the performance timeline.
   - Portfolio Composition consumes authoritative Feature 05 reporting values and never computes FX conversions independently.
 - **Market Provider Abstraction (Feature 18)**:
@@ -318,7 +318,7 @@ $$\text{Source Adapter} \longrightarrow \text{Canonical Validation / Sanitizatio
 - Stale universal `~15 phút` text is removed from Gold, Crypto, Alerts, Watchlist, and Portfolio; replaced with truthful provider-neutral wording: *"Dữ liệu theo thời điểm cập nhật của nhà cung cấp"*.
 
 ### G. Ledger Authority & Non-VND Gating
-- BUY/SELL and opening positions for non-VND assets require the governed VND-basis cross-currency contract and explicit settlement semantics. Cash settlement and cash balances remain VND-only; Binance `USDT` reference prices never become canonical USD accounting values.
+- BUY/SELL for non-VND assets requires the governed VND-basis cross-currency contract and explicit settlement semantics. A cash-neutral opening position may preserve supported native acquisition cost while leaving historical VND basis unknown. Cash settlement and cash balances remain VND-only; Binance `USDT` reference prices never become canonical USD accounting values.
 
 ---
 
@@ -467,3 +467,9 @@ $$\text{Source Adapter} \longrightarrow \text{Canonical Validation / Sanitizatio
 - Historical valuation marks may carry only across calendar dates that the canonical asset market policy identifies as weekend non-trading dates. A prior close cannot cross a missing expected trading session or a continuous-market date and remain performance-eligible.
 - Historical stale marks may remain inspectable as last-known observations, but cannot enter performance TWR, MWR, drawdown, or historical end-period unrealized P/L. Current stale snapshots may retain displayable valuation/P/L only with explicit stale state.
 - A cash-only portfolio requires no market-history acquisition. Cash and total remain valid when authoritative cash exists; invested value is zero, concentration and benchmark comparison are not applicable, and annualized MWR remains unavailable until sufficient history exists.
+
+### J. P0.2.1 Native-Currency Opening Cost
+- `position_opening_baselines.execution_unit_price` and `price_currency` are the canonical native acquisition-cost pair for cash-neutral existing-position declarations; no duplicate native-cost columns are introduced.
+- `position_opening_baselines.opening_average_cost` and the holdings projection `average_cost` are optional authoritative historical VND basis fields. Unknown is `NULL`, never zero and never a conversion using current FX.
+- Native unrealized P/L is permitted only against a current price in exactly the same currency and only while the opening position remains unmodified by later ledger activity. VND unrealized P/L remains unavailable without authoritative historical VND cost.
+- Binance USDT may supply a display-only current reference for USDT-native opening cost. CoinGecko USD remains the canonical Crypto accounting snapshot, and no USDT/USD equivalence is assumed.

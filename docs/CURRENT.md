@@ -8,7 +8,7 @@
 - This checkpoint records repository behavior inspected on 2026-09-09. Exact production migration parity and deployment revision were not queried in this implementation phase.
 
 ## Current Phase
-Portfolio V1 P0.2 Data Correctness is implemented and locally verified. P0.1 established rebuild, economic-time, and portfolio-eligibility trust boundaries; P0.2 adds fail-closed cash authority, no annualized XIRR below one year, cadence-bounded historical valuation marks, and provider-free cash-only performance. The reconciled-snapshot/API projection and UI redesign phases remain pending.
+Portfolio V1 P0.2 Data Correctness is implemented and locally verified. P0.1 established rebuild, economic-time, and portfolio-eligibility trust boundaries; P0.2 adds fail-closed cash authority, no annualized XIRR below one year, cadence-bounded historical valuation marks, and provider-free cash-only performance. P0.2.1 now permits cash-neutral existing positions to retain native acquisition cost while leaving an unknown historical VND basis null. The reconciled-snapshot/API projection and UI redesign phases remain pending.
 
 ## Portfolio — Verified Working Today
 - Supabase Auth user identity resolves through `investor_profile.user_id` to private `investor_profile.id`; protected Express routes pass that profile ID to service-role data access and profile-scoped financial RPCs.
@@ -36,6 +36,14 @@ Portfolio V1 P0.2 Data Correctness is implemented and locally verified. P0.1 est
 - Historical marks use canonical asset market policy. Weekend carry remains valid for weekday markets; continuous markets and missing subsequent trading sessions cannot receive unbounded carry-forward.
 - Cash-only performance makes zero market-history provider calls, keeps authoritative cash/total value available, invested value at zero, concentration absent, benchmark comparison not applicable in the client, and short-history annualized MWR absent.
 - Local verification: focused Portfolio correctness tests 151/151 PASS; full backend 1444/1444 PASS; client and Worker production build PASS; `git diff --check` PASS.
+
+## Portfolio P0.2.1 — Implemented Locally (Not Deployed)
+- Existing-position entry uses the already-persisted `execution_unit_price` and `price_currency` fields as the native acquisition-cost pair. A supported non-VND position can be recorded without inventing `opening_average_cost`/`holdings.average_cost` in VND.
+- Historical VND cost basis remains nullable and is never backfilled using current FX. Current VND market value may still use the canonical current USD snapshot plus authoritative current USD/VND valuation FX.
+- Native unrealized P/L is exposed only when an unmodified opening position has a current price in exactly the same currency. Binance USDT is display-only for this purpose and never replaces CoinGecko USD accounting valuation; USDT is not treated as USD.
+- Opening-position create/correct remains profile-scoped, portfolio-eligibility-gated, and cash-neutral. Existing VND and verified historical VND-basis rows are preserved without rewriting.
+- Forward migration `20260909000000_portfolio_native_opening_cost.sql` is local and unapplied remotely.
+- Local verification: focused native-opening-position tests 11/11 PASS; full backend 1455/1455 PASS; client and Worker production build PASS; `git diff --check` PASS.
 
 ## Portfolio — Partial
 - Overview, composition, performance, and benchmark are separate requests. They do not share a portfolio snapshot ID, ledger revision, valuation timestamp, or atomic read boundary.

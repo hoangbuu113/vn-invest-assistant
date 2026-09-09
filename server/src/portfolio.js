@@ -1,5 +1,5 @@
 import { getHoldings } from './supabase.js';
-import { getMarketSnapshot } from './market.js';
+import { getMarketRealtime, getMarketSnapshot } from './market.js';
 import { getCashOverview } from './cash.js';
 import {
   createUnavailableFxRate,
@@ -47,6 +47,17 @@ function fxRateForCurrency(fxRatesMap, currency) {
   return fxRatesMap && typeof fxRatesMap === 'object' ? fxRatesMap[currency] : null;
 }
 
+function priceReferenceForSymbol(priceReferencesMap, symbol) {
+  if (priceReferencesMap instanceof Map) return priceReferencesMap.get(symbol);
+  return priceReferencesMap && typeof priceReferencesMap === 'object' ? priceReferencesMap[symbol] : null;
+}
+
+function normalizeCurrency(value) {
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim().toUpperCase();
+  return CANONICAL_CURRENCY_PATTERN.test(normalized) ? normalized : null;
+}
+
 /**
  * Pure calculation function for portfolio holdings and aggregate summary.
  *
@@ -55,23 +66,54 @@ function fxRateForCurrency(fxRatesMap, currency) {
  * 2. VND assets bypass FX; non-VND assets require one valid direct quote-to-VND rate.
  * 3. Legacy marketValue is the authoritative VND reporting value and remains null
  *    when price, currency integrity, or FX provenance is unavailable.
- * 4. Holdings cost basis is stored in VND (authoritative acquisition cost); non-VND
- *    current unrealized P/L evaluates against current reporting market value (native
- *    price converted via current authoritative FX). Missing current price or FX rate
- *    marks valuation and P/L unavailable without mutating historical basis.
+ * 4. Holdings VND cost basis is optional authoritative acquisition cost. Native
+ *    opening cost may support same-currency P/L independently; current FX never
+ *    backfills a missing historical VND basis.
  * 5. Aggregates use full precision, include only valid reporting market values,
  *    and expose valuation and P/L coverage independently.
  */
-export function calculatePortfolioValuation(profile, holdings, snapshotsMap = {}, fxRatesMap = {}) {
+export function calculatePortfolioValuation(
+  profile,
+  holdings,
+  snapshotsMap = {},
+  fxRatesMap = {},
+  nativePriceReferencesMap = {}
+) {
   const cashAvailable = profile ? normalizeNonNegativeFinancialNumber(profile.cash_available) : null;
   const cashStatus = cashAvailable === null ? 'unavailable' : 'available';
 
   const holdingsWithMarket = (Array.isArray(holdings) ? holdings : []).map((holding) => {
     const quantity = normalizeNonNegativeFinancialNumber(holding.quantity);
-    const averageCost = normalizeNonNegativeFinancialNumber(holding.average_cost);
+    const rawAverageCost = holding.average_cost;
+    const averageCost = normalizeNonNegativeFinancialNumber(rawAverageCost);
+    const vndCostUnavailableReason = rawAverageCost === null || rawAverageCost === undefined
+      ? 'VND_COST_BASIS_UNKNOWN'
+      : 'MALFORMED_HOLDING_COST';
 
     const symbol = holding.asset?.symbol || null;
     const nativeCurrency = canonicalQuoteCurrency(holding);
+    const openingPosition = holding.opening_position ?? holding.openingPosition ?? null;
+    const openingIsUnmodified = Boolean(
+      openingPosition
+      && !(openingPosition.locked_at || openingPosition.lockedAt)
+      && !(openingPosition.cancelled_at || openingPosition.cancelledAt)
+    );
+    const nativeAverageCost = openingIsUnmodified
+      ? normalizeNonNegativeFinancialNumber(
+          openingPosition.execution_unit_price
+          ?? openingPosition.executionUnitPrice
+          ?? openingPosition.native_average_cost
+          ?? openingPosition.nativeAverageCost
+        )
+      : null;
+    const nativeCostCurrency = openingIsUnmodified
+      ? normalizeCurrency(
+          openingPosition.price_currency
+          ?? openingPosition.priceCurrency
+          ?? openingPosition.native_cost_currency
+          ?? openingPosition.nativeCostCurrency
+        )
+      : null;
 
     let latestPrice = null;
     let marketValue = null;
@@ -93,12 +135,25 @@ export function calculatePortfolioValuation(profile, holdings, snapshotsMap = {}
     let fxRateTimestamp = null;
     let fxProvider = null;
     let fxFreshness = null;
+    let nativeCurrentPrice = null;
+    let nativeCurrentPriceAsOf = null;
+    let nativeCurrentPriceSource = null;
+    let nativeCurrentPriceFreshness = null;
+    const nativeAcquisitionCostBasis = quantity !== null && nativeAverageCost !== null
+      ? quantity * nativeAverageCost
+      : null;
+    let nativeUnrealizedPnL = null;
+    let nativeUnrealizedPnLPercent = null;
+    let nativePnlStatus = 'unavailable';
+    let nativePnlReason = nativeAverageCost === null || !nativeCostCurrency
+      ? 'NATIVE_COST_BASIS_UNAVAILABLE'
+      : 'MISSING_SAME_CURRENCY_PRICE';
 
     if (quantity === null) {
       valuationReason = 'MALFORMED_HOLDING_QUANTITY';
       pnlReason = 'MALFORMED_HOLDING_QUANTITY';
     } else if (averageCost === null) {
-      pnlReason = 'MALFORMED_HOLDING_COST';
+      pnlReason = vndCostUnavailableReason;
     }
 
     const nativeCostBasis = quantity !== null && averageCost !== null ? quantity * averageCost : null;
@@ -114,6 +169,34 @@ export function calculatePortfolioValuation(profile, holdings, snapshotsMap = {}
       marketCacheStatus = snapshot.cacheStatus || null;
     }
 
+    const nativeReference = symbol ? priceReferenceForSymbol(nativePriceReferencesMap, symbol) : null;
+    const sameCurrencySnapshot = hasValidPrice
+      && normalizeCurrency(snapshot?.currency) === nativeCostCurrency
+      ? snapshot
+      : null;
+    const sameCurrencyReference = validPositiveNumber(nativeReference?.price)
+      && normalizeCurrency(nativeReference?.currency) === nativeCostCurrency
+      ? nativeReference
+      : null;
+    const acquisitionPriceSource = sameCurrencySnapshot || sameCurrencyReference;
+
+    if (quantity !== null && nativeAcquisitionCostBasis !== null && acquisitionPriceSource) {
+      nativeCurrentPrice = acquisitionPriceSource.price;
+      nativeCurrentPriceAsOf = acquisitionPriceSource.priceAsOf
+        || acquisitionPriceSource.observedAt
+        || acquisitionPriceSource.updatedAt
+        || null;
+      nativeCurrentPriceSource = acquisitionPriceSource.source || acquisitionPriceSource.provider || null;
+      nativeCurrentPriceFreshness = acquisitionPriceSource.freshness || acquisitionPriceSource.cacheStatus || null;
+      nativeUnrealizedPnL = (nativeCurrentPrice * quantity) - nativeAcquisitionCostBasis;
+      nativeUnrealizedPnLPercent = nativeAcquisitionCostBasis > 0
+        ? (nativeUnrealizedPnL / nativeAcquisitionCostBasis) * 100
+        : null;
+      const nativeIsStale = nativeCurrentPriceFreshness === 'stale';
+      nativePnlStatus = nativeIsStale ? 'stale' : 'available';
+      nativePnlReason = nativeIsStale ? 'STALE_NATIVE_PRICE' : null;
+    }
+
     if (quantity === null) {
       pricingStatus = hasValidPrice ? 'available' : 'unavailable';
       valuationStatus = 'unavailable';
@@ -126,7 +209,7 @@ export function calculatePortfolioValuation(profile, holdings, snapshotsMap = {}
       pnlReason = 'MISSING_CANONICAL_CURRENCY';
     } else if (!hasValidPrice) {
       valuationReason = 'MISSING_NATIVE_PRICE';
-      pnlReason = averageCost === null ? 'MALFORMED_HOLDING_COST' : 'MISSING_NATIVE_PRICE';
+      pnlReason = averageCost === null ? vndCostUnavailableReason : 'MISSING_NATIVE_PRICE';
       if (averageCost !== null) {
         costBasis = nativeCostBasis;
       }
@@ -135,7 +218,7 @@ export function calculatePortfolioValuation(profile, holdings, snapshotsMap = {}
       latestPrice = null;
       marketUpdatedAt = null;
       valuationReason = 'PROVIDER_CURRENCY_MISMATCH';
-      pnlReason = averageCost === null ? 'MALFORMED_HOLDING_COST' : 'PROVIDER_CURRENCY_MISMATCH';
+      pnlReason = averageCost === null ? vndCostUnavailableReason : 'PROVIDER_CURRENCY_MISMATCH';
       if (averageCost !== null) {
         costBasis = nativeCostBasis;
       }
@@ -153,7 +236,7 @@ export function calculatePortfolioValuation(profile, holdings, snapshotsMap = {}
         if (averageCost === null) {
           costBasis = null;
           pnlStatus = 'unavailable';
-          pnlReason = 'MALFORMED_HOLDING_COST';
+          pnlReason = vndCostUnavailableReason;
         } else {
           costBasis = nativeCostBasis;
           unrealizedPnL = reportingMarketValue - costBasis;
@@ -183,7 +266,7 @@ export function calculatePortfolioValuation(profile, holdings, snapshotsMap = {}
           if (averageCost === null) {
             costBasis = null;
             pnlStatus = 'unavailable';
-            pnlReason = 'MALFORMED_HOLDING_COST';
+            pnlReason = vndCostUnavailableReason;
           } else {
             costBasis = nativeCostBasis;
             unrealizedPnL = reportingMarketValue - costBasis;
@@ -199,7 +282,7 @@ export function calculatePortfolioValuation(profile, holdings, snapshotsMap = {}
           valuationReason = fxRate.reason || 'FX_UNAVAILABLE';
           costBasis = averageCost !== null ? nativeCostBasis : null;
           pnlStatus = 'unavailable';
-          pnlReason = averageCost === null ? 'MALFORMED_HOLDING_COST' : (fxRate.reason || 'FX_UNAVAILABLE');
+          pnlReason = averageCost === null ? vndCostUnavailableReason : (fxRate.reason || 'FX_UNAVAILABLE');
         }
       }
     }
@@ -219,6 +302,17 @@ export function calculatePortfolioValuation(profile, holdings, snapshotsMap = {}
       nativePrice,
       nativeCurrency,
       nativeMarketValue,
+      nativeAverageCost,
+      nativeCostCurrency,
+      nativeCostBasis: nativeAcquisitionCostBasis,
+      nativeCurrentPrice,
+      nativeCurrentPriceAsOf,
+      nativeCurrentPriceSource,
+      nativeCurrentPriceFreshness,
+      nativeUnrealizedPnL,
+      nativeUnrealizedPnLPercent,
+      nativePnlStatus,
+      nativePnlReason,
       reportingCurrency: REPORTING_CURRENCY,
       reportingMarketValue,
       fxRateToReporting,
@@ -247,10 +341,13 @@ export function calculatePortfolioValuation(profile, holdings, snapshotsMap = {}
   let hasStalePricing = false;
   let comparablePnlCount = 0;
   let hasStalePnl = false;
+  let hasUnknownCostBasis = false;
 
   for (const item of holdingsWithMarket) {
     if (typeof item.costBasis === 'number') {
       totalCostBasis += item.costBasis;
+    } else {
+      hasUnknownCostBasis = true;
     }
     if (['available', 'stale'].includes(item.valuationStatus) && typeof item.reportingMarketValue === 'number') {
       totalMarketValue += item.reportingMarketValue;
@@ -266,7 +363,11 @@ export function calculatePortfolioValuation(profile, holdings, snapshotsMap = {}
     }
   }
 
-  const totalUnrealizedPnL = pnlComparableMarketValue - pricedCostBasis;
+  const totalUnrealizedPnL = comparablePnlCount > 0
+    ? pnlComparableMarketValue - pricedCostBasis
+    : holdingsWithMarket.length === 0
+      ? 0
+      : null;
   const totalUnrealizedPnLPercent = pricedCostBasis > 0
     ? (totalUnrealizedPnL / pricedCostBasis) * 100
     : null;
@@ -293,7 +394,12 @@ export function calculatePortfolioValuation(profile, holdings, snapshotsMap = {}
       cashStatus,
       cashReason: cashStatus === 'available' ? null : 'AUTHORITATIVE_CASH_UNAVAILABLE',
       reportingCurrency: REPORTING_CURRENCY,
-      totalCostBasis: totalCostBasis,
+      totalCostBasis: hasUnknownCostBasis ? null : totalCostBasis,
+      costBasisStatus: holdingsWithMarket.length === 0
+        ? 'not_applicable'
+        : hasUnknownCostBasis
+          ? (totalCostBasis > 0 ? 'partial' : 'unavailable')
+          : 'complete',
       pricedCostBasis: pricedCostBasis,
       totalMarketValue: totalMarketValue,
       totalUnrealizedPnL: totalUnrealizedPnL,
@@ -316,6 +422,7 @@ export async function getPortfolioOverview({
   getCashOverviewFn = getCashOverview,
   getHoldingsFn = getHoldings,
   getMarketSnapshotFn = getMarketSnapshot,
+  getMarketRealtimeFn = getMarketRealtime,
   getFxRateFn = getFxRate
 } = {}) {
   const [cashOverview, holdings] = await Promise.all([
@@ -345,6 +452,31 @@ export async function getPortfolioOverview({
   );
 
   const snapshotsMap = Object.fromEntries(snapshotsEntries);
+
+  // Binance USDT is a display-only same-currency reference for an unmodified
+  // opening position. It never replaces the canonical USD accounting snapshot.
+  const nativeReferenceSymbols = Array.from(new Set(
+    (holdings || [])
+      .filter((holding) => {
+        const opening = holding.opening_position;
+        return opening
+          && !opening.locked_at
+          && !opening.cancelled_at
+          && normalizeCurrency(opening.price_currency) === 'USDT';
+      })
+      .map((holding) => holding.asset?.symbol)
+      .filter((symbol) => typeof symbol === 'string' && symbol.trim())
+  ));
+  const nativeReferenceEntries = await Promise.all(
+    nativeReferenceSymbols.map(async (symbol) => {
+      try {
+        return [symbol, await getMarketRealtimeFn(symbol)];
+      } catch {
+        return [symbol, null];
+      }
+    })
+  );
+  const nativePriceReferencesMap = Object.fromEntries(nativeReferenceEntries);
 
   const fxCurrencies = Array.from(new Set(
     (holdings || [])
@@ -380,6 +512,7 @@ export async function getPortfolioOverview({
     { cash_available: cashOverview?.currentCash ?? null },
     holdings,
     snapshotsMap,
-    fxRatesMap
+    fxRatesMap,
+    nativePriceReferencesMap
   );
 }

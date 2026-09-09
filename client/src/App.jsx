@@ -1950,7 +1950,9 @@ function App({ onLogout }) {
                         <span className="metric-icon">💼</span>
                       </div>
                       <div className="metric-value">
-                        <CountUp value={portfolioOverview.summary.totalCostBasis} suffix=" ₫" />
+                        {typeof portfolioOverview.summary.totalCostBasis === 'number'
+                          ? <CountUp value={portfolioOverview.summary.totalCostBasis} suffix=" ₫" />
+                          : '—'}
                       </div>
                       <div className="metric-change" style={{ color: 'var(--color-slate-500)' }}>
                         Tổng chi phí mua ban đầu
@@ -2005,8 +2007,12 @@ function App({ onLogout }) {
                               : 'var(--color-slate-900)'
                         }}
                       >
-                        {portfolioOverview.summary.totalUnrealizedPnL > 0 ? '+' : ''}
-                        <CountUp value={portfolioOverview.summary.totalUnrealizedPnL} suffix=" ₫" />
+                        {typeof portfolioOverview.summary.totalUnrealizedPnL === 'number' ? (
+                          <>
+                            {portfolioOverview.summary.totalUnrealizedPnL > 0 ? '+' : ''}
+                            <CountUp value={portfolioOverview.summary.totalUnrealizedPnL} suffix=" ₫" />
+                          </>
+                        ) : '—'}
                       </div>
                       <div className="metric-change">
                         <span className={`fintech-badge ${portfolioOverview.summary.totalUnrealizedPnL > 0 ? 'badge-gain' : portfolioOverview.summary.totalUnrealizedPnL < 0 ? 'badge-loss' : 'badge-neutral'}`}>
@@ -2084,11 +2090,17 @@ function App({ onLogout }) {
                           </thead>
                           <tbody>
                             {portfolioOverview.holdings.map((h) => {
-                              const isPriced = h.pricingStatus === 'available' && h.latestPrice !== null;
-                              const isPnlSupported = h.pnlStatus === 'available' && h.unrealizedPnL !== null;
-                              const isProfit = isPnlSupported && h.unrealizedPnL > 0;
-                              const isLoss = isPnlSupported && h.unrealizedPnL < 0;
-                              const holdingCurrency = h.asset?.quote_currency || h.asset?.quoteCurrency || h.currency || 'VND';
+                              const isPriced = ['available', 'stale'].includes(h.pricingStatus) && h.latestPrice !== null;
+                              const hasNativeCost = h.nativeAverageCost !== null && h.nativeAverageCost !== undefined && Boolean(h.nativeCostCurrency);
+                              const hasNativeCurrent = h.nativeCurrentPrice !== null && h.nativeCurrentPrice !== undefined;
+                              const isVndPnlSupported = ['available', 'stale'].includes(h.pnlStatus) && h.unrealizedPnL !== null;
+                              const isNativePnlSupported = ['available', 'stale'].includes(h.nativePnlStatus) && h.nativeUnrealizedPnL !== null;
+                              const displayedPnl = isVndPnlSupported ? h.unrealizedPnL : h.nativeUnrealizedPnL;
+                              const displayedPnlPct = isVndPnlSupported ? h.unrealizedPnLPercent : h.nativeUnrealizedPnLPercent;
+                              const displayedPnlCurrency = isVndPnlSupported ? 'VND' : h.nativeCostCurrency;
+                              const isProfit = (isVndPnlSupported || isNativePnlSupported) && displayedPnl > 0;
+                              const isLoss = (isVndPnlSupported || isNativePnlSupported) && displayedPnl < 0;
+                              const holdingCurrency = h.nativeCurrency || 'VND';
 
                               const holdingMeta = holdings.find((item) => item.asset_id === h.assetId || item.id === h.id);
                               const isEditable = holdingMeta?.opening_correction_allowed === true;
@@ -2135,14 +2147,20 @@ function App({ onLogout }) {
 
                                   {/* 3. Average Cost */}
                                   <td style={{ textAlign: 'right', color: 'var(--color-slate-700)' }}>
-                                    {h.averageCost !== null && h.averageCost !== undefined
-                                      ? formatNativeAmount(h.averageCost, holdingCurrency)
+                                    {hasNativeCost
+                                      ? formatNativeAmount(h.nativeAverageCost, h.nativeCostCurrency)
+                                      : h.averageCost !== null && h.averageCost !== undefined
+                                        ? formatNativeAmount(h.averageCost, 'VND')
                                       : '—'}
                                   </td>
 
                                   {/* 4. Latest Price */}
                                   <td style={{ textAlign: 'right' }}>
-                                    {isPriced ? (
+                                    {hasNativeCost && hasNativeCurrent ? (
+                                      <span style={{ fontWeight: 700, color: 'var(--color-slate-900)' }}>
+                                        {formatNativeAmount(h.nativeCurrentPrice, h.nativeCostCurrency)}
+                                      </span>
+                                    ) : isPriced ? (
                                       <span style={{ fontWeight: 700, color: 'var(--color-slate-900)' }}>
                                         {formatNativeAmount(h.latestPrice, holdingCurrency)}
                                       </span>
@@ -2168,22 +2186,24 @@ function App({ onLogout }) {
 
                                   {/* 6. Unrealized PnL & % */}
                                   <td style={{ textAlign: 'right' }}>
-                                    {isPnlSupported ? (
+                                    {isVndPnlSupported || isNativePnlSupported ? (
                                       <div>
                                         <div style={{
                                           fontWeight: 800,
                                           color: isProfit ? 'var(--color-gain-600)' : isLoss ? 'var(--color-loss-600)' : 'var(--color-slate-900)'
                                         }}>
-                                          {isProfit ? '+' : ''}{formatVNDReporting(h.unrealizedPnL)}
+                                          {isProfit ? '+' : ''}{displayedPnlCurrency === 'VND'
+                                            ? formatVNDReporting(displayedPnl)
+                                            : formatNativeAmount(displayedPnl, displayedPnlCurrency)}
                                         </div>
                                         <div style={{ marginTop: '2px' }}>
                                           <span className={`fintech-badge ${isProfit ? 'badge-gain' : isLoss ? 'badge-loss' : 'badge-neutral'}`}>
-                                            {formatPercentVN(h.unrealizedPnLPercent)}
+                                            {formatPercentVN(displayedPnlPct)}
                                           </span>
                                         </div>
                                       </div>
                                     ) : h.pnlStatus === 'unavailable' ? (
-                                      <span className="fintech-badge badge-neutral" style={{ fontSize: '0.72rem' }} title="Chưa hỗ trợ tính P&L cho tài sản phi VND">
+                                      <span className="fintech-badge badge-neutral" style={{ fontSize: '0.72rem' }} title="Chưa có giá vốn VND hoặc giá hiện tại cùng đồng tiền mua">
                                         Chưa khả dụng
                                       </span>
                                     ) : (
@@ -4145,7 +4165,18 @@ function App({ onLogout }) {
                       <tbody>
                         {holdings.map((h) => {
                           const asset = h.asset || {};
-                          const totalCost = Number(h.quantity) * Number(h.average_cost);
+                          const nativeAverageCost = h.opening_position?.execution_unit_price;
+                          const nativeCostCurrency = h.opening_position?.price_currency;
+                          const hasNativeCost = h.opening_correction_allowed === true
+                            && nativeAverageCost !== null
+                            && nativeAverageCost !== undefined
+                            && Boolean(nativeCostCurrency);
+                          const hasVndCost = h.average_cost !== null && h.average_cost !== undefined;
+                          const displayedAverageCost = hasNativeCost ? nativeAverageCost : h.average_cost;
+                          const displayedCostCurrency = hasNativeCost ? nativeCostCurrency : 'VND';
+                          const totalCost = displayedAverageCost === null || displayedAverageCost === undefined
+                            ? null
+                            : Number(h.quantity) * Number(displayedAverageCost);
                           const isCorrectionAllowed = h.opening_correction_allowed === true;
 
                           return (
@@ -4188,15 +4219,24 @@ function App({ onLogout }) {
                               {/* Column 4: Average Cost */}
                               <td style={{ textAlign: 'right' }}>
                                 <span style={{ color: 'var(--color-slate-700)', fontWeight: 600 }}>
-                                  {Number(h.average_cost).toLocaleString('vi-VN')} ₫
+                                  {displayedAverageCost !== null && displayedAverageCost !== undefined
+                                    ? formatNativeAmount(Number(displayedAverageCost), displayedCostCurrency)
+                                    : '—'}
                                 </span>
                               </td>
 
                               {/* Column 5: Total Cost Basis */}
                               <td style={{ textAlign: 'right' }}>
                                 <span style={{ fontWeight: 800, color: 'var(--color-slate-900)' }}>
-                                  {totalCost.toLocaleString('vi-VN')} ₫
+                                  {totalCost !== null
+                                    ? formatNativeAmount(totalCost, displayedCostCurrency)
+                                    : '—'}
                                 </span>
+                                {!hasVndCost && hasNativeCost && (
+                                  <div style={{ fontSize: '0.7rem', color: 'var(--color-slate-500)', marginTop: '2px' }}>
+                                    Giá vốn VND: —
+                                  </div>
+                                )}
                               </td>
 
                               {/* Column 6: Actions */}

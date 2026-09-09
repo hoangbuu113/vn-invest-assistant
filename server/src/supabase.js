@@ -452,7 +452,9 @@ function normalizeHolding(row) {
     asset_id: row.asset_id,
     opening_position_id: row.opening_position_id || null,
     quantity: typeof row.quantity === 'number' ? row.quantity : Number(row.quantity),
-    average_cost: typeof row.average_cost === 'number' ? row.average_cost : Number(row.average_cost),
+    average_cost: row.average_cost === null || row.average_cost === undefined
+      ? null
+      : (typeof row.average_cost === 'number' ? row.average_cost : Number(row.average_cost)),
     created_at: row.created_at,
     updated_at: row.updated_at,
     asset: row.assets || null,
@@ -466,15 +468,23 @@ function normalizeHolding(row) {
           opening_quantity: typeof openingPosition.opening_quantity === 'number'
             ? openingPosition.opening_quantity
             : Number(openingPosition.opening_quantity),
-          opening_average_cost: typeof openingPosition.opening_average_cost === 'number'
-            ? openingPosition.opening_average_cost
-            : Number(openingPosition.opening_average_cost),
+          opening_average_cost: openingPosition.opening_average_cost === null || openingPosition.opening_average_cost === undefined
+            ? null
+            : (typeof openingPosition.opening_average_cost === 'number'
+                ? openingPosition.opening_average_cost
+                : Number(openingPosition.opening_average_cost)),
           execution_unit_price: openingPosition.execution_unit_price === null
             ? null
             : (typeof openingPosition.execution_unit_price === 'number'
                 ? openingPosition.execution_unit_price
                 : Number(openingPosition.execution_unit_price)),
-          price_currency: openingPosition.price_currency || 'VND',
+          price_currency: openingPosition.price_currency || null,
+          native_average_cost: openingPosition.execution_unit_price === null
+            ? null
+            : (typeof openingPosition.execution_unit_price === 'number'
+                ? openingPosition.execution_unit_price
+                : Number(openingPosition.execution_unit_price)),
+          native_cost_currency: openingPosition.price_currency || null,
           fx_rate_to_vnd: openingPosition.fx_rate_to_vnd === null
             ? null
             : (typeof openingPosition.fx_rate_to_vnd === 'number'
@@ -1981,11 +1991,17 @@ export async function getPositionOpeningBaselines(profileIdOrClient = privateSup
     profileId: row.profile_id,
     assetId: row.asset_id,
     openingQuantity: typeof row.opening_quantity === 'number' ? row.opening_quantity : Number(row.opening_quantity),
-    openingAverageCost: typeof row.opening_average_cost === 'number' ? row.opening_average_cost : Number(row.opening_average_cost),
+    openingAverageCost: row.opening_average_cost === null || row.opening_average_cost === undefined
+      ? null
+      : (typeof row.opening_average_cost === 'number' ? row.opening_average_cost : Number(row.opening_average_cost)),
     executionUnitPrice: row.execution_unit_price === null
       ? null
       : (typeof row.execution_unit_price === 'number' ? row.execution_unit_price : Number(row.execution_unit_price)),
-    priceCurrency: row.price_currency || 'VND',
+    priceCurrency: row.price_currency || null,
+    nativeAverageCost: row.execution_unit_price === null
+      ? null
+      : (typeof row.execution_unit_price === 'number' ? row.execution_unit_price : Number(row.execution_unit_price)),
+    nativeCostCurrency: row.price_currency || null,
     fxRateToVnd: row.fx_rate_to_vnd === null
       ? null
       : (typeof row.fx_rate_to_vnd === 'number' ? row.fx_rate_to_vnd : Number(row.fx_rate_to_vnd)),

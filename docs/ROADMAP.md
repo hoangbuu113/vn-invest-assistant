@@ -158,13 +158,14 @@ Portfolio V1 remains a supporting personal tracking capability inside the broade
 2. **PARTIAL (P0.1 accounting-time scope complete)** Linked tracked-cash BUY/SELL and position reconstruction now align on transaction `executedAt`, with `createdAt` preserved as audit time and ambiguous history failing closed. Remaining authoritative current-price, FX, cash-validation, and completeness invariants continue in later P0 phases.
 3. **COMPLETE (P0.1)** Enforce canonical portfolio asset eligibility at both server and database trust boundaries so reference-only instruments cannot bypass UI filtering.
 4. **PARTIAL (P0.2 cash/performance scope complete)** Implement the governed completeness/freshness states: `AVAILABLE`, `PARTIAL`, `STALE`, `NOT_APPLICABLE`, `INSUFFICIENT_HISTORY`, `UNAVAILABLE`. Cash authority and historical-performance eligibility now fail closed; the reconciled projection must finish the cross-section contract.
-5. Produce one reconciled portfolio projection so Summary, Holdings, and Allocation share a snapshot ID, ledger revision, valuation time, and source timestamps.
-6. Rebuild Summary around total portfolio value, cash, invested market value, and valuation/data state.
-7. Move Holdings directly after Summary and expose truthful price, FX, valuation, P/L, weight, and as-of state per position.
-8. **PARTIAL (P0.2 correctness complete)** Build a compact cash-only experience that does not fill the page with inapplicable investment analytics. Cash-only performance is provider-free and benchmark/concentration are not fabricated; broader layout consolidation remains pending.
-9. **PARTIAL (P0.2 methodology complete)** Consolidate Performance around primary TWR, separate accounting P/L, conditional MWR/drawdown, and the no-annualization-below-one-year rule. Eligibility and annualization are corrected; final information architecture remains pending.
-10. Enforce benchmark eligibility and add user-selected/no-benchmark behavior with explicit currency/return-basis compatibility.
-11. Simplify Allocation and Activity, preserving known-value-only and immutable-ledger semantics without duplicate totals.
+5. **COMPLETE (P0.2.1)** Allow cash-neutral existing positions to retain supported native acquisition price/currency without requiring or fabricating historical VND cost basis. Same-currency native P/L is separate from VND accounting P/L.
+6. Produce one reconciled portfolio projection so Summary, Holdings, and Allocation share a snapshot ID, ledger revision, valuation time, and source timestamps.
+7. Rebuild Summary around total portfolio value, cash, invested market value, and valuation/data state.
+8. Move Holdings directly after Summary and expose truthful price, FX, valuation, P/L, weight, and as-of state per position.
+9. **PARTIAL (P0.2 correctness complete)** Build a compact cash-only experience that does not fill the page with inapplicable investment analytics. Cash-only performance is provider-free and benchmark/concentration are not fabricated; broader layout consolidation remains pending.
+10. **PARTIAL (P0.2 methodology complete)** Consolidate Performance around primary TWR, separate accounting P/L, conditional MWR/drawdown, and the no-annualization-below-one-year rule. Eligibility and annualization are corrected; final information architecture remains pending.
+11. Enforce benchmark eligibility and add user-selected/no-benchmark behavior with explicit currency/return-basis compatibility.
+12. Simplify Allocation and Activity, preserving known-value-only and immutable-ledger semantics without duplicate totals.
 
 ### P1 — Accounting Detail and Reconciliation
 - Realized/unrealized P/L decomposition by asset and period.

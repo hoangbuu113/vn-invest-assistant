@@ -273,9 +273,16 @@ export function reconstructHoldingsState(dateKey, positionBaselines = [], transa
     const qty = typeof baseline.openingQuantity === 'number'
       ? baseline.openingQuantity
       : Number(baseline.openingQuantity || baseline.opening_quantity || 0);
-    const avgCost = typeof baseline.openingAverageCost === 'number'
-      ? baseline.openingAverageCost
-      : Number(baseline.openingAverageCost || baseline.opening_average_cost || 0);
+    const rawAverageCost = baseline.openingAverageCost ?? baseline.opening_average_cost;
+    const parsedAverageCost = typeof rawAverageCost === 'number'
+      ? rawAverageCost
+      : Number(rawAverageCost);
+    const avgCost = rawAverageCost !== null
+      && rawAverageCost !== undefined
+      && Number.isFinite(parsedAverageCost)
+      && parsedAverageCost >= 0
+      ? parsedAverageCost
+      : null;
 
     holdingsMap.set(assetId, {
       assetId,
@@ -325,11 +332,12 @@ export function reconstructHoldingsState(dateKey, positionBaselines = [], transa
     }
 
     if (txType === 'BUY') {
-      const currentTotalCost = holding.quantity * holding.averageCost;
-      const newTotalCost = currentTotalCost + (qty * price);
       const newQty = holding.quantity + qty;
+      const newAverageCost = holding.quantity > 0 && holding.averageCost === null
+        ? null
+        : ((holding.quantity * holding.averageCost) + (qty * price)) / newQty;
       holding.quantity = newQty;
-      holding.averageCost = newQty > 0 ? newTotalCost / newQty : 0;
+      holding.averageCost = newAverageCost;
     } else if (txType === 'SELL') {
       const newQty = Math.max(0, holding.quantity - qty);
       holding.quantity = newQty;
@@ -1058,6 +1066,11 @@ export function calculatePortfolioPerformance({
 
     const asset = assetMap[assetId];
     if (!asset || (asset.quoteCurrency !== REPORTING_CURRENCY && asset.quote_currency !== REPORTING_CURRENCY)) {
+      endPnlComplete = false;
+      break;
+    }
+
+    if (holding.averageCost === null || !Number.isFinite(holding.averageCost)) {
       endPnlComplete = false;
       break;
     }
