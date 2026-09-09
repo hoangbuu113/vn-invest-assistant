@@ -30,6 +30,8 @@ const sectionItemVariants = {
 
 export default function CashManagementSection({
   cashOverview,
+  currentCashSnapshot,
+  currentCashLoading,
   cashOverviewLoading = false,
   cashOverviewError = null,
   cashLedger = [],
@@ -74,10 +76,20 @@ export default function CashManagementSection({
     return cashLedger;
   }, [cashLedger, filterType]);
 
-  const currentCash = typeof cashOverview?.currentCash === 'number'
-    && Number.isFinite(cashOverview.currentCash)
-    ? cashOverview.currentCash
-    : null;
+  const hasSnapshotAuthority = currentCashSnapshot !== undefined;
+  const currentCash = hasSnapshotAuthority
+    ? currentCashSnapshot?.status === 'AVAILABLE'
+      && typeof currentCashSnapshot?.value === 'number'
+      && Number.isFinite(currentCashSnapshot.value)
+      ? currentCashSnapshot.value
+      : null
+    : typeof cashOverview?.currentCash === 'number'
+      && Number.isFinite(cashOverview.currentCash)
+      ? cashOverview.currentCash
+      : null;
+  const isCurrentCashLoading = typeof currentCashLoading === 'boolean'
+    ? currentCashLoading
+    : cashOverviewLoading;
 
   return (
     <motion.div variants={sectionItemVariants} className="fintech-card" style={{ padding: '1.25rem 1.5rem', marginBottom: '1.5rem' }}>
@@ -112,7 +124,7 @@ export default function CashManagementSection({
               Tiền sẵn sàng đầu tư
             </span>
             <div style={{ fontSize: '1.45rem', fontWeight: 800, color: 'var(--color-slate-900)', marginTop: '2px' }}>
-              {cashOverviewLoading ? (
+              {isCurrentCashLoading ? (
                 <span style={{ fontSize: '1.1rem', color: 'var(--color-slate-400)' }}>Đang tải...</span>
               ) : currentCash !== null ? (
                 <CountUp value={currentCash} suffix=" ₫" />

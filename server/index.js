@@ -32,6 +32,7 @@ import { getMarketSnapshot, getMarketHistory, getMarketRealtime } from './src/ma
 import { getNewsFeed, getPersonalizedNewsFeed, runNewsCollector } from './src/news.js';
 import { getPortfolioOverview } from './src/portfolio.js';
 import { getPortfolioComposition } from './src/composition.js';
+import { getPortfolioSnapshot } from './src/portfolioSnapshot.js';
 import { getPortfolioPerformance } from './src/performance.js';
 import { getPortfolioBenchmark } from './src/benchmarks.js';
 import { getBinanceHealth } from './src/providers/index.js';
@@ -172,6 +173,7 @@ export function createApp(services = {}) {
     getPersonalizedNewsFeedFn = getPersonalizedNewsFeed,
     getPortfolioOverviewFn = getPortfolioOverview,
     getPortfolioCompositionFn = getPortfolioComposition,
+    getPortfolioSnapshotFn = getPortfolioSnapshot,
     getPortfolioPerformanceFn = getPortfolioPerformance,
     getPortfolioBenchmarkFn = getPortfolioBenchmark,
     getBinanceHealthFn = getBinanceHealth,
@@ -1339,6 +1341,32 @@ export function createApp(services = {}) {
   });
 
   // Portfolio overview endpoint (combines profile, holdings, and delayed market prices)
+  app.get('/api/portfolio/snapshot', async (req, res) => {
+    try {
+      const profileId = requireProfile(req, res);
+      if (!profileId) return;
+
+      const snapshot = await getPortfolioSnapshotFn({
+        profileId,
+        now: () => new Date(),
+        getPortfolioOverviewFn: (options = {}) => getPortfolioOverviewFn({
+          ...options,
+          profileId
+        })
+      });
+      return res.json({
+        status: 'ok',
+        data: snapshot
+      });
+    } catch (error) {
+      return res.status(500).json({
+        status: 'error',
+        message: 'Failed to generate portfolio snapshot'
+      });
+    }
+  });
+
+  // Legacy compatibility endpoint. Current Summary/Holdings/Allocation use /api/portfolio/snapshot.
   app.get('/api/portfolio/overview', async (req, res) => {
     try {
       const profileId = requireProfile(req, res);

@@ -124,6 +124,7 @@ export function calculatePortfolioValuation(
     let unrealizedPnL = null;
     let unrealizedPnLPercent = null;
     let marketUpdatedAt = null;
+    let marketProvider = null;
     let marketFreshness = null;
     let marketCacheStatus = null;
     let pricingStatus = 'unavailable';
@@ -165,6 +166,7 @@ export function calculatePortfolioValuation(
       nativePrice = snapshot.price;
       latestPrice = nativePrice;
       marketUpdatedAt = snapshot.priceAsOf || snapshot.updatedAt || null;
+      marketProvider = snapshot.source || snapshot.provider || null;
       marketFreshness = snapshot.freshness || null;
       marketCacheStatus = snapshot.cacheStatus || null;
     }
@@ -290,10 +292,12 @@ export function calculatePortfolioValuation(
     return {
       id: holding.id,
       assetId: holding.asset_id,
+      openingPositionId: holding.opening_position_id || holding.openingPositionId || null,
       symbol: symbol,
       name: holding.asset?.name || null,
       assetType: holding.asset?.asset_type || null,
       exchange: holding.asset?.exchange || null,
+      quantityUnit: holding.asset?.quantity_unit || holding.asset?.quantityUnit || null,
       quantity: quantity,
       averageCost: averageCost,
       costBasis: costBasis,
@@ -322,13 +326,16 @@ export function calculatePortfolioValuation(
       unrealizedPnL: unrealizedPnL,
       unrealizedPnLPercent: unrealizedPnLPercent,
       marketUpdatedAt: marketUpdatedAt,
+      marketProvider,
       marketFreshness,
       marketCacheStatus,
       pricingStatus: pricingStatus,
       valuationStatus,
       valuationReason,
       pnlStatus,
-      pnlReason
+      pnlReason,
+      holdingUpdatedAt: holding.updated_at || holding.updatedAt || null,
+      openingPositionUpdatedAt: openingPosition?.updated_at || openingPosition?.updatedAt || null
     };
   });
 
@@ -393,6 +400,11 @@ export function calculatePortfolioValuation(
       cashAvailable: cashAvailable,
       cashStatus,
       cashReason: cashStatus === 'available' ? null : 'AUTHORITATIVE_CASH_UNAVAILABLE',
+      cashLedgerEntryCount: Number.isInteger(profile?.cash_ledger_entry_count)
+        && profile.cash_ledger_entry_count >= 0
+        ? profile.cash_ledger_entry_count
+        : null,
+      cashLedgerStartAt: profile?.cash_ledger_start_at || null,
       reportingCurrency: REPORTING_CURRENCY,
       totalCostBasis: hasUnknownCostBasis ? null : totalCostBasis,
       costBasisStatus: holdingsWithMarket.length === 0
@@ -509,7 +521,11 @@ export async function getPortfolioOverview({
   const fxRatesMap = Object.fromEntries(fxRateEntries);
 
   return calculatePortfolioValuation(
-    { cash_available: cashOverview?.currentCash ?? null },
+    {
+      cash_available: cashOverview?.currentCash ?? null,
+      cash_ledger_entry_count: cashOverview?.entryCount ?? null,
+      cash_ledger_start_at: cashOverview?.ledgerStartAt ?? null
+    },
     holdings,
     snapshotsMap,
     fxRatesMap,

@@ -1,14 +1,14 @@
 # Current Project Status
 
 ## Latest Verified Repository Checkpoint
-- Portfolio V1 P0.1 implementation baseline: `24bd932 docs: rebaseline portfolio v1`; current-schema bootstrap parity correction: `4a9114a fix: align database bootstrap with current schema`.
+- Portfolio V1 P0.3 implementation base: `4cb5558 feat: support native cost for existing positions`; P0.1, P0.2, and P0.2.1 remain the verified accounting/data foundations beneath it.
 - Branch: `main`; production/remote migration state is intentionally unchanged by this implementation task.
-- Tracked working tree was clean before P0.2 implementation; pre-existing untracked `server/artifacts/` remains preserved and untouched.
+- Tracked working tree was clean before P0.3 implementation; pre-existing untracked `server/artifacts/` remains preserved and untouched.
 - Runtime architecture remains Cloudflare Workers Static Assets/frontend proxy and scheduler, Render Node.js/Express backend, and Supabase PostgreSQL/Auth.
-- This checkpoint records repository behavior inspected on 2026-09-09. Exact production migration parity and deployment revision were not queried in this implementation phase.
+- This checkpoint records repository behavior inspected on 2026-09-10. Exact production migration parity and deployment revision were not queried in this implementation phase.
 
 ## Current Phase
-Portfolio V1 P0.2 Data Correctness is implemented and locally verified. P0.1 established rebuild, economic-time, and portfolio-eligibility trust boundaries; P0.2 adds fail-closed cash authority, no annualized XIRR below one year, cadence-bounded historical valuation marks, and provider-free cash-only performance. P0.2.1 now permits cash-neutral existing positions to retain native acquisition cost while leaving an unknown historical VND basis null. The reconciled-snapshot/API projection and UI redesign phases remain pending.
+Portfolio V1 P0.3 Unified Portfolio Snapshot is implemented locally. P0.1 established rebuild, economic-time, and portfolio-eligibility trust boundaries; P0.2 added fail-closed cash authority, performance eligibility, and provider-free cash-only performance; P0.2.1 added truthful native acquisition cost. P0.3 now provides the reconciled current-state API used by Summary, Holdings, and Allocation. P0.4 visual/information-order redesign remains pending.
 
 ## Portfolio — Verified Working Today
 - Supabase Auth user identity resolves through `investor_profile.user_id` to private `investor_profile.id`; protected Express routes pass that profile ID to service-role data access and profile-scoped financial RPCs.
@@ -18,6 +18,7 @@ Portfolio V1 P0.2 Data Correctness is implemented and locally verified. P0.1 est
 - Opening positions establish cash-neutral known state, can be corrected/cancelled before ledger activity, and lock after a transaction.
 - Portfolio overview returns cash, holdings, current VND market value, cost basis, unrealized P/L, FX metadata, and partial-valuation states without valuing an unpriced holding at zero.
 - Composition derives from one overview inside its own request and distinguishes complete, partial, unavailable, and cash-only allocation bases.
+- `GET /api/portfolio/snapshot` obtains one Portfolio overview and derives Summary, Holdings, and Allocation from that exact payload. Each block carries one deterministic `snapshotId`; the response also exposes a deterministic ledger-state checkpoint, calculation boundary, valuation coverage, and per-source price/FX timestamps.
 - Performance exposes daily chained end-of-day TWR, XIRR/MWR, wealth-index drawdown, accounting P/L, coverage reasons, and completed-date series for 1W/1M/3M/6M/1Y.
 - Missing or malformed authoritative cash is exposed as unavailable/partial rather than zero. Confirmed authoritative zero remains a valid zero.
 - MWR/XIRR is annualized only when the evaluated cash-flow span is at least 365 days; shorter or unsolved cases return a null metric with an explicit reason.
@@ -45,16 +46,22 @@ Portfolio V1 P0.2 Data Correctness is implemented and locally verified. P0.1 est
 - Forward migration `20260909000000_portfolio_native_opening_cost.sql` is local and unapplied remotely.
 - Local verification: focused native-opening-position tests 11/11 PASS; full backend 1455/1455 PASS; client and Worker production build PASS; `git diff --check` PASS.
 
+## Portfolio P0.3 — Implemented Locally (Not Deployed)
+- `GET /api/portfolio/snapshot` is authoritative for current Summary, Holdings, and Allocation acquisition. The browser updates all three atomically from one response; legacy overview/composition endpoints remain for compatibility only.
+- `ledgerRevision` is explicitly a deterministic checkpoint over the cash and holding state actually read, not a fabricated database transaction snapshot. `snapshotId` additionally includes the exact valuation, price, FX, P/L, and source-as-of inputs used.
+- Current-state completeness uses `AVAILABLE`, `PARTIAL`, `STALE`, `NOT_APPLICABLE`, `INSUFFICIENT_HISTORY`, and `UNAVAILABLE`. Unknown cash, price, FX, cost basis, and P/L remain null; confirmed zero remains zero.
+- Holdings expose canonical asset identity/class/unit, native price and currency, current VND value, native and VND cost/P/L where valid, valuation state, and price/FX provenance timestamps without duplicating financial logic in the client.
+- A cash-only portfolio returns authoritative cash/total, zero invested value, an empty holdings list, 100% cash allocation, and `NOT_APPLICABLE` concentration while making zero price, realtime, FX, or history calls.
+- Local verification: focused Portfolio snapshot/accounting tests 62/62 PASS; full backend 1469/1469 PASS; client and Worker production build PASS; `git diff --check` PASS.
+
 ## Portfolio — Partial
-- Overview, composition, performance, and benchmark are separate requests. They do not share a portfolio snapshot ID, ledger revision, valuation timestamp, or atomic read boundary.
+- Performance and benchmark remain separate historical requests and clocks; P0.3 intentionally reconciles only current Summary, Holdings, and Allocation.
 - Historical performance supports only holdings that can be valued directly in VND. Historical non-VND performance remains unavailable because authoritative historical FX is not integrated.
 - Benchmark choice is component-local and defaults to VN-Index. There is no persisted user selection and no explicit no-benchmark state.
 - Portfolio UI currently orders Performance before Summary/Holdings and spreads related values across independently refreshed blocks.
 - Transaction entry supports cross-currency execution metadata, but transaction-history rendering presents the VND accounting price as though it were the only execution price/currency.
 
 ## Portfolio — Missing
-- One reconciled Summary/Holdings/Allocation snapshot contract with `snapshotId`, ledger revision, valuation time, and refresh metadata.
-- Unified portfolio states: `AVAILABLE`, `PARTIAL`, `STALE`, `NOT_APPLICABLE`, `INSUFFICIENT_HISTORY`, `UNAVAILABLE`.
 - Idempotency keys for financial writes and auditable transaction correction/reversal flows.
 - Governed fee, tax, dividend/income, adjustment, and asset-transfer ledger events.
 - Daily P/L and unified total/accounting P/L in the overview API.
@@ -102,15 +109,14 @@ Portfolio V1 P0.2 Data Correctness is implemented and locally verified. P0.1 est
 - USD/VND historical bars/historical FX authority remain insufficient for non-VND portfolio performance.
 - Gold spot history remains close-only where the configured provider cannot supply authoritative OHLC.
 
-## Portfolio P0.1/P0.2 Verification and Remaining Blockers
+## Portfolio P0.1–P0.3 Verification and Remaining Blockers
 - Disposable PostgreSQL execution reproduces two historical rebuild facts: the chronological migration directory has no initial-schema migration, and the immutable cross-currency migration references cash-ledger columns absent from its historical predecessor. Production may still be correct because it was evolved from an existing base; no production data was queried or changed here.
 - The supported rebuild contract is the full current `server/db/schema.sql` bootstrap. Historical applied migrations remain audit history, and future changes continue through forward migrations. The new P0.1 forward migration changes no historical financial row.
 - P0.1 closes the linked BUY/SELL economic-time split and the UI-only portfolio-eligibility bypass for future writes, while historical reads reconcile immutable legacy linkage without rewriting ledger records.
 
 Remaining blockers:
-1. No reconciled portfolio snapshot/ledger-revision contract exists; independent Summary/Holdings/Allocation refreshes may describe different price/FX moments.
-2. The six-state completeness/freshness contract is only partially implemented; a single reconciled projection remains required to govern it across Summary, Holdings, and Allocation.
-3. Historical FX authority for non-VND performance remains unavailable.
+1. Historical FX authority for non-VND performance remains unavailable.
+2. Portfolio information order and visual hierarchy remain the P0.4 task; P0.3 changed acquisition/projection only.
 
 ## Next Work
-Continue with Portfolio V1 P0.3: one reconciled backend portfolio projection and complete cross-section state contract. UI redesign must follow those authorities rather than precede them.
+Continue with Portfolio V1 P0.4: rebuild the Portfolio information order and visual hierarchy on the P0.3 snapshot authority without changing accounting semantics.

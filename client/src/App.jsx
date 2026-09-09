@@ -358,7 +358,7 @@ function App({ onLogout }) {
   const [compositionLoading, setCompositionLoading] = useState(true);
   const [compositionRefreshing, setCompositionRefreshing] = useState(false);
   const [compositionError, setCompositionError] = useState(null);
-  const activeCompositionReqRef = useRef(null);
+  const activePortfolioSnapshotReqRef = useRef(null);
 
   // Deterministic Opportunity Engine state (Feature 28)
   const [opportunityData, setOpportunityData] = useState(null);
@@ -447,7 +447,6 @@ function App({ onLogout }) {
           setInvestmentHorizon(json.data.investment_horizon);
           setProfileSuccess(true);
           fetchPortfolio(false);
-          fetchComposition(false);
         } else {
           throw new Error(json.message || 'Không thể lưu hồ sơ đầu tư');
         }
@@ -501,7 +500,6 @@ function App({ onLogout }) {
     setHoldingsSuccess(message || 'Thao tác vị thế ban đầu thành công.');
     fetchHoldings(false);
     fetchPortfolio(false);
-    fetchComposition(false);
     fetchPersonalizedNews(false);
   };
 
@@ -593,70 +591,49 @@ function App({ onLogout }) {
     fetchPersonalizedNews(true);
   }, [fetchNews, fetchPersonalizedNews]);
 
-  // Fetch portfolio overview data
+  // Fetch one authoritative current-state snapshot for Summary, Holdings, and Allocation.
   const fetchPortfolio = useCallback((isInitial = false) => {
-    if (isInitial) {
-      setPortfolioLoading(true);
-    } else {
-      setPortfolioRefreshing(true);
-    }
-    setPortfolioError(null);
-
-    apiFetch('/api/portfolio/overview')
-      .then((res) => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return res.json();
-      })
-      .then((json) => {
-        if (json.status === 'ok' && json.data) {
-          setPortfolioOverview(json.data);
-        } else {
-          throw new Error(json.message || 'Không thể tải tổng quan danh mục');
-        }
-      })
-      .catch((err) => {
-        setPortfolioError(err.message || 'Không thể tải dữ liệu tổng quan danh mục');
-      })
-      .finally(() => {
-        setPortfolioLoading(false);
-        setPortfolioRefreshing(false);
-      });
-  }, []);
-
-  // Fetch portfolio composition data (Feature 10)
-  const fetchComposition = useCallback((isInitial = false) => {
-    if (activeCompositionReqRef.current) {
-      activeCompositionReqRef.current.abort();
+    if (activePortfolioSnapshotReqRef.current) {
+      activePortfolioSnapshotReqRef.current.abort();
     }
     const controller = new AbortController();
-    activeCompositionReqRef.current = controller;
+    activePortfolioSnapshotReqRef.current = controller;
 
     if (isInitial) {
+      setPortfolioLoading(true);
       setCompositionLoading(true);
     } else {
+      setPortfolioRefreshing(true);
       setCompositionRefreshing(true);
     }
+    setPortfolioError(null);
     setCompositionError(null);
 
-    apiFetch('/api/portfolio/composition', { signal: controller.signal })
+    return apiFetch('/api/portfolio/snapshot', { signal: controller.signal })
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.json();
       })
       .then((json) => {
-        if (json.status === 'ok' && json.data) {
-          setCompositionData(json.data);
+        if (controller.signal.aborted) return;
+        if (json.status === 'ok' && json.data && json.data.allocation) {
+          setPortfolioOverview(json.data);
+          setCompositionData(json.data.allocation);
         } else {
-          throw new Error(json.message || 'Không thể tải cơ cấu danh mục');
+          throw new Error(json.message || 'Không thể tải snapshot danh mục');
         }
       })
       .catch((err) => {
         if (err.name === 'AbortError') return;
-        setCompositionError(err.message || 'Không thể tải dữ liệu cơ cấu danh mục');
+        const message = err.message || 'Không thể tải snapshot danh mục';
+        setPortfolioError(message);
+        setCompositionError(message);
       })
       .finally(() => {
-        if (activeCompositionReqRef.current === controller) {
-          activeCompositionReqRef.current = null;
+        if (activePortfolioSnapshotReqRef.current === controller) {
+          activePortfolioSnapshotReqRef.current = null;
+          setPortfolioLoading(false);
+          setPortfolioRefreshing(false);
           setCompositionLoading(false);
           setCompositionRefreshing(false);
         }
@@ -809,46 +786,41 @@ function App({ onLogout }) {
     fetchCashOverview(false);
     fetchCashLedger(false);
     fetchPortfolio(false);
-    fetchComposition(false);
     fetchProfile(false);
-  }, [fetchCashOverview, fetchCashLedger, fetchPortfolio, fetchComposition, fetchProfile]);
+  }, [fetchCashOverview, fetchCashLedger, fetchPortfolio, fetchProfile]);
 
   const handleTransactionRecorded = useCallback(() => {
     fetchHoldings(false);
     fetchPortfolio(false);
-    fetchComposition(false);
     fetchTransactions(false);
     fetchCashOverview(false);
     fetchCashLedger(false);
     fetchPersonalizedNews(false);
-  }, [fetchHoldings, fetchPortfolio, fetchComposition, fetchTransactions, fetchCashOverview, fetchCashLedger, fetchPersonalizedNews]);
+  }, [fetchHoldings, fetchPortfolio, fetchTransactions, fetchCashOverview, fetchCashLedger, fetchPersonalizedNews]);
 
   // Fetch portfolio, composition, transactions & cash on initial mount
   useEffect(() => {
     fetchPortfolio(true);
-    fetchComposition(true);
     fetchTransactions(true);
     fetchCashOverview(true);
     fetchCashLedger(true);
-  }, [fetchPortfolio, fetchComposition, fetchTransactions, fetchCashOverview, fetchCashLedger]);
+  }, [fetchPortfolio, fetchTransactions, fetchCashOverview, fetchCashLedger]);
 
   // Periodic 5-minute auto-refresh when on portfolio tab
   useEffect(() => {
     if (activeTab !== 'portfolio') return;
     fetchPortfolio(false);
-    fetchComposition(false);
     fetchTransactions(false);
     fetchCashOverview(false);
     fetchCashLedger(false);
     const intervalId = setInterval(() => {
       fetchPortfolio(false);
-      fetchComposition(false);
       fetchTransactions(false);
       fetchCashOverview(false);
       fetchCashLedger(false);
     }, 5 * 60 * 1000);
     return () => clearInterval(intervalId);
-  }, [activeTab, fetchPortfolio, fetchComposition, fetchTransactions, fetchCashOverview, fetchCashLedger]);
+  }, [activeTab, fetchPortfolio, fetchTransactions, fetchCashOverview, fetchCashLedger]);
 
   // Fetch display prices for Watchlist and Dashboard while preserving the
   // canonical snapshot map used by alert threshold defaults.
@@ -964,13 +936,12 @@ function App({ onLogout }) {
     setDashboardRefreshing(true);
     Promise.allSettled([
       fetchPortfolio(false),
-      fetchComposition(false),
       fetchWatchlist(false),
       fetchNews(false)
     ]).finally(() => {
       setDashboardRefreshing(false);
     });
-  }, [fetchPortfolio, fetchComposition, fetchWatchlist, fetchNews]);
+  }, [fetchPortfolio, fetchWatchlist, fetchNews]);
 
   // Periodic 5-minute auto-refresh when on dashboard tab
   useEffect(() => {
@@ -1369,6 +1340,7 @@ function App({ onLogout }) {
       if (activeHistoryReqRef.current) activeHistoryReqRef.current.abort();
       if (activeAnalysisReqRef.current) activeAnalysisReqRef.current.abort();
       if (activeOpportunityReqRef.current) activeOpportunityReqRef.current.abort();
+      if (activePortfolioSnapshotReqRef.current) activePortfolioSnapshotReqRef.current.abort();
     };
   }, []);
 
@@ -1837,7 +1809,6 @@ function App({ onLogout }) {
                 <MagneticButton
                   onClick={() => {
                     fetchPortfolio(false);
-                    fetchComposition(false);
                     fetchTransactions(false);
                     fetchCashOverview(false);
                     fetchCashLedger(false);
@@ -1922,6 +1893,8 @@ function App({ onLogout }) {
                   {/* Feature 15: Cash Management Section (Overview, Deposit/Withdraw, Cash Ledger) */}
                   <CashManagementSection
                     cashOverview={cashOverview}
+                    currentCashSnapshot={portfolioOverview?.cash}
+                    currentCashLoading={portfolioLoading}
                     cashOverviewLoading={cashOverviewLoading}
                     cashOverviewError={cashOverviewError}
                     cashLedger={cashLedger}
@@ -1936,6 +1909,7 @@ function App({ onLogout }) {
                       setIsCashModalOpen(true);
                     }}
                     onRefresh={() => {
+                      fetchPortfolio(false);
                       fetchCashOverview(false);
                       fetchCashLedger(false);
                     }}
@@ -1966,7 +1940,9 @@ function App({ onLogout }) {
                         <span className="metric-icon">📊</span>
                       </div>
                       <div className="metric-value">
-                        <CountUp value={portfolioOverview.summary.totalMarketValue} suffix=" ₫" />
+                        {typeof portfolioOverview.summary.totalMarketValue === 'number'
+                          ? <CountUp value={portfolioOverview.summary.totalMarketValue} suffix=" ₫" />
+                          : '—'}
                       </div>
                       <div className="metric-change" style={{ color: 'var(--color-slate-500)' }}>
                         Định giá theo giá khớp gần nhất
@@ -2033,7 +2009,9 @@ function App({ onLogout }) {
                         <span className="metric-icon">💎</span>
                       </div>
                       <div className="metric-value" style={{ color: 'var(--color-brand-700)', fontSize: '1.45rem' }}>
-                        <CountUp value={portfolioOverview.summary.totalPortfolioValue} suffix=" ₫" />
+                        {typeof portfolioOverview.summary.totalPortfolioValue === 'number'
+                          ? <CountUp value={portfolioOverview.summary.totalPortfolioValue} suffix=" ₫" />
+                          : '—'}
                       </div>
                       <div className="metric-change" style={{ color: 'var(--color-brand-600)' }}>
                         Tiền mặt + Giá trị thị trường
@@ -2253,7 +2231,7 @@ function App({ onLogout }) {
                     data={compositionData}
                     loading={compositionLoading}
                     error={compositionError}
-                    onRetry={() => fetchComposition(true)}
+                    onRetry={() => fetchPortfolio(true)}
                   />
                 </>
               )}

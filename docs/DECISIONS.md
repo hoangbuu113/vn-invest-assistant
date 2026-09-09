@@ -473,3 +473,11 @@ $$\text{Source Adapter} \longrightarrow \text{Canonical Validation / Sanitizatio
 - `position_opening_baselines.opening_average_cost` and the holdings projection `average_cost` are optional authoritative historical VND basis fields. Unknown is `NULL`, never zero and never a conversion using current FX.
 - Native unrealized P/L is permitted only against a current price in exactly the same currency and only while the opening position remains unmodified by later ledger activity. VND unrealized P/L remains unavailable without authoritative historical VND cost.
 - Binance USDT may supply a display-only current reference for USDT-native opening cost. CoinGecko USD remains the canonical Crypto accounting snapshot, and no USDT/USD equivalence is assumed.
+
+### K. P0.3 Unified Current-State Snapshot
+- `GET /api/portfolio/snapshot` is the authoritative current-state read projection for Portfolio Summary, Holdings, and Allocation. Those blocks consume one response and one `snapshotId`; Performance and Benchmark retain their separate historical clocks.
+- `ledgerRevision` is a deterministic state checkpoint derived from the exact cash/holding authority visible to the read. It is not represented as a PostgreSQL transaction snapshot or a globally monotonic ledger sequence.
+- `snapshotId` is derived from that ledger checkpoint plus the exact price, FX, valuation, P/L, and source-as-of inputs used. Recalculating identical inputs preserves identity; a changed authoritative input changes identity.
+- `valuationAsOf` is the explicit calculation boundary. Per-source `priceAsOf` and `fxAsOf` remain visible because provider observations are not transactionally simultaneous.
+- Current-state metrics use the governed six-state vocabulary. A partial projection may expose known subtotals, but unknown cash, prices, FX, cost basis, or P/L remain null rather than zero.
+- Legacy overview and composition routes remain temporarily available for compatibility and are not the current Portfolio page authority.

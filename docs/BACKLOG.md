@@ -37,13 +37,13 @@ The following design decisions are unresolved and intentionally deferred. They m
 
 ## 3. Portfolio V1 Concrete Work Items
 
-Statuses describe the repository state after the 2026-09-09 P0.2 implementation and do not imply deployment or remote migration.
+Statuses describe the repository state after the local Portfolio P0.3 implementation and do not imply deployment or remote migration.
 
 | Priority | Work item | Data dependency | Method dependency | Acceptance criteria | Status |
 |---|---|---|---|---|---|
 | P0 | Fresh-database rebuild reproducibility | Current schema bootstrap plus forward migrations | Preserve immutable applied history; explicitly test historical replay debt | A blank database builds the authoritative current Portfolio schema; disposable PostgreSQL tests reproduce the old migration mismatch; no financial backfill/fabrication | COMPLETE_P0.1 |
-| P0 | Reconciled portfolio snapshot | Cash ledger revision, holdings projection revision, price/FX observations | One valuation boundary and stable `snapshotId` | Summary, holdings, and allocation carry the same snapshot/revision; repeated consumers cannot mix price/FX vintages | MISSING |
-| P0 | Completeness/freshness contract | Provider timestamps, FX timestamps, refresh attempts/results | Governed six-state vocabulary | Every portfolio metric returns an explicit state/reason; missing/error/NaN never becomes zero or ready | PARTIAL_P0.2 |
+| P0 | Reconciled portfolio snapshot | Cash ledger revision, holdings projection revision, price/FX observations | One valuation boundary and stable `snapshotId` | Summary, holdings, and allocation carry the same snapshot/revision; repeated consumers cannot mix price/FX vintages | COMPLETE_P0.3 |
+| P0 | Completeness/freshness contract | Provider timestamps, FX timestamps, refresh attempts/results | Governed six-state vocabulary | Current Summary/Holdings/Allocation metrics expose explicit state/reason; missing/error/NaN never becomes zero or ready | COMPLETE_P0.3 |
 | P0 | Cash validation trust boundary | `get_cash_overview` result | Fail closed on malformed/missing authority | Overview rejects unavailable/malformed authoritative cash rather than coercing it to zero | COMPLETE_P0.2 |
 | P0 | Performance eligibility correction | Authority start, dated valuations, cash flows | No annualization below one year; explicit insufficient/not-applicable cases | Short history never displays annualized XIRR; failed XIRR remains null; cash-only and one-point cases have explicit states | COMPLETE_P0.2 |
 | P0 | Native-cost existing-position entry | Opening baseline native price/currency; optional historical VND basis | Native cost stays native; unknown VND basis stays null; opening remains cash-neutral | Crypto/Gold can be declared from remembered native cost without current-FX historical backfill; native and VND P/L remain explicitly separate | COMPLETE_P0.2.1 |
