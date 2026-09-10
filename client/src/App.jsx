@@ -1901,9 +1901,7 @@ function App({ onLogout }) {
 
                   {/* Feature 25D: separate historical/EOD performance clock. */}
                   <PortfolioPerformanceSection
-                    cashAvailable={portfolioOverview.cash?.status === 'AVAILABLE' ? portfolioOverview.cash.value : null}
                     holdingsCount={portfolioOverview.holdings.length}
-                    onNavigateToPortfolio={() => setActiveTab('portfolio')}
                   />
 
                   {/* Feature 10: Allocation remains a direct projection of this same snapshot. */}

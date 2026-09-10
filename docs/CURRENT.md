@@ -1,14 +1,14 @@
 # Current Project Status
 
 ## Latest Verified Repository Checkpoint
-- Portfolio V1 P0.4 implementation base: `6ce81b5 feat: unify portfolio current-state snapshot`; P0.1 through P0.3 remain the verified accounting, data, and current-snapshot foundations beneath it.
+- Portfolio V1 P0.5 implementation base: `9f6ef48 feat: redesign portfolio summary and holdings`; P0.1 through P0.4 remain the verified accounting, data, snapshot, Summary, and Holdings foundations beneath it.
 - Branch: `main`; production/remote migration state is intentionally unchanged by this implementation task.
-- Tracked working tree was clean before P0.4 implementation; pre-existing untracked `server/artifacts/` remains preserved and untouched.
+- Tracked working tree was clean before P0.5 implementation; pre-existing untracked `server/artifacts/` remains preserved and untouched.
 - Runtime architecture remains Cloudflare Workers Static Assets/frontend proxy and scheduler, Render Node.js/Express backend, and Supabase PostgreSQL/Auth.
 - This checkpoint records repository behavior inspected on 2026-09-10. Exact production migration parity and deployment revision were not queried in this implementation phase.
 
 ## Current Phase
-Portfolio V1 P0.4 Summary + Holdings is implemented locally. The visible Portfolio order is now Summary, Holdings, Performance, Allocation, then Activity. Summary and Holdings consume the reconciled P0.3 snapshot without changing accounting, transaction, performance, or allocation semantics.
+Portfolio V1 P0.5 Performance is implemented locally. One compact historical/EOD block now prioritizes TWR and valid VND accounting P/L, keeps MWR/drawdown/realized/unrealized detail secondary, and makes benchmark comparison opt-in without changing any financial formula or the reconciled P0.3 current-state snapshot.
 
 ## Portfolio — Verified Working Today
 - Supabase Auth user identity resolves through `investor_profile.user_id` to private `investor_profile.id`; protected Express routes pass that profile ID to service-role data access and profile-scoped financial RPCs.
@@ -62,11 +62,18 @@ Portfolio V1 P0.4 Summary + Holdings is implemented locally. The visible Portfol
 - Performance remains on its separate historical/EOD request and clock. Allocation remains the P0.3 snapshot projection, and immutable transaction/cash activity remains available below it.
 - Local verification: focused Portfolio display/snapshot/native-cost tests 40/40 PASS; full backend 1478/1478 PASS; client and Worker production build PASS; desktop/mobile visual check PASS; `git diff --check` PASS.
 
+## Portfolio P0.5 — Implemented Locally (Not Deployed)
+- Performance is one compact historical/EOD block. TWR and valid VND accounting P/L are primary; MWR/XIRR, drawdown, realized P/L during the period, and unrealized P/L at period end remain distinct secondary facts.
+- The measured start/end dates, valid observation count, and historical/EOD clock are explicit. One to three observations use a compact summary instead of a large chart; missing or failed metrics remain unavailable rather than becoming zero.
+- MWR/XIRR below 365 days remains `INSUFFICIENT_HISTORY`. Zero drawdown is reported as no drawdown observed during the measured period, without implying no risk and without meaningless peak/trough dates.
+- Benchmark defaults to no selection. VN-Index is an eligible VND price-return comparison on common dates; S&P 500 remains a USD reference-only series. Compatible differences are labelled in percentage points and never as alpha.
+- Cash-only performance remains provider-free and compact: no chart or benchmark request is made, while any valid historical/accounting facts remain visible.
+- The block is responsive at desktop and 390px mobile width with one contained chart and no horizontal overflow. Summary, Holdings, Allocation, Activity, and their current-state snapshot semantics are unchanged.
+- Local verification: focused performance/benchmark/Portfolio display tests 88/88 PASS; full backend 1493/1493 PASS; client and Worker production build PASS; desktop/mobile visual check PASS; `git diff --check` PASS.
+
 ## Portfolio — Partial
-- Performance and benchmark remain separate historical requests and clocks; P0.3 intentionally reconciles only current Summary, Holdings, and Allocation.
+- Performance and benchmark remain historical/EOD projections separate from the P0.3 current Summary/Holdings/Allocation snapshot clock.
 - Historical performance supports only holdings that can be valued directly in VND. Historical non-VND performance remains unavailable because authoritative historical FX is not integrated.
-- Benchmark choice is component-local and defaults to VN-Index. There is no persisted user selection and no explicit no-benchmark state.
-- Performance and benchmark presentation consolidation remains a later Portfolio phase; P0.4 intentionally leaves its existing calculations and visual treatment unchanged.
 - Transaction entry supports cross-currency execution metadata, but transaction-history rendering presents the VND accounting price as though it were the only execution price/currency.
 
 ## Portfolio — Missing
@@ -117,14 +124,13 @@ Portfolio V1 P0.4 Summary + Holdings is implemented locally. The visible Portfol
 - USD/VND historical bars/historical FX authority remain insufficient for non-VND portfolio performance.
 - Gold spot history remains close-only where the configured provider cannot supply authoritative OHLC.
 
-## Portfolio P0.1–P0.4 Verification and Remaining Blockers
+## Portfolio P0.1–P0.5 Verification and Remaining Blockers
 - Disposable PostgreSQL execution reproduces two historical rebuild facts: the chronological migration directory has no initial-schema migration, and the immutable cross-currency migration references cash-ledger columns absent from its historical predecessor. Production may still be correct because it was evolved from an existing base; no production data was queried or changed here.
 - The supported rebuild contract is the full current `server/db/schema.sql` bootstrap. Historical applied migrations remain audit history, and future changes continue through forward migrations. The new P0.1 forward migration changes no historical financial row.
 - P0.1 closes the linked BUY/SELL economic-time split and the UI-only portfolio-eligibility bypass for future writes, while historical reads reconcile immutable legacy linkage without rewriting ledger records.
 
 Remaining blockers:
 1. Historical FX authority for non-VND performance remains unavailable.
-2. Performance and benchmark information architecture remains outside P0.4; current-state Summary/Holdings order and presentation are complete locally.
 
 ## Next Work
-Continue with the next Portfolio V1 phase: consolidate Performance and benchmark presentation without changing the verified P0.1–P0.4 accounting, snapshot, or display contracts.
+Continue with Portfolio V1 P0.6: simplify Allocation and Activity without changing the verified P0.1–P0.5 accounting, snapshot, performance, or benchmark contracts.

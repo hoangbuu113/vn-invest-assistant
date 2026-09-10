@@ -163,8 +163,8 @@ Portfolio V1 remains a supporting personal tracking capability inside the broade
 7. **COMPLETE (P0.4)** Rebuild Summary around total portfolio value, cash, invested market value, valid unrealized P/L, and valuation/data state, using only the reconciled snapshot.
 8. **COMPLETE (P0.4)** Move Holdings directly after Summary and expose truthful native price/cost/P/L, VND valuation, weight, and as-of state in a desktop table and mobile expandable cards.
 9. **COMPLETE (P0.4)** Build a compact cash-only Summary/Holdings experience with one empty state and secondary cash management. Cash-only performance remains provider-free, and benchmark/concentration are not fabricated.
-10. **PARTIAL (P0.2 methodology complete)** Consolidate Performance around primary TWR, separate accounting P/L, conditional MWR/drawdown, and the no-annualization-below-one-year rule. Eligibility and annualization are corrected; final information architecture remains pending.
-11. Enforce benchmark eligibility and add user-selected/no-benchmark behavior with explicit currency/return-basis compatibility.
+10. **COMPLETE (P0.5)** Consolidate Performance around primary TWR, separate accounting P/L, conditional MWR/drawdown, sparse-history presentation, and the no-annualization-below-one-year rule.
+11. **COMPLETE (P0.5)** Enforce benchmark eligibility and add user-selected/no-benchmark behavior with explicit currency/return-basis compatibility. VN-Index is VND-comparable; S&P 500 remains reference-only.
 12. Simplify Allocation and Activity, preserving known-value-only and immutable-ledger semantics without duplicate totals.
 
 ### P1 — Accounting Detail and Reconciliation
