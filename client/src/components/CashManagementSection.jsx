@@ -39,7 +39,8 @@ export default function CashManagementSection({
   cashLedgerError = null,
   onOpenDeposit,
   onOpenWithdraw,
-  onRefresh
+  onRefresh,
+  activityOnly = false
 }) {
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
   const [filterType, setFilterType] = useState('ALL'); // 'ALL' | 'MOVEMENT' | 'TRADE'
@@ -92,9 +93,29 @@ export default function CashManagementSection({
     : cashOverviewLoading;
 
   return (
-    <motion.div variants={sectionItemVariants} className="fintech-card" style={{ padding: '1.25rem 1.5rem', marginBottom: '1.5rem' }}>
+    <motion.div
+      variants={sectionItemVariants}
+      className={`fintech-card${activityOnly ? ' cash-management-activity' : ''}`}
+      style={{ padding: '1.25rem 1.5rem', marginBottom: '1.5rem' }}
+    >
+      {activityOnly && (
+        <div className="cash-activity-heading">
+          <div>
+            <strong>Dòng tiền</strong>
+            <span>Nạp, rút và dòng tiền giao dịch đã ghi nhận</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setIsDetailsOpen((prev) => !prev)}
+            className="fintech-btn btn-secondary btn-sm"
+          >
+            {isDetailsOpen ? 'Thu gọn' : 'Xem dòng tiền'}
+          </button>
+        </div>
+      )}
       {/* Primary Cash Summary & Actions Bar */}
       <div
+        className="cash-primary-summary"
         style={{
           display: 'flex',
           justifyContent: 'space-between',

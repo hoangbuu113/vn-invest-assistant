@@ -23,6 +23,8 @@ const MIGRATION_PATH = path.join(
 );
 const OPENING_MODAL_PATH = path.join(REPO_ROOT, 'client', 'src', 'components', 'OpeningPositionModal.jsx');
 const APP_PATH = path.join(REPO_ROOT, 'client', 'src', 'App.jsx');
+const PORTFOLIO_HOLDINGS_PATH = path.join(REPO_ROOT, 'client', 'src', 'components', 'PortfolioSummaryHoldings.jsx');
+const PORTFOLIO_DISPLAY_PATH = path.join(REPO_ROOT, 'client', 'src', 'utils', 'portfolioSnapshotDisplay.js');
 
 const PROFILE_ID = '11111111-1111-4111-8111-111111111111';
 const BTC_ID = '22222222-2222-4222-8222-222222222222';
@@ -451,17 +453,24 @@ describe('Portfolio V1 P0.2.1 native-currency opening positions', () => {
   });
 
   test('opening-position UI asks for native purchase price and never requires invented VND conversion', async () => {
-    const [modal, app] = await Promise.all([
+    const [modal, app, holdingsView, displayModel] = await Promise.all([
       readFile(OPENING_MODAL_PATH, 'utf8'),
-      readFile(APP_PATH, 'utf8')
+      readFile(APP_PATH, 'utf8'),
+      readFile(PORTFOLIO_HOLDINGS_PATH, 'utf8'),
+      readFile(PORTFOLIO_DISPLAY_PATH, 'utf8')
     ]);
     assert.match(modal, /Giá mua trung bình \*/);
     assert.match(modal, /Không cần tự quy đổi sang VND/);
     assert.doesNotMatch(modal, /Giá vốn trung bình quy đổi VND/);
     assert.doesNotMatch(modal, /USER_SUPPLIED_OPENING_VND_BASIS/);
-    assert.match(app, /nativeAverageCost/);
-    assert.match(app, /nativeCurrentPrice/);
-    assert.match(app, /nativeUnrealizedPnL/);
-    assert.match(app, /Giá vốn VND: —/);
+    assert.match(app, /PortfolioSummaryHoldings/);
+    assert.match(displayModel, /nativeAverageCost/);
+    assert.match(displayModel, /nativeCurrentPrice/);
+    assert.match(displayModel, /nativeUnrealizedPnL/);
+    assert.match(displayModel, /nativeCostCurrency/);
+    assert.match(holdingsView, /holding\.averageCost/);
+    assert.match(holdingsView, /holding\.currentPrice/);
+    assert.match(holdingsView, /holding\.unrealizedPnl/);
+    assert.doesNotMatch(`${app}\n${holdingsView}\n${displayModel}`, /USER_SUPPLIED_OPENING_VND_BASIS/);
   });
 });

@@ -29,8 +29,8 @@ import TransactionHistorySection from './components/TransactionHistorySection.js
 import CashMovementModal from './components/CashMovementModal.jsx';
 import CashManagementSection from './components/CashManagementSection.jsx';
 import OpeningPositionModal from './components/OpeningPositionModal.jsx';
-import { PortfolioOnboardingGuide } from './components/PortfolioOnboardingGuide.jsx';
 import { PortfolioPerformanceSection } from './components/PortfolioPerformanceSection.jsx';
+import { PortfolioSummaryHoldings } from './components/PortfolioSummaryHoldings.jsx';
 import { useAppNavigation } from './hooks/useAppNavigation.js';
 import { OpportunitySection } from './components/OpportunitySection.jsx';
 import { InvestmentBriefPanel } from './components/InvestmentBriefPanel.jsx';
@@ -1878,28 +1878,17 @@ function App({ onLogout }) {
                 </div>
               )}
 
-              {/* Feature 25D: Portfolio performance and benchmark comparison */}
-              {!portfolioLoading && (
-                <PortfolioPerformanceSection
-                  cashAvailable={portfolioOverview?.summary?.cashAvailable ?? cashOverview?.currentCash ?? null}
-                  holdingsCount={portfolioOverview?.holdings?.length || 0}
-                  onNavigateToPortfolio={() => setActiveTab('portfolio')}
-                />
-              )}
-
-              {/* Content when loaded */}
+              {/* Portfolio V1: one current snapshot drives Summary and Holdings. */}
               {!portfolioLoading && portfolioOverview && (
                 <>
-                  {/* Feature 15: Cash Management Section (Overview, Deposit/Withdraw, Cash Ledger) */}
-                  <CashManagementSection
-                    cashOverview={cashOverview}
-                    currentCashSnapshot={portfolioOverview?.cash}
-                    currentCashLoading={portfolioLoading}
-                    cashOverviewLoading={cashOverviewLoading}
-                    cashOverviewError={cashOverviewError}
-                    cashLedger={cashLedger}
-                    cashLedgerLoading={cashLedgerLoading}
-                    cashLedgerError={cashLedgerError}
+                  <PortfolioSummaryHoldings
+                    snapshot={portfolioOverview}
+                    onRecordTransaction={() => {
+                      setTransactionModalDefaultType('BUY');
+                      setTransactionModalDefaultAsset(null);
+                      setIsTransactionModalOpen(true);
+                    }}
+                    onDeclarePosition={() => handleOpenOpeningPositionModal('CREATE')}
                     onOpenDeposit={() => {
                       setCashModalMode('DEPOSIT');
                       setIsCashModalOpen(true);
@@ -1908,331 +1897,70 @@ function App({ onLogout }) {
                       setCashModalMode('WITHDRAWAL');
                       setIsCashModalOpen(true);
                     }}
-                    onRefresh={() => {
-                      fetchPortfolio(false);
-                      fetchCashOverview(false);
-                      fetchCashLedger(false);
-                    }}
                   />
 
-                  {/* Metric Summary Cards with 3D Tilt & Dynamic Radial Sheen */}
-                  <motion.div variants={sectionItemVariants} className="metrics-grid">
-                    {/* Metric 1: Total Cost Basis */}
-                    <TiltCard className="metric-card" style={{ '--card-accent': '#64748b' }}>
-                      <div className="metric-header">
-                        <span className="metric-label">Giá vốn đang nắm giữ</span>
-                        <span className="metric-icon">💼</span>
-                      </div>
-                      <div className="metric-value">
-                        {typeof portfolioOverview.summary.totalCostBasis === 'number'
-                          ? <CountUp value={portfolioOverview.summary.totalCostBasis} suffix=" ₫" />
-                          : '—'}
-                      </div>
-                      <div className="metric-change" style={{ color: 'var(--color-slate-500)' }}>
-                        Tổng chi phí mua ban đầu
-                      </div>
-                    </TiltCard>
-
-                    {/* Metric 3: Total Market Value */}
-                    <TiltCard className="metric-card" style={{ '--card-accent': '#6366f1' }}>
-                      <div className="metric-header">
-                        <span className="metric-label">Giá trị thị trường</span>
-                        <span className="metric-icon">📊</span>
-                      </div>
-                      <div className="metric-value">
-                        {typeof portfolioOverview.summary.totalMarketValue === 'number'
-                          ? <CountUp value={portfolioOverview.summary.totalMarketValue} suffix=" ₫" />
-                          : '—'}
-                      </div>
-                      <div className="metric-change" style={{ color: 'var(--color-slate-500)' }}>
-                        Định giá theo giá khớp gần nhất
-                      </div>
-                    </TiltCard>
-
-                    {/* Metric 4: Unrealized P/L */}
-                    <TiltCard
-                      className={`metric-card ${
-                        portfolioOverview.summary.totalUnrealizedPnL > 0
-                          ? 'metric-card-gain'
-                          : portfolioOverview.summary.totalUnrealizedPnL < 0
-                          ? 'metric-card-loss'
-                          : ''
-                      }`}
-                      style={{
-                        '--card-accent':
-                          portfolioOverview.summary.totalUnrealizedPnL > 0
-                            ? '#10b981'
-                            : portfolioOverview.summary.totalUnrealizedPnL < 0
-                            ? '#ef4444'
-                            : '#94a3b8'
-                      }}
-                    >
-                      <div className="metric-header">
-                        <span className="metric-label">Lãi / Lỗ tạm tính</span>
-                        <span className="metric-icon">
-                          {portfolioOverview.summary.totalUnrealizedPnL > 0 ? '▲' : portfolioOverview.summary.totalUnrealizedPnL < 0 ? '▼' : '➖'}
-                        </span>
-                      </div>
-                      <div
-                        className="metric-value"
-                        style={{
-                          color: portfolioOverview.summary.totalUnrealizedPnL > 0
-                            ? 'var(--color-gain-600)'
-                            : portfolioOverview.summary.totalUnrealizedPnL < 0
-                              ? 'var(--color-loss-600)'
-                              : 'var(--color-slate-900)'
-                        }}
-                      >
-                        {typeof portfolioOverview.summary.totalUnrealizedPnL === 'number' ? (
-                          <>
-                            {portfolioOverview.summary.totalUnrealizedPnL > 0 ? '+' : ''}
-                            <CountUp value={portfolioOverview.summary.totalUnrealizedPnL} suffix=" ₫" />
-                          </>
-                        ) : '—'}
-                      </div>
-                      <div className="metric-change">
-                        <span className={`fintech-badge ${portfolioOverview.summary.totalUnrealizedPnL > 0 ? 'badge-gain' : portfolioOverview.summary.totalUnrealizedPnL < 0 ? 'badge-loss' : 'badge-neutral'}`}>
-                          {portfolioOverview.summary.totalUnrealizedPnLPercent !== null && portfolioOverview.summary.totalUnrealizedPnLPercent !== undefined ? (
-                            <>
-                              {portfolioOverview.summary.totalUnrealizedPnLPercent > 0 ? '+' : ''}
-                              <CountUp value={portfolioOverview.summary.totalUnrealizedPnLPercent} decimals={2} suffix="%" />
-                            </>
-                          ) : '—'}
-                        </span>
-                      </div>
-                    </TiltCard>
-
-                    {/* Metric 5: Total Portfolio Value (Highlight with Animated Border Glow) */}
-                    <TiltCard className="metric-card metric-card-highlight" borderGlow={true} style={{ '--card-accent': '#2563eb' }}>
-                      <div className="metric-header">
-                        <span className="metric-label" style={{ color: 'var(--color-brand-700)' }}>Tổng giá trị danh mục</span>
-                        <span className="metric-icon">💎</span>
-                      </div>
-                      <div className="metric-value" style={{ color: 'var(--color-brand-700)', fontSize: '1.45rem' }}>
-                        {typeof portfolioOverview.summary.totalPortfolioValue === 'number'
-                          ? <CountUp value={portfolioOverview.summary.totalPortfolioValue} suffix=" ₫" />
-                          : '—'}
-                      </div>
-                      <div className="metric-change" style={{ color: 'var(--color-brand-600)' }}>
-                        Tiền mặt + Giá trị thị trường
-                      </div>
-                    </TiltCard>
-                  </motion.div>
-
-                  {/* Holdings Breakdown Table */}
-                  <motion.div variants={sectionItemVariants} className="fintech-card" style={{ overflow: 'hidden' }}>
-                    <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
-                      <span style={{ fontSize: '0.95rem', fontWeight: 800, color: 'var(--color-slate-900)' }}>
-                        Chi tiết tài sản nắm giữ ({portfolioOverview.holdings.length})
-                      </span>
-                      <MagneticButton
-                        onClick={() => handleOpenOpeningPositionModal('CREATE')}
-                        className="fintech-btn btn-secondary btn-sm"
-                        style={{ fontSize: '0.8rem', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
-                      >
-                        <span>+</span>
-                        <span>Thêm tài sản đã sở hữu từ trước</span>
-                      </MagneticButton>
-                    </div>
-
-                    {portfolioOverview.holdings.length === 0 ? (
-                      <div style={{ padding: '0 1rem 1rem 1rem' }}>
-                        <PortfolioOnboardingGuide
-                          cashAvailable={portfolioOverview.summary?.cashAvailable ?? cashOverview?.currentCash ?? null}
-                          holdingsCount={portfolioOverview.holdings.length}
-                          onOpenCashModal={() => {
-                            setCashMovementType('DEPOSIT');
-                            setIsCashMovementModalOpen(true);
-                          }}
-                          onOpenOpeningPositionModal={() => handleOpenOpeningPositionModal('CREATE')}
-                          onOpenTransactionModal={() => {
-                            setTransactionModalDefaultType('BUY');
-                            setTransactionModalDefaultAsset(null);
-                            setIsTransactionModalOpen(true);
-                          }}
-                        />
-                      </div>
-                    ) : (
-                      <div className="table-container">
-                        <table className="fintech-table">
-                          <thead>
-                            <tr>
-                              <th>Mã & Tài sản</th>
-                              <th style={{ textAlign: 'right' }}>Số lượng</th>
-                              <th style={{ textAlign: 'right' }}>Giá mua TB</th>
-                              <th style={{ textAlign: 'right' }}>Giá gần nhất</th>
-                              <th style={{ textAlign: 'right' }}>Giá trị hiện tại</th>
-                              <th style={{ textAlign: 'right' }}>Lãi / Lỗ tạm tính</th>
-                              <th style={{ textAlign: 'right' }}>Cập nhật giá</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {portfolioOverview.holdings.map((h) => {
-                              const isPriced = ['available', 'stale'].includes(h.pricingStatus) && h.latestPrice !== null;
-                              const hasNativeCost = h.nativeAverageCost !== null && h.nativeAverageCost !== undefined && Boolean(h.nativeCostCurrency);
-                              const hasNativeCurrent = h.nativeCurrentPrice !== null && h.nativeCurrentPrice !== undefined;
-                              const isVndPnlSupported = ['available', 'stale'].includes(h.pnlStatus) && h.unrealizedPnL !== null;
-                              const isNativePnlSupported = ['available', 'stale'].includes(h.nativePnlStatus) && h.nativeUnrealizedPnL !== null;
-                              const displayedPnl = isVndPnlSupported ? h.unrealizedPnL : h.nativeUnrealizedPnL;
-                              const displayedPnlPct = isVndPnlSupported ? h.unrealizedPnLPercent : h.nativeUnrealizedPnLPercent;
-                              const displayedPnlCurrency = isVndPnlSupported ? 'VND' : h.nativeCostCurrency;
-                              const isProfit = (isVndPnlSupported || isNativePnlSupported) && displayedPnl > 0;
-                              const isLoss = (isVndPnlSupported || isNativePnlSupported) && displayedPnl < 0;
-                              const holdingCurrency = h.nativeCurrency || 'VND';
-
-                              const holdingMeta = holdings.find((item) => item.asset_id === h.assetId || item.id === h.id);
-                              const isEditable = holdingMeta?.opening_correction_allowed === true;
-
-                              return (
-                                <tr key={h.id}>
-                                  {/* 1. Symbol & Name */}
-                                  <td>
-                                    <div style={{ fontWeight: 800, color: 'var(--color-slate-900)', display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-                                      <span>{h.symbol || 'N/A'}</span>
-                                      {h.assetType && (
-                                        <span className="fintech-badge badge-neutral">
-                                          {formatAssetType(h.assetType)}
-                                        </span>
-                                      )}
-                                      {isEditable && (
-                                        <span
-                                          className="fintech-badge badge-neutral"
-                                          style={{ fontSize: '0.7rem', color: 'var(--color-brand-700)', backgroundColor: 'var(--color-brand-50)' }}
-                                          title="Vị thế ban đầu ghi nhận trước khi dùng ứng dụng"
-                                        >
-                                          Vị thế ban đầu
-                                        </span>
-                                      )}
-                                      {holdingMeta && !isEditable && (
-                                        <span
-                                          className="fintech-badge badge-neutral"
-                                          style={{ fontSize: '0.7rem', color: 'var(--color-slate-500)' }}
-                                          title="Đã phát sinh giao dịch — thay đổi số lượng qua Ghi nhận giao dịch"
-                                        >
-                                          Đã có giao dịch
-                                        </span>
-                                      )}
-                                    </div>
-                                    <div style={{ fontSize: '0.78rem', color: 'var(--color-slate-500)', marginTop: '2px' }}>
-                                      {h.name || 'Tài sản'}
-                                    </div>
-                                  </td>
-
-                                  {/* 2. Quantity */}
-                                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--color-slate-900)' }}>
-                                    {h.quantity.toLocaleString('vi-VN')}
-                                  </td>
-
-                                  {/* 3. Average Cost */}
-                                  <td style={{ textAlign: 'right', color: 'var(--color-slate-700)' }}>
-                                    {hasNativeCost
-                                      ? formatNativeAmount(h.nativeAverageCost, h.nativeCostCurrency)
-                                      : h.averageCost !== null && h.averageCost !== undefined
-                                        ? formatNativeAmount(h.averageCost, 'VND')
-                                      : '—'}
-                                  </td>
-
-                                  {/* 4. Latest Price */}
-                                  <td style={{ textAlign: 'right' }}>
-                                    {hasNativeCost && hasNativeCurrent ? (
-                                      <span style={{ fontWeight: 700, color: 'var(--color-slate-900)' }}>
-                                        {formatNativeAmount(h.nativeCurrentPrice, h.nativeCostCurrency)}
-                                      </span>
-                                    ) : isPriced ? (
-                                      <span style={{ fontWeight: 700, color: 'var(--color-slate-900)' }}>
-                                        {formatNativeAmount(h.latestPrice, holdingCurrency)}
-                                      </span>
-                                    ) : (
-                                      <span style={{ fontSize: '0.78rem', color: 'var(--color-slate-400)', fontStyle: 'italic' }}>
-                                        Chưa có dữ liệu
-                                      </span>
-                                    )}
-                                  </td>
-
-                                  {/* 5. Market Value (Reporting VND) */}
-                                  <td style={{ textAlign: 'right' }}>
-                                    {isPriced && h.marketValue !== null ? (
-                                      <span style={{ fontWeight: 800, color: 'var(--color-slate-900)' }}>
-                                        {formatVNDReporting(h.marketValue)}
-                                      </span>
-                                    ) : (
-                                      <span style={{ fontSize: '0.78rem', color: 'var(--color-slate-400)', fontStyle: 'italic' }}>
-                                        Chưa có dữ liệu
-                                      </span>
-                                    )}
-                                  </td>
-
-                                  {/* 6. Unrealized PnL & % */}
-                                  <td style={{ textAlign: 'right' }}>
-                                    {isVndPnlSupported || isNativePnlSupported ? (
-                                      <div>
-                                        <div style={{
-                                          fontWeight: 800,
-                                          color: isProfit ? 'var(--color-gain-600)' : isLoss ? 'var(--color-loss-600)' : 'var(--color-slate-900)'
-                                        }}>
-                                          {isProfit ? '+' : ''}{displayedPnlCurrency === 'VND'
-                                            ? formatVNDReporting(displayedPnl)
-                                            : formatNativeAmount(displayedPnl, displayedPnlCurrency)}
-                                        </div>
-                                        <div style={{ marginTop: '2px' }}>
-                                          <span className={`fintech-badge ${isProfit ? 'badge-gain' : isLoss ? 'badge-loss' : 'badge-neutral'}`}>
-                                            {formatPercentVN(displayedPnlPct)}
-                                          </span>
-                                        </div>
-                                      </div>
-                                    ) : h.pnlStatus === 'unavailable' ? (
-                                      <span className="fintech-badge badge-neutral" style={{ fontSize: '0.72rem' }} title="Chưa có giá vốn VND hoặc giá hiện tại cùng đồng tiền mua">
-                                        Chưa khả dụng
-                                      </span>
-                                    ) : (
-                                      <span style={{ fontSize: '0.78rem', color: 'var(--color-slate-400)', fontStyle: 'italic' }}>
-                                        Chưa có dữ liệu
-                                      </span>
-                                    )}
-                                  </td>
-
-                                  {/* 7. Market Updated Time */}
-                                  <td style={{ textAlign: 'right' }}>
-                                    {isPriced && h.marketUpdatedAt ? (
-                                      formatPublishedTime(h.marketUpdatedAt)
-                                    ) : (
-                                      <span style={{ color: 'var(--color-slate-400)', fontStyle: 'italic' }}>
-                                        Chưa có dữ liệu
-                                      </span>
-                                    )}
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
-                  </motion.div>
-
-                  {/* Feature 14: Lịch sử giao dịch (Transaction History) */}
-                  <TransactionHistorySection
-                    transactions={transactions}
-                    loading={transactionsLoading}
-                    refreshing={transactionsRefreshing}
-                    error={transactionsError}
+                  {/* Feature 25D: separate historical/EOD performance clock. */}
+                  <PortfolioPerformanceSection
+                    cashAvailable={portfolioOverview.cash?.status === 'AVAILABLE' ? portfolioOverview.cash.value : null}
                     holdingsCount={portfolioOverview.holdings.length}
-                    onOpenTransactionModal={() => {
-                      setTransactionModalDefaultType('BUY');
-                      setTransactionModalDefaultAsset(null);
-                      setIsTransactionModalOpen(true);
-                    }}
-                    onRetry={() => fetchTransactions(true)}
-                    onRefresh={() => fetchTransactions(false)}
+                    onNavigateToPortfolio={() => setActiveTab('portfolio')}
                   />
 
-                  {/* Feature 10: Cơ cấu danh mục (Portfolio Composition & Concentration) */}
+                  {/* Feature 10: Allocation remains a direct projection of this same snapshot. */}
                   <PortfolioCompositionSection
                     data={compositionData}
                     loading={compositionLoading}
                     error={compositionError}
                     onRetry={() => fetchPortfolio(true)}
                   />
+
+                  {/* Existing activity capabilities retain their own ledger reads. */}
+                  <div className="portfolio-activity-section">
+                    <div className="portfolio-activity-heading">
+                      <div>
+                        <span className="portfolio-eyebrow">Hoạt động</span>
+                        <h3>Lịch sử danh mục</h3>
+                      </div>
+                    </div>
+                    <TransactionHistorySection
+                      transactions={transactions}
+                      loading={transactionsLoading}
+                      refreshing={transactionsRefreshing}
+                      error={transactionsError}
+                      holdingsCount={portfolioOverview.holdings.length}
+                      onOpenTransactionModal={() => {
+                        setTransactionModalDefaultType('BUY');
+                        setTransactionModalDefaultAsset(null);
+                        setIsTransactionModalOpen(true);
+                      }}
+                      onRetry={() => fetchTransactions(true)}
+                      onRefresh={() => fetchTransactions(false)}
+                    />
+                    <CashManagementSection
+                      activityOnly
+                      cashOverview={cashOverview}
+                      currentCashSnapshot={portfolioOverview?.cash}
+                      currentCashLoading={portfolioLoading}
+                      cashOverviewLoading={cashOverviewLoading}
+                      cashOverviewError={cashOverviewError}
+                      cashLedger={cashLedger}
+                      cashLedgerLoading={cashLedgerLoading}
+                      cashLedgerError={cashLedgerError}
+                      onOpenDeposit={() => {
+                        setCashModalMode('DEPOSIT');
+                        setIsCashModalOpen(true);
+                      }}
+                      onOpenWithdraw={() => {
+                        setCashModalMode('WITHDRAWAL');
+                        setIsCashModalOpen(true);
+                      }}
+                      onRefresh={() => {
+                        fetchPortfolio(false);
+                        fetchCashOverview(false);
+                        fetchCashLedger(false);
+                      }}
+                    />
+                  </div>
                 </>
               )}
             </motion.section>

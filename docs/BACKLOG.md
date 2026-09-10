@@ -37,7 +37,7 @@ The following design decisions are unresolved and intentionally deferred. They m
 
 ## 3. Portfolio V1 Concrete Work Items
 
-Statuses describe the repository state after the local Portfolio P0.3 implementation and do not imply deployment or remote migration.
+Statuses describe the repository state after the local Portfolio P0.4 implementation and do not imply deployment or remote migration.
 
 | Priority | Work item | Data dependency | Method dependency | Acceptance criteria | Status |
 |---|---|---|---|---|---|
@@ -50,8 +50,8 @@ Statuses describe the repository state after the local Portfolio P0.3 implementa
 | P0 | Historical transaction timing consistency | Transaction `executedAt`/`createdAt`, cash-ledger link, opening cutoff | Linked BUY/SELL use transaction execution as economic time; ambiguous history fails closed | A back-entered internal BUY/SELL cannot create a period where the position effect and matching cash effect occur on different dates | COMPLETE_P0.1 |
 | P0 | Server-side portfolio asset eligibility | Canonical `assets.portfolio_eligibility` | Reference-only assets are never positions | Transaction and opening-position APIs/RPCs reject `USD/VND` and any non-investable canonical asset even when called outside the UI | COMPLETE_P0.1 |
 | P0 | Benchmark eligibility and selection | Portfolio TWR series, benchmark bars, currency metadata | Same period/return basis/currency; explicit reference-only mode | User can select a compatible benchmark or none; price return labelled; percentage-point difference never called alpha | PARTIAL |
-| P0 | Summary + holdings-first API/UI | Reconciled snapshot | Governed page order | Summary → Holdings → Performance → Allocation → Activity; core values and data state visible without scrolling past performance | MISSING |
-| P0 | Cash-only experience | Cash authority and zero-position state | Applicability truth table | Approximately 200M VND cash/zero holdings shows known cash and 100% cash allocation without false investment, concentration, benchmark comparison, or annualized metrics | PARTIAL_P0.2 |
+| P0 | Summary + holdings-first API/UI | Reconciled snapshot | Governed page order | Summary → Holdings → Performance → Allocation → Activity; core values and data state visible without scrolling past performance | COMPLETE_P0.4 |
+| P0 | Cash-only experience | Cash authority and zero-position state | Applicability truth table | Approximately 200M VND cash/zero holdings shows known cash and 100% cash allocation without false investment, concentration, benchmark comparison, or annualized metrics | COMPLETE_P0.4 |
 | P0 | Idempotent financial writes | Transaction/cash request identity | At-most-once economic event semantics | Retried POST cannot create duplicate deposit/withdrawal/BUY/SELL; response returns stable event identity | MISSING |
 | P0 | Auditable correction/reversal | Immutable ledgers and links | Append-only reversal/correction policy | Erroneous financial events are corrected without update/delete or loss of audit trail | MISSING |
 | P1 | Realized/unrealized decomposition | Transactions, holdings, dated marks | Period and cumulative P/L definitions | API and UI separate realized, unrealized, and total accounting P/L with coverage/as-of metadata | PARTIAL |

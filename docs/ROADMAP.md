@@ -160,9 +160,9 @@ Portfolio V1 remains a supporting personal tracking capability inside the broade
 4. **COMPLETE (P0.3)** Implement the governed completeness/freshness states: `AVAILABLE`, `PARTIAL`, `STALE`, `NOT_APPLICABLE`, `INSUFFICIENT_HISTORY`, `UNAVAILABLE`. Cash authority and historical-performance eligibility fail closed, and the reconciled current-state projection applies the vocabulary across Summary, Holdings, and Allocation.
 5. **COMPLETE (P0.2.1)** Allow cash-neutral existing positions to retain supported native acquisition price/currency without requiring or fabricating historical VND cost basis. Same-currency native P/L is separate from VND accounting P/L.
 6. **COMPLETE (P0.3)** Produce one reconciled portfolio projection so Summary, Holdings, and Allocation share a snapshot ID, deterministic ledger checkpoint, valuation time, and source timestamps.
-7. Rebuild Summary around total portfolio value, cash, invested market value, and valuation/data state.
-8. Move Holdings directly after Summary and expose truthful price, FX, valuation, P/L, weight, and as-of state per position.
-9. **PARTIAL (P0.2 correctness complete)** Build a compact cash-only experience that does not fill the page with inapplicable investment analytics. Cash-only performance is provider-free and benchmark/concentration are not fabricated; broader layout consolidation remains pending.
+7. **COMPLETE (P0.4)** Rebuild Summary around total portfolio value, cash, invested market value, valid unrealized P/L, and valuation/data state, using only the reconciled snapshot.
+8. **COMPLETE (P0.4)** Move Holdings directly after Summary and expose truthful native price/cost/P/L, VND valuation, weight, and as-of state in a desktop table and mobile expandable cards.
+9. **COMPLETE (P0.4)** Build a compact cash-only Summary/Holdings experience with one empty state and secondary cash management. Cash-only performance remains provider-free, and benchmark/concentration are not fabricated.
 10. **PARTIAL (P0.2 methodology complete)** Consolidate Performance around primary TWR, separate accounting P/L, conditional MWR/drawdown, and the no-annualization-below-one-year rule. Eligibility and annualization are corrected; final information architecture remains pending.
 11. Enforce benchmark eligibility and add user-selected/no-benchmark behavior with explicit currency/return-basis compatibility.
 12. Simplify Allocation and Activity, preserving known-value-only and immutable-ledger semantics without duplicate totals.
