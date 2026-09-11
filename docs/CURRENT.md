@@ -1,14 +1,14 @@
 # Current Project Status
 
 ## Latest Verified Repository Checkpoint
-- Portfolio V1 P0.6 implementation base: `73eb6b4 feat: simplify portfolio performance`; P0.1 through P0.5 remain the verified accounting, data, snapshot, Summary, Holdings, and Performance foundations beneath it.
+- Portfolio V1 P0.7 implementation base: `6c90275 fix: repair portfolio allocation syntax`; P0.1 through P0.6 remain the verified accounting, data, snapshot, Summary, Holdings, Performance, Allocation, and Activity foundations beneath it.
 - Branch: `main`; production/remote migration state is intentionally unchanged by this implementation task.
-- Tracked working tree was clean before P0.6 implementation; pre-existing untracked `server/artifacts/` remains preserved and untouched.
+- Tracked working tree was clean before P0.7 implementation; pre-existing untracked `server/artifacts/` remains preserved and untouched.
 - Runtime architecture remains Cloudflare Workers Static Assets/frontend proxy and scheduler, Render Node.js/Express backend, and Supabase PostgreSQL/Auth.
 - This checkpoint records repository behavior inspected on 2026-09-11. Exact production migration parity and deployment revision were not queried in this implementation phase.
 
 ## Current Phase
-Portfolio V1 P0.6 Allocation & Activity is implemented locally. Allocation is simplified into a compact horizontal visual with top-3 concentration strictly on invested assets only (excluding cash), compact cash-only representation (100% cash / 0% invested, concentration NOT_APPLICABLE), and no oversized charts. Activity is redesigned to "Hoạt động gần đây" showing MAX 5 latest events with truthful currency semantics and a toggle to full history. Cash operations remain secondary under "Quản lý tiền mặt". All verified P0.1–P0.5 accounting, snapshot, and performance contracts are preserved.
+Portfolio V1 P0.7 Cleanup & Final Stabilization is implemented locally. Superseded Feature 10 CSS (~411 lines) and dead imports are safely removed; single snapshot authority drives Summary, Holdings, and Allocation; historical Performance and benchmarks remain separated; cash-only and mobile responsive UX verified; all regression tests from P0.1–P0.6 pass cleanly.
 
 ## Portfolio — Verified Working Today
 - Supabase Auth user identity resolves through `investor_profile.user_id` to private `investor_profile.id`; protected Express routes pass that profile ID to service-role data access and profile-scoped financial RPCs.
@@ -81,6 +81,16 @@ Portfolio V1 P0.6 Allocation & Activity is implemented locally. Allocation is si
 - Governed empty states: confirmed cash = 0 and holdings = 0 displays "Chưa có tài sản trong danh mục." with primary/secondary CTAs; fatal snapshot load error displays "Không thể tải dữ liệu danh mục." with retry action and never maps to empty portfolio; activity load error is displayed separately.
 - Mobile layout (~390px) verified: no horizontal overflow, responsive wrapping, compact cards.
 - Local verification: focused tests 12/12 PASS; core portfolio tests 86/86 PASS; full backend 1505/1505 PASS; client and Worker production build PASS; `git diff --check` PASS.
+
+## Portfolio P0.7 — Implemented Locally (Not Deployed)
+- Superseded Feature 10 composition & donut styles (~411 lines) safely removed from `client/src/index.css`, reducing production client CSS bundle size from ~112.8 kB to ~106.7 kB.
+- Dead imports `TransactionHistorySection` and `CashManagementSection` removed from `client/src/App.jsx` (both components are encapsulated inside `PortfolioActivitySection`).
+- Verified single snapshot authority: `GET /api/portfolio/snapshot` drives Summary, Holdings, and Allocation; frontend performs zero independent financial calculations.
+- Preserved historical domain separation: Performance (TWR/MWR/drawdown) and benchmarks maintain independent historical queries.
+- Preserved native-cost baseline for existing positions (crypto/gold native acquisition price/currency without fake VND historical cost; USDT != USD).
+- Preserved governed six-state vocabulary: `AVAILABLE`, `PARTIAL`, `STALE`, `NOT_APPLICABLE`, `INSUFFICIENT_HISTORY`, `UNAVAILABLE`.
+- Verified cash-only experience: compact 100% cash / 0% invested, concentration `NOT_APPLICABLE`, no oversized charts.
+- Local verification: focused Portfolio test suite 93/93 PASS; full backend regression 1505/1505 PASS; client and Worker production build PASS; `git diff --check` PASS; Vite dev server loads without error overlay.
 
 ## Portfolio — Partial
 - Performance and benchmark remain historical/EOD projections separate from the P0.3 current Summary/Holdings/Allocation snapshot clock.

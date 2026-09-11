@@ -25,9 +25,7 @@ import { AssetComparisonSection } from './components/AssetComparisonSection.jsx'
 import PriceAlertModal from './components/PriceAlertModal.jsx';
 import AlertCenterSection from './components/AlertCenterSection.jsx';
 import TransactionModal from './components/TransactionModal.jsx';
-import TransactionHistorySection from './components/TransactionHistorySection.jsx';
 import CashMovementModal from './components/CashMovementModal.jsx';
-import CashManagementSection from './components/CashManagementSection.jsx';
 import OpeningPositionModal from './components/OpeningPositionModal.jsx';
 import { PortfolioPerformanceSection } from './components/PortfolioPerformanceSection.jsx';
 import { PortfolioSummaryHoldings } from './components/PortfolioSummaryHoldings.jsx';

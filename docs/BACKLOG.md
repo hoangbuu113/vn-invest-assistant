@@ -37,7 +37,7 @@ The following design decisions are unresolved and intentionally deferred. They m
 
 ## 3. Portfolio V1 Concrete Work Items
 
-Statuses describe the repository state after the local Portfolio P0.6 implementation and do not imply deployment or remote migration.
+Statuses describe the repository state after the local Portfolio P0.7 implementation and do not imply deployment or remote migration.
 
 | Priority | Work item | Data dependency | Method dependency | Acceptance criteria | Status |
 |---|---|---|---|---|---|
@@ -54,6 +54,7 @@ Statuses describe the repository state after the local Portfolio P0.6 implementa
 | P0 | Summary + holdings-first API/UI | Reconciled snapshot | Governed page order | Summary → Holdings → Performance → Allocation → Activity; core values and data state visible without scrolling past performance | COMPLETE_P0.4 |
 | P0 | Cash-only experience | Cash authority and zero-position state | Applicability truth table | Approximately 200M VND cash/zero holdings shows known cash and 100% cash allocation without false investment, concentration, benchmark comparison, or annualized metrics | COMPLETE_P0.4 |
 | P0 | Allocation and activity simplification | Reconciled snapshot, invested-asset weights, immutable ledgers | Governed page order, invested-only top-3 concentration, MAX 5 recent activity | Compact horizontal bar (cash vs invested); top-3 concentration denominator strictly excludes cash; cash-only renders compact 100% cash / 0% invested without concentration UI; max 5 recent events with truthful currencies and toggleable full history; secondary cash management | COMPLETE_P0.6 |
+| P0 | Portfolio V1 cleanup and final stabilization | Unified snapshot, client bundle, regression suite | Dead-code removal, CSS optimization, zero data loss | Removed unused imports and 411 lines of obsolete Feature 10 donut CSS; confirmed single snapshot authority and preserved regression suite | COMPLETE_P0.7 |
 | P0 | Idempotent financial writes | Transaction/cash request identity | At-most-once economic event semantics | Retried POST cannot create duplicate deposit/withdrawal/BUY/SELL; response returns stable event identity | MISSING |
 | P0 | Auditable correction/reversal | Immutable ledgers and links | Append-only reversal/correction policy | Erroneous financial events are corrected without update/delete or loss of audit trail | MISSING |
 | P1 | Realized/unrealized decomposition | Transactions, holdings, dated marks | Period and cumulative P/L definitions | API and UI separate realized, unrealized, and total accounting P/L with coverage/as-of metadata | PARTIAL |
