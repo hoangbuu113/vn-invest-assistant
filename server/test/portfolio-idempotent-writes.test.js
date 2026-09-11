@@ -12,6 +12,7 @@ import { ownerFetch } from './helpers/owner-auth.js';
 const TEST_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(TEST_DIR, '..', '..');
 const SCHEMA_PATH = path.join(REPO_ROOT, 'server', 'db', 'schema.sql');
+const MIGRATION_PATH = path.join(REPO_ROOT, 'supabase', 'migrations', '20260910000000_portfolio_idempotent_writes.sql');
 
 const USER_ID = '11111111-1111-4111-8111-111111111111';
 const PROFILE_ID = '22222222-2222-4222-8222-222222222222';
@@ -82,6 +83,53 @@ describe('Portfolio P1A — Idempotent Financial Writes (Database Layer)', () =>
         auth_select: false,
         service_select: true
       });
+    } finally {
+      await db.close();
+    }
+  });
+
+  test('actual migration 20260910000000_portfolio_idempotent_writes.sql executes cleanly on pre-P1A schema', async () => {
+    const db = new PGlite();
+    try {
+      await db.exec(`
+        CREATE ROLE anon NOLOGIN;
+        CREATE ROLE authenticated NOLOGIN;
+        CREATE ROLE service_role NOLOGIN;
+        CREATE SCHEMA auth;
+        CREATE TABLE auth.users (id UUID PRIMARY KEY);
+        CREATE SCHEMA extensions;
+      `);
+
+      const fullSchema = await readFile(SCHEMA_PATH, 'utf8');
+      const preP1ASchema = fullSchema.split('-- Portfolio P1A: Idempotent Financial Writes')[0];
+      assert.ok(preP1ASchema.length > 0 && preP1ASchema.length < fullSchema.length, 'pre-P1A schema cut must be valid');
+      await db.exec(preP1ASchema);
+
+      // Verify table does not exist before migration
+      const beforeCheck = await db.query(`
+        SELECT table_name FROM information_schema.tables
+        WHERE table_schema = 'public' AND table_name = 'portfolio_idempotency_records'
+      `);
+      assert.equal(beforeCheck.rows.length, 0);
+
+      // Execute actual migration file
+      const migrationSql = await readFile(MIGRATION_PATH, 'utf8');
+      await db.exec(migrationSql);
+
+      // Verify table exists after migration
+      const afterCheck = await db.query(`
+        SELECT table_name FROM information_schema.tables
+        WHERE table_schema = 'public' AND table_name = 'portfolio_idempotency_records'
+      `);
+      assert.equal(afterCheck.rows.length, 1);
+
+      // Verify RPC signature contains p_idempotency_key
+      const rpcCheck = await db.query(`
+        SELECT proname, proargnames
+        FROM pg_proc
+        WHERE proname = 'create_opening_position'
+      `);
+      assert.ok(rpcCheck.rows[0]?.proargnames.includes('p_idempotency_key'));
     } finally {
       await db.close();
     }

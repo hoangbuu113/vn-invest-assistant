@@ -117,7 +117,6 @@ BEGIN
         WHERE profile_id = p_profile_id AND idempotency_key = v_idempotency_key;
 
         IF FOUND THEN
-            IF v_idempotency_record.request_hash <> v_request_hash THEN
             IF v_idempotency_record.operation_type <> 'TRANSACTION' OR v_idempotency_record.request_hash <> v_request_hash THEN
                 RAISE EXCEPTION USING ERRCODE = 'IC001', MESSAGE = 'idempotency key reused with different parameters';
             END IF;
@@ -444,7 +443,6 @@ BEGIN
         WHERE profile_id = p_profile_id AND idempotency_key = v_idempotency_key;
 
         IF FOUND THEN
-            IF v_idempotency_record.request_hash <> v_request_hash THEN
             IF v_idempotency_record.operation_type <> 'CASH_MOVEMENT' OR v_idempotency_record.request_hash <> v_request_hash THEN
                 RAISE EXCEPTION USING ERRCODE = 'IC001', MESSAGE = 'idempotency key reused with different parameters';
             END IF;
@@ -615,7 +613,6 @@ BEGIN
         WHERE profile_id = p_profile_id AND idempotency_key = v_idempotency_key;
 
         IF FOUND THEN
-            IF v_idempotency_record.request_hash <> v_request_hash THEN
             IF v_idempotency_record.operation_type <> 'OPENING_POSITION' OR v_idempotency_record.request_hash <> v_request_hash THEN
                 RAISE EXCEPTION USING ERRCODE = 'IC001', MESSAGE = 'idempotency key reused with different parameters';
             END IF;
