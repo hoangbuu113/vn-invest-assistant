@@ -1,4 +1,4 @@
-# Confirmed Product & Architectural Decisions
+﻿# Confirmed Product & Architectural Decisions
 
 The following architectural and product decisions are confirmed and authoritative across the project:
 
@@ -481,3 +481,15 @@ $$\text{Source Adapter} \longrightarrow \text{Canonical Validation / Sanitizatio
 - `valuationAsOf` is the explicit calculation boundary. Per-source `priceAsOf` and `fxAsOf` remain visible because provider observations are not transactionally simultaneous.
 - Current-state metrics use the governed six-state vocabulary. A partial projection may expose known subtotals, but unknown cash, prices, FX, cost basis, or P/L remain null rather than zero.
 - Legacy overview and composition routes remain temporarily available for compatibility and are not the current Portfolio page authority.
+
+---
+
+## 16. Portfolio P1A: Idempotent Financial Writes
+
+- **Scope Boundary**: Governs mutation endpoints `POST /api/transactions` (BUY/SELL), `POST /api/cash/deposit`, `POST /api/cash/withdraw`, and `POST /api/positions/opening`. Reversals/corrections remain deferred to P1B.
+- **Dedicated Storage**: Dedicated append-only table `public.portfolio_idempotency_records` tracks `(profile_id, idempotency_key)`, `operation_type`, `request_hash`, `response_payload`, and `resource_id`. RLS is enabled and accessible exclusively by `service_role`.
+- **Concurrency & Advisory Locking**: Plpgsql functions acquire transactional advisory lock `PERFORM pg_advisory_xact_lock(hashtext(p_profile_id::TEXT), hashtext(v_idempotency_key))` prior to inspecting or inserting idempotency records, serializing parallel requests on the same key without table-level bottlenecks.
+- **Payload Hash Validation (Conflict Semantics)**: MD5 hash of canonical parameters is compared with cached `request_hash`. Key reuse with differing parameters raises SQLSTATE `IC001` ('idempotency key reused with different parameters') which maps to HTTP 409 Conflict.
+- **Replay Semantics**: Replaying identical requests returns cached response payload with `replayed: true` and HTTP response header `Idempotent-Replayed: true` (HTTP 200 OK). No duplicate transaction, cash movement, holding, or baseline rows are created.
+- **Opening Position Pre-Check Invariant**: `create_opening_position` performs the idempotency check *before* checking whether an active opening position already exists, preventing duplicate-key retries from falsely failing with `OP003`/`OP005`.
+- **Client Key Lifecycle**: Frontend modals (`TransactionModal`, `CashMovementModal`, `OpeningPositionModal`) generate client-side UUID keys upon modal open, attach `Idempotency-Key` headers on submit, and rotate keys upon verified success.

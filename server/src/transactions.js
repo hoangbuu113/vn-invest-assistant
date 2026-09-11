@@ -146,8 +146,10 @@ function normalizeHoldingState(row) {
 function transactionDatabaseError(error, fallbackMessage) {
   const err = new Error(error?.message || fallbackMessage);
   err.code = error?.code;
-  if (['PT001', 'PT002', 'PT003', 'PT004', 'PT005', 'PE001', 'CL001', 'CL004'].includes(error?.code)) {
+  if (['PT001', 'PT002', 'PT003', 'PT004', 'PT005', 'PE001', 'CL001', 'CL004', 'IK001'].includes(error?.code)) {
     err.statusCode = 400;
+  } else if (['IC001'].includes(error?.code)) {
+    err.statusCode = 409;
   }
   return err;
 }
@@ -159,11 +161,12 @@ export async function getPortfolioTransactions({ profileId, symbol } = {}, clien
     ? symbol.trim().toUpperCase()
     : null;
 
-  const rpcArgs = {
-    p_symbol: normalizedSymbol
-  };
+  const rpcArgs = {};
   if (targetProfileId) {
     rpcArgs.p_profile_id = targetProfileId;
+  }
+  if (normalizedSymbol) {
+    rpcArgs.p_symbol = normalizedSymbol;
   }
 
   const { data, error } = await db.rpc('list_portfolio_transactions', rpcArgs);
@@ -192,10 +195,12 @@ export async function createPortfolioTransaction({
   settlementCurrency,
   fxRateToVnd,
   fxProvenance,
-  fxObservedAt
+  fxObservedAt,
+  idempotencyKey
 }, client = privateSupabase, options = {}) {
   const db = requireDatabaseClient(client);
   const targetProfileId = options?.profileId || null;
+  const effectiveIdempotencyKey = options?.idempotencyKey || idempotencyKey || null;
 
   const rpcArgs = {
     p_symbol: typeof symbol === 'string' && symbol.trim() ? symbol.trim().toUpperCase() : null,
@@ -207,6 +212,9 @@ export async function createPortfolioTransaction({
   };
   if (targetProfileId) {
     rpcArgs.p_profile_id = targetProfileId;
+  }
+  if (effectiveIdempotencyKey) {
+    rpcArgs.p_idempotency_key = effectiveIdempotencyKey;
   }
   if (executionUnitPrice !== undefined && executionUnitPrice !== null) {
     rpcArgs.p_execution_unit_price = executionUnitPrice;
@@ -245,6 +253,7 @@ export async function createPortfolioTransaction({
     holding: normalizeHoldingState(data.holding),
     holdingRemoved: data.holdingRemoved === true,
     cashEntry: normalizeCashLedgerEntry(data.cashEntry),
-    currentCash: normalizeDatabaseNumber(data.currentCash, 'current cash', { nonNegative: true })
+    currentCash: normalizeDatabaseNumber(data.currentCash, 'current cash', { nonNegative: true }),
+    replayed: data.replayed === true
   };
 }

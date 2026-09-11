@@ -1,5 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { apiFetch } from '../utils/api.js';
+
+function getClientUUID() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return 'idemp-' + Date.now() + '-' + Math.random().toString(36).slice(2);
+}
 
 function formatVND(value) {
   if (value === null || value === undefined || isNaN(value)) return '—';
@@ -14,6 +21,9 @@ function translateErrorMessage(msg, mode) {
   }
   const lower = String(msg).toLowerCase();
 
+  if (lower.includes('ic001') || lower.includes('idempotency key reused')) {
+    return 'Giao dịch bị xung đột khóa trùng lặp. Vui lòng thử lại.';
+  }
   if (lower.includes('withdrawal amount exceeds current cash') || lower.includes('cl001')) {
     return 'Số tiền rút vượt quá số tiền mặt hiện có.';
   }
@@ -38,11 +48,13 @@ export default function CashMovementModal({
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState(null);
   const [successMsg, setSuccessMsg] = useState(null);
+  const idempotencyKeyRef = useRef(null);
 
   const isDeposit = mode === 'DEPOSIT';
 
   useEffect(() => {
     if (isOpen) {
+      idempotencyKeyRef.current = getClientUUID();
       setAmountInput('');
       setErrorMsg(null);
       setSuccessMsg(null);
@@ -74,14 +86,16 @@ export default function CashMovementModal({
     setLoading(true);
 
     const endpoint = isDeposit ? '/api/cash/deposit' : '/api/cash/withdraw';
+    const idempotencyKey = idempotencyKeyRef.current || (idempotencyKeyRef.current = getClientUUID());
 
     try {
       const res = await apiFetch(endpoint, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          'Idempotency-Key': idempotencyKey
         },
-        body: JSON.stringify({ amount: numAmount })
+        body: JSON.stringify({ amount: numAmount, idempotencyKey })
       });
 
       const json = await res.json();
@@ -90,6 +104,8 @@ export default function CashMovementModal({
         const backendMsg = json.details || json.message || `HTTP ${res.status}`;
         throw new Error(translateErrorMessage(backendMsg, mode));
       }
+
+      idempotencyKeyRef.current = getClientUUID();
 
       const successText = isDeposit ? 'Đã ghi nhận tiền nạp.' : 'Đã ghi nhận tiền rút.';
       setSuccessMsg(successText);

@@ -1,9 +1,16 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { MagneticButton } from './MotionHelpers.jsx';
 import { apiFetch } from '../utils/api.js';
 import { formatAssetType } from '../utils/formatting.js';
 import { isPortfolioTradeableAsset } from '../utils/assetCapabilities.js';
+
+function getClientUUID() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return 'idemp-' + Date.now() + '-' + Math.random().toString(36).slice(2);
+}
 
 const overlayVariants = {
   hidden: { opacity: 0 },
@@ -30,6 +37,9 @@ function translateOpeningError(error) {
   if (!error) return 'Đã xảy ra lỗi không xác định. Vui lòng thử lại.';
   const msg = typeof error === 'string' ? error : error.message || '';
 
+  if (msg.includes('IC001') || msg.includes('idempotency key reused')) {
+    return 'Thao tác bị xung đột khóa trùng lặp. Vui lòng thử lại.';
+  }
   if (msg.includes('OP001') || msg.includes('asset not found')) {
     return 'Không tìm thấy thông tin tài sản đã chọn.';
   }
@@ -71,6 +81,7 @@ export default function OpeningPositionModal({
   const [priceCurrency, setPriceCurrency] = useState('VND');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const idempotencyKeyRef = useRef(null);
 
   // Initialize modal state on open or mode change
   useEffect(() => {
@@ -83,6 +94,10 @@ export default function OpeningPositionModal({
       setError(null);
       setLoading(false);
       return;
+    }
+
+    if (mode === 'CREATE') {
+      idempotencyKeyRef.current = getClientUUID();
     }
 
     setError(null);
@@ -232,15 +247,22 @@ export default function OpeningPositionModal({
           }
         }
 
+        const idempotencyKey = idempotencyKeyRef.current || (idempotencyKeyRef.current = getClientUUID());
+        payload.idempotencyKey = idempotencyKey;
+
         const res = await apiFetch('/api/positions/opening', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            'Idempotency-Key': idempotencyKey
+          },
           body: JSON.stringify(payload)
         });
         const json = await res.json();
         if (!res.ok || json.status !== 'ok') {
           throw new Error(json.message || `HTTP ${res.status}`);
         }
+        idempotencyKeyRef.current = getClientUUID();
         if (onSuccess) {
           onSuccess({
             type: 'CREATE',

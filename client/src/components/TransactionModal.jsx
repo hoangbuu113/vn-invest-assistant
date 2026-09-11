@@ -1,12 +1,22 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { apiFetch } from '../utils/api.js';
 import { formatAssetType } from '../utils/formatting.js';
 import { isPortfolioTradeableAsset } from '../utils/assetCapabilities.js';
+
+function getClientUUID() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return 'idemp-' + Date.now() + '-' + Math.random().toString(36).slice(2);
+}
 
 function translateErrorMessage(msg) {
   if (!msg) return 'Không thể ghi nhận giao dịch.';
   const lower = String(msg).toLowerCase();
 
+  if (lower.includes('ic001') || lower.includes('idempotency key reused')) {
+    return 'Giao dịch bị xung đột khóa trùng lặp. Vui lòng thử lại.';
+  }
   if (lower.includes('sell quantity exceeds current holding quantity') || lower.includes('pt003')) {
     return 'Số lượng bán vượt quá số lượng đang nắm giữ trong danh mục.';
   }
@@ -65,10 +75,12 @@ export default function TransactionModal({
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState(null);
   const [successMsg, setSuccessMsg] = useState(null);
+  const idempotencyKeyRef = useRef(null);
 
   // Initialize or reset form on open
   useEffect(() => {
     if (isOpen) {
+      idempotencyKeyRef.current = getClientUUID();
       const initialType = defaultType === 'SELL' ? 'SELL' : 'BUY';
       setTransactionType(initialType);
 
@@ -325,13 +337,17 @@ export default function TransactionModal({
       payload.settlementCurrency = 'VND';
     }
 
+    const idempotencyKey = idempotencyKeyRef.current || (idempotencyKeyRef.current = getClientUUID());
+    payload.idempotencyKey = idempotencyKey;
+
     setLoading(true);
 
     try {
       const res = await apiFetch('/api/transactions', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          'Idempotency-Key': idempotencyKey
         },
         body: JSON.stringify(payload)
       });
@@ -342,6 +358,9 @@ export default function TransactionModal({
         const backendMsg = json.details || json.message || `HTTP ${res.status}`;
         throw new Error(translateErrorMessage(backendMsg));
       }
+
+      // Rotate key after verified success so subsequent operations have a fresh key
+      idempotencyKeyRef.current = getClientUUID();
 
       const successText = transactionType === 'BUY'
         ? 'Đã ghi nhận giao dịch mua.'

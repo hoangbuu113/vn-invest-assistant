@@ -248,6 +248,29 @@ export function createApp(services = {}) {
     return id ? { profileId: id } : {};
   }
 
+  function parseIdempotencyKey(req, errors = []) {
+    const headerKey = req.header('idempotency-key');
+    const bodyKey = req.body?.idempotencyKey;
+    const rawKey = headerKey !== undefined ? headerKey : bodyKey;
+
+    if (rawKey === undefined || rawKey === null) {
+      return null;
+    }
+
+    if (typeof rawKey !== 'string') {
+      errors.push('Idempotency-Key must be a string between 1 and 128 characters');
+      return null;
+    }
+
+    const trimmed = rawKey.trim();
+    if (trimmed.length === 0 || trimmed.length > 128 || !/^[A-Za-z0-9_\-.:]{1,128}$/.test(trimmed)) {
+      errors.push('Idempotency-Key must be a valid string between 1 and 128 characters');
+      return null;
+    }
+
+    return trimmed;
+  }
+
   async function resolvePortfolioAsset({ assetId, symbol }) {
     const asset = assetId
       ? await getAssetByIdFn(assetId)
@@ -534,6 +557,8 @@ export function createApp(services = {}) {
 
       validateFxProvenance(fxProvenance, errors);
 
+      const idempotencyKey = parseIdempotencyKey(req, errors);
+
       let normalizedFxObservedAt;
       if (fxObservedAt !== undefined && fxObservedAt !== null) {
         normalizedFxObservedAt = normalizeExplicitTimestamp(fxObservedAt);
@@ -592,10 +617,15 @@ export function createApp(services = {}) {
       if (fxRateToVnd !== undefined) openingPayload.fxRateToVnd = fxRateToVnd;
       if (fxProvenance !== undefined) openingPayload.fxProvenance = fxProvenance;
       if (normalizedFxObservedAt !== undefined) openingPayload.fxObservedAt = normalizedFxObservedAt;
+      if (idempotencyKey) openingPayload.idempotencyKey = idempotencyKey;
 
       const result = await createOpeningPositionFn(openingPayload, positionClient, getProfileOptions(req, profileId));
 
-      return res.status(201).json({
+      if (result.replayed) {
+        res.set('Idempotent-Replayed', 'true');
+      }
+
+      return res.status(result.replayed ? 200 : 201).json({
         status: 'ok',
         data: result
       });
@@ -603,6 +633,7 @@ export function createApp(services = {}) {
       const statusCode = error.statusCode || 500;
       return res.status(statusCode).json({
         status: 'error',
+        code: error.code,
         message: error.statusCode ? error.message : 'Failed to create opening position'
       });
     }
@@ -835,6 +866,8 @@ export function createApp(services = {}) {
 
       validateFxProvenance(fxProvenance, errors);
 
+      const idempotencyKey = parseIdempotencyKey(req, errors);
+
       let normalizedExecutedAt;
       if (Object.prototype.hasOwnProperty.call(body, 'executedAt')) {
         normalizedExecutedAt = normalizeExplicitTimestamp(executedAt);
@@ -885,10 +918,15 @@ export function createApp(services = {}) {
       if (fxRateToVnd !== undefined) transactionPayload.fxRateToVnd = fxRateToVnd;
       if (fxProvenance !== undefined) transactionPayload.fxProvenance = fxProvenance;
       if (normalizedFxObservedAt !== undefined) transactionPayload.fxObservedAt = normalizedFxObservedAt;
+      if (idempotencyKey) transactionPayload.idempotencyKey = idempotencyKey;
 
       const result = await createPortfolioTransactionFn(transactionPayload, transactionClient, getProfileOptions(req, profileId));
 
-      return res.status(201).json({
+      if (result.replayed) {
+        res.set('Idempotent-Replayed', 'true');
+      }
+
+      return res.status(result.replayed ? 200 : 201).json({
         status: 'ok',
         data: result,
         methodology: TRANSACTION_METHODOLOGY
@@ -897,6 +935,7 @@ export function createApp(services = {}) {
       const statusCode = error.statusCode || 500;
       return res.status(statusCode).json({
         status: 'error',
+        code: error.code,
         message: error.statusCode ? error.message : 'Failed to create portfolio transaction'
       });
     }
@@ -947,17 +986,30 @@ export function createApp(services = {}) {
     const profileId = requireProfile(req, res);
     if (!profileId) return;
 
+    const errors = [];
     const { amount } = req.body || {};
     if (!isValidFinancialNumber(amount, { allowZero: false })) {
+      errors.push('amount must be a finite number greater than 0');
+    }
+
+    const idempotencyKey = parseIdempotencyKey(req, errors);
+    if (errors.length > 0) {
       return res.status(400).json({
         status: 'error',
-        message: 'amount must be a finite number greater than 0'
+        message: errors[0],
+        errors
       });
     }
 
     try {
-      const result = await createCashMovementFn({ entryType, amount }, cashClient, getProfileOptions(req, profileId));
-      return res.status(201).json({
+      const payload = { entryType, amount };
+      if (idempotencyKey) payload.idempotencyKey = idempotencyKey;
+
+      const result = await createCashMovementFn(payload, cashClient, getProfileOptions(req, profileId));
+      if (result.replayed) {
+        res.set('Idempotent-Replayed', 'true');
+      }
+      return res.status(result.replayed ? 200 : 201).json({
         status: 'ok',
         data: result,
         methodology: CASH_LEDGER_METHODOLOGY
@@ -965,6 +1017,7 @@ export function createApp(services = {}) {
     } catch (error) {
       return res.status(error.statusCode || 500).json({
         status: 'error',
+        code: error.code,
         message: error.statusCode ? error.message : `Failed to create ${entryType.toLowerCase()}`
       });
     }

@@ -90,9 +90,9 @@ function openingPositionDatabaseError(error, fallbackMessage) {
   const err = new Error(error?.message || fallbackMessage);
   err.code = error?.code;
 
-  if (['OP001', 'OP002', 'OP003', 'OP004', 'PE001'].includes(error?.code)) {
+  if (['OP001', 'OP002', 'OP003', 'OP004', 'PE001', 'IK001'].includes(error?.code)) {
     err.statusCode = 400;
-  } else if (error?.code === 'OP005' || error?.code === 'OP007') {
+  } else if (['OP005', 'OP007', 'IC001'].includes(error?.code)) {
     err.statusCode = 409;
   } else if (error?.code === 'OP006') {
     err.statusCode = 404;
@@ -108,7 +108,8 @@ function normalizeOpeningResult(data) {
 
   return {
     openingPosition: normalizeOpeningPosition(data.openingPosition),
-    holding: normalizeHolding(data.holding)
+    holding: normalizeHolding(data.holding),
+    replayed: data.replayed === true
   };
 }
 
@@ -121,10 +122,12 @@ export async function createOpeningPosition({
   priceCurrency,
   fxRateToVnd,
   fxProvenance,
-  fxObservedAt
+  fxObservedAt,
+  idempotencyKey
 } = {}, client = privateSupabase, options = {}) {
   const db = requireDatabaseClient(client);
   const profileId = options?.profileId || payloadProfileId || null;
+  const effectiveIdempotencyKey = options?.idempotencyKey || idempotencyKey || null;
 
   const rpcArgs = {
     p_asset_id: assetId,
@@ -133,6 +136,9 @@ export async function createOpeningPosition({
   };
   if (profileId) {
     rpcArgs.p_profile_id = profileId;
+  }
+  if (effectiveIdempotencyKey) {
+    rpcArgs.p_idempotency_key = effectiveIdempotencyKey;
   }
   if (executionUnitPrice !== undefined && executionUnitPrice !== null) {
     rpcArgs.p_execution_unit_price = executionUnitPrice;

@@ -169,6 +169,8 @@ Portfolio V1 remains a supporting personal tracking capability inside the broade
 13. **COMPLETE (P0.7)** Portfolio V1 cleanup and final stabilization: removed dead imports and superseded Feature 10 CSS (~411 lines); verified single snapshot authority, desktop/mobile responsiveness, cash-only compact UX, and regression test suite.
 
 ### P1 — Accounting Detail and Reconciliation
+- **COMPLETE (P1A)**: Idempotent financial writes across BUY, SELL, cash deposit, cash withdrawal, and opening position baseline creation. Governed by dedicated `public.portfolio_idempotency_records` table, advisory xact locks, request hashing (`IC001` on mismatch), and replay semantics (`replayed: true` + `Idempotent-Replayed: true` header).
+- Auditable correction/reversal semantics (P1B).
 - Realized/unrealized P/L decomposition by asset and period.
 - Explicit income/dividend and fee/tax detail after governed ledger event types exist.
 - Richer transaction history with idempotent writes and auditable correction/reversal semantics.

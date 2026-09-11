@@ -35,11 +35,14 @@ function normalizeDatabaseNumber(value, field) {
 function cashDatabaseError(error, fallbackMessage) {
   const err = new Error(error?.message || fallbackMessage);
   err.code = error?.code;
-  if (['CL001', 'CL002'].includes(error?.code)) {
+  if (['CL001', 'CL002', 'IK001'].includes(error?.code)) {
     err.statusCode = 400;
+  } else if (['IC001'].includes(error?.code)) {
+    err.statusCode = 409;
   }
   return err;
 }
+
 
 export function normalizeCashLedgerEntry(row) {
   if (!row) return null;
@@ -137,9 +140,10 @@ export async function getCashLedger(client = privateSupabase, options = {}) {
   return data.map(normalizeCashLedgerEntry);
 }
 
-export async function createCashMovement({ profileId: payloadProfileId, entryType, amount } = {}, client = privateSupabase, options = {}) {
+export async function createCashMovement({ profileId: payloadProfileId, entryType, amount, idempotencyKey } = {}, client = privateSupabase, options = {}) {
   const db = requireDatabaseClient(client);
   const profileId = options?.profileId || payloadProfileId || null;
+  const effectiveIdempotencyKey = options?.idempotencyKey || idempotencyKey || null;
 
   const rpcArgs = {
     p_entry_type: entryType,
@@ -147,6 +151,9 @@ export async function createCashMovement({ profileId: payloadProfileId, entryTyp
   };
   if (profileId) {
     rpcArgs.p_profile_id = profileId;
+  }
+  if (effectiveIdempotencyKey) {
+    rpcArgs.p_idempotency_key = effectiveIdempotencyKey;
   }
 
   const { data, error } = await db.rpc('create_cash_movement', rpcArgs);
@@ -160,6 +167,7 @@ export async function createCashMovement({ profileId: payloadProfileId, entryTyp
 
   return {
     entry: normalizeCashLedgerEntry(data.entry),
-    currentCash: normalizeDatabaseNumber(data.currentCash, 'current cash')
+    currentCash: normalizeDatabaseNumber(data.currentCash, 'current cash'),
+    replayed: data.replayed === true
   };
 }
