@@ -173,13 +173,19 @@ export function calculatePortfolioComposition(portfolioOverview) {
         name: sortedPricedHoldings[0].name,
         assetType: sortedPricedHoldings[0].assetType,
         marketValue: sortedPricedHoldings[0].marketValue,
-        weightPct: sortedPricedHoldings[0].weightPct
+        weightPct: sortedPricedHoldings[0].weightPct,
+        investedWeightPct: pricedHoldingsMarketValue > 0
+          ? (sortedPricedHoldings[0].marketValue / pricedHoldingsMarketValue) * 100
+          : null
       }
     : null;
 
   const top3Holdings = sortedPricedHoldings.slice(0, 3);
   const top3HoldingsWeightPct = top3Holdings.length > 0 && cashAvailable && knownAllocationValue > 0
     ? (top3Holdings.reduce((sum, holding) => sum + holding.marketValue, 0) / knownAllocationValue) * 100
+    : null;
+  const top3InvestedWeightPct = top3Holdings.length > 0 && pricedHoldingsMarketValue > 0
+    ? (top3Holdings.reduce((sum, holding) => sum + holding.marketValue, 0) / pricedHoldingsMarketValue) * 100
     : null;
 
   return {
@@ -200,6 +206,7 @@ export function calculatePortfolioComposition(portfolioOverview) {
     assetTypeGroups,
     largestHolding,
     top3HoldingsWeightPct,
+    top3InvestedWeightPct,
     pricedHoldingCountUsed: top3Holdings.length
   };
 }

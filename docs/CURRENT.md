@@ -1,14 +1,14 @@
 # Current Project Status
 
 ## Latest Verified Repository Checkpoint
-- Portfolio V1 P0.5 implementation base: `9f6ef48 feat: redesign portfolio summary and holdings`; P0.1 through P0.4 remain the verified accounting, data, snapshot, Summary, and Holdings foundations beneath it.
+- Portfolio V1 P0.6 implementation base: `73eb6b4 feat: simplify portfolio performance`; P0.1 through P0.5 remain the verified accounting, data, snapshot, Summary, Holdings, and Performance foundations beneath it.
 - Branch: `main`; production/remote migration state is intentionally unchanged by this implementation task.
-- Tracked working tree was clean before P0.5 implementation; pre-existing untracked `server/artifacts/` remains preserved and untouched.
+- Tracked working tree was clean before P0.6 implementation; pre-existing untracked `server/artifacts/` remains preserved and untouched.
 - Runtime architecture remains Cloudflare Workers Static Assets/frontend proxy and scheduler, Render Node.js/Express backend, and Supabase PostgreSQL/Auth.
-- This checkpoint records repository behavior inspected on 2026-09-10. Exact production migration parity and deployment revision were not queried in this implementation phase.
+- This checkpoint records repository behavior inspected on 2026-09-11. Exact production migration parity and deployment revision were not queried in this implementation phase.
 
 ## Current Phase
-Portfolio V1 P0.5 Performance is implemented locally. One compact historical/EOD block now prioritizes TWR and valid VND accounting P/L, keeps MWR/drawdown/realized/unrealized detail secondary, and makes benchmark comparison opt-in without changing any financial formula or the reconciled P0.3 current-state snapshot.
+Portfolio V1 P0.6 Allocation & Activity is implemented locally. Allocation is simplified into a compact horizontal visual with top-3 concentration strictly on invested assets only (excluding cash), compact cash-only representation (100% cash / 0% invested, concentration NOT_APPLICABLE), and no oversized charts. Activity is redesigned to "Hoạt động gần đây" showing MAX 5 latest events with truthful currency semantics and a toggle to full history. Cash operations remain secondary under "Quản lý tiền mặt". All verified P0.1–P0.5 accounting, snapshot, and performance contracts are preserved.
 
 ## Portfolio — Verified Working Today
 - Supabase Auth user identity resolves through `investor_profile.user_id` to private `investor_profile.id`; protected Express routes pass that profile ID to service-role data access and profile-scoped financial RPCs.
@@ -71,6 +71,17 @@ Portfolio V1 P0.5 Performance is implemented locally. One compact historical/EOD
 - The block is responsive at desktop and 390px mobile width with one contained chart and no horizontal overflow. Summary, Holdings, Allocation, Activity, and their current-state snapshot semantics are unchanged.
 - Local verification: focused performance/benchmark/Portfolio display tests 88/88 PASS; full backend 1493/1493 PASS; client and Worker production build PASS; desktop/mobile visual check PASS; `git diff --check` PASS.
 
+## Portfolio P0.6 — Implemented Locally (Not Deployed)
+- Allocation is simplified into a compact, informative horizontal presentation: dual segmented bar (Tiền mặt % vs Đang đầu tư %), top-3 concentration strictly on invested assets only (excluding cash from denominator), largest holding chip, and asset-type breakdown list.
+- Cash-only allocation (e.g. 200,000,000 VND cash, 0 holdings) renders compactly as Tiền mặt 100% / Đang đầu tư 0% with concentration `NOT_APPLICABLE`, suppressing giant donuts, empty asset panels, largest holding, and top-3 stats.
+- Partial and stale valuation states are preserved truthfully: unpriced assets remain visible with `—` instead of fake 0, and stale marks display "Dữ liệu cũ" with provenance time.
+- Activity is redesigned to "Hoạt động gần đây" showing MAX 5 latest relevant events (BUY, SELL, opening positions, cash deposits/withdrawals/opening balance) with truthful currency semantics and no fake VND.
+- Full ledger history is accessible via `[Xem toàn bộ lịch sử]` toggle, cleanly reusing existing transaction and cash components without duplicate ledgers.
+- Cash management actions (`[Nạp tiền]`, `[Rút tiền]`) remain secondary behind `[Quản lý tiền mặt]`; primary user actions remain `[Ghi giao dịch]` and `[Khai báo tài sản đang có]`.
+- Governed empty states: confirmed cash = 0 and holdings = 0 displays "Chưa có tài sản trong danh mục." with primary/secondary CTAs; fatal snapshot load error displays "Không thể tải dữ liệu danh mục." with retry action and never maps to empty portfolio; activity load error is displayed separately.
+- Mobile layout (~390px) verified: no horizontal overflow, responsive wrapping, compact cards.
+- Local verification: focused tests 12/12 PASS; core portfolio tests 86/86 PASS; full backend 1505/1505 PASS; client and Worker production build PASS; `git diff --check` PASS.
+
 ## Portfolio — Partial
 - Performance and benchmark remain historical/EOD projections separate from the P0.3 current Summary/Holdings/Allocation snapshot clock.
 - Historical performance supports only holdings that can be valued directly in VND. Historical non-VND performance remains unavailable because authoritative historical FX is not integrated.
@@ -124,13 +135,14 @@ Portfolio V1 P0.5 Performance is implemented locally. One compact historical/EOD
 - USD/VND historical bars/historical FX authority remain insufficient for non-VND portfolio performance.
 - Gold spot history remains close-only where the configured provider cannot supply authoritative OHLC.
 
-## Portfolio P0.1–P0.5 Verification and Remaining Blockers
+## Portfolio P0.1–P0.6 Verification and Remaining Blockers
 - Disposable PostgreSQL execution reproduces two historical rebuild facts: the chronological migration directory has no initial-schema migration, and the immutable cross-currency migration references cash-ledger columns absent from its historical predecessor. Production may still be correct because it was evolved from an existing base; no production data was queried or changed here.
 - The supported rebuild contract is the full current `server/db/schema.sql` bootstrap. Historical applied migrations remain audit history, and future changes continue through forward migrations. The new P0.1 forward migration changes no historical financial row.
 - P0.1 closes the linked BUY/SELL economic-time split and the UI-only portfolio-eligibility bypass for future writes, while historical reads reconcile immutable legacy linkage without rewriting ledger records.
+- P0.6 simplifies visible Allocation and Activity without modifying underlying financial accounting formulas.
 
 Remaining blockers:
 1. Historical FX authority for non-VND performance remains unavailable.
 
 ## Next Work
-Continue with Portfolio V1 P0.6: simplify Allocation and Activity without changing the verified P0.1–P0.5 accounting, snapshot, performance, or benchmark contracts.
+Continue with next Portfolio V1 priorities according to roadmap.

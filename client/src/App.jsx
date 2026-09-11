@@ -31,6 +31,7 @@ import CashManagementSection from './components/CashManagementSection.jsx';
 import OpeningPositionModal from './components/OpeningPositionModal.jsx';
 import { PortfolioPerformanceSection } from './components/PortfolioPerformanceSection.jsx';
 import { PortfolioSummaryHoldings } from './components/PortfolioSummaryHoldings.jsx';
+import { PortfolioActivitySection } from './components/PortfolioActivitySection.jsx';
 import { useAppNavigation } from './hooks/useAppNavigation.js';
 import { OpportunitySection } from './components/OpportunitySection.jsx';
 import { InvestmentBriefPanel } from './components/InvestmentBriefPanel.jsx';
@@ -1836,7 +1837,7 @@ function App({ onLogout }) {
               {portfolioError && !portfolioLoading && !portfolioOverview && (
                 <div className="fintech-banner banner-error">
                   <div>
-                    <strong style={{ display: 'block', marginBottom: '0.2rem' }}>Không thể tải tổng quan danh mục</strong>
+                    <strong style={{ display: 'block', marginBottom: '0.2rem' }}>Không thể tải dữ liệu danh mục</strong>
                     <span style={{ fontSize: '0.85rem' }}>{portfolioError}</span>
                   </div>
                   <MagneticButton
@@ -1904,61 +1905,48 @@ function App({ onLogout }) {
                     holdingsCount={portfolioOverview.holdings.length}
                   />
 
-                  {/* Feature 10: Allocation remains a direct projection of this same snapshot. */}
+                  {/* Feature 10 & P0.6: Allocation derived from unified snapshot. */}
                   <PortfolioCompositionSection
+                    snapshot={portfolioOverview}
                     data={compositionData}
                     loading={compositionLoading}
                     error={compositionError}
                     onRetry={() => fetchPortfolio(true)}
                   />
 
-                  {/* Existing activity capabilities retain their own ledger reads. */}
-                  <div className="portfolio-activity-section">
-                    <div className="portfolio-activity-heading">
-                      <div>
-                        <span className="portfolio-eyebrow">Hoạt động</span>
-                        <h3>Lịch sử danh mục</h3>
-                      </div>
-                    </div>
-                    <TransactionHistorySection
-                      transactions={transactions}
-                      loading={transactionsLoading}
-                      refreshing={transactionsRefreshing}
-                      error={transactionsError}
-                      holdingsCount={portfolioOverview.holdings.length}
-                      onOpenTransactionModal={() => {
-                        setTransactionModalDefaultType('BUY');
-                        setTransactionModalDefaultAsset(null);
-                        setIsTransactionModalOpen(true);
-                      }}
-                      onRetry={() => fetchTransactions(true)}
-                      onRefresh={() => fetchTransactions(false)}
-                    />
-                    <CashManagementSection
-                      activityOnly
-                      cashOverview={cashOverview}
-                      currentCashSnapshot={portfolioOverview?.cash}
-                      currentCashLoading={portfolioLoading}
-                      cashOverviewLoading={cashOverviewLoading}
-                      cashOverviewError={cashOverviewError}
-                      cashLedger={cashLedger}
-                      cashLedgerLoading={cashLedgerLoading}
-                      cashLedgerError={cashLedgerError}
-                      onOpenDeposit={() => {
-                        setCashModalMode('DEPOSIT');
-                        setIsCashModalOpen(true);
-                      }}
-                      onOpenWithdraw={() => {
-                        setCashModalMode('WITHDRAWAL');
-                        setIsCashModalOpen(true);
-                      }}
-                      onRefresh={() => {
-                        fetchPortfolio(false);
-                        fetchCashOverview(false);
-                        fetchCashLedger(false);
-                      }}
-                    />
-                  </div>
+                  {/* Portfolio V1 P0.6: Simplified Recent Activity with toggleable full ledger history */}
+                  <PortfolioActivitySection
+                    transactions={transactions}
+                    transactionsLoading={transactionsLoading}
+                    transactionsRefreshing={transactionsRefreshing}
+                    transactionsError={transactionsError}
+                    holdings={portfolioOverview.holdings}
+                    cashOverview={cashOverview}
+                    cashLedger={cashLedger}
+                    cashLedgerLoading={cashLedgerLoading}
+                    cashLedgerError={cashLedgerError}
+                    currentCashSnapshot={portfolioOverview?.cash}
+                    onOpenTransactionModal={() => {
+                      setTransactionModalDefaultType('BUY');
+                      setTransactionModalDefaultAsset(null);
+                      setIsTransactionModalOpen(true);
+                    }}
+                    onOpenDeposit={() => {
+                      setCashModalMode('DEPOSIT');
+                      setIsCashModalOpen(true);
+                    }}
+                    onOpenWithdraw={() => {
+                      setCashModalMode('WITHDRAWAL');
+                      setIsCashModalOpen(true);
+                    }}
+                    onRefresh={() => {
+                      fetchPortfolio(false);
+                      fetchTransactions(false);
+                      fetchCashOverview(false);
+                      fetchCashLedger(false);
+                    }}
+                    onRetryTransactions={() => fetchTransactions(true)}
+                  />
                 </>
               )}
             </motion.section>

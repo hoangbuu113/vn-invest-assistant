@@ -234,10 +234,11 @@ describe('Portfolio V1 P0.4 Summary and Holdings display', () => {
   });
 
   test('component contract has one compact summary, one empty state, and mobile expandable cards', async () => {
-    const [componentSource, appSource, cssSource] = await Promise.all([
+    const [componentSource, appSource, cssSource, activitySource] = await Promise.all([
       readFile(new URL('../../client/src/components/PortfolioSummaryHoldings.jsx', import.meta.url), 'utf8'),
       readFile(new URL('../../client/src/App.jsx', import.meta.url), 'utf8'),
-      readFile(new URL('../../client/src/index.css', import.meta.url), 'utf8')
+      readFile(new URL('../../client/src/index.css', import.meta.url), 'utf8'),
+      readFile(new URL('../../client/src/components/PortfolioActivitySection.jsx', import.meta.url), 'utf8')
     ]);
 
     assert.equal((componentSource.match(/Tổng giá trị danh mục/g) || []).length, 1);
@@ -253,7 +254,7 @@ describe('Portfolio V1 P0.4 Summary and Holdings display', () => {
       appSource.indexOf('{/* TAB: WATCHLIST')
     );
     assert.doesNotMatch(portfolioSection, /className="metrics-grid"/);
-    assert.match(appSource, /activityOnly/);
+    assert.match(activitySource, /activityOnly/);
     assert.match(cssSource, /@media \(max-width: 768px\)[\s\S]*\.portfolio-holdings-desktop[\s\S]*display: none/);
     assert.match(cssSource, /\.portfolio-holdings-mobile \{[\s\S]*display: none/);
     assert.match(cssSource, /@media \(max-width: 768px\)[\s\S]*\.portfolio-holdings-mobile[\s\S]*display: grid/);

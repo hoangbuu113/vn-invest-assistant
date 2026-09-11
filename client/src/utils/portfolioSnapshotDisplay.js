@@ -220,3 +220,251 @@ export function buildPortfolioHoldingsDisplay(snapshot) {
   const holdings = Array.isArray(snapshot?.holdings) ? snapshot.holdings : [];
   return holdings.map((holding) => buildPortfolioHoldingDisplay(holding, snapshot?.allocation));
 }
+
+export function buildPortfolioAllocationDisplay(snapshot) {
+  const allocation = snapshot?.allocation || {};
+  const holdings = Array.isArray(snapshot?.holdings) ? snapshot.holdings : [];
+  const state = normalizedState(allocation?.status || snapshot?.status);
+  const concentrationState = normalizedState(allocation?.concentrationStatus, PORTFOLIO_DISPLAY_STATES.NOT_APPLICABLE);
+  const totalHoldingsCount = allocation?.totalHoldingsCount ?? holdings.length;
+  const pricedHoldingsCount = allocation?.pricedHoldingsCount ?? holdings.filter((h) => ['AVAILABLE', 'STALE'].includes(normalizedState(h?.dataStatus))).length;
+  const unpricedHoldingsCount = allocation?.unpricedHoldingsCount ?? (totalHoldingsCount - pricedHoldingsCount);
+  const isCashOnly = totalHoldingsCount === 0 && snapshot?.cash?.value !== null && snapshot?.cash?.value !== undefined;
+  const isEmpty = totalHoldingsCount === 0 && snapshot?.cash?.value === 0;
+
+  const cashValue = finiteNumber(allocation?.cashValue)
+    ? allocation.cashValue
+    : (finiteNumber(snapshot?.cash?.value) ? snapshot.cash.value : null);
+  const investedMarketValue = finiteNumber(allocation?.pricedHoldingsMarketValue)
+    ? allocation.pricedHoldingsMarketValue
+    : (finiteNumber(snapshot?.investedMarketValue) ? snapshot.investedMarketValue : 0);
+  const totalValue = finiteNumber(snapshot?.totalPortfolioValue)
+    ? snapshot.totalPortfolioValue
+    : (finiteNumber(allocation?.knownAllocationValue) ? allocation.knownAllocationValue : null);
+
+  let cashWeightPct = null;
+  let investedWeightPct = null;
+  let top3Concentration = null;
+  let largestHolding = null;
+  let assetTypeGroups = [];
+
+  if (isCashOnly) {
+    cashWeightPct = 100;
+    investedWeightPct = 0;
+  } else if (!isEmpty && totalValue !== null && totalValue > 0) {
+    cashWeightPct = finiteNumber(allocation?.cashWeightPct)
+      ? allocation.cashWeightPct
+      : (cashValue !== null ? (cashValue / totalValue) * 100 : null);
+    investedWeightPct = finiteNumber(allocation?.pricedAssetsWeightPct)
+      ? allocation.pricedAssetsWeightPct
+      : (investedMarketValue !== null ? (investedMarketValue / totalValue) * 100 : null);
+  }
+
+  if (!isCashOnly && !isEmpty && pricedHoldingsCount > 0) {
+    // Top-3 concentration: denominator strictly on invested assets only (excluding cash)
+    if (finiteNumber(allocation?.top3InvestedWeightPct)) {
+      top3Concentration = allocation.top3InvestedWeightPct;
+    } else if (investedMarketValue > 0 && Array.isArray(allocation?.holdingAllocations)) {
+      const pricedAllocations = allocation.holdingAllocations.filter((h) => h.isPriced && finiteNumber(h.marketValue));
+      const top3Sum = pricedAllocations.slice(0, 3).reduce((sum, h) => sum + h.marketValue, 0);
+      top3Concentration = (top3Sum / investedMarketValue) * 100;
+    }
+
+    if (allocation?.largestHolding) {
+      const lh = allocation.largestHolding;
+      largestHolding = {
+        id: lh.id || lh.assetId,
+        assetId: lh.assetId,
+        symbol: lh.symbol || '—',
+        name: lh.name || 'Tài sản',
+        assetType: lh.assetType || null,
+        marketValue: finiteNumber(lh.marketValue) ? lh.marketValue : null,
+        weightPct: finiteNumber(lh.weightPct) ? lh.weightPct : null,
+        investedWeightPct: finiteNumber(lh.investedWeightPct)
+          ? lh.investedWeightPct
+          : (investedMarketValue > 0 && finiteNumber(lh.marketValue) ? (lh.marketValue / investedMarketValue) * 100 : null)
+      };
+    }
+
+    if (Array.isArray(allocation?.assetTypeGroups)) {
+      assetTypeGroups = allocation.assetTypeGroups.map((g) => ({
+        assetType: g.assetType,
+        marketValue: finiteNumber(g.marketValue) ? g.marketValue : 0,
+        weightPct: finiteNumber(g.weightPct) ? g.weightPct : null,
+        holdingCount: g.holdingCount || 0
+      }));
+    }
+  }
+
+  return {
+    snapshotId: snapshot?.snapshotId || null,
+    state,
+    stateLabel: getPortfolioStateLabel(state),
+    stateTone: getPortfolioStateTone(state),
+    concentrationState,
+    isCashOnly,
+    isEmpty,
+    isPartial: state === PORTFOLIO_DISPLAY_STATES.PARTIAL || unpricedHoldingsCount > 0,
+    isStale: state === PORTFOLIO_DISPLAY_STATES.STALE,
+    totalHoldingsCount,
+    pricedHoldingsCount,
+    unpricedHoldingsCount,
+    cashValue,
+    cashWeightPct,
+    investedMarketValue,
+    investedWeightPct,
+    totalValue,
+    top3Concentration,
+    largestHolding,
+    assetTypeGroups
+  };
+}
+
+export function formatActivityDate(isoString) {
+  if (!isoString) return '—';
+  try {
+    const date = new Date(isoString);
+    if (isNaN(date.getTime())) return String(isoString);
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = date.getFullYear();
+    return `${day}/${month}/${year}`;
+  } catch {
+    return String(isoString);
+  }
+}
+
+function formatQuantityNumber(val) {
+  if (val === null || val === undefined || isNaN(val)) return '—';
+  return Number(val).toLocaleString('vi-VN', { maximumFractionDigits: 6 });
+}
+
+function assetUnitLabel(quantityUnit, assetType, symbol) {
+  if (quantityUnit) {
+    const map = { share: 'cổ phiếu', coin: symbol || 'coin', oz: 'oz', unit: 'đơn vị' };
+    return map[quantityUnit] || quantityUnit;
+  }
+  if (assetType === 'stock') return 'cổ phiếu';
+  if (assetType === 'crypto') return symbol || 'coin';
+  if (assetType === 'gold') return 'oz';
+  return '';
+}
+
+export function buildPortfolioRecentActivity({ transactions = [], holdings = [], cashLedger = [] } = {}) {
+  const events = [];
+
+  // 1. Transactions (BUY / SELL)
+  if (Array.isArray(transactions)) {
+    for (const t of transactions) {
+      if (!t) continue;
+      const isBuy = t.transactionType === 'BUY';
+      const isSell = t.transactionType === 'SELL';
+      if (!isBuy && !isSell) continue;
+
+      const symbol = t.symbol || 'Tài sản';
+      const action = isBuy ? 'Mua' : 'Bán';
+      const effectiveAt = t.executedAt || t.createdAt || null;
+      const quantityStr = formatQuantityNumber(t.quantity);
+      const unit = assetUnitLabel(t.quantityUnit, t.assetType, symbol);
+
+      let priceStr = null;
+      if (t.priceCurrency && t.priceCurrency !== 'VND' && finiteNumber(t.executionUnitPrice)) {
+        priceStr = `${formatQuantityNumber(t.executionUnitPrice)} ${t.priceCurrency}`;
+      } else if (finiteNumber(t.price)) {
+        priceStr = `${Number(t.price).toLocaleString('vi-VN')} ₫`;
+      }
+
+      let detail = `${quantityStr}${unit ? ` ${unit}` : ''}`;
+      if (priceStr) {
+        detail += ` · ${priceStr}`;
+      }
+
+      events.push({
+        id: `tx-${t.id || Math.random()}`,
+        type: t.transactionType,
+        action,
+        symbol,
+        title: `${action} ${symbol}`,
+        detail,
+        effectiveAt,
+        formattedDate: formatActivityDate(effectiveAt)
+      });
+    }
+  }
+
+  // 2. Opening Positions
+  if (Array.isArray(holdings)) {
+    for (const h of holdings) {
+      if (!h || (!h.openingPositionId && !h.opening_position_id && !h.opening_position)) continue;
+      const symbol = h.symbol || 'Tài sản';
+      const effectiveAt = h.openingPositionUpdatedAt
+        || h.opening_position?.updated_at
+        || h.updatedAt
+        || h.createdAt
+        || null;
+      const quantityStr = formatQuantityNumber(h.quantity);
+      const unit = assetUnitLabel(h.quantityUnit, h.assetType, symbol);
+
+      let costStr = null;
+      if (finiteNumber(h.nativeAverageCost) && h.nativeCostCurrency && h.nativeCostCurrency !== 'VND') {
+        costStr = `${formatQuantityNumber(h.nativeAverageCost)} ${h.nativeCostCurrency}`;
+      } else if (finiteNumber(h.averageCost)) {
+        costStr = `${Number(h.averageCost).toLocaleString('vi-VN')} ₫`;
+      }
+
+      let detail = `${quantityStr}${unit ? ` ${unit}` : ''}`;
+      if (costStr) {
+        detail += ` · ${costStr}`;
+      }
+
+      events.push({
+        id: `op-${h.openingPositionId || h.id || Math.random()}`,
+        type: 'OPENING_POSITION',
+        action: 'Khai báo vị thế',
+        symbol,
+        title: `Khai báo vị thế ${symbol}`,
+        detail,
+        effectiveAt,
+        formattedDate: formatActivityDate(effectiveAt)
+      });
+    }
+  }
+
+  // 3. Cash Events (DEPOSIT, WITHDRAWAL, OPENING_BALANCE only - trade movements already in transactions)
+  if (Array.isArray(cashLedger)) {
+    for (const e of cashLedger) {
+      if (!e) continue;
+      if (!['DEPOSIT', 'WITHDRAWAL', 'OPENING_BALANCE'].includes(e.entryType)) continue;
+
+      let action = 'Biến động tiền';
+      if (e.entryType === 'DEPOSIT') action = 'Nạp tiền';
+      else if (e.entryType === 'WITHDRAWAL') action = 'Rút tiền';
+      else if (e.entryType === 'OPENING_BALANCE') action = 'Số dư ban đầu';
+
+      const effectiveAt = e.effectiveAt || e.createdAt || null;
+      const sign = e.entryType === 'WITHDRAWAL' ? '−' : '+';
+      const amountStr = finiteNumber(e.amount) ? `${sign}${Number(e.amount).toLocaleString('vi-VN')} ₫` : '—';
+
+      events.push({
+        id: `cash-${e.id || Math.random()}`,
+        type: e.entryType,
+        action,
+        symbol: 'Tiền mặt',
+        title: action,
+        detail: amountStr,
+        effectiveAt,
+        formattedDate: formatActivityDate(effectiveAt)
+      });
+    }
+  }
+
+  // Sort descending by effective date
+  events.sort((a, b) => {
+    const timeA = a.effectiveAt ? Date.parse(a.effectiveAt) : 0;
+    const timeB = b.effectiveAt ? Date.parse(b.effectiveAt) : 0;
+    return timeB - timeA;
+  });
+
+  // Main Portfolio page shows MAX 5 latest relevant events
+  return events.slice(0, 5);
+}

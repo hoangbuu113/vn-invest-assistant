@@ -233,11 +233,19 @@ function Holdings({ snapshot, actions }) {
         <div className="portfolio-holdings-empty">
           <div className="portfolio-holdings-empty-icon" aria-hidden="true">◇</div>
           <div>
-            <h4>Hiện danh mục đang giữ tiền mặt.</h4>
+            <h4>
+              {summary.cash === 0
+                ? 'Chưa có tài sản trong danh mục.'
+                : summary.cash !== null
+                  ? 'Hiện danh mục đang giữ tiền mặt.'
+                  : 'Chưa có tài sản trong danh mục.'}
+            </h4>
             <p>
-              {summary.cash === null
-                ? 'Số dư tiền mặt hiện chưa khả dụng.'
-                : `Bạn có ${formatVNDReporting(summary.cash)} tiền mặt.`}
+              {summary.cash === 0
+                ? 'Bắt đầu bằng cách ghi nhận giao dịch mới hoặc khai báo tài sản bạn đang có.'
+                : summary.cash !== null
+                  ? `Bạn có ${formatVNDReporting(summary.cash)} tiền mặt.`
+                  : 'Số dư tiền mặt hiện chưa khả dụng.'}
             </p>
           </div>
           <div className="portfolio-empty-actions">

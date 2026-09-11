@@ -165,7 +165,7 @@ Portfolio V1 remains a supporting personal tracking capability inside the broade
 9. **COMPLETE (P0.4)** Build a compact cash-only Summary/Holdings experience with one empty state and secondary cash management. Cash-only performance remains provider-free, and benchmark/concentration are not fabricated.
 10. **COMPLETE (P0.5)** Consolidate Performance around primary TWR, separate accounting P/L, conditional MWR/drawdown, sparse-history presentation, and the no-annualization-below-one-year rule.
 11. **COMPLETE (P0.5)** Enforce benchmark eligibility and add user-selected/no-benchmark behavior with explicit currency/return-basis compatibility. VN-Index is VND-comparable; S&P 500 remains reference-only.
-12. Simplify Allocation and Activity, preserving known-value-only and immutable-ledger semantics without duplicate totals.
+12. **COMPLETE (P0.6)** Simplify Allocation and Activity, preserving known-value-only and immutable-ledger semantics without duplicate totals. Top-3 concentration denominator strictly excludes cash; cash-only renders compact 100% cash / 0% invested without concentration UI; Activity shows max 5 recent events with toggleable full history; cash management remains secondary.
 
 ### P1 — Accounting Detail and Reconciliation
 - Realized/unrealized P/L decomposition by asset and period.
