@@ -6,6 +6,7 @@ export const SETTLEMENT_MODES = Object.freeze(['INTERNAL_VND_CASH', 'EXTERNAL_SE
 export const FX_PROVENANCE_METHODS = Object.freeze([
   'TWELVE_DATA_USD_VND',
   'BINANCE_P2P_USDT_VND',
+  'COINGECKO_USDT_VND',
   'USER_SUPPLIED_VND_BASIS',
   'USD_VND_DIRECT'
 ]);
@@ -31,6 +32,13 @@ function requireDatabaseClient(client) {
     throw new Error('Supabase credentials are not configured. Please set SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY in server/.env');
   }
   return client;
+}
+
+function normalizeFxProvenanceInput(value) {
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new TypeError('fxProvenance must be a non-empty string when provided');
+  }
+  return value.trim().toUpperCase();
 }
 
 function normalizeDatabaseNumber(value, field, { nullable = false, nonNegative = false } = {}) {
@@ -95,8 +103,8 @@ export function normalizeTransaction(row) {
     : (settlementMode === 'INTERNAL_VND_CASH' ? 'VND' : null);
   const fxProvenance = row.fx_provenance ?? row.fxProvenance;
   const normalizedFxProvenance = typeof fxProvenance === 'string' && fxProvenance.trim()
-    ? fxProvenance.trim()
-    : (fxProvenance && typeof fxProvenance === 'object' && !Array.isArray(fxProvenance) ? { ...fxProvenance } : null);
+    ? fxProvenance.trim().toUpperCase()
+    : null;
 
   return {
     id: row.id,
@@ -237,7 +245,7 @@ export async function createPortfolioTransaction({
     rpcArgs.p_fx_rate_to_vnd = fxRateToVnd;
   }
   if (fxProvenance !== undefined && fxProvenance !== null) {
-    rpcArgs.p_fx_provenance = typeof fxProvenance === 'string' ? fxProvenance.trim() : fxProvenance;
+    rpcArgs.p_fx_provenance = normalizeFxProvenanceInput(fxProvenance);
   }
   if (fxObservedAt !== undefined && fxObservedAt !== null) {
     rpcArgs.p_fx_observed_at = fxObservedAt;

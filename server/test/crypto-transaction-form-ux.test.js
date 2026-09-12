@@ -58,7 +58,7 @@ describe('Crypto transaction form UX', () => {
     assert.equal(valid.price, 9500);
   });
 
-  test('modal keeps native crypto inputs primary and the required VND basis collapsed by default', async () => {
+  test('modal keeps native crypto inputs primary and shows manual VND only as governed fallback', async () => {
     const source = await readFile(
       new URL('../../client/src/components/TransactionModal.jsx', import.meta.url),
       'utf8'
@@ -71,8 +71,13 @@ describe('Crypto transaction form UX', () => {
     assert.match(source, /isSimplifiedCryptoExternal \? 'Đồng giá'/);
     assert.match(source, /data-testid="crypto-native-total"/);
     assert.match(source, /Tổng giá trị giao dịch/);
+    assert.match(source, /data-testid="automatic-usdt-vnd-accounting"/);
+    assert.match(source, /Giá hạch toán VND được tự động tính theo dữ liệu CoinGecko/);
+    assert.match(source, /Nguồn: \{accountingRateState\.quote\.provider\}/);
+    assert.match(source, /shouldShowManualAccounting \? \(/);
     assert.match(advancedSection, /<details/);
     assert.match(advancedSection, /open=\{isAdvancedAccountingOpen\}/);
+    assert.match(advancedSection, /data-testid="automatic-accounting-fallback"/);
     assert.match(advancedSection, /Thông tin hạch toán nâng cao/);
     assert.match(advancedSection, /Giá hạch toán VND \(₫\/đơn vị\)/);
     assert.match(advancedSection, /Ứng dụng hiện cần giá trị VND để tính giá vốn, lãi\/lỗ và lịch sử danh mục/);
@@ -89,7 +94,7 @@ describe('Crypto transaction form UX', () => {
     assert.match(source, /if \(!accountingValidation\.valid\) \{\s+revealAccountingPriceError\(accountingValidation\.message\);\s+return;/);
   });
 
-  test('entered VND basis remains current price and idempotency remains unchanged', async () => {
+  test('automatic or fallback VND basis remains current price and submission intent is frozen', async () => {
     const source = await readFile(
       new URL('../../client/src/components/TransactionModal.jsx', import.meta.url),
       'utf8'
@@ -98,8 +103,23 @@ describe('Crypto transaction form UX', () => {
     assert.match(source, /price: numPrice/);
     assert.match(source, /payload\.executionUnitPrice = numExecUnitPrice/);
     assert.match(source, /payload\.priceCurrency = priceCurrency/);
-    assert.match(source, /payload\.idempotencyKey = idempotencyKey/);
-    assert.match(source, /'Idempotency-Key': idempotencyKey/);
+    assert.match(source, /payload\.fxRateToVnd = selectedAutomaticQuote\.rate/);
+    assert.match(source, /payload\.fxProvenance = selectedAutomaticQuote\.provenance/);
+    assert.match(source, /payload\.fxObservedAt = selectedAutomaticQuote\.observedAt/);
+    assert.match(source, /freezeTransactionSubmissionIntent/);
+    assert.match(source, /body: JSON\.stringify\(frozenPayload\)/);
+    assert.match(source, /'Idempotency-Key': intent\.idempotencyKey/);
+  });
+
+  test('custom transaction time invalidates and refetches the historical USDT/VND observation', async () => {
+    const source = await readFile(
+      new URL('../../client/src/components/TransactionModal.jsx', import.meta.url),
+      'utf8'
+    );
+
+    assert.match(source, /buildUsdtVndAccountingRatePath\(requestedAt\)/);
+    assert.match(source, /isAutomaticUsdtAccounting,\s+isCustomTime,\s+customDateTime/);
+    assert.doesNotMatch(source, /priceCurrency === 'USDT'[^}]*currentUsdVndRate/);
   });
 
   test('internal VND transaction defaults and payload semantics remain unchanged', () => {
@@ -114,6 +134,18 @@ describe('Crypto transaction form UX', () => {
       settlementMode: 'INTERNAL_VND_CASH'
     });
     assert.equal(isSimplifiedCryptoExternalEntry({ asset_type: 'stock' }, defaults.settlementMode), false);
+  });
+
+  test('existing current USD prefill stays authoritative and historical USD stays manual', async () => {
+    const source = await readFile(
+      new URL('../../client/src/components/TransactionModal.jsx', import.meta.url),
+      'utf8'
+    );
+
+    assert.match(source, /apiFetch\('\/api\/market\/USD%2FVND'\)/);
+    assert.match(source, /priceCurrency === 'USD' && !isCustomTime && currentUsdVndRate/);
+    assert.match(source, /priceCurrency === 'USD' && isFxPrefillConfirmed && currentUsdVndRate && !isCustomTime/);
+    assert.match(source, /payload\.fxProvenance = 'TWELVE_DATA_USD_VND'/);
   });
 
   test('P1C Activity continues to render the native USDT execution price', () => {

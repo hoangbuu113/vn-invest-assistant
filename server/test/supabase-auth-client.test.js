@@ -86,6 +86,7 @@ describe('Feature 13D — Standard Login / Register Client & Auth Gate', () => {
       assert.equal(isPrivateApiPath('/api/holdings'), true);
       assert.equal(isPrivateApiPath('/api/positions/opening'), true);
       assert.equal(isPrivateApiPath('/api/transactions'), true);
+      assert.equal(isPrivateApiPath('/api/accounting-rate?base=USDT&quote=VND'), true);
       assert.equal(isPrivateApiPath('/api/cash/overview'), true);
       assert.equal(isPrivateApiPath('/api/cash/ledger'), true);
       assert.equal(isPrivateApiPath('/api/portfolio/overview'), true);

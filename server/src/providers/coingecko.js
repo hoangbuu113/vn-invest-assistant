@@ -6,6 +6,7 @@ import {
 
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 const DAY_MS = 24 * 60 * 60 * 1000;
+const COINGECKO_TETHER_ID = 'tether';
 
 export const COINGECKO_CACHE_POLICY = Object.freeze({
   // Matches the existing UI snapshot refresh cadence. Duplicate consumers inside
@@ -726,6 +727,149 @@ export async function getHistory(asset, mapping, options = {}) {
     internalErr.code = 'PROVIDER_ERROR';
     throw internalErr;
   }
+}
+
+function createAccountingRateProviderError(message, code = 'PROVIDER_ERROR', status = 502) {
+  const error = new Error(message);
+  error.code = code;
+  error.status = status;
+  return error;
+}
+
+async function fetchAccountingRateJson(url, resource, options = {}) {
+  const fetchFn = options.fetchFn || fetch;
+  const apiKey = options.apiKey !== undefined ? options.apiKey : process.env.COINGECKO_API_KEY;
+  const headers = { 'User-Agent': USER_AGENT };
+  if (apiKey) headers['x-cg-demo-api-key'] = apiKey;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
+  try {
+    const response = await fetchFn(url, { signal: controller.signal, headers });
+    if (!response.ok) {
+      if (response.status === 429) {
+        throw createAccountingRateProviderError(
+          'CoinGecko accounting-rate request was rate limited',
+          'PROVIDER_RATE_LIMITED',
+          503
+        );
+      }
+      if (response.status === 401 || response.status === 403) {
+        throw createAccountingRateProviderError(
+          'CoinGecko accounting-rate access was denied',
+          'PROVIDER_ACCESS_DENIED',
+          503
+        );
+      }
+      if (response.status === 404 && resource === 'historical') {
+        throw createAccountingRateProviderError(
+          'CoinGecko historical accounting-rate data was unavailable',
+          'HISTORICAL_DATA_UNAVAILABLE',
+          503
+        );
+      }
+      throw createAccountingRateProviderError('CoinGecko accounting-rate request failed');
+    }
+
+    let data;
+    try {
+      data = await response.json();
+    } catch {
+      throw createAccountingRateProviderError(
+        'CoinGecko accounting-rate response was malformed',
+        'MALFORMED_PROVIDER_RESPONSE'
+      );
+    }
+    assertNoProviderPayloadError(data, 'accounting rate');
+    return data;
+  } catch (error) {
+    if (error?.name === 'AbortError') {
+      throw createAccountingRateProviderError(
+        'CoinGecko accounting-rate request timed out',
+        'PROVIDER_TIMEOUT',
+        504
+      );
+    }
+    if (error?.code && error?.status) throw error;
+    throw createAccountingRateProviderError('CoinGecko accounting-rate request failed');
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+/**
+ * Returns one current provider observation for exactly 1 USDT quoted in VND.
+ * This accounting-only path is intentionally separate from canonical crypto
+ * valuation snapshots, which remain quoted in USD.
+ */
+export async function getCoinGeckoCurrentUsdtVndObservation(options = {}) {
+  const url = `https://api.coingecko.com/api/v3/simple/price?ids=${COINGECKO_TETHER_ID}&vs_currencies=vnd&include_last_updated_at=true&precision=full`;
+  const data = await fetchAccountingRateJson(url, 'current', options);
+  const raw = data?.[COINGECKO_TETHER_ID];
+  const rate = raw?.vnd;
+  const timestampSeconds = raw?.last_updated_at;
+
+  if (
+    typeof rate !== 'number'
+    || !Number.isFinite(rate)
+    || rate <= 0
+    || typeof timestampSeconds !== 'number'
+    || !Number.isFinite(timestampSeconds)
+    || timestampSeconds <= 0
+  ) {
+    throw createAccountingRateProviderError(
+      'CoinGecko current USDT/VND observation was malformed',
+      'MALFORMED_PROVIDER_RESPONSE'
+    );
+  }
+
+  return {
+    rate,
+    observedAt: new Date(timestampSeconds * 1000).toISOString()
+  };
+}
+
+/**
+ * Returns actual CoinGecko Tether/VND observations inside the requested range.
+ * No interpolation, carry-forward, or current-price fallback is performed.
+ */
+export async function getCoinGeckoHistoricalUsdtVndObservations({ fromMs, toMs } = {}, options = {}) {
+  if (
+    !Number.isFinite(fromMs)
+    || !Number.isFinite(toMs)
+    || fromMs >= toMs
+  ) {
+    throw new TypeError('A valid historical accounting-rate range is required');
+  }
+
+  const from = Math.floor(fromMs / 1000);
+  const to = Math.ceil(toMs / 1000);
+  const url = `https://api.coingecko.com/api/v3/coins/${COINGECKO_TETHER_ID}/market_chart/range?vs_currency=vnd&from=${from}&to=${to}&precision=full`;
+  const data = await fetchAccountingRateJson(url, 'historical', options);
+  if (!Array.isArray(data?.prices)) {
+    throw createAccountingRateProviderError(
+      'CoinGecko historical USDT/VND response was malformed',
+      'MALFORMED_PROVIDER_RESPONSE'
+    );
+  }
+
+  return data.prices.flatMap((row) => {
+    if (!Array.isArray(row) || row.length < 2) return [];
+    const [timestampMs, rate] = row;
+    if (
+      typeof timestampMs !== 'number'
+      || !Number.isFinite(timestampMs)
+      || timestampMs <= 0
+      || typeof rate !== 'number'
+      || !Number.isFinite(rate)
+      || rate <= 0
+    ) return [];
+
+    return [{
+      rate,
+      observedAt: new Date(timestampMs).toISOString()
+    }];
+  }).sort((left, right) => Date.parse(left.observedAt) - Date.parse(right.observedAt));
 }
 
 export const coingeckoProvider = Object.freeze({

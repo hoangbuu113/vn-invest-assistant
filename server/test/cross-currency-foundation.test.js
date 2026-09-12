@@ -639,6 +639,24 @@ describe('V1.1 Improvement 07C — Cross-Currency Accounting Foundation', () => 
     }, fake);
     assert.equal(acceptedExplicit.transaction.fxProvenance, 'BINANCE_P2P_USDT_VND');
     assert.equal(acceptedExplicit.transaction.settlementCurrency, 'USDT');
+
+    // Accept a direct provider-output CoinGecko Tether/VND observation.
+    const acceptedCoinGecko = await createPortfolioTransaction({
+      assetId: USDT_ASSET_ID,
+      transactionType: 'BUY',
+      quantity: 225.86,
+      price: 0.36402 * 25325,
+      executionUnitPrice: 0.36402,
+      priceCurrency: 'USDT',
+      settlementMode: 'EXTERNAL_SETTLEMENT',
+      settlementCurrency: 'USDT',
+      fxRateToVnd: 25325,
+      fxProvenance: 'coingecko_usdt_vnd',
+      fxObservedAt: '2026-09-12T10:00:00.000Z'
+    }, fake);
+    assert.equal(acceptedCoinGecko.transaction.fxProvenance, 'COINGECKO_USDT_VND');
+    assert.equal(acceptedCoinGecko.transaction.priceCurrency, 'USDT');
+    assert.equal(acceptedCoinGecko.transaction.price, 0.36402 * 25325);
   });
 
   test('Gold XAU/USD: cross-currency accounting contract handles asset identity safely without domestic bullion confusion', async () => {

@@ -43,6 +43,7 @@ import { runMarketContextCollector } from './src/context/collector.js';
 import { getOpportunities } from './src/opportunities.js';
 import { getInvestmentBrief } from './src/investmentBrief.js';
 import { getMarketStrategist } from './src/marketStrategist.js';
+import { getAccountingRate } from './src/accountingRate.js';
 import {
   createPortfolioTransaction,
   reversePortfolioTransaction,
@@ -135,26 +136,18 @@ export function isValidFinancialNumber(val, { allowZero = false } = {}) {
   return typeof val === 'number' && Number.isFinite(val) && (allowZero ? val >= 0 : val > 0);
 }
 
-function isPlainObject(value) {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
-
 function validateFxProvenance(value, errors) {
-  if (value === undefined || value === null) return;
-  if (!isPlainObject(value)) {
-    errors.push('fxProvenance must be an object when provided');
-    return;
+  if (value === undefined || value === null) return value;
+  if (typeof value !== 'string' || !value.trim()) {
+    errors.push('fxProvenance must be a non-empty string when provided');
+    return null;
   }
-  if (typeof value.method !== 'string' || !FX_PROVENANCE_METHODS.includes(value.method.trim().toUpperCase())) {
-    errors.push(`fxProvenance.method must be one of: ${FX_PROVENANCE_METHODS.join(', ')}`);
+  const normalized = value.trim().toUpperCase();
+  if (!FX_PROVENANCE_METHODS.includes(normalized)) {
+    errors.push(`fxProvenance must be one of: ${FX_PROVENANCE_METHODS.join(', ')}`);
+    return null;
   }
-  if (
-    value.provider !== undefined
-    && value.provider !== null
-    && (typeof value.provider !== 'string' || !value.provider.trim())
-  ) {
-    errors.push('fxProvenance.provider must be a non-empty string when provided');
-  }
+  return normalized;
 }
 
 export function createApp(services = {}) {
@@ -204,6 +197,7 @@ export function createApp(services = {}) {
     getPortfolioTransactionsFn = getPortfolioTransactions,
     createPortfolioTransactionFn = createPortfolioTransaction,
     reversePortfolioTransactionFn = reversePortfolioTransaction,
+    getAccountingRateFn = getAccountingRate,
     getCashOverviewFn = getCashOverview,
     getCashLedgerFn = getCashLedger,
     createCashMovementFn = createCashMovement,
@@ -559,7 +553,7 @@ export function createApp(services = {}) {
         errors.push('fxRateToVnd must be a finite number greater than 0');
       }
 
-      validateFxProvenance(fxProvenance, errors);
+      const normalizedFxProvenance = validateFxProvenance(fxProvenance, errors);
 
       const idempotencyKey = parseIdempotencyKey(req, errors);
 
@@ -619,7 +613,7 @@ export function createApp(services = {}) {
         openingPayload.priceCurrency = priceCurrency.trim().toUpperCase();
       }
       if (fxRateToVnd !== undefined) openingPayload.fxRateToVnd = fxRateToVnd;
-      if (fxProvenance !== undefined) openingPayload.fxProvenance = fxProvenance;
+      if (fxProvenance !== undefined) openingPayload.fxProvenance = normalizedFxProvenance;
       if (normalizedFxObservedAt !== undefined) openingPayload.fxObservedAt = normalizedFxObservedAt;
       if (idempotencyKey) openingPayload.idempotencyKey = idempotencyKey;
 
@@ -684,7 +678,7 @@ export function createApp(services = {}) {
         errors.push('fxRateToVnd must be a finite number greater than 0');
       }
 
-      validateFxProvenance(fxProvenance, errors);
+      const normalizedFxProvenance = validateFxProvenance(fxProvenance, errors);
 
       let normalizedFxObservedAt;
       if (fxObservedAt !== undefined && fxObservedAt !== null) {
@@ -712,7 +706,7 @@ export function createApp(services = {}) {
         correctionPayload.priceCurrency = priceCurrency.trim().toUpperCase();
       }
       if (fxRateToVnd !== undefined) correctionPayload.fxRateToVnd = fxRateToVnd;
-      if (fxProvenance !== undefined) correctionPayload.fxProvenance = fxProvenance;
+      if (fxProvenance !== undefined) correctionPayload.fxProvenance = normalizedFxProvenance;
       if (normalizedFxObservedAt !== undefined) correctionPayload.fxObservedAt = normalizedFxObservedAt;
 
       const result = await correctOpeningPositionFn(
@@ -758,6 +752,54 @@ export function createApp(services = {}) {
       return res.status(statusCode).json({
         status: 'error',
         message: error.statusCode ? error.message : 'Failed to cancel opening position'
+      });
+    }
+  });
+
+  // Authenticated, read-only accounting authority for transaction-entry UX.
+  app.get('/api/accounting-rate', async (req, res) => {
+    try {
+      const profileId = requireProfile(req, res);
+      if (!profileId) return;
+
+      const { base, quote, at } = req.query || {};
+      const errors = [];
+      if (typeof base !== 'string' || !base.trim()) {
+        errors.push('base is required and must be a non-empty currency code');
+      }
+      if (typeof quote !== 'string' || !quote.trim()) {
+        errors.push('quote is required and must be a non-empty currency code');
+      }
+
+      let normalizedAt;
+      if (at !== undefined) {
+        normalizedAt = normalizeExplicitTimestamp(at);
+        if (!normalizedAt) {
+          errors.push('at must be a valid timestamp with an explicit Z or UTC offset');
+        }
+      }
+
+      if (errors.length > 0) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'Invalid accounting-rate request',
+          errors
+        });
+      }
+
+      const result = await getAccountingRateFn({
+        baseCurrency: base.trim().toUpperCase(),
+        quoteCurrency: quote.trim().toUpperCase(),
+        at: normalizedAt
+      });
+
+      res.set('Cache-Control', 'no-store');
+      return res.json({ status: 'ok', data: result });
+    } catch {
+      return res.status(500).json({
+        status: 'error',
+        code: 'ACCOUNTING_RATE_FAILED',
+        message: 'Failed to resolve accounting rate'
       });
     }
   });
@@ -868,7 +910,7 @@ export function createApp(services = {}) {
         errors.push('fxRateToVnd must be a finite number greater than 0');
       }
 
-      validateFxProvenance(fxProvenance, errors);
+      const normalizedFxProvenance = validateFxProvenance(fxProvenance, errors);
 
       const idempotencyKey = parseIdempotencyKey(req, errors);
 
@@ -920,7 +962,7 @@ export function createApp(services = {}) {
         transactionPayload.settlementCurrency = settlementCurrency.trim().toUpperCase();
       }
       if (fxRateToVnd !== undefined) transactionPayload.fxRateToVnd = fxRateToVnd;
-      if (fxProvenance !== undefined) transactionPayload.fxProvenance = fxProvenance;
+      if (fxProvenance !== undefined) transactionPayload.fxProvenance = normalizedFxProvenance;
       if (normalizedFxObservedAt !== undefined) transactionPayload.fxObservedAt = normalizedFxObservedAt;
       if (idempotencyKey) transactionPayload.idempotencyKey = idempotencyKey;
 

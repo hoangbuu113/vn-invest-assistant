@@ -83,3 +83,25 @@ export function validateRequiredVndAccountingPrice(value) {
       : 'Giá hạch toán VND phải là số dương lớn hơn 0.'
   };
 }
+
+export function freezeTransactionSubmissionIntent({
+  previousIntent,
+  candidatePayload,
+  idempotencyKey,
+  createIdempotencyKey
+}) {
+  const signature = JSON.stringify(candidatePayload);
+  if (previousIntent?.signature === signature) return previousIntent;
+
+  const nextKey = previousIntent
+    ? createIdempotencyKey()
+    : (idempotencyKey || createIdempotencyKey());
+  return {
+    signature,
+    idempotencyKey: nextKey,
+    payload: {
+      ...candidatePayload,
+      idempotencyKey: nextKey
+    }
+  };
+}

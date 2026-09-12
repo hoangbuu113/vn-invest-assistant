@@ -5,6 +5,7 @@ export const PRIVATE_API_PREFIXES = Object.freeze([
   '/api/holdings',
   '/api/positions',
   '/api/transactions',
+  '/api/accounting-rate',
   '/api/cash',
   '/api/news/personalized',
   '/api/opportunities',

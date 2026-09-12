@@ -7,6 +7,13 @@ function requireDatabaseClient(client) {
   return client;
 }
 
+function normalizeFxProvenanceInput(value) {
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new TypeError('fxProvenance must be a non-empty string when provided');
+  }
+  return value.trim().toUpperCase();
+}
+
 function normalizeDatabaseNumber(value, field, { nullable = false } = {}) {
   if (value === null || value === undefined) {
     if (nullable) return null;
@@ -54,8 +61,8 @@ export function normalizeOpeningPosition(row) {
       'fx rate to vnd',
       { nullable: true }
     ),
-    fxProvenance: fxProvenance && typeof fxProvenance === 'object' && !Array.isArray(fxProvenance)
-      ? { ...fxProvenance }
+    fxProvenance: typeof fxProvenance === 'string' && fxProvenance.trim()
+      ? fxProvenance.trim().toUpperCase()
       : null,
     fxObservedAt: row.fx_observed_at || row.fxObservedAt || null,
     accountingCutoffAt: row.accounting_cutoff_at || row.accountingCutoffAt,
@@ -150,7 +157,7 @@ export async function createOpeningPosition({
     rpcArgs.p_fx_rate_to_vnd = fxRateToVnd;
   }
   if (fxProvenance !== undefined && fxProvenance !== null) {
-    rpcArgs.p_fx_provenance = fxProvenance;
+    rpcArgs.p_fx_provenance = normalizeFxProvenanceInput(fxProvenance);
   }
   if (fxObservedAt !== undefined && fxObservedAt !== null) {
     rpcArgs.p_fx_observed_at = fxObservedAt;
@@ -197,7 +204,7 @@ export async function correctOpeningPosition({
     rpcArgs.p_fx_rate_to_vnd = fxRateToVnd;
   }
   if (fxProvenance !== undefined && fxProvenance !== null) {
-    rpcArgs.p_fx_provenance = fxProvenance;
+    rpcArgs.p_fx_provenance = normalizeFxProvenanceInput(fxProvenance);
   }
   if (fxObservedAt !== undefined && fxObservedAt !== null) {
     rpcArgs.p_fx_observed_at = fxObservedAt;
