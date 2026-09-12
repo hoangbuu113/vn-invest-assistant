@@ -130,8 +130,8 @@ describe('V1.1 Improvement 07E — Cross-Currency User-Facing Activation & Valua
 
     it('TransactionModal contains USDT notice avoiding USD substitution', () => {
       assert.match(txModalSrc, /USDT/);
-      assert.match(txModalSrc, /giá vốn\/giá trị quy đổi VND thực tế/);
-      assert.match(txModalSrc, /không tự động quy đổi USDT=USD/);
+      assert.match(txModalSrc, /không quy đổi USDT thành USD/);
+      assert.match(txModalSrc, /không thay đổi giá giao dịch \{priceCurrency\} ở trên/);
     });
 
     it('OpeningPositionModal preserves cash neutrality notice for opening positions', () => {

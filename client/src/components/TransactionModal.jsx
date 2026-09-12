@@ -2,6 +2,12 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { apiFetch } from '../utils/api.js';
 import { formatAssetType } from '../utils/formatting.js';
 import { isPortfolioTradeableAsset } from '../utils/assetCapabilities.js';
+import {
+  formatNativeTransactionTotal,
+  getTransactionEntryDefaults,
+  isSimplifiedCryptoExternalEntry,
+  validateRequiredVndAccountingPrice
+} from '../utils/transactionEntryDisplay.js';
 
 function getClientUUID() {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -45,6 +51,120 @@ function translateErrorMessage(msg) {
   return msg;
 }
 
+function TransactionSettlementControls({
+  compact,
+  settlementMode,
+  setSettlementMode,
+  settlementCurrency,
+  setSettlementCurrency,
+  loading
+}) {
+  const options = [
+    {
+      value: 'EXTERNAL_SETTLEMENT',
+      title: 'Giao dịch qua ví / sàn / tài khoản bên ngoài',
+      description: 'Không thay đổi số dư tiền mặt VND đang theo dõi trong ứng dụng.'
+    },
+    {
+      value: 'INTERNAL_VND_CASH',
+      title: 'Thanh toán từ tiền mặt VND đang theo dõi',
+      description: 'Mua sẽ trừ tiền mặt VND, Bán sẽ cộng thêm vào tiền mặt VND.'
+    }
+  ];
+
+  const controls = (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+      {options.map((option) => (
+        <label
+          key={option.value}
+          style={{
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: '8px',
+            padding: '0.65rem 0.85rem',
+            border: `1px solid ${settlementMode === option.value ? 'var(--color-brand-600, #2563eb)' : 'var(--color-slate-200, #e2e8f0)'}`,
+            borderRadius: '10px',
+            backgroundColor: settlementMode === option.value ? 'rgba(37, 99, 235, 0.04)' : '#ffffff',
+            cursor: 'pointer'
+          }}
+        >
+          <input
+            type="radio"
+            name="settlementMode"
+            value={option.value}
+            checked={settlementMode === option.value}
+            onChange={() => setSettlementMode(option.value)}
+            disabled={loading}
+            style={{ marginTop: '2px' }}
+          />
+          <div>
+            <div style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--color-slate-900)' }}>
+              {option.title}
+            </div>
+            <div style={{ fontSize: '0.75rem', color: 'var(--color-slate-500)', marginTop: '2px' }}>
+              {option.description}
+            </div>
+          </div>
+        </label>
+      ))}
+
+      {settlementMode === 'EXTERNAL_SETTLEMENT' && (
+        <div style={{ marginTop: '0.25rem' }}>
+          <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 600, color: 'var(--color-slate-600)', marginBottom: '0.25rem' }}>
+            Đồng tiền thanh toán thực tế (không bắt buộc)
+          </label>
+          <input
+            type="text"
+            placeholder="Ví dụ: USDT, USD, VND..."
+            value={settlementCurrency}
+            onChange={(event) => setSettlementCurrency(event.target.value)}
+            disabled={loading}
+            style={{
+              width: '100%',
+              padding: '0.5rem 0.75rem',
+              fontSize: '0.85rem',
+              border: '1px solid var(--border-default, #cbd5e1)',
+              borderRadius: '8px',
+              outline: 'none',
+              backgroundColor: '#ffffff'
+            }}
+          />
+        </div>
+      )}
+    </div>
+  );
+
+  if (compact) {
+    return (
+      <details
+        style={{
+          marginBottom: '1.25rem',
+          border: '1px solid var(--color-slate-200, #e2e8f0)',
+          borderRadius: '10px',
+          backgroundColor: '#ffffff'
+        }}
+      >
+        <summary style={{ padding: '0.7rem 0.85rem', cursor: 'pointer', fontSize: '0.8rem', color: 'var(--color-slate-600)' }}>
+          Thanh toán: <strong style={{ color: 'var(--color-slate-800)' }}>Ví / sàn bên ngoài</strong>
+          <span style={{ float: 'right', color: 'var(--color-brand-600, #2563eb)', fontWeight: 600 }}>Thay đổi</span>
+        </summary>
+        <div style={{ padding: '0 0.85rem 0.85rem' }}>
+          {controls}
+        </div>
+      </details>
+    );
+  }
+
+  return (
+    <div style={{ marginBottom: '1.25rem' }}>
+      <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 700, color: 'var(--color-slate-700)', marginBottom: '0.4rem' }}>
+        Cách thanh toán <span style={{ color: 'var(--color-loss-600)' }}>*</span>
+      </label>
+      {controls}
+    </div>
+  );
+}
+
 export default function TransactionModal({
   isOpen,
   onClose,
@@ -69,6 +189,8 @@ export default function TransactionModal({
   const [currentUsdVndRate, setCurrentUsdVndRate] = useState(null);
   const [fxObservedAt, setFxObservedAt] = useState(null);
   const [isFxPrefillConfirmed, setIsFxPrefillConfirmed] = useState(false);
+  const [isAdvancedAccountingOpen, setIsAdvancedAccountingOpen] = useState(false);
+  const [accountingPriceError, setAccountingPriceError] = useState(null);
 
   const [isCustomTime, setIsCustomTime] = useState(false);
   const [customDateTime, setCustomDateTime] = useState('');
@@ -76,6 +198,7 @@ export default function TransactionModal({
   const [errorMsg, setErrorMsg] = useState(null);
   const [successMsg, setSuccessMsg] = useState(null);
   const idempotencyKeyRef = useRef(null);
+  const priceInputRef = useRef(null);
 
   // Initialize or reset form on open
   useEffect(() => {
@@ -87,6 +210,10 @@ export default function TransactionModal({
       const initialSymbol = typeof defaultAsset === 'string'
         ? defaultAsset
         : defaultAsset?.symbol || (initialType === 'SELL' && holdings.length > 0 ? (holdings[0].symbol || holdings[0].asset?.symbol || '') : '');
+      const initialAsset = (assets || []).find((asset) => (
+        (asset.symbol || '').toUpperCase() === initialSymbol.toUpperCase()
+      ));
+      const initialDefaults = getTransactionEntryDefaults(initialAsset);
 
       setSelectedSymbol(initialSymbol);
       setAssetSearchQuery('');
@@ -94,8 +221,12 @@ export default function TransactionModal({
       setQuantityInput('');
       setPriceInput('');
       setExecutionUnitPrice('');
+      setPriceCurrency(initialDefaults.priceCurrency);
+      setSettlementMode(initialDefaults.settlementMode);
       setSettlementCurrency('');
       setIsFxPrefillConfirmed(false);
+      setIsAdvancedAccountingOpen(false);
+      setAccountingPriceError(null);
       setIsCustomTime(false);
       setCustomDateTime('');
       setErrorMsg(null);
@@ -161,24 +292,29 @@ export default function TransactionModal({
     ? (selectedAssetObject.quote_currency === 'VND' || selectedAssetObject.quoteCurrency === 'VND') && !isCrypto && !isGold
     : true;
   const isNonVnd = !isVndAsset;
+  const isSimplifiedCryptoExternal = isSimplifiedCryptoExternalEntry(
+    selectedAssetObject,
+    settlementMode
+  );
+  const nativeTransactionTotalLabel = formatNativeTransactionTotal(
+    quantityInput,
+    executionUnitPrice,
+    priceCurrency
+  );
 
   // Set currency and settlement defaults when selected asset changes
   useEffect(() => {
     if (!selectedAssetObject) return;
-
-    if (isCrypto) {
-      setPriceCurrency('USDT');
-      setSettlementMode('EXTERNAL_SETTLEMENT');
-    } else if (isGold) {
-      setPriceCurrency('USD');
-      setSettlementMode('EXTERNAL_SETTLEMENT');
-    } else {
-      setPriceCurrency('VND');
-      setSettlementMode('INTERNAL_VND_CASH');
-    }
+    const defaults = getTransactionEntryDefaults(selectedAssetObject);
+    setPriceCurrency(defaults.priceCurrency);
+    setSettlementMode(defaults.settlementMode);
+    setPriceInput('');
     setExecutionUnitPrice('');
+    setSettlementCurrency('');
     setIsFxPrefillConfirmed(false);
-  }, [selectedAssetObject, isCrypto, isGold]);
+    setIsAdvancedAccountingOpen(false);
+    setAccountingPriceError(null);
+  }, [selectedAssetObject]);
 
   // Fetch USD/VND rate for verified prefill path when relevant
   useEffect(() => {
@@ -247,12 +383,20 @@ export default function TransactionModal({
     setErrorMsg(null);
   };
 
+  const revealAccountingPriceError = (message) => {
+    setIsAdvancedAccountingOpen(true);
+    setAccountingPriceError(message);
+    setErrorMsg(message);
+    setTimeout(() => priceInputRef.current?.focus(), 0);
+  };
+
   const handleSubmit = async (e) => {
     e?.preventDefault();
     if (loading) return;
 
     setErrorMsg(null);
     setSuccessMsg(null);
+    setAccountingPriceError(null);
 
     // Strict client validations
     if (!selectedSymbol || !selectedSymbol.trim()) {
@@ -271,7 +415,28 @@ export default function TransactionModal({
       return;
     }
 
+    let numExecUnitPrice = null;
+    const rawExecutionPrice = executionUnitPrice.trim();
+    if (isSimplifiedCryptoExternal && !rawExecutionPrice) {
+      setErrorMsg(`Vui lòng nhập giá thực hiện (${priceCurrency}).`);
+      return;
+    }
+    if (isNonVnd && rawExecutionPrice) {
+      numExecUnitPrice = parseFloat(rawExecutionPrice);
+      if (!Number.isFinite(numExecUnitPrice) || numExecUnitPrice <= 0) {
+        setErrorMsg(`Giá thực hiện (${priceCurrency}) phải là số dương lớn hơn 0.`);
+        return;
+      }
+    }
+
     const rawPrice = priceInput.trim();
+    if (isSimplifiedCryptoExternal) {
+      const accountingValidation = validateRequiredVndAccountingPrice(rawPrice);
+      if (!accountingValidation.valid) {
+        revealAccountingPriceError(accountingValidation.message);
+        return;
+      }
+    }
     if (!rawPrice) {
       setErrorMsg(isNonVnd ? 'Vui lòng nhập giá vốn / giá trị quy đổi VND.' : 'Vui lòng nhập giá giao dịch.');
       return;
@@ -280,15 +445,6 @@ export default function TransactionModal({
     if (!Number.isFinite(numPrice) || numPrice <= 0) {
       setErrorMsg('Giá vốn quy đổi VND phải là số dương lớn hơn 0.');
       return;
-    }
-
-    let numExecUnitPrice = null;
-    if (isNonVnd && executionUnitPrice.trim()) {
-      numExecUnitPrice = parseFloat(executionUnitPrice.trim());
-      if (!Number.isFinite(numExecUnitPrice) || numExecUnitPrice <= 0) {
-        setErrorMsg(`Giá thực hiện (${priceCurrency}) phải là số dương lớn hơn 0.`);
-        return;
-      }
     }
 
     // Build payload ensuring numeric JSON values and approved cross-currency contract
@@ -818,19 +974,20 @@ export default function TransactionModal({
                 }}
               >
                 <div style={{ fontSize: '0.82rem', fontWeight: 800, color: 'var(--color-slate-800)', marginBottom: '0.75rem' }}>
-                  Thông tin giá thực hiện ngoại tệ
+                  {isSimplifiedCryptoExternal ? 'Giá giao dịch' : 'Thông tin giá thực hiện ngoại tệ'}
                 </div>
 
                 <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '10px', marginBottom: '0.75rem' }}>
                   <div>
                     <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 700, color: 'var(--color-slate-600)', marginBottom: '0.35rem' }}>
-                      Giá thực hiện ({priceCurrency})
+                      {isSimplifiedCryptoExternal ? 'Giá thực hiện' : `Giá thực hiện (${priceCurrency})`}
+                      {isSimplifiedCryptoExternal && <span style={{ color: 'var(--color-loss-600)' }}> *</span>}
                     </label>
                     <input
                       type="number"
                       step="any"
                       min="0.00000001"
-                      placeholder={`Ví dụ: ${isGold ? '2650' : '95000'}`}
+                      placeholder={`Ví dụ: ${isGold ? '2650' : (isCrypto ? '0.36402' : '95000')}`}
                       value={executionUnitPrice}
                       onChange={(e) => {
                         setExecutionUnitPrice(e.target.value);
@@ -851,7 +1008,7 @@ export default function TransactionModal({
 
                   <div>
                     <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 700, color: 'var(--color-slate-600)', marginBottom: '0.35rem' }}>
-                      Đồng tiền giá
+                      {isSimplifiedCryptoExternal ? 'Đồng giá' : 'Đồng tiền giá'}
                     </label>
                     <select
                       value={priceCurrency}
@@ -885,10 +1042,34 @@ export default function TransactionModal({
                   </div>
                 </div>
 
+                {isSimplifiedCryptoExternal && (
+                  <div
+                    data-testid="crypto-native-total"
+                    style={{
+                      padding: '0.65rem 0.75rem',
+                      backgroundColor: 'rgba(37, 99, 235, 0.06)',
+                      borderRadius: '8px',
+                      border: '1px solid rgba(37, 99, 235, 0.14)',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      gap: '10px',
+                      marginBottom: '0.65rem'
+                    }}
+                  >
+                    <span style={{ fontSize: '0.8rem', color: 'var(--color-slate-600)' }}>
+                      Tổng giá trị giao dịch
+                    </span>
+                    <strong style={{ fontSize: '0.92rem', color: 'var(--color-brand-700, #1d4ed8)' }}>
+                      {nativeTransactionTotalLabel}
+                    </strong>
+                  </div>
+                )}
+
                 {/* USDT Explanation */}
                 {priceCurrency === 'USDT' && (
                   <div style={{ fontSize: '0.75rem', color: 'var(--color-slate-500)', lineHeight: 1.4, marginBottom: '0.5rem' }}>
-                    ℹ️ Giao dịch bằng USDT cần nhập giá vốn/giá trị quy đổi VND thực tế bên dưới để tính toán danh mục chính xác (hệ thống không tự động quy đổi USDT=USD).
+                    ℹ️ Giá và tổng giao dịch giữ nguyên USDT. Ứng dụng không quy đổi USDT thành USD hoặc tự suy ra giá trị VND.
                   </div>
                 )}
 
@@ -933,139 +1114,129 @@ export default function TransactionModal({
               </div>
             )}
 
-            {/* Authoritative VND Accounting Price */}
-            <div style={{ marginBottom: '1.25rem' }}>
-              <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 700, color: 'var(--color-slate-700)', marginBottom: '0.4rem' }}>
-                {isNonVnd ? 'Giá vốn / Giá trị quy đổi VND (₫/đơn vị)' : 'Giá giao dịch (₫)'} <span style={{ color: 'var(--color-loss-600)' }}>*</span>
-              </label>
-              <input
-                type="number"
-                step="any"
-                min="1"
-                placeholder={isGold ? 'Ví dụ: 68000000' : 'Ví dụ: 120000'}
-                value={priceInput}
-                onChange={(e) => {
-                  setPriceInput(e.target.value);
-                  setIsFxPrefillConfirmed(false);
-                }}
-                disabled={loading}
+            {/* Required VND accounting price: advanced only for the simplified external crypto flow */}
+            {isSimplifiedCryptoExternal ? (
+              <details
+                open={isAdvancedAccountingOpen}
+                onToggle={(event) => setIsAdvancedAccountingOpen(event.currentTarget.open)}
                 style={{
-                  width: '100%',
-                  padding: '0.65rem 0.85rem',
-                  fontSize: '0.92rem',
-                  border: '1px solid var(--border-default, #cbd5e1)',
+                  marginBottom: '1.25rem',
+                  border: accountingPriceError
+                    ? '1px solid var(--color-loss-300, #fca5a5)'
+                    : '1px solid var(--color-slate-200, #e2e8f0)',
                   borderRadius: '10px',
-                  outline: 'none',
-                  backgroundColor: 'var(--color-surface, #ffffff)',
-                  color: 'var(--color-slate-900)'
+                  backgroundColor: 'var(--color-slate-50, #f8fafc)',
+                  overflow: 'hidden'
                 }}
-              />
-              <div style={{ fontSize: '0.75rem', color: 'var(--color-slate-500)', marginTop: '4px' }}>
-                {isNonVnd
-                  ? 'Đây là giá trị VND đơn vị làm căn cứ xác định giá vốn, lãi/lỗ và giá trị danh mục.'
-                  : 'Giá tiền đồng cho mỗi đơn vị tài sản.'}
-              </div>
-            </div>
-
-            {/* Non-VND Settlement Options */}
-            {isNonVnd && (
+              >
+                <summary
+                  style={{
+                    padding: '0.7rem 0.85rem',
+                    cursor: 'pointer',
+                    fontSize: '0.82rem',
+                    fontWeight: 700,
+                    color: accountingPriceError
+                      ? 'var(--color-loss-700, #b91c1c)'
+                      : 'var(--color-slate-700)'
+                  }}
+                >
+                  Thông tin hạch toán nâng cao
+                </summary>
+                <div style={{ padding: '0 0.85rem 0.85rem' }}>
+                  <label
+                    htmlFor="transaction-vnd-accounting-price"
+                    style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: 'var(--color-slate-700)', marginBottom: '0.4rem' }}
+                  >
+                    Giá hạch toán VND (₫/đơn vị) <span style={{ color: 'var(--color-loss-600)' }}>*</span>
+                  </label>
+                  <input
+                    ref={priceInputRef}
+                    id="transaction-vnd-accounting-price"
+                    type="number"
+                    step="any"
+                    min="1"
+                    placeholder="Ví dụ: 9500"
+                    value={priceInput}
+                    onChange={(event) => {
+                      setPriceInput(event.target.value);
+                      setIsFxPrefillConfirmed(false);
+                      setAccountingPriceError(null);
+                    }}
+                    aria-invalid={Boolean(accountingPriceError)}
+                    disabled={loading}
+                    style={{
+                      width: '100%',
+                      padding: '0.65rem 0.85rem',
+                      fontSize: '0.92rem',
+                      border: accountingPriceError
+                        ? '1px solid var(--color-loss-500, #ef4444)'
+                        : '1px solid var(--border-default, #cbd5e1)',
+                      borderRadius: '10px',
+                      outline: 'none',
+                      backgroundColor: 'var(--color-surface, #ffffff)',
+                      color: 'var(--color-slate-900)'
+                    }}
+                  />
+                  <div style={{ fontSize: '0.75rem', color: 'var(--color-slate-500)', marginTop: '5px', lineHeight: 1.45 }}>
+                    Ứng dụng hiện cần giá trị VND để tính giá vốn, lãi/lỗ và lịch sử danh mục.
+                    {' '}Thông tin này không thay đổi giá giao dịch {priceCurrency} ở trên.
+                  </div>
+                  {accountingPriceError && (
+                    <div style={{ fontSize: '0.75rem', color: 'var(--color-loss-700, #b91c1c)', marginTop: '5px', fontWeight: 600 }}>
+                      {accountingPriceError}
+                    </div>
+                  )}
+                </div>
+              </details>
+            ) : (
               <div style={{ marginBottom: '1.25rem' }}>
                 <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 700, color: 'var(--color-slate-700)', marginBottom: '0.4rem' }}>
-                  Cách thanh toán <span style={{ color: 'var(--color-loss-600)' }}>*</span>
+                  {isNonVnd ? 'Giá vốn / Giá trị quy đổi VND (₫/đơn vị)' : 'Giá giao dịch (₫)'} <span style={{ color: 'var(--color-loss-600)' }}>*</span>
                 </label>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  <label
-                    style={{
-                      display: 'flex',
-                      alignItems: 'flex-start',
-                      gap: '8px',
-                      padding: '0.65rem 0.85rem',
-                      border: `1px solid ${settlementMode === 'EXTERNAL_SETTLEMENT' ? 'var(--color-brand-600, #2563eb)' : 'var(--color-slate-200, #e2e8f0)'}`,
-                      borderRadius: '10px',
-                      backgroundColor: settlementMode === 'EXTERNAL_SETTLEMENT' ? 'rgba(37, 99, 235, 0.04)' : '#ffffff',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    <input
-                      type="radio"
-                      name="settlementMode"
-                      value="EXTERNAL_SETTLEMENT"
-                      checked={settlementMode === 'EXTERNAL_SETTLEMENT'}
-                      onChange={() => setSettlementMode('EXTERNAL_SETTLEMENT')}
-                      disabled={loading}
-                      style={{ marginTop: '2px' }}
-                    />
-                    <div>
-                      <div style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--color-slate-900)' }}>
-                        Giao dịch qua ví / sàn / tài khoản bên ngoài
-                      </div>
-                      <div style={{ fontSize: '0.75rem', color: 'var(--color-slate-500)', marginTop: '2px' }}>
-                        Không thay đổi số dư tiền mặt VND đang theo dõi trong ứng dụng.
-                      </div>
-                    </div>
-                  </label>
-
-                  <label
-                    style={{
-                      display: 'flex',
-                      alignItems: 'flex-start',
-                      gap: '8px',
-                      padding: '0.65rem 0.85rem',
-                      border: `1px solid ${settlementMode === 'INTERNAL_VND_CASH' ? 'var(--color-brand-600, #2563eb)' : 'var(--color-slate-200, #e2e8f0)'}`,
-                      borderRadius: '10px',
-                      backgroundColor: settlementMode === 'INTERNAL_VND_CASH' ? 'rgba(37, 99, 235, 0.04)' : '#ffffff',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    <input
-                      type="radio"
-                      name="settlementMode"
-                      value="INTERNAL_VND_CASH"
-                      checked={settlementMode === 'INTERNAL_VND_CASH'}
-                      onChange={() => setSettlementMode('INTERNAL_VND_CASH')}
-                      disabled={loading}
-                      style={{ marginTop: '2px' }}
-                    />
-                    <div>
-                      <div style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--color-slate-900)' }}>
-                        Thanh toán từ tiền mặt VND đang theo dõi
-                      </div>
-                      <div style={{ fontSize: '0.75rem', color: 'var(--color-slate-500)', marginTop: '2px' }}>
-                        Mua sẽ trừ tiền mặt VND, Bán sẽ cộng thêm vào tiền mặt VND.
-                      </div>
-                    </div>
-                  </label>
+                <input
+                  type="number"
+                  step="any"
+                  min="1"
+                  placeholder={isGold ? 'Ví dụ: 68000000' : 'Ví dụ: 120000'}
+                  value={priceInput}
+                  onChange={(event) => {
+                    setPriceInput(event.target.value);
+                    setIsFxPrefillConfirmed(false);
+                  }}
+                  disabled={loading}
+                  style={{
+                    width: '100%',
+                    padding: '0.65rem 0.85rem',
+                    fontSize: '0.92rem',
+                    border: '1px solid var(--border-default, #cbd5e1)',
+                    borderRadius: '10px',
+                    outline: 'none',
+                    backgroundColor: 'var(--color-surface, #ffffff)',
+                    color: 'var(--color-slate-900)'
+                  }}
+                />
+                <div style={{ fontSize: '0.75rem', color: 'var(--color-slate-500)', marginTop: '4px' }}>
+                  {isNonVnd
+                    ? 'Đây là giá trị VND đơn vị làm căn cứ xác định giá vốn, lãi/lỗ và giá trị danh mục.'
+                    : 'Giá tiền đồng cho mỗi đơn vị tài sản.'}
                 </div>
-
-                {/* Optional Settlement Currency for External */}
-                {settlementMode === 'EXTERNAL_SETTLEMENT' && (
-                  <div style={{ marginTop: '0.75rem' }}>
-                    <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 600, color: 'var(--color-slate-600)', marginBottom: '0.25rem' }}>
-                      Đồng tiền thanh toán thực tế (không bắt buộc)
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="Ví dụ: USDT, USD, VND..."
-                      value={settlementCurrency}
-                      onChange={(e) => setSettlementCurrency(e.target.value)}
-                      disabled={loading}
-                      style={{
-                        width: '100%',
-                        padding: '0.5rem 0.75rem',
-                        fontSize: '0.85rem',
-                        border: '1px solid var(--border-default, #cbd5e1)',
-                        borderRadius: '8px',
-                        outline: 'none',
-                        backgroundColor: '#ffffff'
-                      }}
-                    />
-                  </div>
-                )}
               </div>
             )}
 
+            {/* Non-VND Settlement Options */}
+            {isNonVnd && (
+              <TransactionSettlementControls
+                compact={isSimplifiedCryptoExternal}
+                settlementMode={settlementMode}
+                setSettlementMode={setSettlementMode}
+                settlementCurrency={settlementCurrency}
+                setSettlementCurrency={setSettlementCurrency}
+                loading={loading}
+              />
+            )}
+
             {/* Total Estimated Value Preview */}
-            {Number(quantityInput) > 0 && Number(priceInput) > 0 && (
+            {!isSimplifiedCryptoExternal && Number(quantityInput) > 0 && Number(priceInput) > 0 && (
               <div
                 style={{
                   padding: '0.65rem 0.85rem',
