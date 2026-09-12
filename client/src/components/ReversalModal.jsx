@@ -45,6 +45,69 @@ function translateReversalError(msg) {
   return msg;
 }
 
+export function getStableTargetKey(isOpen, target) {
+  if (!isOpen || !target) return null;
+  const type = target.type || null;
+  const id = target.item?.id || null;
+  return (type && id) ? `${type}:${id}` : null;
+}
+
+export function createReversalIdempotencyManager({ getUuid = getClientUUID } = {}) {
+  let activeTargetKey = null;
+  let idempotencyKey = null;
+  let isSubmitting = false;
+  let isSuccess = false;
+
+  return {
+    sync(isOpen, target) {
+      const stableKey = getStableTargetKey(isOpen, target);
+      if (isOpen && stableKey) {
+        if (activeTargetKey !== stableKey) {
+          activeTargetKey = stableKey;
+          idempotencyKey = getUuid();
+          isSubmitting = false;
+          isSuccess = false;
+          return { isNewIntent: true, idempotencyKey };
+        }
+        return { isNewIntent: false, idempotencyKey };
+      }
+      activeTargetKey = null;
+      idempotencyKey = null;
+      isSubmitting = false;
+      isSuccess = false;
+      return { isNewIntent: false, idempotencyKey: null };
+    },
+    getIdempotencyKey() {
+      return idempotencyKey;
+    },
+    canSubmit() {
+      return !isSubmitting && !isSuccess;
+    },
+    beginSubmit() {
+      if (isSubmitting || isSuccess) return false;
+      isSubmitting = true;
+      if (!idempotencyKey) {
+        idempotencyKey = getUuid();
+      }
+      return true;
+    },
+    handleFailure() {
+      isSubmitting = false;
+      // Invariant: idempotencyKey is strictly preserved across failures for safe replay
+    },
+    handleSuccess() {
+      isSubmitting = false;
+      isSuccess = true;
+    },
+    isSubmitting() {
+      return isSubmitting;
+    },
+    isSuccess() {
+      return isSuccess;
+    }
+  };
+}
+
 export default function ReversalModal({
   isOpen,
   onClose,
@@ -55,17 +118,24 @@ export default function ReversalModal({
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState(null);
   const [successMsg, setSuccessMsg] = useState(null);
-  const idempotencyKeyRef = useRef(null);
+
+  const managerRef = useRef(null);
+  if (!managerRef.current) {
+    managerRef.current = createReversalIdempotencyManager();
+  }
+  const manager = managerRef.current;
+
+  const stableTargetKey = getStableTargetKey(isOpen, target);
 
   useEffect(() => {
-    if (isOpen) {
-      idempotencyKeyRef.current = getClientUUID();
+    const { isNewIntent } = manager.sync(isOpen, target);
+    if (isNewIntent) {
       setReason('');
       setErrorMsg(null);
       setSuccessMsg(null);
       setLoading(false);
     }
-  }, [isOpen, target]);
+  }, [isOpen, stableTargetKey]);
 
   if (!isOpen || !target) return null;
 
@@ -74,7 +144,7 @@ export default function ReversalModal({
 
   const handleSubmit = async (e) => {
     e?.preventDefault();
-    if (loading) return;
+    if (!manager.canSubmit() || loading) return;
 
     setErrorMsg(null);
     setSuccessMsg(null);
@@ -85,13 +155,14 @@ export default function ReversalModal({
       return;
     }
 
+    if (!manager.beginSubmit()) return;
     setLoading(true);
 
     const endpoint = isTransaction
       ? `/api/transactions/${item.id}/reversal`
       : `/api/cash/ledger/${item.id}/reversal`;
 
-    const idempotencyKey = idempotencyKeyRef.current || (idempotencyKeyRef.current = getClientUUID());
+    const idempotencyKey = manager.getIdempotencyKey();
 
     try {
       const res = await apiFetch(endpoint, {
@@ -111,6 +182,8 @@ export default function ReversalModal({
         throw new Error(data.message || `Mã lỗi: ${res.status}`);
       }
 
+      manager.handleSuccess();
+
       const resData = await res.json().catch(() => ({}));
       const isReplayed = res.headers.get('Idempotent-Replayed') === 'true' || resData?.data?.replayed;
 
@@ -125,9 +198,10 @@ export default function ReversalModal({
         onClose();
       }, 1200);
     } catch (err) {
+      manager.handleFailure();
       setErrorMsg(translateReversalError(err.message));
-      // Refresh idempotency key on failure so user can retry safely
-      idempotencyKeyRef.current = getClientUUID();
+      // Invariant: Do NOT rotate idempotencyKey on failure.
+      // Retries after network disconnect or timeout must send the same key to trigger server replay.
     } finally {
       setLoading(false);
     }
@@ -151,7 +225,7 @@ export default function ReversalModal({
         padding: '1rem'
       }}
       onClick={(e) => {
-        if (e.target === e.currentTarget && !loading) onClose();
+        if (e.target === e.currentTarget && !loading && !manager.isSubmitting()) onClose();
       }}
     >
       <div
@@ -178,12 +252,12 @@ export default function ReversalModal({
           <button
             type="button"
             onClick={onClose}
-            disabled={loading}
+            disabled={loading || manager.isSubmitting()}
             style={{
               background: 'transparent',
               border: 'none',
               fontSize: '1.25rem',
-              cursor: loading ? 'not-allowed' : 'pointer',
+              cursor: (loading || manager.isSubmitting()) ? 'not-allowed' : 'pointer',
               color: 'var(--color-slate-400)'
             }}
           >
@@ -252,7 +326,7 @@ export default function ReversalModal({
               value={reason}
               onChange={(e) => setReason(e.target.value)}
               placeholder="Ví dụ: Nhập nhầm giá, lệnh trùng lặp, ngân hàng hủy giao dịch..."
-              disabled={loading}
+              disabled={loading || manager.isSubmitting() || manager.isSuccess()}
               style={{
                 width: '100%',
                 padding: '0.65rem 0.85rem',
@@ -305,7 +379,7 @@ export default function ReversalModal({
             <button
               type="button"
               onClick={onClose}
-              disabled={loading}
+              disabled={loading || manager.isSubmitting()}
               className="fintech-btn btn-secondary btn-sm"
               style={{ padding: '0.5rem 1rem' }}
             >
@@ -313,7 +387,7 @@ export default function ReversalModal({
             </button>
             <button
               type="submit"
-              disabled={loading || !reason.trim()}
+              disabled={loading || manager.isSubmitting() || manager.isSuccess() || !reason.trim()}
               className="fintech-btn btn-danger btn-sm"
               style={{
                 padding: '0.5rem 1.25rem',
@@ -322,11 +396,11 @@ export default function ReversalModal({
                 border: 'none',
                 borderRadius: '8px',
                 fontWeight: 700,
-                cursor: loading || !reason.trim() ? 'not-allowed' : 'pointer',
-                opacity: loading || !reason.trim() ? 0.6 : 1
+                cursor: (loading || manager.isSubmitting() || manager.isSuccess() || !reason.trim()) ? 'not-allowed' : 'pointer',
+                opacity: (loading || manager.isSubmitting() || manager.isSuccess() || !reason.trim()) ? 0.6 : 1
               }}
             >
-              {loading ? 'Đang xử lý...' : 'Xác nhận hoàn tác'}
+              {loading || manager.isSubmitting() ? 'Đang xử lý...' : 'Xác nhận hoàn tác'}
             </button>
           </div>
         </form>
