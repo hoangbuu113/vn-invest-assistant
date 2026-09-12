@@ -1129,7 +1129,7 @@ export function createApp(services = {}) {
       }
 
       const payload = {
-        cashLedgerEntryId: id.trim(),
+        cashEntryId: id.trim(),
         reason: reason.trim()
       };
       if (idempotencyKey) {

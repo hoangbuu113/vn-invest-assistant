@@ -858,28 +858,53 @@ describe('Portfolio P1B — Express HTTP Routes Integration', () => {
     }
   });
 
-  test('POST /api/cash/ledger/:id/reversal maps errors and handles Idempotent-Replayed header', async () => {
+  test('POST /api/cash/ledger/:id/reversal forwards cashEntryId and preserves reversal idempotency semantics', async () => {
     let capturedPayload = null;
+    const idempotencyRecords = new Map();
+    const reversedCashEntryIds = new Set();
     const app = createApp({
       getProfileByUserIdFn: async () => ({ id: PROFILE_ID }),
       reverseCashMovementFn: async (payload) => {
         capturedPayload = payload;
-        if (payload.idempotencyKey === 'trade-cash-err-key') {
-          const err = new Error('trade cash movements cannot be reversed directly');
-          err.code = 'RC003';
-          err.statusCode = 400;
+
+        if (!payload.cashEntryId) {
+          const err = new Error('cashEntryId is required');
+          err.statusCode = 500;
           throw err;
         }
-        if (payload.idempotencyKey === 'replayed-cash-key') {
+
+        const requestHash = JSON.stringify({
+          cashEntryId: payload.cashEntryId,
+          reason: payload.reason
+        });
+        const existing = idempotencyRecords.get(payload.idempotencyKey);
+        if (existing) {
+          if (existing.requestHash !== requestHash) {
+            const err = new Error('idempotency key reused with different parameters');
+            err.code = 'IC001';
+            err.statusCode = 409;
+            throw err;
+          }
           return {
-            reversalCashEntry: { id: 'rev-cash-1' },
+            ...existing.result,
             replayed: true
           };
         }
-        return {
+
+        if (reversedCashEntryIds.has(payload.cashEntryId)) {
+          const err = new Error('cash ledger entry has already been reversed');
+          err.code = 'RC001';
+          err.statusCode = 409;
+          throw err;
+        }
+
+        const result = {
           reversalCashEntry: { id: 'rev-cash-1' },
           replayed: false
         };
+        reversedCashEntryIds.add(payload.cashEntryId);
+        idempotencyRecords.set(payload.idempotencyKey, { requestHash, result });
+        return result;
       }
     });
 
@@ -899,35 +924,49 @@ describe('Portfolio P1B — Express HTTP Routes Integration', () => {
       });
       assert.equal(res1.status, 201);
       assert.equal(res1.headers.get('Idempotent-Replayed'), null);
-      assert.equal(capturedPayload.cashLedgerEntryId, 'cash-123');
+      assert.equal(capturedPayload.cashEntryId, 'cash-123');
 
-      // 2. Replay cash reversal
+      // 2. Same request/key is replayed.
       const res2 = await ownerFetch(`${baseUrl}/api/cash/ledger/cash-123/reversal`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Idempotency-Key': 'replayed-cash-key'
+          'Idempotency-Key': 'fresh-cash-rev-01'
         },
         body: JSON.stringify({ reason: 'Wrong bank deposit entry' })
       });
       assert.equal(res2.status, 200);
       assert.equal(res2.headers.get('Idempotent-Replayed'), 'true');
+      const body2 = await res2.json();
+      assert.equal(body2.data.replayed, true);
 
-      // 3. Trade cash reversal direct attempt -> 400 RC003
+      // 3. Reusing the key with a changed payload conflicts before reversal checks.
       const res3 = await ownerFetch(`${baseUrl}/api/cash/ledger/cash-123/reversal`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Idempotency-Key': 'trade-cash-err-key'
+          'Idempotency-Key': 'fresh-cash-rev-01'
         },
-        body: JSON.stringify({ reason: 'Trade cash direct attempt' })
+        body: JSON.stringify({ reason: 'Changed reversal reason' })
       });
-      assert.equal(res3.status, 400);
+      assert.equal(res3.status, 409);
       const body3 = await res3.json();
-      assert.equal(body3.code, 'RC003');
+      assert.equal(body3.code, 'IC001');
+
+      // 4. A new key cannot create a second reversal.
+      const res4 = await ownerFetch(`${baseUrl}/api/cash/ledger/cash-123/reversal`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'second-cash-rev-01'
+        },
+        body: JSON.stringify({ reason: 'Wrong bank deposit entry' })
+      });
+      assert.equal(res4.status, 409);
+      const body4 = await res4.json();
+      assert.equal(body4.code, 'RC001');
     } finally {
       await new Promise((resolve) => server.close(resolve));
     }
   });
 });
-
