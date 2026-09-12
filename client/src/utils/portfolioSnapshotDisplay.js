@@ -1,3 +1,5 @@
+import { formatNativeAmount, formatVNDReporting } from './formatting.js';
+
 export const PORTFOLIO_DISPLAY_STATES = Object.freeze({
   AVAILABLE: 'AVAILABLE',
   PARTIAL: 'PARTIAL',
@@ -350,6 +352,60 @@ function assetUnitLabel(quantityUnit, assetType, symbol) {
   return '';
 }
 
+function normalizedCurrency(value) {
+  return typeof value === 'string' && value.trim()
+    ? value.trim().toUpperCase()
+    : null;
+}
+
+export function buildPortfolioTransactionDisplay(transaction = {}) {
+  const quantity = finiteNumber(transaction?.quantity) ? transaction.quantity : null;
+  const executionUnitPrice = finiteNumber(transaction?.executionUnitPrice)
+    && transaction.executionUnitPrice > 0
+    ? transaction.executionUnitPrice
+    : null;
+  const executionCurrency = normalizedCurrency(transaction?.priceCurrency);
+  const hasNativeExecutionPrice = executionUnitPrice !== null && executionCurrency !== null;
+  const accountingUnitPriceVnd = finiteNumber(transaction?.price) && transaction.price > 0
+    ? transaction.price
+    : null;
+  const executionTotal = hasNativeExecutionPrice && quantity !== null
+    ? quantity * executionUnitPrice
+    : null;
+  const accountingTotalVnd = accountingUnitPriceVnd !== null && quantity !== null
+    ? quantity * accountingUnitPriceVnd
+    : null;
+  const showAccountingBasis = accountingUnitPriceVnd !== null && (
+    !hasNativeExecutionPrice
+    || executionCurrency !== 'VND'
+    || executionUnitPrice !== accountingUnitPriceVnd
+  );
+
+  return {
+    quantity,
+    quantityLabel: formatQuantityNumber(quantity),
+    hasNativeExecutionPrice,
+    executionUnitPrice: hasNativeExecutionPrice ? executionUnitPrice : null,
+    executionCurrency: hasNativeExecutionPrice ? executionCurrency : null,
+    executionPriceLabel: hasNativeExecutionPrice
+      ? formatNativeAmount(executionUnitPrice, executionCurrency)
+      : '—',
+    executionTotal,
+    executionTotalLabel: executionTotal !== null
+      ? formatNativeAmount(executionTotal, executionCurrency)
+      : '—',
+    accountingUnitPriceVnd,
+    accountingUnitPriceLabel: accountingUnitPriceVnd !== null
+      ? formatVNDReporting(accountingUnitPriceVnd)
+      : '—',
+    accountingTotalVnd,
+    accountingTotalLabel: accountingTotalVnd !== null
+      ? formatVNDReporting(accountingTotalVnd)
+      : '—',
+    showAccountingBasis
+  };
+}
+
 export function buildPortfolioRecentActivity({ transactions = [], holdings = [], cashLedger = [] } = {}) {
   const events = [];
 
@@ -371,20 +427,14 @@ export function buildPortfolioRecentActivity({ transactions = [], holdings = [],
       else if (isSellReversal) action = 'Hoàn tác Bán';
 
       const effectiveAt = t.executedAt || t.createdAt || null;
-      const quantityStr = formatQuantityNumber(t.quantity);
+      const transactionDisplay = buildPortfolioTransactionDisplay(t);
+      const quantityStr = transactionDisplay.quantityLabel;
       const unit = assetUnitLabel(t.quantityUnit, t.assetType, symbol);
 
-      let priceStr = null;
-      if (t.priceCurrency && t.priceCurrency !== 'VND' && finiteNumber(t.executionUnitPrice)) {
-        priceStr = `${formatQuantityNumber(t.executionUnitPrice)} ${t.priceCurrency}`;
-      } else if (finiteNumber(t.price)) {
-        priceStr = `${Number(t.price).toLocaleString('vi-VN')} ₫`;
-      }
-
       let detail = `${quantityStr}${unit ? ` ${unit}` : ''}`;
-      if (priceStr) {
-        detail += ` · ${priceStr}`;
-      }
+      detail += transactionDisplay.hasNativeExecutionPrice
+        ? ` · ${transactionDisplay.executionPriceLabel}`
+        : ' · Giá thực hiện: —';
 
       const isReversedStatus = t.isReversed ? ' (Đã hoàn tác)' : '';
 

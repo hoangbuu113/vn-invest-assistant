@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { MagneticButton } from './MotionHelpers.jsx';
 import ReversalModal from './ReversalModal.jsx';
+import { buildPortfolioTransactionDisplay } from '../utils/portfolioSnapshotDisplay.js';
 
 const ASSET_TYPE_LABELS = {
   stock: 'Cổ phiếu',
@@ -322,9 +323,9 @@ export default function TransactionHistorySection({
               <tr>
                 <th>Mã & Tài sản</th>
                 <th style={{ textAlign: 'center' }}>Loại GD</th>
-                <th style={{ textAlign: 'right' }}>Khối lượng & Giá</th>
-                <th style={{ textAlign: 'right' }}>Tổng giá trị</th>
-                <th style={{ textAlign: 'right' }}>Lãi/lỗ đã thực hiện</th>
+                <th style={{ textAlign: 'right' }}>Khối lượng & Giá thực hiện</th>
+                <th style={{ textAlign: 'right' }}>Tổng thực hiện</th>
+                <th style={{ textAlign: 'right' }}>Lãi/lỗ đã thực hiện (VND)</th>
                 <th style={{ textAlign: 'right' }}>Thời gian</th>
                 <th style={{ textAlign: 'center' }}>Thao tác</th>
               </tr>
@@ -337,10 +338,7 @@ export default function TransactionHistorySection({
                 const isSellReversal = tx.transactionType === 'SELL_REVERSAL';
                 const isReversalEvent = isBuyReversal || isSellReversal || Boolean(tx.isReversal);
                 const isReversed = Boolean(tx.isReversed);
-
-                const totalValue = typeof tx.quantity === 'number' && typeof tx.price === 'number'
-                  ? tx.quantity * tx.price
-                  : null;
+                const transactionDisplay = buildPortfolioTransactionDisplay(tx);
 
                 const hasRealizedPnL = !isBuy && !isBuyReversal && typeof tx.realizedPnL === 'number';
                 const isGain = hasRealizedPnL && tx.realizedPnL > 0;
@@ -413,16 +411,28 @@ export default function TransactionHistorySection({
                     {/* 3. Quantity & Price */}
                     <td style={{ textAlign: 'right' }}>
                       <div style={{ fontWeight: 700, color: 'var(--color-slate-900)' }}>
-                        {Number(tx.quantity).toLocaleString('vi-VN')} đơn vị
+                        {transactionDisplay.quantityLabel} đơn vị
                       </div>
                       <div style={{ fontSize: '0.78rem', color: 'var(--color-slate-500)', marginTop: '2px' }}>
-                        × {Number(tx.price).toLocaleString('vi-VN')} ₫
+                        Giá thực hiện: {transactionDisplay.executionPriceLabel}
                       </div>
+                      {transactionDisplay.showAccountingBasis && (
+                        <div style={{ fontSize: '0.72rem', color: 'var(--color-slate-400)', marginTop: '1px' }}>
+                          Hạch toán: {transactionDisplay.accountingUnitPriceLabel} / đơn vị
+                        </div>
+                      )}
                     </td>
 
-                    {/* 4. Total Value */}
-                    <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--color-slate-800)' }}>
-                      {formatVND(totalValue)}
+                    {/* 4. Native execution total, with separately labelled VND accounting total when needed */}
+                    <td style={{ textAlign: 'right', color: 'var(--color-slate-800)' }}>
+                      <div style={{ fontWeight: 700 }}>
+                        {transactionDisplay.executionTotalLabel}
+                      </div>
+                      {transactionDisplay.showAccountingBasis && (
+                        <div style={{ fontSize: '0.72rem', color: 'var(--color-slate-400)', marginTop: '1px' }}>
+                          Hạch toán: {transactionDisplay.accountingTotalLabel}
+                        </div>
+                      )}
                     </td>
 
                     {/* 5. Realized P/L for SELL / SELL_REVERSAL */}
@@ -505,4 +515,3 @@ export default function TransactionHistorySection({
     </motion.div>
   );
 }
-

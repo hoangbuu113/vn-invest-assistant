@@ -519,3 +519,13 @@ $$\text{Source Adapter} \longrightarrow \text{Canonical Validation / Sanitizatio
   - **Cash Balance Sufficiency (`CL001`)**: Reversing a SELL or a DEPOSIT requires sufficient available cash to fund the outflow; negative cash balances remain forbidden.
 - **Transactional Advisory Locking**: RPCs acquire `pg_advisory_xact_lock` using profile ID and original record ID to serialize concurrent reversal attempts against the same record.
 - **Performance & Time-Weighted Return (TWR) Integration**: Reversal events carry the exact economic timestamp (`executed_at` / `effective_at`) of the reversal action. Reversal rows adjust the cash balance, position quantities, and realized P/L atomically, allowing reconstruction engines to correctly compute historical accounting states.
+
+---
+
+## 18. Portfolio P1C: Multi-Asset Activity Display
+
+- **Scope Boundary**: P1C changes only Activity and transaction-history presentation/normalization. It does not change database fields, API contracts, portfolio accounting, settlement, FX, or reversal behavior.
+- **Native Execution Authority**: `executionUnitPrice` and `priceCurrency` are one canonical pair. They are the only authority for displaying execution unit price and native execution total for VND, USD, and USDT; USDT is never treated as USD.
+- **VND Accounting Basis**: `price` remains the authoritative VND accounting unit price. For non-VND transactions, its unit value and total may be shown only as a separately labelled VND accounting basis, never substituted for native execution price.
+- **Unavailable Metadata**: Missing or invalid native execution metadata renders as unavailable. The UI must not invent zero, VND, FX, or a historical native value.
+- **Reversal and Cash Events**: `BUY_REVERSAL` and `SELL_REVERSAL` render the native pair copied from the original transaction. Manual cash movements are signed VND ledger amounts and are not transaction execution prices.
