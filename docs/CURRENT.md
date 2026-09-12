@@ -10,6 +10,7 @@
 ## Current Phase
 Portfolio V1 P0.7 Cleanup & Final Stabilization is implemented locally. Superseded Feature 10 CSS (~411 lines) and dead imports are safely removed; single snapshot authority drives Summary, Holdings, and Allocation; historical Performance and benchmarks remain separated; cash-only and mobile responsive UX verified; all regression tests from P0.1–P0.6 pass cleanly.
 Portfolio P1A Idempotent Financial Writes is implemented and verified locally. Mutation endpoints (BUY/SELL transactions, cash deposits, cash withdrawals, opening position baselines) enforce strict idempotency via dedicated storage `public.portfolio_idempotency_records`, transactional advisory locking, parameter hash validation (`IC001` on conflict), and transparent replay returning cached response payloads with `Idempotent-Replayed: true` (HTTP 200). Frontend modals generate, attach, and rotate idempotency keys. All 1515 backend tests and client Vite production build pass cleanly.
+Portfolio P1B Auditable Correction / Reversal is implemented and verified locally. Financial records remain strictly immutable: corrections create explicit compensating entries (`BUY_REVERSAL`, `SELL_REVERSAL`, and offsetting `DEPOSIT`/`WITHDRAWAL` cash entries) and are logged in `public.portfolio_reversals`. Atomic RPCs `reverse_portfolio_transaction` and `reverse_cash_movement` enforce strict audit reasons, profile ownership, double-reversal prevention (`RC001`), LIFO chronological dependency checks (`RC002`), trade-linked cash isolation (`RC003`), and reversal immutability (`RC004`). All 1536 backend tests and client Vite production build pass cleanly.
 
 ## Portfolio — Verified Working Today
 - Supabase Auth user identity resolves through `investor_profile.user_id` to private `investor_profile.id`; protected Express routes pass that profile ID to service-role data access and profile-scoped financial RPCs.
@@ -99,7 +100,6 @@ Portfolio P1A Idempotent Financial Writes is implemented and verified locally. M
 - Transaction entry supports cross-currency execution metadata, but transaction-history rendering presents the VND accounting price as though it were the only execution price/currency.
 
 ## Portfolio — Missing
-- Idempotency keys for financial writes and auditable transaction correction/reversal flows.
 - Governed fee, tax, dividend/income, adjustment, and asset-transfer ledger events.
 - Daily P/L and unified total/accounting P/L in the overview API.
 - Historical FX authority for non-VND portfolio performance.

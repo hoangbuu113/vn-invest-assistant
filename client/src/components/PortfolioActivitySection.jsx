@@ -17,6 +17,9 @@ function eventBadgeClass(type) {
       return 'is-buy';
     case 'SELL':
       return 'is-sell';
+    case 'BUY_REVERSAL':
+    case 'SELL_REVERSAL':
+      return 'is-neutral';
     case 'OPENING_POSITION':
       return 'is-opening';
     case 'DEPOSIT':

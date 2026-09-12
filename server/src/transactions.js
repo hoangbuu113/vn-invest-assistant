@@ -125,7 +125,10 @@ export function normalizeTransaction(row) {
     fxProvenance: normalizedFxProvenance,
     fxObservedAt: row.fx_observed_at || row.fxObservedAt || null,
     executedAt: row.executed_at || row.executedAt,
-    createdAt: row.created_at || row.createdAt
+    createdAt: row.created_at || row.createdAt,
+    reversalOfId: row.reversal_of_id || row.reversalOfId || null,
+    isReversal: row.is_reversal === true || row.isReversal === true,
+    isReversed: row.is_reversed === true || row.isReversed === true
   };
 }
 
@@ -146,10 +149,12 @@ function normalizeHoldingState(row) {
 function transactionDatabaseError(error, fallbackMessage) {
   const err = new Error(error?.message || fallbackMessage);
   err.code = error?.code;
-  if (['PT001', 'PT002', 'PT003', 'PT004', 'PT005', 'PE001', 'CL001', 'CL004', 'IK001'].includes(error?.code)) {
+  if (['PT002', 'PT003', 'PT004', 'PT005', 'PE001', 'CL001', 'CL004', 'IK001', 'RC002', 'RC003', 'RC004'].includes(error?.code)) {
     err.statusCode = 400;
-  } else if (['IC001'].includes(error?.code)) {
+  } else if (['IC001', 'RC001'].includes(error?.code)) {
     err.statusCode = 409;
+  } else if (['PT001'].includes(error?.code)) {
+    err.statusCode = 404;
   }
   return err;
 }
@@ -250,6 +255,55 @@ export async function createPortfolioTransaction({
 
   return {
     transaction: normalizeTransaction(data.transaction),
+    holding: normalizeHoldingState(data.holding),
+    holdingRemoved: data.holdingRemoved === true,
+    cashEntry: normalizeCashLedgerEntry(data.cashEntry),
+    currentCash: normalizeDatabaseNumber(data.currentCash, 'current cash', { nonNegative: true }),
+    replayed: data.replayed === true
+  };
+}
+
+export async function reversePortfolioTransaction({
+  transactionId,
+  reason,
+  idempotencyKey
+} = {}, client = privateSupabase, options = {}) {
+  const db = requireDatabaseClient(client);
+  const targetProfileId = options?.profileId || null;
+  const effectiveIdempotencyKey = options?.idempotencyKey || idempotencyKey || null;
+
+  const rpcArgs = {
+    p_transaction_id: transactionId,
+    p_reason: reason
+  };
+  if (targetProfileId) {
+    rpcArgs.p_profile_id = targetProfileId;
+  }
+  if (effectiveIdempotencyKey) {
+    rpcArgs.p_idempotency_key = effectiveIdempotencyKey;
+  }
+
+  const { data, error } = await db.rpc('reverse_portfolio_transaction', rpcArgs);
+
+  if (error) {
+    throw transactionDatabaseError(error, 'Failed to reverse portfolio transaction');
+  }
+
+  if (!data || typeof data !== 'object' || !data.reversal) {
+    throw new Error('Database returned malformed portfolio transaction reversal result');
+  }
+
+  return {
+    reversal: {
+      id: data.reversal.id,
+      profileId: data.reversal.profileId,
+      originalEventType: data.reversal.originalEventType,
+      originalEventId: data.reversal.originalEventId,
+      reason: data.reversal.reason,
+      effectiveAt: data.reversal.effectiveAt,
+      createdAt: data.reversal.createdAt
+    },
+    reversalTransaction: normalizeTransaction(data.reversalTransaction),
     holding: normalizeHoldingState(data.holding),
     holdingRemoved: data.holdingRemoved === true,
     cashEntry: normalizeCashLedgerEntry(data.cashEntry),

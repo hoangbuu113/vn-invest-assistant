@@ -170,7 +170,7 @@ Portfolio V1 remains a supporting personal tracking capability inside the broade
 
 ### P1 — Accounting Detail and Reconciliation
 - **COMPLETE (P1A)**: Idempotent financial writes across BUY, SELL, cash deposit, cash withdrawal, and opening position baseline creation. Governed by dedicated `public.portfolio_idempotency_records` table, advisory xact locks, request hashing (`IC001` on mismatch), and replay semantics (`replayed: true` + `Idempotent-Replayed: true` header).
-- Auditable correction/reversal semantics (P1B).
+- **COMPLETE (P1B)**: Auditable correction/reversal semantics across BUY, SELL, cash deposit, and cash withdrawal. Immutable append-only model via compensating rows (`BUY_REVERSAL`, `SELL_REVERSAL`, offsetting `DEPOSIT`/`WITHDRAWAL`), dedicated audit log `public.portfolio_reversals`, double-reversal prevention (`RC001`), chronological/LIFO dependency checks (`RC002`), trade-linked cash isolation (`RC003`), reversal immutability (`RC004`), and cash balance protection (`CL001`). UI integration with `ReversalModal` in Transaction History and Cash Management.
 - Realized/unrealized P/L decomposition by asset and period.
 - Explicit income/dividend and fee/tax detail after governed ledger event types exist.
 - Richer transaction history with idempotent writes and auditable correction/reversal semantics.

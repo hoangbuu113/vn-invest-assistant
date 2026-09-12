@@ -45,6 +45,7 @@ import { getInvestmentBrief } from './src/investmentBrief.js';
 import { getMarketStrategist } from './src/marketStrategist.js';
 import {
   createPortfolioTransaction,
+  reversePortfolioTransaction,
   FX_PROVENANCE_METHODS,
   getPortfolioTransactions,
   normalizeExplicitTimestamp,
@@ -56,6 +57,7 @@ import {
   CASH_LEDGER_METHODOLOGY,
   CASH_MOVEMENT_TYPES,
   createCashMovement,
+  reverseCashMovement,
   getCashLedger,
   getCashOverview
 } from './src/cash.js';
@@ -201,9 +203,11 @@ export function createApp(services = {}) {
     evaluateAndPersistAlertsFn = evaluateAndPersistAlerts,
     getPortfolioTransactionsFn = getPortfolioTransactions,
     createPortfolioTransactionFn = createPortfolioTransaction,
+    reversePortfolioTransactionFn = reversePortfolioTransaction,
     getCashOverviewFn = getCashOverview,
     getCashLedgerFn = getCashLedger,
     createCashMovementFn = createCashMovement,
+    reverseCashMovementFn = reverseCashMovement,
     createOpeningPositionFn = createOpeningPosition,
     correctOpeningPositionFn = correctOpeningPosition,
     cancelOpeningPositionFn = cancelOpeningPosition,
@@ -940,6 +944,69 @@ export function createApp(services = {}) {
       });
     }
   });
+  app.post('/api/transactions/:id/reversal', async (req, res) => {
+    try {
+      const profileId = requireProfile(req, res);
+      if (!profileId) return;
+
+      const { id } = req.params;
+      if (!id || typeof id !== 'string' || !id.trim()) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'Transaction ID is required'
+        });
+      }
+
+      const body = req.body || {};
+      const { reason } = body;
+      const errors = [];
+
+      if (!reason || typeof reason !== 'string' || !reason.trim()) {
+        errors.push('reason is required and must be a non-empty string');
+      }
+
+      const idempotencyKey = parseIdempotencyKey(req, errors);
+
+      if (errors.length > 0) {
+        return res.status(400).json({
+          status: 'error',
+          message: errors[0],
+          errors
+        });
+      }
+
+      const payload = {
+        transactionId: id.trim(),
+        reason: reason.trim()
+      };
+      if (idempotencyKey) {
+        payload.idempotencyKey = idempotencyKey;
+      }
+
+      const result = await reversePortfolioTransactionFn(
+        payload,
+        transactionClient,
+        getProfileOptions(req, profileId)
+      );
+
+      if (result.replayed) {
+        res.set('Idempotent-Replayed', 'true');
+      }
+
+      return res.status(result.replayed ? 200 : 201).json({
+        status: 'ok',
+        data: result
+      });
+    } catch (error) {
+      const statusCode = error.statusCode || 500;
+      return res.status(statusCode).json({
+        status: 'error',
+        code: error.code,
+        message: error.statusCode ? error.message : 'Failed to reverse portfolio transaction'
+      });
+    }
+  });
+
 
   // Feature 15 immutable cash/capital ledger. All mutations are delegated to
   // PostgreSQL RPCs that update the compatibility cash cache atomically.
@@ -1030,6 +1097,69 @@ export function createApp(services = {}) {
   app.post('/api/cash/withdraw', (req, res) => (
     handleCashMovement(req, res, CASH_MOVEMENT_TYPES[1])
   ));
+  app.post('/api/cash/ledger/:id/reversal', async (req, res) => {
+    try {
+      const profileId = requireProfile(req, res);
+      if (!profileId) return;
+
+      const { id } = req.params;
+      if (!id || typeof id !== 'string' || !id.trim()) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'Cash ledger entry ID is required'
+        });
+      }
+
+      const body = req.body || {};
+      const { reason } = body;
+      const errors = [];
+
+      if (!reason || typeof reason !== 'string' || !reason.trim()) {
+        errors.push('reason is required and must be a non-empty string');
+      }
+
+      const idempotencyKey = parseIdempotencyKey(req, errors);
+
+      if (errors.length > 0) {
+        return res.status(400).json({
+          status: 'error',
+          message: errors[0],
+          errors
+        });
+      }
+
+      const payload = {
+        cashLedgerEntryId: id.trim(),
+        reason: reason.trim()
+      };
+      if (idempotencyKey) {
+        payload.idempotencyKey = idempotencyKey;
+      }
+
+      const result = await reverseCashMovementFn(
+        payload,
+        cashClient,
+        getProfileOptions(req, profileId)
+      );
+
+      if (result.replayed) {
+        res.set('Idempotent-Replayed', 'true');
+      }
+
+      return res.status(result.replayed ? 200 : 201).json({
+        status: 'ok',
+        data: result
+      });
+    } catch (error) {
+      const statusCode = error.statusCode || 500;
+      return res.status(statusCode).json({
+        status: 'error',
+        code: error.code,
+        message: error.statusCode ? error.message : 'Failed to reverse cash ledger entry'
+      });
+    }
+  });
+
 
   // Assets list endpoint
   app.get('/api/assets', async (req, res) => {

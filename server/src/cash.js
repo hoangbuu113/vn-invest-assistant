@@ -35,10 +35,12 @@ function normalizeDatabaseNumber(value, field) {
 function cashDatabaseError(error, fallbackMessage) {
   const err = new Error(error?.message || fallbackMessage);
   err.code = error?.code;
-  if (['CL001', 'CL002', 'IK001'].includes(error?.code)) {
+  if (['CL001', 'CL002', 'IK001', 'RC003', 'RC004'].includes(error?.code)) {
     err.statusCode = 400;
-  } else if (['IC001'].includes(error?.code)) {
+  } else if (['IC001', 'RC001'].includes(error?.code)) {
     err.statusCode = 409;
+  } else if (['CL004'].includes(error?.code)) {
+    err.statusCode = 404;
   }
   return err;
 }
@@ -56,6 +58,9 @@ export function normalizeCashLedgerEntry(row) {
     transactionExecutedAt: row.transaction_executed_at || null,
     effectiveAt: row.effective_at,
     createdAt: row.created_at,
+    reversalOfId: row.reversal_of_id || row.reversalOfId || null,
+    isReversal: row.is_reversal === true || row.isReversal === true,
+    isReversed: row.is_reversed === true || row.isReversed === true,
     metadata: row.metadata && typeof row.metadata === 'object' ? row.metadata : {}
   };
 }
@@ -167,6 +172,52 @@ export async function createCashMovement({ profileId: payloadProfileId, entryTyp
 
   return {
     entry: normalizeCashLedgerEntry(data.entry),
+    currentCash: normalizeDatabaseNumber(data.currentCash, 'current cash'),
+    replayed: data.replayed === true
+  };
+}
+
+export async function reverseCashMovement({
+  cashEntryId,
+  reason,
+  idempotencyKey
+} = {}, client = privateSupabase, options = {}) {
+  const db = requireDatabaseClient(client);
+  const targetProfileId = options?.profileId || null;
+  const effectiveIdempotencyKey = options?.idempotencyKey || idempotencyKey || null;
+
+  const rpcArgs = {
+    p_cash_entry_id: cashEntryId,
+    p_reason: reason
+  };
+  if (targetProfileId) {
+    rpcArgs.p_profile_id = targetProfileId;
+  }
+  if (effectiveIdempotencyKey) {
+    rpcArgs.p_idempotency_key = effectiveIdempotencyKey;
+  }
+
+  const { data, error } = await db.rpc('reverse_cash_movement', rpcArgs);
+
+  if (error) {
+    throw cashDatabaseError(error, 'Failed to reverse cash movement');
+  }
+
+  if (!data || typeof data !== 'object' || !data.reversal) {
+    throw new Error('Database returned malformed cash movement reversal result');
+  }
+
+  return {
+    reversal: {
+      id: data.reversal.id,
+      profileId: data.reversal.profileId,
+      originalEventType: data.reversal.originalEventType,
+      originalEventId: data.reversal.originalEventId,
+      reason: data.reversal.reason,
+      effectiveAt: data.reversal.effectiveAt,
+      createdAt: data.reversal.createdAt
+    },
+    reversalCashEntry: normalizeCashLedgerEntry(data.reversalCashEntry),
     currentCash: normalizeDatabaseNumber(data.currentCash, 'current cash'),
     replayed: data.replayed === true
   };

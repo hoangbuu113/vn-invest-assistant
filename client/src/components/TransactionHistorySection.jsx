@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { MagneticButton } from './MotionHelpers.jsx';
+import ReversalModal from './ReversalModal.jsx';
 
 const ASSET_TYPE_LABELS = {
   stock: 'Cổ phiếu',
@@ -53,21 +54,25 @@ export default function TransactionHistorySection({
   onRetry,
   onRefresh
 }) {
-  const [filterType, setFilterType] = useState('ALL'); // 'ALL' | 'BUY' | 'SELL'
+  const [reversalTarget, setReversalTarget] = useState(null);
+  const [filterType, setFilterType] = useState('ALL'); // 'ALL' | 'BUY' | 'SELL' | 'REVERSAL'
 
   const counts = useMemo(() => {
     let buy = 0;
     let sell = 0;
+    let reversal = 0;
     if (Array.isArray(transactions)) {
       for (const t of transactions) {
         if (t.transactionType === 'BUY') buy++;
         else if (t.transactionType === 'SELL') sell++;
+        else if (t.transactionType === 'BUY_REVERSAL' || t.transactionType === 'SELL_REVERSAL' || t.isReversal) reversal++;
       }
     }
     return {
       all: transactions.length,
       buy,
-      sell
+      sell,
+      reversal
     };
   }, [transactions]);
 
@@ -75,6 +80,11 @@ export default function TransactionHistorySection({
     if (!Array.isArray(transactions)) return [];
     if (filterType === 'BUY') return transactions.filter((t) => t.transactionType === 'BUY');
     if (filterType === 'SELL') return transactions.filter((t) => t.transactionType === 'SELL');
+    if (filterType === 'REVERSAL') {
+      return transactions.filter(
+        (t) => t.transactionType === 'BUY_REVERSAL' || t.transactionType === 'SELL_REVERSAL' || t.isReversal
+      );
+    }
     return transactions;
   }, [transactions, filterType]);
 
@@ -107,7 +117,7 @@ export default function TransactionHistorySection({
             )}
           </div>
           <p style={{ margin: '3px 0 0 0', fontSize: '0.8rem', color: 'var(--color-slate-500)' }}>
-            Lịch sử giao dịch đã ghi nhận không thể chỉnh sửa trong phiên bản hiện tại.
+            Lịch sử giao dịch được bảo lưu bất biến. Các thao tác điều chỉnh được ghi nhận dưới dạng bút toán hoàn tác đối ứng.
           </p>
         </div>
 
@@ -203,6 +213,26 @@ export default function TransactionHistorySection({
           >
             Bán ({counts.sell})
           </button>
+          {counts.reversal > 0 && (
+            <button
+              type="button"
+              onClick={() => setFilterType('REVERSAL')}
+              style={{
+                padding: '0.35rem 0.75rem',
+                borderRadius: '8px',
+                border: 'none',
+                fontSize: '0.82rem',
+                fontWeight: filterType === 'REVERSAL' ? 800 : 600,
+                cursor: 'pointer',
+                backgroundColor: filterType === 'REVERSAL' ? 'var(--color-surface, #ffffff)' : 'transparent',
+                color: filterType === 'REVERSAL' ? 'var(--color-slate-900)' : 'var(--color-slate-500)',
+                boxShadow: filterType === 'REVERSAL' ? '0 1px 3px rgba(0,0,0,0.06)' : 'none',
+                transition: 'all 0.15s ease'
+              }}
+            >
+              Hoàn tác ({counts.reversal})
+            </button>
+          )}
         </div>
       )}
 
@@ -271,7 +301,7 @@ export default function TransactionHistorySection({
         <div className="state-box" style={{ border: 'none', boxShadow: 'none', padding: '2rem 1.5rem' }}>
           <div className="state-icon">🔍</div>
           <h3 className="state-title" style={{ fontSize: '0.95rem' }}>
-            Không có giao dịch {filterType === 'BUY' ? 'mua' : 'bán'} nào được ghi nhận.
+            Không có giao dịch {filterType === 'BUY' ? 'mua' : filterType === 'SELL' ? 'bán' : 'hoàn tác'} nào được ghi nhận.
           </h3>
           <button
             type="button"
@@ -296,28 +326,65 @@ export default function TransactionHistorySection({
                 <th style={{ textAlign: 'right' }}>Tổng giá trị</th>
                 <th style={{ textAlign: 'right' }}>Lãi/lỗ đã thực hiện</th>
                 <th style={{ textAlign: 'right' }}>Thời gian</th>
+                <th style={{ textAlign: 'center' }}>Thao tác</th>
               </tr>
             </thead>
             <tbody>
               {filteredTransactions.map((tx) => {
                 const isBuy = tx.transactionType === 'BUY';
+                const isSell = tx.transactionType === 'SELL';
+                const isBuyReversal = tx.transactionType === 'BUY_REVERSAL';
+                const isSellReversal = tx.transactionType === 'SELL_REVERSAL';
+                const isReversalEvent = isBuyReversal || isSellReversal || Boolean(tx.isReversal);
+                const isReversed = Boolean(tx.isReversed);
+
                 const totalValue = typeof tx.quantity === 'number' && typeof tx.price === 'number'
                   ? tx.quantity * tx.price
                   : null;
 
-                const hasRealizedPnL = !isBuy && typeof tx.realizedPnL === 'number';
+                const hasRealizedPnL = !isBuy && !isBuyReversal && typeof tx.realizedPnL === 'number';
                 const isGain = hasRealizedPnL && tx.realizedPnL > 0;
                 const isLoss = hasRealizedPnL && tx.realizedPnL < 0;
 
+                let badgeClass = 'badge-neutral';
+                let typeIcon = '📄';
+                let typeText = tx.transactionType;
+
+                if (isBuy) {
+                  badgeClass = 'badge-gain';
+                  typeIcon = '📥';
+                  typeText = 'Mua';
+                } else if (isSell) {
+                  badgeClass = 'badge-loss';
+                  typeIcon = '📤';
+                  typeText = 'Bán';
+                } else if (isBuyReversal) {
+                  badgeClass = 'badge-neutral';
+                  typeIcon = '↩';
+                  typeText = 'Hoàn tác Mua';
+                } else if (isSellReversal) {
+                  badgeClass = 'badge-neutral';
+                  typeIcon = '↩';
+                  typeText = 'Hoàn tác Bán';
+                }
+
                 return (
-                  <tr key={tx.id || `${tx.symbol}-${tx.executedAt}-${tx.quantity}`}>
+                  <tr
+                    key={tx.id || `${tx.symbol}-${tx.executedAt}-${tx.quantity}`}
+                    style={isReversed ? { opacity: 0.72, backgroundColor: 'var(--color-slate-50, #f8fafc)' } : undefined}
+                  >
                     {/* 1. Symbol & Asset Name */}
                     <td>
                       <div style={{ fontWeight: 800, color: 'var(--color-slate-900)', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <span>{tx.symbol || 'N/A'}</span>
+                        <span style={isReversed ? { textDecoration: 'line-through' } : undefined}>{tx.symbol || 'N/A'}</span>
                         {tx.assetType && (
                           <span className="fintech-badge badge-neutral" style={{ fontSize: '0.7rem' }}>
                             {formatAssetType(tx.assetType)}
+                          </span>
+                        )}
+                        {isReversed && (
+                          <span className="fintech-badge badge-neutral" style={{ fontSize: '0.68rem', color: 'var(--color-slate-500)' }}>
+                            Đã hoàn tác
                           </span>
                         )}
                       </div>
@@ -329,7 +396,7 @@ export default function TransactionHistorySection({
                     {/* 2. Transaction Type */}
                     <td style={{ textAlign: 'center' }}>
                       <span
-                        className={`fintech-badge ${isBuy ? 'badge-gain' : 'badge-loss'}`}
+                        className={`fintech-badge ${badgeClass}`}
                         style={{
                           fontWeight: 700,
                           padding: '3px 8px',
@@ -338,8 +405,8 @@ export default function TransactionHistorySection({
                           gap: '4px'
                         }}
                       >
-                        <span>{isBuy ? '📥' : '📤'}</span>
-                        <span>{isBuy ? 'Mua' : 'Bán'}</span>
+                        <span>{typeIcon}</span>
+                        <span>{typeText}</span>
                       </span>
                     </td>
 
@@ -358,9 +425,9 @@ export default function TransactionHistorySection({
                       {formatVND(totalValue)}
                     </td>
 
-                    {/* 5. Realized P/L for SELL */}
+                    {/* 5. Realized P/L for SELL / SELL_REVERSAL */}
                     <td style={{ textAlign: 'right' }}>
-                      {isBuy ? (
+                      {(isBuy || isBuyReversal) ? (
                         <span style={{ color: 'var(--color-slate-400)' }}>—</span>
                       ) : hasRealizedPnL ? (
                         <div>
@@ -373,7 +440,7 @@ export default function TransactionHistorySection({
                             {isGain ? '+' : ''}{formatVND(tx.realizedPnL)}
                           </div>
                           <div style={{ fontSize: '0.72rem', color: 'var(--color-slate-400)', marginTop: '1px' }}>
-                            Đã thực hiện
+                            {isSellReversal ? 'Bù trừ lãi/lỗ' : 'Đã thực hiện'}
                           </div>
                         </div>
                       ) : (
@@ -385,6 +452,39 @@ export default function TransactionHistorySection({
                     <td style={{ textAlign: 'right', fontSize: '0.82rem', color: 'var(--color-slate-600)' }}>
                       {formatTransactionTime(tx.executedAt || tx.createdAt)}
                     </td>
+
+                    {/* 7. Action */}
+                    <td style={{ textAlign: 'center' }}>
+                      {isReversalEvent ? (
+                        <span className="fintech-badge badge-neutral" style={{ fontSize: '0.72rem' }}>
+                          Bù trừ
+                        </span>
+                      ) : isReversed ? (
+                        <span className="fintech-badge badge-neutral" style={{ fontSize: '0.72rem', color: 'var(--color-slate-400)' }}>
+                          Đã hoàn tác
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setReversalTarget({
+                            type: 'TRANSACTION',
+                            item: tx,
+                            title: `Hoàn tác giao dịch ${isBuy ? 'Mua' : 'Bán'}`,
+                            subtitle: `${tx.symbol || 'Tài sản'} · ${Number(tx.quantity).toLocaleString('vi-VN')} đơn vị`
+                          })}
+                          className="fintech-btn btn-secondary btn-sm"
+                          style={{
+                            padding: '3px 8px',
+                            fontSize: '0.75rem',
+                            color: 'var(--color-loss-600, #dc2626)',
+                            borderColor: 'rgba(220, 38, 38, 0.25)'
+                          }}
+                          title="Hoàn tác giao dịch này (tạo bản ghi đối ứng bù trừ)"
+                        >
+                          Hoàn tác
+                        </button>
+                      )}
+                    </td>
                   </tr>
                 );
               })}
@@ -392,6 +492,16 @@ export default function TransactionHistorySection({
           </table>
         </div>
       )}
+
+      {/* Reversal Confirmation Modal */}
+      <ReversalModal
+        isOpen={Boolean(reversalTarget)}
+        onClose={() => setReversalTarget(null)}
+        target={reversalTarget}
+        onSuccess={() => {
+          if (onRefresh) onRefresh();
+        }}
+      />
     </motion.div>
   );
 }

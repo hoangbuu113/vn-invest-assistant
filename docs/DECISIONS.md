@@ -1,4 +1,4 @@
-﻿# Confirmed Product & Architectural Decisions
+# Confirmed Product & Architectural Decisions
 
 The following architectural and product decisions are confirmed and authoritative across the project:
 
@@ -493,3 +493,29 @@ $$\text{Source Adapter} \longrightarrow \text{Canonical Validation / Sanitizatio
 - **Replay Semantics**: Replaying identical requests returns cached response payload with `replayed: true` and HTTP response header `Idempotent-Replayed: true` (HTTP 200 OK). No duplicate transaction, cash movement, holding, or baseline rows are created.
 - **Opening Position Pre-Check Invariant**: `create_opening_position` performs the idempotency check *before* checking whether an active opening position already exists, preventing duplicate-key retries from falsely failing with `OP003`/`OP005`.
 - **Client Key Lifecycle**: Frontend modals (`TransactionModal`, `CashMovementModal`, `OpeningPositionModal`) generate client-side UUID keys upon modal open, attach `Idempotency-Key` headers on submit, and rotate keys upon verified success.
+
+---
+
+## 17. Portfolio P1B: Auditable Correction & Reversal Architecture
+
+- **Core Immutability Invariant**: Historical financial rows in `public.portfolio_transactions` and `public.cash_ledger_entries` are strictly immutable. Corrections must NEVER delete or update original historical records in place.
+- **Compensating Event Model**:
+  $$\text{ORIGINAL EVENT} \longrightarrow \text{REVERSAL EVENT (compensating entry)} \longrightarrow \text{optional REPLACEMENT EVENT}$$
+  - A reversed BUY produces a compensating transaction of type `'BUY_REVERSAL'` (with matching negative cash movement `'BUY_REVERSAL'`).
+  - A reversed SELL produces a compensating transaction of type `'SELL_REVERSAL'` (with matching negative cash movement `'SELL_REVERSAL'`).
+  - A reversed manual DEPOSIT produces an offsetting cash ledger entry of type `'WITHDRAWAL'` with `is_reversal = true`.
+  - A reversed manual WITHDRAWAL produces an offsetting cash ledger entry of type `'DEPOSIT'` with `is_reversal = true`.
+- **Audit Logging (`public.portfolio_reversals`)**:
+  - Every reversal requires a mandatory non-empty textual reason and an authenticated profile ID.
+  - Reversals are logged in `public.portfolio_reversals` linking `original_record_id`, `reversal_record_id`, `entity_type` (`'PORTFOLIO_TRANSACTION'` or `'CASH_LEDGER'`), `reason`, and `reversal_effective_at`.
+  - Row Level Security (RLS) is enabled and restricted exclusively to `service_role`.
+- **Integrity & Concurrency Controls**:
+  - **Double Reversal Prevention (`RC001`)**: Attempting to reverse an already-reversed record raises SQLSTATE `RC001` (mapped to HTTP 409 Conflict).
+  - **Chronological / Position Dependency (`RC002`)**:
+    - Reversing a BUY requires that current holdings quantity $\ge$ bought quantity (cannot reverse a BUY if assets were already sold in subsequent transactions).
+    - Reversing a SELL requires that no subsequent transactions have occurred on that asset (must reverse in strict reverse-chronological LIFO order to protect average-cost basis calculations).
+  - **Trade-Linked Cash Isolation (`RC003`)**: Cash ledger entries originating from trades (`BUY`/`SELL`) cannot be reversed directly via the cash reversal endpoint; the parent portfolio transaction must be reversed.
+  - **Reversal Immutability (`RC004`)**: Compensating reversal entries cannot themselves be reversed.
+  - **Cash Balance Sufficiency (`CL001`)**: Reversing a SELL or a DEPOSIT requires sufficient available cash to fund the outflow; negative cash balances remain forbidden.
+- **Transactional Advisory Locking**: RPCs acquire `pg_advisory_xact_lock` using profile ID and original record ID to serialize concurrent reversal attempts against the same record.
+- **Performance & Time-Weighted Return (TWR) Integration**: Reversal events carry the exact economic timestamp (`executed_at` / `effective_at`) of the reversal action. Reversal rows adjust the cash balance, position quantities, and realized P/L atomically, allowing reconstruction engines to correctly compute historical accounting states.

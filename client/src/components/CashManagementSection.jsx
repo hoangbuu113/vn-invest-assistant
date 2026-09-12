@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { TiltCard, MagneticButton, CountUp } from './MotionHelpers.jsx';
+import ReversalModal from './ReversalModal.jsx';
 
 function formatVND(value) {
   if (value === null || value === undefined || isNaN(value)) return '—';
@@ -43,14 +44,18 @@ export default function CashManagementSection({
   activityOnly = false
 }) {
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
-  const [filterType, setFilterType] = useState('ALL'); // 'ALL' | 'MOVEMENT' | 'TRADE'
+  const [reversalTarget, setReversalTarget] = useState(null);
+  const [filterType, setFilterType] = useState('ALL'); // 'ALL' | 'MOVEMENT' | 'TRADE' | 'REVERSAL'
 
   const counts = useMemo(() => {
     let movement = 0;
     let trade = 0;
+    let reversal = 0;
     if (Array.isArray(cashLedger)) {
       for (const entry of cashLedger) {
-        if (entry.entryType === 'DEPOSIT' || entry.entryType === 'WITHDRAWAL') {
+        if (entry.isReversal) {
+          reversal++;
+        } else if (entry.entryType === 'DEPOSIT' || entry.entryType === 'WITHDRAWAL') {
           movement++;
         } else if (entry.entryType === 'BUY' || entry.entryType === 'SELL') {
           trade++;
@@ -60,7 +65,8 @@ export default function CashManagementSection({
     return {
       all: cashLedger.length,
       movement,
-      trade
+      trade,
+      reversal
     };
   }, [cashLedger]);
 
@@ -68,11 +74,14 @@ export default function CashManagementSection({
     if (!Array.isArray(cashLedger)) return [];
     if (filterType === 'MOVEMENT') {
       return cashLedger.filter(
-        (e) => e.entryType === 'DEPOSIT' || e.entryType === 'WITHDRAWAL'
+        (e) => !e.isReversal && (e.entryType === 'DEPOSIT' || e.entryType === 'WITHDRAWAL')
       );
     }
     if (filterType === 'TRADE') {
-      return cashLedger.filter((e) => e.entryType === 'BUY' || e.entryType === 'SELL');
+      return cashLedger.filter((e) => !e.isReversal && (e.entryType === 'BUY' || e.entryType === 'SELL'));
+    }
+    if (filterType === 'REVERSAL') {
+      return cashLedger.filter((e) => e.isReversal);
     }
     return cashLedger;
   }, [cashLedger, filterType]);
@@ -343,7 +352,7 @@ export default function CashManagementSection({
                   </span>
                 </div>
                 <span style={{ fontSize: '0.76rem', color: 'var(--color-slate-500)' }}>
-                  Lịch sử dòng tiền đã ghi nhận không thể chỉnh sửa trong phiên bản hiện tại.
+                  Lịch sử dòng tiền được bảo lưu bất biến. Các khoản nạp/rút sai có thể thực hiện hoàn tác để bù trừ số dư.
                 </span>
               </div>
 
@@ -398,6 +407,24 @@ export default function CashManagementSection({
                   >
                     Mua/Bán ({counts.trade})
                   </button>
+                  {counts.reversal > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setFilterType('REVERSAL')}
+                      style={{
+                        padding: '0.3rem 0.65rem',
+                        borderRadius: '6px',
+                        border: 'none',
+                        fontSize: '0.78rem',
+                        fontWeight: filterType === 'REVERSAL' ? 800 : 600,
+                        cursor: 'pointer',
+                        backgroundColor: filterType === 'REVERSAL' ? 'var(--color-slate-200, #e2e8f0)' : 'transparent',
+                        color: 'var(--color-slate-800)'
+                      }}
+                    >
+                      Hoàn tác ({counts.reversal})
+                    </button>
+                  )}
                 </div>
               )}
             </div>
@@ -443,6 +470,7 @@ export default function CashManagementSection({
                       <th>Mã tài sản</th>
                       <th style={{ textAlign: 'right' }}>Dòng tiền</th>
                       <th style={{ textAlign: 'right' }}>Thời gian ghi nhận</th>
+                      <th style={{ textAlign: 'center' }}>Thao tác</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -452,6 +480,8 @@ export default function CashManagementSection({
                       const isBuy = entry.entryType === 'BUY';
                       const isSell = entry.entryType === 'SELL';
                       const isOpening = entry.entryType === 'OPENING_BALANCE';
+                      const isReversal = Boolean(entry.isReversal);
+                      const isReversed = Boolean(entry.isReversed);
 
                       let badgeText = 'Khác';
                       let badgeClass = 'badge-neutral';
@@ -459,7 +489,25 @@ export default function CashManagementSection({
                       let amountColor = 'var(--color-slate-900)';
                       const numAmount = Number(entry.amount);
 
-                      if (isOpening || numAmount === 0) {
+                      if (isReversal) {
+                        badgeClass = 'badge-neutral';
+                        amountColor = 'var(--color-slate-800)';
+                        if (isDeposit) {
+                          badgeText = '↩ Hoàn tác rút';
+                          sign = '+';
+                        } else if (isWithdraw) {
+                          badgeText = '↩ Hoàn tác nạp';
+                          sign = '−';
+                        } else if (isBuy) {
+                          badgeText = '↩ Bù trừ mua';
+                          sign = '+';
+                        } else if (isSell) {
+                          badgeText = '↩ Bù trừ bán';
+                          sign = '−';
+                        } else {
+                          badgeText = 'Hoàn tác';
+                        }
+                      } else if (isOpening || numAmount === 0) {
                         badgeText = 'Số dư khởi điểm';
                         badgeClass = 'badge-neutral';
                         sign = '';
@@ -487,12 +535,22 @@ export default function CashManagementSection({
                       }
 
                       return (
-                        <tr key={entry.id || `${entry.entryType}-${entry.effectiveAt}-${entry.amount}`}>
+                        <tr
+                          key={entry.id || `${entry.entryType}-${entry.effectiveAt}-${entry.amount}`}
+                          style={isReversed ? { opacity: 0.72, backgroundColor: 'var(--color-slate-50, #f8fafc)' } : undefined}
+                        >
                           {/* 1. Entry Type */}
                           <td>
-                            <span className={`fintech-badge ${badgeClass}`} style={{ fontWeight: 700, padding: '2px 7px', fontSize: '0.72rem' }}>
-                              {badgeText}
-                            </span>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <span className={`fintech-badge ${badgeClass}`} style={{ fontWeight: 700, padding: '2px 7px', fontSize: '0.72rem' }}>
+                                {badgeText}
+                              </span>
+                              {isReversed && (
+                                <span className="fintech-badge badge-neutral" style={{ fontSize: '0.68rem', color: 'var(--color-slate-500)' }}>
+                                  Đã hoàn tác
+                                </span>
+                              )}
+                            </div>
                             {isOpening && (
                               <div style={{ fontSize: '0.7rem', color: 'var(--color-slate-400)', marginTop: '2px' }}>
                                 Số dư khởi điểm khi bắt đầu theo dõi dòng tiền
@@ -511,12 +569,53 @@ export default function CashManagementSection({
 
                           {/* 3. Cash Flow Amount */}
                           <td style={{ textAlign: 'right', fontWeight: 800, color: amountColor }}>
-                            {numAmount === 0 ? '0 ₫' : `${sign}${formatVND(entry.amount)}`}
+                            <span style={isReversed ? { textDecoration: 'line-through' } : undefined}>
+                              {numAmount === 0 ? '0 ₫' : `${sign}${formatVND(entry.amount)}`}
+                            </span>
                           </td>
 
                           {/* 4. Effective Time */}
                           <td style={{ textAlign: 'right', color: 'var(--color-slate-600)', fontSize: '0.8rem' }}>
                             {formatEffectiveTime(entry.effectiveAt || entry.createdAt)}
+                          </td>
+
+                          {/* 5. Action */}
+                          <td style={{ textAlign: 'center' }}>
+                            {isOpening ? (
+                              <span style={{ color: 'var(--color-slate-400)', fontSize: '0.75rem' }}>—</span>
+                            ) : isReversal ? (
+                              <span className="fintech-badge badge-neutral" style={{ fontSize: '0.7rem' }}>
+                                Bù trừ
+                              </span>
+                            ) : isReversed ? (
+                              <span className="fintech-badge badge-neutral" style={{ fontSize: '0.7rem', color: 'var(--color-slate-400)' }}>
+                                Đã hoàn tác
+                              </span>
+                            ) : (isBuy || isSell) ? (
+                              <span style={{ fontSize: '0.72rem', color: 'var(--color-slate-400)' }} title="Dòng tiền liên kết với giao dịch mua/bán. Vui lòng hoàn tác tại bảng Lịch sử giao dịch.">
+                                Từ GD mua/bán
+                              </span>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => setReversalTarget({
+                                  type: 'CASH',
+                                  item: entry,
+                                  title: `Hoàn tác ${isDeposit ? 'nạp tiền' : 'rút tiền'}`,
+                                  subtitle: `${isDeposit ? 'Nạp tiền' : 'Rút tiền'}: ${formatVND(entry.amount)}`
+                                })}
+                                className="fintech-btn btn-secondary btn-sm"
+                                style={{
+                                  padding: '2px 8px',
+                                  fontSize: '0.75rem',
+                                  color: 'var(--color-loss-600, #dc2626)',
+                                  borderColor: 'rgba(220, 38, 38, 0.25)'
+                                }}
+                                title="Hoàn tác dòng tiền này (tạo bút toán bù trừ)"
+                              >
+                                Hoàn tác
+                              </button>
+                            )}
                           </td>
                         </tr>
                       );
@@ -528,6 +627,16 @@ export default function CashManagementSection({
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Reversal Confirmation Modal */}
+      <ReversalModal
+        isOpen={Boolean(reversalTarget)}
+        onClose={() => setReversalTarget(null)}
+        target={reversalTarget}
+        onSuccess={() => {
+          if (onRefresh) onRefresh();
+        }}
+      />
     </motion.div>
   );
 }

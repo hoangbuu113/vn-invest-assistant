@@ -353,16 +353,23 @@ function assetUnitLabel(quantityUnit, assetType, symbol) {
 export function buildPortfolioRecentActivity({ transactions = [], holdings = [], cashLedger = [] } = {}) {
   const events = [];
 
-  // 1. Transactions (BUY / SELL)
+  // 1. Transactions (BUY / SELL / BUY_REVERSAL / SELL_REVERSAL)
   if (Array.isArray(transactions)) {
     for (const t of transactions) {
       if (!t) continue;
       const isBuy = t.transactionType === 'BUY';
       const isSell = t.transactionType === 'SELL';
-      if (!isBuy && !isSell) continue;
+      const isBuyReversal = t.transactionType === 'BUY_REVERSAL';
+      const isSellReversal = t.transactionType === 'SELL_REVERSAL';
+      if (!isBuy && !isSell && !isBuyReversal && !isSellReversal) continue;
 
       const symbol = t.symbol || 'Tài sản';
-      const action = isBuy ? 'Mua' : 'Bán';
+      let action = 'Giao dịch';
+      if (isBuy) action = 'Mua';
+      else if (isSell) action = 'Bán';
+      else if (isBuyReversal) action = 'Hoàn tác Mua';
+      else if (isSellReversal) action = 'Hoàn tác Bán';
+
       const effectiveAt = t.executedAt || t.createdAt || null;
       const quantityStr = formatQuantityNumber(t.quantity);
       const unit = assetUnitLabel(t.quantityUnit, t.assetType, symbol);
@@ -379,15 +386,19 @@ export function buildPortfolioRecentActivity({ transactions = [], holdings = [],
         detail += ` · ${priceStr}`;
       }
 
+      const isReversedStatus = t.isReversed ? ' (Đã hoàn tác)' : '';
+
       events.push({
         id: `tx-${t.id || Math.random()}`,
         type: t.transactionType,
         action,
         symbol,
-        title: `${action} ${symbol}`,
+        title: `${action} ${symbol}${isReversedStatus}`,
         detail,
         effectiveAt,
-        formattedDate: formatActivityDate(effectiveAt)
+        formattedDate: formatActivityDate(effectiveAt),
+        isReversed: Boolean(t.isReversed),
+        isReversal: Boolean(t.isReversal || isBuyReversal || isSellReversal)
       });
     }
   }
@@ -437,23 +448,32 @@ export function buildPortfolioRecentActivity({ transactions = [], holdings = [],
       if (!['DEPOSIT', 'WITHDRAWAL', 'OPENING_BALANCE'].includes(e.entryType)) continue;
 
       let action = 'Biến động tiền';
-      if (e.entryType === 'DEPOSIT') action = 'Nạp tiền';
-      else if (e.entryType === 'WITHDRAWAL') action = 'Rút tiền';
-      else if (e.entryType === 'OPENING_BALANCE') action = 'Số dư ban đầu';
+      if (e.isReversal) {
+        action = e.entryType === 'DEPOSIT' ? 'Hoàn tác rút tiền' : 'Hoàn tác nạp tiền';
+      } else if (e.entryType === 'DEPOSIT') {
+        action = 'Nạp tiền';
+      } else if (e.entryType === 'WITHDRAWAL') {
+        action = 'Rút tiền';
+      } else if (e.entryType === 'OPENING_BALANCE') {
+        action = 'Số dư ban đầu';
+      }
 
       const effectiveAt = e.effectiveAt || e.createdAt || null;
       const sign = e.entryType === 'WITHDRAWAL' ? '−' : '+';
       const amountStr = finiteNumber(e.amount) ? `${sign}${Number(e.amount).toLocaleString('vi-VN')} ₫` : '—';
+      const isReversedStatus = e.isReversed ? ' (Đã hoàn tác)' : '';
 
       events.push({
         id: `cash-${e.id || Math.random()}`,
         type: e.entryType,
         action,
         symbol: 'Tiền mặt',
-        title: action,
+        title: `${action}${isReversedStatus}`,
         detail: amountStr,
         effectiveAt,
-        formattedDate: formatActivityDate(effectiveAt)
+        formattedDate: formatActivityDate(effectiveAt),
+        isReversed: Boolean(e.isReversed),
+        isReversal: Boolean(e.isReversal)
       });
     }
   }

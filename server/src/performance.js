@@ -186,7 +186,7 @@ export function resolveCashEntryEconomicTimestamp(entry, transactions = []) {
   const type = entry?.entryType || entry?.entry_type;
   const linkId = cashEntryLinkId(entry);
 
-  if (!linkId || !['BUY', 'SELL'].includes(type)) {
+  if (!linkId || !['BUY', 'SELL', 'BUY_REVERSAL', 'SELL_REVERSAL'].includes(type)) {
     return entry?.effectiveAt || entry?.effective_at || null;
   }
 
@@ -251,6 +251,10 @@ export function reconstructCashBalance(dateKey, cashActivation, cashEntries = []
       balance -= amount;
     } else if (type === 'SELL') {
       balance += amount;
+    } else if (type === 'BUY_REVERSAL') {
+      balance += amount;
+    } else if (type === 'SELL_REVERSAL') {
+      balance -= amount;
     }
   }
 
@@ -344,6 +348,22 @@ export function reconstructHoldingsState(dateKey, positionBaselines = [], transa
       if (newQty === 0) {
         holding.averageCost = 0;
       }
+    } else if (txType === 'BUY_REVERSAL') {
+      const newQty = Math.max(0, holding.quantity - qty);
+      let newAverageCost = holding.averageCost;
+      if (newQty === 0) {
+        newAverageCost = 0;
+      } else if (holding.averageCost !== null) {
+        const remainingTotalCost = (holding.quantity * holding.averageCost) - (qty * price);
+        newAverageCost = remainingTotalCost > 0 ? remainingTotalCost / newQty : 0;
+      }
+      holding.quantity = newQty;
+      holding.averageCost = newAverageCost;
+    } else if (txType === 'SELL_REVERSAL') {
+      const restoredQty = holding.quantity + qty;
+      const preTradeAvgCost = tx.preTradeAverageCost ?? tx.pre_trade_average_cost ?? holding.averageCost;
+      holding.quantity = restoredQty;
+      holding.averageCost = restoredQty === 0 ? 0 : preTradeAvgCost;
     }
   }
 
@@ -663,6 +683,10 @@ export function getExternalSettlementFlowForDate(dateKey, transactions = []) {
       contributions += amount;
     } else if (type === 'SELL') {
       withdrawals += amount;
+    } else if (type === 'BUY_REVERSAL') {
+      contributions -= amount;
+    } else if (type === 'SELL_REVERSAL') {
+      withdrawals -= amount;
     }
   }
 
