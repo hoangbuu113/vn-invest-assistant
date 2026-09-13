@@ -4,6 +4,7 @@ import dotenv from 'dotenv';
 import {
   createAlertSchedulerAuthMiddleware,
   createAuthMiddleware,
+  createFundamentalsAdminAuthMiddleware,
   PRIVATE_API_PREFIXES
 } from './src/auth.js';
 import {
@@ -90,7 +91,9 @@ import {
   ERROR_CATEGORIES
 } from './src/observability/dataHealth.js';
 import {
+  getEquityFundamentals,
   getVietnamEquityEvidence,
+  ingestManualOfficialFundamentalFiling,
   runVietnamEquityEvidenceCollector
 } from './src/equities/index.js';
 import {
@@ -183,6 +186,8 @@ export function createApp(services = {}) {
     getAssetComparisonFn = getAssetComparison,
     getVietnamRegimeFn = getVietnamRegime,
     runMarketContextCollectorFn = runMarketContextCollector,
+    getEquityFundamentalsFn = getEquityFundamentals,
+    ingestManualOfficialFundamentalFilingFn = ingestManualOfficialFundamentalFiling,
     getVietnamEquityEvidenceFn = getVietnamEquityEvidence,
     runVietnamEquityEvidenceCollectorFn = runVietnamEquityEvidenceCollector,
     getPublishedEquityOpportunitiesFn = getPublishedEquityOpportunities,
@@ -225,12 +230,23 @@ export function createApp(services = {}) {
     cashClient,
     positionClient,
     supabaseAuthClient = privateSupabase,
-    alertSchedulerToken = process.env.ALERT_SCHEDULER_TOKEN
+    fundamentalsClient,
+    alertSchedulerToken = process.env.ALERT_SCHEDULER_TOKEN,
+    fundamentalsAdminToken = process.env.FUNDAMENTALS_ADMIN_TOKEN
   } = services;
 
   const app = express();
   app.use(cors(createCorsOptions(corsOrigins)));
   app.use(express.json());
+
+  const hasExplicitFundamentalsClient = Object.prototype.hasOwnProperty.call(services, 'fundamentalsClient')
+    || Object.prototype.hasOwnProperty.call(services, 'supabaseAuthClient');
+  const configuredFundamentalsClient = Object.prototype.hasOwnProperty.call(services, 'fundamentalsClient')
+    ? fundamentalsClient
+    : (hasExplicitFundamentalsClient ? supabaseAuthClient : privateSupabase);
+  const fundamentalsStorageClient = configuredFundamentalsClient === null && hasExplicitFundamentalsClient
+    ? null
+    : (configuredFundamentalsClient || Object.freeze({}));
 
   const resolveProfileById = async (id) => {
     if (getProfileByIdFn !== getProfileById) return getProfileByIdFn(id);
@@ -334,6 +350,7 @@ export function createApp(services = {}) {
     getProfileByUserIdFn: resolveProfileForUser
   }));
   const requireAlertScheduler = createAlertSchedulerAuthMiddleware({ alertSchedulerToken });
+  const requireFundamentalsAdmin = createFundamentalsAdminAuthMiddleware({ fundamentalsAdminToken });
 
   // Basic system health endpoint with provider status
   app.get('/api/health', (req, res) => {
@@ -1309,11 +1326,31 @@ export function createApp(services = {}) {
     }
   });
 
+  // Public read of manually verified official-filing fundamentals.
+  app.get('/api/equities/:symbol/fundamentals', async (req, res) => {
+    try {
+      const fundamentals = await getEquityFundamentalsFn(req.params.symbol, {
+        client: fundamentalsStorageClient,
+        getAssetBySymbolFn,
+        asOf: req.query.asOf,
+        now: new Date()
+      });
+      return res.json({ status: 'ok', data: fundamentals });
+    } catch (error) {
+      return res.status(error.status || 500).json({
+        status: 'error',
+        code: error.code || 'EQUITY_FUNDAMENTALS_UNAVAILABLE',
+        message: error.status ? error.message : 'Failed to read equity fundamentals'
+      });
+    }
+  });
+
   // Provider-free public read of persisted canonical VN equity evidence.
   app.get('/api/equities/:symbol/evidence', async (req, res) => {
     try {
       const evidence = await getVietnamEquityEvidenceFn(req.params.symbol, {
         client: supabaseAuthClient,
+        fundamentalsClient: fundamentalsStorageClient,
         getAssetBySymbolFn,
         now: new Date()
       });
@@ -1323,6 +1360,25 @@ export function createApp(services = {}) {
         status: 'error',
         code: error.code || 'EQUITY_EVIDENCE_UNAVAILABLE',
         message: error.status ? error.message : 'Failed to read equity evidence'
+      });
+    }
+  });
+
+  // Deliberate admin-only manual ingestion; no crawler or parser is exposed here.
+  app.post('/api/admin/equities/fundamentals/filings', requireFundamentalsAdmin, async (req, res) => {
+    try {
+      const result = await ingestManualOfficialFundamentalFilingFn(req.body, {
+        client: fundamentalsStorageClient,
+        getAssetByIdFn,
+        now: new Date()
+      });
+      res.set('Cache-Control', 'private, no-store');
+      return res.status(201).json({ status: 'ok', data: result });
+    } catch (error) {
+      return res.status(error.status || 500).json({
+        status: 'error',
+        code: error.code || 'FUNDAMENTALS_INGESTION_FAILED',
+        message: error.status ? error.message : 'Failed to ingest official filing fundamentals'
       });
     }
   });

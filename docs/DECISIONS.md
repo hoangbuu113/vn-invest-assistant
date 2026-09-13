@@ -404,7 +404,15 @@ $$\text{Source Adapter} \longrightarrow \text{Canonical Validation / Sanitizatio
 ### D. Vietnam Equity Evidence (Feature 01F)
 - **Canonical Stock Evidence Foundation**: Model and repository (`public.vn_equity_evidence_observations`) storing immutable evidence vintages for canonical Vietnam equities.
 - **Replay-Safe Timestamp Invariants**: Enforces `system_knowable_at >= first_seen_at` and `system_knowable_at >= source_available_at`.
-- **Scope Boundary**: Completed daily OHLCV bars ingested via backend collector with delayed freshness provenance. Stock fundamentals and official corporate disclosures remain truthfully declared as `SOURCE_NOT_PROVISIONED`.
+- **Scope Boundary**: Completed daily OHLCV bars are ingested via backend collector with delayed freshness provenance. Official corporate disclosures remain truthfully declared as `SOURCE_NOT_PROVISIONED`; fundamentals use the separate V1A decision below.
+
+### D.1. Vietnam Equity Fundamentals V1A
+- **Providerless Ingestion**: Official fundamentals enter only through the admin-authorized manual endpoint. No automated crawling, undocumented API, parser, commercial data vendor, or copied third-party table is an authority.
+- **Eligibility Authority**: `assets.fundamentals_company_type` is canonical. V1A accepts `INDUSTRIAL` only; banks, securities firms, insurers, and unclassified issuers are unsupported rather than forced into an industrial metric model.
+- **Immutable Corrections**: Filing and fact rows are insert-only to the service role. A correction must append exactly the next revision and identify one prior filing via `supersedes_filing_id`; replay as-of time uses `max(source_available_at, first_seen_at)`.
+- **Numeric and Missing Semantics**: Financial facts use PostgreSQL `NUMERIC` and decimal strings at the API boundary. Explicit zero is valid. Missing is null with a reason and is never normalized to zero.
+- **Trust Boundary**: Public projections admit numeric output only when both the filing and the individual fact are `VERIFIED`. Source URL, authority, filing identity, period, scope, audit status, source location, document hash when available, and verification metadata remain visible.
+- **No Seeded Fundamentals**: The foundation creates no initial company financial values. Availability remains `NOT_INGESTED` until a filing is manually verified and persisted.
 
 ### E. Deterministic Equity Opportunity Engine (Feature 01G)
 - **Deterministic Authority**: Evaluates Vietnam equity universe against persisted evidence into explicit categories: `QUALIFIED`, `WATCH`, `INSUFFICIENT_EVIDENCE`, `REJECTED`.

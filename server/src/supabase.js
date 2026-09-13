@@ -79,6 +79,7 @@ const ASSET_SELECT_FIELDS = [
   'market_timezone',
   'quantity_unit',
   'portfolio_eligibility',
+  'fundamentals_company_type',
   'is_active',
   'created_at'
 ].join(', ');

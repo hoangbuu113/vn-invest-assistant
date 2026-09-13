@@ -111,7 +111,14 @@ V1.3 delivers institutional-grade market intelligence, historical evidence repla
 ### Feature 01F: Vietnam Equity Evidence Foundation
 - **Canonical Evidence Model**: `public.vn_equity_evidence_observations` stores immutable evidence vintages for Vietnamese equities.
 - **Replay Timestamps**: Enforces `system_knowable_at >= first_seen_at` and `system_knowable_at >= source_available_at`.
-- **Scope Boundary**: Price evidence is supported; fundamentals and disclosures remain truthfully declared as `SOURCE_NOT_PROVISIONED`.
+- **Scope Boundary**: Price evidence is supported; issuer disclosures remain truthfully declared as `SOURCE_NOT_PROVISIONED`. Fundamentals are extended by the separate V1A contract below.
+
+### Fundamentals V1A: Providerless Official-Filing Evidence Foundation
+- **Scope**: Manual, administrator-authorized ingestion of official filings for canonically classified industrial/non-financial Vietnam-listed stocks only.
+- **Evidence Contract**: Immutable filing identity/revision metadata plus decimal-safe, source-located facts for the governed balance-sheet, income-statement, and cash-flow metric set.
+- **Truthfulness**: No vendor, crawler, parser, seeded financial values, fabricated zero, or inferred missing facts. Only verified filings and verified facts enter the public projection.
+- **Reads**: `GET /api/equities/:symbol/fundamentals` exposes annual/interim periods, statement scope, audit status, source provenance, revision lineage, and explicit availability.
+- **Risk Tier**: HIGH RISK because it adds forward database structures and a privileged ingestion boundary; full server regression, executable migration verification, client build, and diff checks are required.
 
 ### Feature 01G: Deterministic Equity Opportunity Engine
 - **Deterministic Screening**: Categorizes Vietnam equities into `QUALIFIED`, `WATCH`, `INSUFFICIENT_EVIDENCE`, `REJECTED`.

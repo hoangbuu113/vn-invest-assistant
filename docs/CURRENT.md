@@ -128,7 +128,14 @@ Portfolio P1C Multi-Asset Activity Display is implemented locally. Activity and 
 
 ### Vietnam Equity Evidence (01F)
 - Immutable, replay-safe Vietnam equity evidence vintages remain persisted in `public.vn_equity_evidence_observations`; the public provider-free equity-evidence read path remains implemented.
-- Completed price evidence is supported; official fundamentals and issuer disclosures remain `SOURCE_NOT_PROVISIONED`.
+- Completed price evidence is supported. Official issuer disclosures remain `SOURCE_NOT_PROVISIONED`.
+
+### Vietnam Equity Fundamentals V1A (Implemented Locally, Not Deployed)
+- Providerless fundamentals ingestion is a deliberate admin-only manual workflow for official SSC, HOSE, HNX, or issuer filings. It performs no crawling, scraping, document parsing, or vendor lookup.
+- `public.vn_equity_fundamental_filings` and `public.vn_equity_fundamental_facts` are service-only immutable stores. Corrections append a revision linked by `supersedes_filing_id`; prior facts remain queryable under replay-safe `system_knowable_at` semantics.
+- Fundamentals V1A supports only canonically classified `INDUSTRIAL` Vietnam-listed stocks. `BANK`, `SECURITIES`, `INSURANCE`, and unclassified issuers return an explicit unsupported state.
+- The public `GET /api/equities/:symbol/fundamentals` projection exposes only verified filings and verified facts. Missing values remain null and display as `—`; explicit numeric zero remains zero.
+- No production filing values are seeded. Forward migration `20260913000000_create_verified_equity_fundamentals.sql` is local and unapplied remotely.
 
 ### Deterministic Equity Opportunity Engine (01G)
 - Evidence-bounded deterministic categories remain `QUALIFIED`, `WATCH`, `INSUFFICIENT_EVIDENCE`, and `REJECTED`, separate from AI explanation. No opaque score, target price, probability, or AI mutation of qualification is permitted.
@@ -141,7 +148,7 @@ Portfolio P1C Multi-Asset Activity Display is implemented locally. Activity and 
 - Official monetary evidence uses scoped structured dependencies and replay-safe knowability. Source-access limitations remain explicit rather than substituted with unofficial evidence.
 
 ## Known Cross-Project Limitations Preserved
-- Official Vietnam equity fundamentals and corporate disclosure providers remain unprovisioned.
+- Official Vietnam equity fundamentals have a providerless manual-ingestion foundation but no production filings are seeded; corporate disclosure ingestion remains unprovisioned.
 - Strategy-stability numeric hysteresis thresholds remain intentionally uncalibrated rather than backfit.
 - USD/VND historical bars/historical FX authority remain insufficient for non-VND portfolio performance.
 - Gold spot history remains close-only where the configured provider cannot supply authoritative OHLC.

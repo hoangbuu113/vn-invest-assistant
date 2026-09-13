@@ -55,6 +55,7 @@ const fpt = Object.freeze({
   marketCode: 'HOSE',
   quoteCurrency: 'VND',
   marketPolicy: 'VN_EXCHANGE',
+  fundamentalsCompanyType: 'INDUSTRIAL',
   marketTimezone: 'Asia/Ho_Chi_Minh',
   isActive: true
 });
@@ -99,6 +100,13 @@ function createEvidenceDb(initialRows = []) {
     equityRows,
     checkpointRows,
     calls,
+    async rpc(name) {
+      calls.push({ operation: 'rpc', name });
+      if (name === 'read_vn_equity_fundamental_filings') {
+        return { data: [], error: null };
+      }
+      throw new Error(`Unexpected RPC ${name}`);
+    },
     from(table) {
       calls.push({ operation: 'from', table });
       if (table === 'vn_equity_evidence_observations') {
@@ -437,7 +445,8 @@ test('8. public evidence API reads persistence only and returns honest partial c
     assert.equal(body.status, 'ok');
     assert.equal(body.data.asset.symbol, 'FPT');
     assert.equal(body.data.domains.marketPrice.facts[0].numericValue, 123456.75);
-    assert.equal(body.data.domains.fundamentals.reason, 'SOURCE_NOT_PROVISIONED');
+    assert.equal(body.data.domains.fundamentals.reason, 'NO_FILINGS');
+    assert.equal(body.data.domains.fundamentals.availability, 'NOT_INGESTED');
     assert.equal(body.data.domains.disclosures.reason, 'SOURCE_NOT_PROVISIONED');
     assert.equal(marketProviderCalls, 0);
     assert.equal(db.calls.some((call) => call.operation === 'upsert'), false);

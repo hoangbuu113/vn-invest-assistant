@@ -237,7 +237,18 @@ The double-ledger architecture is the sole authoritative mechanism for portfolio
 
 ---
 
-## 13. Known Unresolved Architectural Decisions (Explicit UNKNOWN)
+## 13. Vietnam Equity Fundamentals Semantics
+
+- `assets.fundamentals_company_type` is the canonical eligibility classification for Fundamentals V1A: `INDUSTRIAL`, `BANK`, `SECURITIES`, `INSURANCE`, or null when not classified.
+- V1A supports only `stock` assets on `VN_EXCHANGE` classified as `INDUSTRIAL`. Financial issuers and unclassified companies return `UNSUPPORTED_COMPANY_TYPE`; their reporting models are not approximated with industrial metrics.
+- Filing metadata includes canonical asset/ticker/exchange, official source authority and URL, publication/source-availability timestamps, period, statement scope, audit status, fiscal identity, and revision lineage.
+- Facts use decimal strings over PostgreSQL `NUMERIC`; each fact preserves currency, source unit scale, source line/label/location, value kind, confidence, validation status, and an explicit missing reason when numeric value is null.
+- Public reads expose only verified filings and verified facts. Missing does not equal zero, and unverified numeric values cannot be promoted into the trusted projection.
+- Corrections are new immutable filing revisions linked through `supersedes_filing_id`. Historical as-of selection cannot see a revision before `max(sourceAvailableAt, firstSeenAt)`.
+
+---
+
+## 14. Known Unresolved Architectural Decisions (Explicit UNKNOWN)
 
 The following items are intentionally open questions and remain classified as `UNKNOWN` until explicitly decided in future roadmap phases:
 

@@ -18,6 +18,7 @@ export const PRIVATE_API_PREFIXES = Object.freeze([
 ]);
 
 export const MIN_ALERT_SCHEDULER_TOKEN_LENGTH = 32;
+export const MIN_FUNDAMENTALS_ADMIN_TOKEN_LENGTH = 32;
 
 export function isPrivateApiPath(pathname, method = 'POST') {
   if (typeof pathname !== 'string') return false;
@@ -181,6 +182,46 @@ export function createAlertSchedulerAuthMiddleware({ alertSchedulerToken } = {})
       );
     }
 
+    return next();
+  };
+}
+
+export function createFundamentalsAdminAuthMiddleware({ fundamentalsAdminToken } = {}) {
+  const configuredToken = typeof fundamentalsAdminToken === 'string' &&
+    fundamentalsAdminToken.length >= MIN_FUNDAMENTALS_ADMIN_TOKEN_LENGTH
+    ? fundamentalsAdminToken
+    : null;
+
+  return function requireFundamentalsAdmin(req, res, next) {
+    if (!configuredToken) {
+      return authFailure(
+        res,
+        503,
+        'FUNDAMENTALS_ADMIN_NOT_CONFIGURED',
+        'Fundamentals administration is unavailable'
+      );
+    }
+
+    const candidate = readBearerToken(req.get('authorization'));
+    if (!candidate) {
+      return authFailure(
+        res,
+        401,
+        'FUNDAMENTALS_ADMIN_AUTH_REQUIRED',
+        'Fundamentals administrator authentication is required'
+      );
+    }
+
+    if (!timingSafeTokenMatch(candidate, configuredToken)) {
+      return authFailure(
+        res,
+        403,
+        'FUNDAMENTALS_ADMIN_AUTH_INVALID',
+        'Fundamentals administrator authentication failed'
+      );
+    }
+
+    res.set('Cache-Control', 'private, no-store');
     return next();
   };
 }

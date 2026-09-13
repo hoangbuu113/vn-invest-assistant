@@ -6,10 +6,15 @@ import {
   EQUITY_EVIDENCE_TYPES
 } from './evidenceModel.js';
 import { fetchLatestEquityEvidence } from './repository.js';
+import { getEquityFundamentals } from './fundamentals.js';
+import { FUNDAMENTALS_METRICS } from './fundamentalsModel.js';
 
 export { runVietnamEquityEvidenceCollector } from './collector.js';
 export * from './evidenceModel.js';
 export * from './repository.js';
+export * from './fundamentals.js';
+export * from './fundamentalsModel.js';
+export * from './fundamentalsRepository.js';
 
 export const VN_EQUITY_SOURCE_HIERARCHY = Object.freeze({
   marketPrice: Object.freeze({
@@ -20,8 +25,8 @@ export const VN_EQUITY_SOURCE_HIERARCHY = Object.freeze({
   }),
   fundamentals: Object.freeze({
     preferredAuthority: 'ISSUER_OR_EXCHANGE_OFFICIAL',
-    preferredStatus: 'not_provisioned',
-    activeSource: null
+    preferredStatus: 'provisioned_manual',
+    activeSource: 'manual_official_filing'
   }),
   disclosures: Object.freeze({
     preferredAuthority: 'ISSUER_OR_EXCHANGE_OFFICIAL',
@@ -55,7 +60,36 @@ function unavailableDomain(reason, expectedMetrics) {
   };
 }
 
-export function buildEquityEvidenceResponse(asset, evidence = [], { now } = {}) {
+function buildFundamentalsEvidenceDomain(fundamentals, asset) {
+  if (!fundamentals) {
+    const companyType = asset.fundamentalsCompanyType ?? asset.fundamentals_company_type ?? null;
+    return {
+      ...unavailableDomain(
+        companyType === 'INDUSTRIAL' ? 'NOT_INGESTED' : 'UNSUPPORTED_COMPANY_TYPE',
+        FUNDAMENTALS_METRICS
+      ),
+      availability: companyType === 'INDUSTRIAL' ? 'NOT_INGESTED' : 'UNSUPPORTED_COMPANY_TYPE',
+      latestAnnual: null,
+      latestQuarter: null,
+      historicalPeriods: []
+    };
+  }
+  const hasTrustedData = ['AVAILABLE', 'PARTIAL'].includes(fundamentals.availability);
+  const currentPeriods = [fundamentals.latestAnnual, fundamentals.latestQuarter].filter(Boolean);
+  return {
+    status: hasTrustedData ? EQUITY_EVIDENCE_STATUS.AVAILABLE : EQUITY_EVIDENCE_STATUS.UNAVAILABLE,
+    availability: fundamentals.availability,
+    reason: fundamentals.reason,
+    facts: currentPeriods.flatMap((period) => Object.values(period.facts || {})),
+    expectedMetrics: fundamentals.expectedMetrics,
+    latestAnnual: fundamentals.latestAnnual,
+    latestQuarter: fundamentals.latestQuarter,
+    historicalPeriods: fundamentals.historicalPeriods,
+    limitations: fundamentals.limitations
+  };
+}
+
+export function buildEquityEvidenceResponse(asset, evidence = [], { now, fundamentals } = {}) {
   if (!(now instanceof Date) || !Number.isFinite(now.getTime())) {
     throw new TypeError('Equity evidence response requires an explicit valid now');
   }
@@ -80,9 +114,7 @@ export function buildEquityEvidenceResponse(asset, evidence = [], { now } = {}) 
       ...(!volume ? ['volume'] : [])
     ]
   };
-  const fundamentals = unavailableDomain('SOURCE_NOT_PROVISIONED', [
-    'market_cap', 'price_to_earnings', 'earnings_per_share', 'book_value_per_share'
-  ]);
+  const fundamentalsDomain = buildFundamentalsEvidenceDomain(fundamentals, asset);
   const disclosures = unavailableDomain('SOURCE_NOT_PROVISIONED', [
     'issuer_disclosure', 'corporate_action'
   ]);
@@ -111,12 +143,14 @@ export function buildEquityEvidenceResponse(asset, evidence = [], { now } = {}) 
     fetchedAt,
     domains: {
       marketPrice,
-      fundamentals,
+      fundamentals: fundamentalsDomain,
       disclosures
     },
     sourceHierarchy: VN_EQUITY_SOURCE_HIERARCHY,
     limitations: [
-      'Official exchange or issuer fundamentals are not provisioned.',
+      ...(fundamentalsDomain.availability === 'NOT_INGESTED'
+        ? ['No manually verified official filing fundamentals have been ingested for this issuer.']
+        : []),
       'Official issuer disclosures and corporate actions are not provisioned.',
       'Yahoo Finance completed daily data is market-reference evidence, not issuer or exchange authority.'
     ]
@@ -125,9 +159,11 @@ export function buildEquityEvidenceResponse(asset, evidence = [], { now } = {}) 
 
 export async function getVietnamEquityEvidence(symbol, {
   client,
+  fundamentalsClient = client,
   now = new Date(),
   getAssetBySymbolFn = getAssetBySymbol,
-  fetchLatestEvidenceFn = fetchLatestEquityEvidence
+  fetchLatestEvidenceFn = fetchLatestEquityEvidence,
+  getEquityFundamentalsFn = getEquityFundamentals
 } = {}) {
   if (typeof symbol !== 'string' || !symbol.trim()) {
     const error = new Error('Equity symbol is required');
@@ -160,6 +196,13 @@ export async function getVietnamEquityEvidence(symbol, {
     throw error;
   }
 
-  const evidence = await fetchLatestEvidenceFn(normalizedSymbol, client);
-  return buildEquityEvidenceResponse(asset, evidence, { now });
+  const [evidence, fundamentals] = await Promise.all([
+    fetchLatestEvidenceFn(normalizedSymbol, client),
+    getEquityFundamentalsFn(normalizedSymbol, {
+      client: fundamentalsClient,
+      now,
+      getAssetBySymbolFn: async () => asset
+    })
+  ]);
+  return buildEquityEvidenceResponse(asset, evidence, { now, fundamentals });
 }

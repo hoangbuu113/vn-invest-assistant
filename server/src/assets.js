@@ -13,6 +13,13 @@ export const PORTFOLIO_ELIGIBILITY = Object.freeze({
   REFERENCE_ONLY: 'REFERENCE_ONLY'
 });
 
+export const FUNDAMENTALS_COMPANY_TYPES = Object.freeze([
+  'INDUSTRIAL',
+  'BANK',
+  'SECURITIES',
+  'INSURANCE'
+]);
+
 const PORTFOLIO_ELIGIBILITY_VALUES = new Set(Object.values(PORTFOLIO_ELIGIBILITY));
 
 const CURRENCY_CODE_PATTERN = /^[A-Z][A-Z0-9]{0,11}$/;
@@ -54,6 +61,9 @@ export function normalizeAsset(row) {
   const suppliedPortfolioEligibility = optionalTrimmedString(
     firstDefined(row, 'portfolioEligibility', 'portfolio_eligibility')
   );
+  const fundamentalsCompanyType = optionalTrimmedString(
+    firstDefined(row, 'fundamentalsCompanyType', 'fundamentals_company_type')
+  )?.toUpperCase() || null;
   const isActiveValue = firstDefined(row, 'isActive', 'is_active');
   const isActive = typeof isActiveValue === 'boolean' ? isActiveValue : true;
   const symbol = optionalTrimmedString(row.symbol)?.toUpperCase() || null;
@@ -85,6 +95,9 @@ export function normalizeAsset(row) {
   if (!PORTFOLIO_ELIGIBILITY_VALUES.has(portfolioEligibility)) {
     throw assetContractError(`Unsupported portfolio eligibility '${portfolioEligibility}'`);
   }
+  if (fundamentalsCompanyType !== null && !FUNDAMENTALS_COMPANY_TYPES.includes(fundamentalsCompanyType)) {
+    throw assetContractError(`Unsupported fundamentals company type '${fundamentalsCompanyType}'`);
+  }
 
   return {
     id: row.id,
@@ -99,6 +112,7 @@ export function normalizeAsset(row) {
     market_timezone: marketTimezone,
     quantity_unit: quantityUnit,
     portfolio_eligibility: portfolioEligibility,
+    fundamentals_company_type: fundamentalsCompanyType,
     is_active: isActive,
     created_at: row.created_at,
     assetType,
@@ -109,6 +123,7 @@ export function normalizeAsset(row) {
     marketTimezone,
     quantityUnit,
     portfolioEligibility,
+    fundamentalsCompanyType,
     isActive
   };
 }

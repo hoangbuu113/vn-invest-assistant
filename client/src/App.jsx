@@ -20,6 +20,7 @@ import {
 
 import { PriceHistoryChart } from './components/PriceHistoryChart.jsx';
 import { AssetAnalysisSection } from './components/AssetAnalysisSection.jsx';
+import { EquityFundamentalsSection } from './components/EquityFundamentalsSection.jsx';
 import { PortfolioCompositionSection } from './components/PortfolioCompositionSection.jsx';
 import { AssetComparisonSection } from './components/AssetComparisonSection.jsx';
 import PriceAlertModal from './components/PriceAlertModal.jsx';
@@ -2861,6 +2862,8 @@ function App({ onLogout }) {
                       </TiltCard>
                     );
                   })()}
+
+                  <EquityFundamentalsSection asset={assetDetail} />
 
 
                   {/* Historical Price & Trend Card (Feature 06) */}

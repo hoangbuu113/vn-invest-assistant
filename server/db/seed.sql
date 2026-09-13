@@ -78,6 +78,17 @@ VALUES
     ('d18509bc-f7fa-47f1-9a90-7d347c7b4038', 'USD/VND', 'US Dollar / Vietnamese Dong', 'fx', NULL, 'GLOBAL', 'VND', 'USD', 'GLOBAL_24_5', 'Asia/Ho_Chi_Minh', NULL, TRUE)
 ON CONFLICT (symbol) DO NOTHING;
 
+-- Fundamentals V1A issuer eligibility is explicit. Financial-sector issuers remain unsupported.
+UPDATE public.assets
+SET fundamentals_company_type = CASE symbol
+    WHEN 'VCB' THEN 'BANK'
+    WHEN 'FPT' THEN 'INDUSTRIAL'
+    WHEN 'HPG' THEN 'INDUSTRIAL'
+    WHEN 'VNM' THEN 'INDUSTRIAL'
+END
+WHERE fundamentals_company_type IS NULL
+  AND symbol IN ('VCB', 'FPT', 'HPG', 'VNM');
+
 -- Explicit Provider Mappings (Yahoo Finance)
 INSERT INTO public.asset_provider_mappings (asset_id, provider, provider_symbol)
 SELECT assets.id, 'yahoo', assets.symbol || '.VN'
