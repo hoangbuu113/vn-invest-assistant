@@ -3,15 +3,19 @@ import { readFile } from 'node:fs/promises';
 import { describe, test } from 'node:test';
 
 import {
+  ACCOUNTING_RATE_SUBMISSION_ACTION,
   ACCOUNTING_RATE_UI_STATUS,
   CURRENT_ACCOUNTING_RATE_MAX_AGE_MS,
   HISTORICAL_ACCOUNTING_RATE_MAX_DELTA_MS,
   buildUsdtVndAccountingRateIntentKey,
-  isUsdtVndAccountingQuoteFreshAtSubmission
+  normalizeUsdtVndAccountingRate,
+  planUsdtVndAccountingIntentTransition,
+  planUsdtVndAccountingSubmission
 } from '../../client/src/utils/accountingRate.js';
 import {
   calculateNativeTransactionTotal,
   formatNativeTransactionTotal,
+  freezeTransactionSubmissionIntent,
   getTransactionEntryDefaults,
   isSimplifiedCryptoExternalEntry,
   validateRequiredVndAccountingPrice
@@ -24,6 +28,41 @@ const cryptoAsset = {
   asset_type: 'crypto',
   quote_currency: 'USD'
 };
+
+function availableQuoteState({
+  rate = 25325,
+  observedAt = '2026-09-12T12:00:00.000Z',
+  requestedAt = '2026-09-12T12:00:00.000Z',
+  mode = 'CURRENT',
+  quoteProof = 'server-proof-a'
+} = {}) {
+  return normalizeUsdtVndAccountingRate({
+    availability: 'available',
+    baseCurrency: 'USDT',
+    quoteCurrency: 'VND',
+    rate,
+    provider: 'CoinGecko',
+    provenance: 'COINGECKO_USDT_VND',
+    observedAt,
+    requestedAt,
+    observationDeltaMs: Math.abs(Date.parse(observedAt) - Date.parse(requestedAt)),
+    mode,
+    quoteProof
+  });
+}
+
+function automaticIntent(overrides = {}) {
+  return {
+    assetId: 'asset-ondo',
+    assetSymbol: 'ONDO',
+    priceCurrency: 'USDT',
+    settlementMode: 'EXTERNAL_SETTLEMENT',
+    executionUnitPrice: '0.36402',
+    isCustomTime: false,
+    executedAt: '',
+    ...overrides
+  };
+}
 
 describe('Crypto transaction form UX', () => {
   test('crypto external entry defaults to USDT without treating it as USD', () => {
@@ -113,101 +152,276 @@ describe('Crypto transaction form UX', () => {
     assert.match(source, /payload\.fxRateToVnd = selectedAutomaticQuote\.rate/);
     assert.match(source, /payload\.fxProvenance = selectedAutomaticQuote\.provenance/);
     assert.match(source, /payload\.fxObservedAt = selectedAutomaticQuote\.observedAt/);
+    assert.match(source, /payload\.quoteProof = selectedAutomaticQuote\.quoteProof/);
     assert.match(source, /freezeTransactionSubmissionIntent/);
     assert.match(source, /body: JSON\.stringify\(intent\.payload\)/);
     assert.match(source, /'Idempotency-Key': intent\.idempotencyKey/);
   });
 
-  test('stable accounting intent identity invalidates asset, execution, quote, settlement, and timestamp changes', async () => {
-    const baseIntent = {
-      assetId: 'asset-ondo',
-      assetSymbol: 'ONDO',
-      priceCurrency: 'USDT',
-      settlementMode: 'EXTERNAL_SETTLEMENT',
-      executionUnitPrice: '0.36402',
-      isCustomTime: false,
-      executedAt: ''
+  test('asset switch invalidates quote/proof/frozen body and requires a second resolution', () => {
+    const quoteA = availableQuoteState();
+    const frozenA = {
+      idempotencyKey: 'key-a',
+      payload: { symbol: 'ONDO', quoteProof: quoteA.quote.quoteProof }
     };
-    const ondo = buildUsdtVndAccountingRateIntentKey(baseIntent);
-
-    assert.equal(ondo, buildUsdtVndAccountingRateIntentKey({ ...baseIntent }));
-    assert.notEqual(ondo, buildUsdtVndAccountingRateIntentKey({ ...baseIntent, assetId: 'asset-btc', assetSymbol: 'BTC' }));
-    assert.notEqual(ondo, buildUsdtVndAccountingRateIntentKey({ ...baseIntent, executionUnitPrice: '0.4' }));
-    assert.notEqual(ondo, buildUsdtVndAccountingRateIntentKey({ ...baseIntent, priceCurrency: 'USD' }));
-    assert.notEqual(ondo, buildUsdtVndAccountingRateIntentKey({ ...baseIntent, settlementMode: 'INTERNAL_VND_CASH' }));
-    assert.notEqual(ondo, buildUsdtVndAccountingRateIntentKey({
-      ...baseIntent,
-      isCustomTime: true,
-      executedAt: '2026-09-12T10:00'
+    const ondoKey = buildUsdtVndAccountingRateIntentKey(automaticIntent());
+    const btcKey = buildUsdtVndAccountingRateIntentKey(automaticIntent({
+      assetId: 'asset-btc',
+      assetSymbol: 'BTC'
     }));
+    let generatedKeys = 0;
+    let resolverCalls = 1;
 
-    const source = await readFile(
-      new URL('../../client/src/components/TransactionModal.jsx', import.meta.url),
-      'utf8'
-    );
-    assert.match(source, /isAutomaticUsdtAccounting,\s+accountingRateIntentKey,\s+accountingRateRefreshVersion/);
-    assert.match(source, /previousKey !== null && previousKey !== accountingRateIntentKey/);
-    assert.doesNotMatch(source, /\}, \[selectedAssetObject\]\);/);
+    const switched = planUsdtVndAccountingIntentTransition({
+      previousIntentKey: ondoKey,
+      nextIntentKey: btcKey,
+      isAutomatic: true,
+      currentRateState: quoteA,
+      frozenSubmission: frozenA,
+      idempotencyKey: frozenA.idempotencyKey,
+      createIdempotencyKey: () => `key-${++generatedKeys}-btc`
+    });
+    if (switched.resolverRequired) resolverCalls += 1;
+
+    assert.equal(switched.intentChanged, true);
+    assert.equal(switched.rateState.status, ACCOUNTING_RATE_UI_STATUS.LOADING);
+    assert.equal(switched.rateState.quote, null);
+    assert.equal(switched.frozenSubmission, null);
+    assert.equal(switched.idempotencyKey, 'key-1-btc');
+    assert.equal(resolverCalls, 2);
+
+    const quoteB = availableQuoteState({ rate: 25400, quoteProof: 'server-proof-b' });
+    assert.equal(quoteB.status, ACCOUNTING_RATE_UI_STATUS.AVAILABLE);
+    assert.equal(quoteB.quote.rate, 25400);
+    assert.equal(quoteB.quote.quoteProof, 'server-proof-b');
+    assert.notEqual(quoteB.quote.quoteProof, quoteA.quote.quoteProof);
   });
 
-  test('current quote expiry blocks first dispatch and triggers refresh while historical validity uses observation delta', async () => {
+  test('price, currency, settlement, and time changes require a new automatic intent', () => {
+    const baseIntent = automaticIntent();
+    const baseKey = buildUsdtVndAccountingRateIntentKey(baseIntent);
+    const quote = availableQuoteState();
+    const frozen = { idempotencyKey: 'key-a', payload: { quoteProof: 'server-proof-a' } };
+    const changes = [
+      { executionUnitPrice: '0.4' },
+      { priceCurrency: 'USD' },
+      { settlementMode: 'INTERNAL_VND_CASH' },
+      { isCustomTime: true, executedAt: '2026-09-12T10:00' },
+      { isCustomTime: true, executedAt: '2026-09-12T11:00' }
+    ];
+
+    changes.forEach((change, index) => {
+      const nextIntent = automaticIntent(change);
+      const nextKey = buildUsdtVndAccountingRateIntentKey(nextIntent);
+      const remainsAutomatic = nextIntent.priceCurrency === 'USDT'
+        && nextIntent.settlementMode === 'EXTERNAL_SETTLEMENT';
+      const transition = planUsdtVndAccountingIntentTransition({
+        previousIntentKey: baseKey,
+        nextIntentKey: nextKey,
+        isAutomatic: remainsAutomatic,
+        currentRateState: quote,
+        frozenSubmission: frozen,
+        idempotencyKey: frozen.idempotencyKey,
+        createIdempotencyKey: () => `key-change-${index}`
+      });
+
+      assert.equal(transition.intentChanged, true);
+      assert.equal(transition.rateState.quote, null);
+      assert.equal(transition.frozenSubmission, null);
+      assert.equal(transition.idempotencyKey, `key-change-${index}`);
+      assert.equal(transition.resolverRequired, remainsAutomatic);
+    });
+  });
+
+  test('current-to-historical and historical-time changes remove the prior proof', () => {
+    const currentIntent = automaticIntent();
+    const historicalA = automaticIntent({
+      isCustomTime: true,
+      executedAt: '2026-09-12T10:00'
+    });
+    const historicalB = automaticIntent({
+      isCustomTime: true,
+      executedAt: '2026-09-12T11:00'
+    });
+    const currentQuote = availableQuoteState();
+    const historicalQuoteA = availableQuoteState({
+      mode: 'HISTORICAL',
+      requestedAt: '2026-09-12T10:00:00.000Z',
+      observedAt: '2026-09-12T09:45:00.000Z',
+      quoteProof: 'historical-proof-a'
+    });
+
+    const toHistorical = planUsdtVndAccountingIntentTransition({
+      previousIntentKey: buildUsdtVndAccountingRateIntentKey(currentIntent),
+      nextIntentKey: buildUsdtVndAccountingRateIntentKey(historicalA),
+      isAutomatic: true,
+      currentRateState: currentQuote,
+      frozenSubmission: null,
+      idempotencyKey: 'key-current',
+      createIdempotencyKey: () => 'key-historical-a'
+    });
+    assert.equal(toHistorical.rateState.status, ACCOUNTING_RATE_UI_STATUS.LOADING);
+    assert.equal(toHistorical.rateState.quote, null);
+    assert.equal(toHistorical.resolverRequired, true);
+
+    const toHistoricalB = planUsdtVndAccountingIntentTransition({
+      previousIntentKey: buildUsdtVndAccountingRateIntentKey(historicalA),
+      nextIntentKey: buildUsdtVndAccountingRateIntentKey(historicalB),
+      isAutomatic: true,
+      currentRateState: historicalQuoteA,
+      frozenSubmission: null,
+      idempotencyKey: 'key-historical-a',
+      createIdempotencyKey: () => 'key-historical-b'
+    });
+    assert.equal(toHistoricalB.rateState.quote, null);
+    assert.equal(toHistoricalB.idempotencyKey, 'key-historical-b');
+    assert.equal(toHistoricalB.resolverRequired, true);
+  });
+
+  test('current quote expiry blocks dispatch, removes proof, and requests refresh', () => {
     const nowMs = Date.parse('2026-09-12T12:00:00.000Z');
-    const currentState = (ageMs) => ({
-      status: ACCOUNTING_RATE_UI_STATUS.AVAILABLE,
-      quote: {
-        mode: 'CURRENT',
-        observedAt: new Date(nowMs - ageMs).toISOString()
+    const boundary = planUsdtVndAccountingSubmission({
+      frozenSubmission: null,
+      isAutomatic: true,
+      rateState: availableQuoteState({
+        observedAt: new Date(nowMs - CURRENT_ACCOUNTING_RATE_MAX_AGE_MS).toISOString()
+      }),
+      nowMs
+    });
+    assert.equal(boundary.action, ACCOUNTING_RATE_SUBMISSION_ACTION.BUILD_NEW);
+
+    const expired = planUsdtVndAccountingSubmission({
+      frozenSubmission: null,
+      isAutomatic: true,
+      rateState: availableQuoteState({
+        observedAt: new Date(nowMs - CURRENT_ACCOUNTING_RATE_MAX_AGE_MS - 1).toISOString()
+      }),
+      nowMs
+    });
+    assert.equal(expired.action, ACCOUNTING_RATE_SUBMISSION_ACTION.BLOCK);
+    assert.equal(expired.intent, null);
+    assert.equal(expired.reason, 'QUOTE_EXPIRED');
+    assert.equal(expired.rateState.status, ACCOUNTING_RATE_UI_STATUS.LOADING);
+    assert.equal(expired.rateState.quote, null);
+    assert.equal(expired.resolverRequired, true);
+
+    const historical = planUsdtVndAccountingSubmission({
+      frozenSubmission: null,
+      isAutomatic: true,
+      rateState: availableQuoteState({
+        mode: 'HISTORICAL',
+        observedAt: '2020-01-01T00:00:00.000Z',
+        requestedAt: new Date(
+          Date.parse('2020-01-01T00:00:00.000Z') + HISTORICAL_ACCOUNTING_RATE_MAX_DELTA_MS
+        ).toISOString(),
+        quoteProof: 'historical-proof'
+      }),
+      nowMs
+    });
+    assert.equal(historical.action, ACCOUNTING_RATE_SUBMISSION_ACTION.BUILD_NEW);
+  });
+
+  test('timeout retry dispatches the exact frozen body and proof without resolver refresh', () => {
+    const quote = availableQuoteState();
+    const candidatePayload = {
+      symbol: 'ONDO',
+      transactionType: 'BUY',
+      quantity: 225,
+      executionUnitPrice: 0.36402,
+      priceCurrency: 'USDT',
+      settlementMode: 'EXTERNAL_SETTLEMENT',
+      fxRateToVnd: quote.quote.rate,
+      fxProvenance: quote.quote.provenance,
+      fxObservedAt: quote.quote.observedAt,
+      quoteProof: quote.quote.quoteProof,
+      price: 0.36402 * quote.quote.rate
+    };
+    const firstDecision = planUsdtVndAccountingSubmission({
+      frozenSubmission: null,
+      isAutomatic: true,
+      rateState: quote,
+      nowMs: Date.parse(quote.quote.observedAt)
+    });
+    assert.equal(firstDecision.action, ACCOUNTING_RATE_SUBMISSION_ACTION.BUILD_NEW);
+
+    const frozen = freezeTransactionSubmissionIntent({
+      previousIntent: null,
+      candidatePayload,
+      idempotencyKey: 'timeout-key',
+      createIdempotencyKey: () => 'unused-key'
+    });
+    const capturedRequest = JSON.stringify({
+      idempotencyKey: frozen.idempotencyKey,
+      body: frozen.payload
+    });
+
+    // A simulated unknown-commit timeout leaves the frozen attempt intact.
+    const rerenderedQuote = availableQuoteState({
+      rate: 26000,
+      observedAt: '2026-09-12T12:01:00.000Z',
+      quoteProof: 'server-proof-rerender'
+    });
+    const retryDecision = planUsdtVndAccountingSubmission({
+      frozenSubmission: frozen,
+      isAutomatic: true,
+      rateState: rerenderedQuote,
+      nowMs: Date.parse('2026-09-12T12:01:00.000Z')
+    });
+    const retriedRequest = JSON.stringify({
+      idempotencyKey: retryDecision.intent.idempotencyKey,
+      body: retryDecision.intent.payload
+    });
+
+    assert.equal(retryDecision.action, ACCOUNTING_RATE_SUBMISSION_ACTION.RETRY_FROZEN);
+    assert.equal(retryDecision.resolverRequired, false);
+    assert.equal(retriedRequest, capturedRequest);
+    assert.deepEqual(retryDecision.intent.payload, {
+      ...candidatePayload,
+      idempotencyKey: 'timeout-key'
+    });
+  });
+
+  test('equivalent rerender intent preserves quote, proof, frozen body, and resolver count', () => {
+    const firstIntent = automaticIntent();
+    const equivalentIntent = { ...firstIntent };
+    const intentKey = buildUsdtVndAccountingRateIntentKey(firstIntent);
+    const equivalentKey = buildUsdtVndAccountingRateIntentKey(equivalentIntent);
+    const quote = availableQuoteState();
+    const frozen = { idempotencyKey: 'same-key', payload: { quoteProof: quote.quote.quoteProof } };
+    let generatedKeys = 0;
+
+    const transition = planUsdtVndAccountingIntentTransition({
+      previousIntentKey: intentKey,
+      nextIntentKey: equivalentKey,
+      isAutomatic: true,
+      currentRateState: quote,
+      frozenSubmission: frozen,
+      idempotencyKey: frozen.idempotencyKey,
+      createIdempotencyKey: () => {
+        generatedKeys += 1;
+        return 'unexpected-key';
       }
     });
 
-    assert.equal(
-      isUsdtVndAccountingQuoteFreshAtSubmission(
-        currentState(CURRENT_ACCOUNTING_RATE_MAX_AGE_MS),
-        nowMs
-      ),
-      true
-    );
-    assert.equal(
-      isUsdtVndAccountingQuoteFreshAtSubmission(
-        currentState(CURRENT_ACCOUNTING_RATE_MAX_AGE_MS + 1),
-        nowMs
-      ),
-      false
-    );
-    assert.equal(isUsdtVndAccountingQuoteFreshAtSubmission({
-      status: ACCOUNTING_RATE_UI_STATUS.AVAILABLE,
-      quote: {
-        mode: 'HISTORICAL',
-        observedAt: '2020-01-01T00:00:00.000Z',
-        observationDeltaMs: HISTORICAL_ACCOUNTING_RATE_MAX_DELTA_MS
-      }
-    }, nowMs), true);
-
-    const source = await readFile(
-      new URL('../../client/src/components/TransactionModal.jsx', import.meta.url),
-      'utf8'
-    );
-    const submitStart = source.indexOf('const handleSubmit');
-    const expiryCheck = source.indexOf('if (!isUsdtVndAccountingQuoteFreshAtSubmission', submitStart);
-    const freezeStart = source.indexOf('freezeTransactionSubmissionIntent', submitStart);
-    assert.ok(expiryCheck > submitStart && expiryCheck < freezeStart);
-    assert.match(source.slice(expiryCheck, freezeStart), /setAccountingRateRefreshVersion\(\(version\) => version \+ 1\)/);
+    assert.equal(transition.intentChanged, false);
+    assert.strictEqual(transition.rateState, quote);
+    assert.strictEqual(transition.frozenSubmission, frozen);
+    assert.equal(transition.idempotencyKey, 'same-key');
+    assert.equal(transition.resolverRequired, false);
+    assert.equal(generatedKeys, 0);
   });
 
-  test('a dispatched timeout retry bypasses active quote rebuilding and reuses the frozen attempt', async () => {
+  test('TransactionModal delegates real intent and submission behavior to the tested planners', async () => {
     const source = await readFile(
       new URL('../../client/src/components/TransactionModal.jsx', import.meta.url),
       'utf8'
     );
-    const submitStart = source.indexOf('const handleSubmit');
-    const frozenRetry = source.indexOf('if (pendingSubmissionIntentRef.current)', submitStart);
-    const validations = source.indexOf('// Strict client validations', submitStart);
-    assert.ok(frozenRetry > submitStart && frozenRetry < validations);
-    assert.match(
-      source.slice(frozenRetry, validations),
-      /dispatchFrozenSubmission\(pendingSubmissionIntentRef\.current\)/
-    );
-    assert.match(source, /body: JSON\.stringify\(intent\.payload\)/);
+
+    assert.match(source, /const transition = planUsdtVndAccountingIntentTransition\(/);
+    assert.match(source, /isAutomaticUsdtAccounting,\s+accountingRateIntentKey,\s+accountingRateRefreshVersion/);
+    assert.match(source, /const submissionPlan = planUsdtVndAccountingSubmission\(/);
+    assert.match(source, /submissionPlan\.action === ACCOUNTING_RATE_SUBMISSION_ACTION\.RETRY_FROZEN/);
+    assert.match(source, /submissionPlan\.action === ACCOUNTING_RATE_SUBMISSION_ACTION\.BLOCK/);
   });
 
   test('custom transaction time invalidates and refetches the historical USDT/VND observation', async () => {

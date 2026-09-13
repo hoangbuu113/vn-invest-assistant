@@ -6,6 +6,12 @@ export const ACCOUNTING_RATE_UI_STATUS = Object.freeze({
   STALE: 'AUTO_STALE'
 });
 
+export const ACCOUNTING_RATE_SUBMISSION_ACTION = Object.freeze({
+  BLOCK: 'BLOCK',
+  BUILD_NEW: 'BUILD_NEW',
+  RETRY_FROZEN: 'RETRY_FROZEN'
+});
+
 const USDT_VND_PROVENANCE = 'COINGECKO_USDT_VND';
 export const CURRENT_ACCOUNTING_RATE_MAX_AGE_MS = 10 * 60 * 1000;
 export const HISTORICAL_ACCOUNTING_RATE_MAX_DELTA_MS = 60 * 60 * 1000;
@@ -88,6 +94,48 @@ export function buildUsdtVndAccountingRateIntentKey({
   });
 }
 
+/**
+ * Plans the observable lifecycle transition for a semantic intent change.
+ * TransactionModal uses this same pure transition that the Node tests exercise.
+ */
+export function planUsdtVndAccountingIntentTransition({
+  previousIntentKey,
+  nextIntentKey,
+  isAutomatic,
+  currentRateState,
+  frozenSubmission,
+  idempotencyKey,
+  createIdempotencyKey
+} = {}) {
+  const intentChanged = previousIntentKey !== null
+    && previousIntentKey !== undefined
+    && previousIntentKey !== nextIntentKey;
+
+  if (!intentChanged) {
+    return {
+      intentChanged: false,
+      rateState: currentRateState,
+      frozenSubmission,
+      idempotencyKey,
+      resolverRequired: false
+    };
+  }
+
+  return {
+    intentChanged: true,
+    rateState: {
+      status: isAutomatic === true
+        ? ACCOUNTING_RATE_UI_STATUS.LOADING
+        : ACCOUNTING_RATE_UI_STATUS.IDLE,
+      quote: null,
+      reason: null
+    },
+    frozenSubmission: null,
+    idempotencyKey: createIdempotencyKey(),
+    resolverRequired: isAutomatic === true
+  };
+}
+
 export function normalizeUsdtVndAccountingRate(data) {
   const availability = typeof data?.availability === 'string'
     ? data.availability.trim().toLowerCase()
@@ -114,6 +162,8 @@ export function normalizeUsdtVndAccountingRate(data) {
     && data?.quoteCurrency === 'VND'
     && data?.provider === 'CoinGecko'
     && data?.provenance === USDT_VND_PROVENANCE
+    && typeof data?.quoteProof === 'string'
+    && data.quoteProof.length > 0
     && validTimestamp(data?.observedAt)
     && rate !== null;
 
@@ -131,7 +181,8 @@ export function normalizeUsdtVndAccountingRate(data) {
       quoteCurrency: 'VND',
       rate,
       provider: 'CoinGecko',
-      provenance: USDT_VND_PROVENANCE,
+      provenance: data.provenance,
+      quoteProof: data.quoteProof,
       observedAt: new Date(data.observedAt).toISOString(),
       requestedAt: validTimestamp(data.requestedAt)
         ? new Date(data.requestedAt).toISOString()
@@ -174,6 +225,72 @@ export function isUsdtVndAccountingQuoteFreshAtSubmission(rateState, nowMs = Dat
   return ageMs >= 0 && ageMs <= CURRENT_ACCOUNTING_RATE_MAX_AGE_MS;
 }
 
+/**
+ * Produces the modal's dispatch decision without side effects. Frozen retries
+ * deliberately take precedence over active-form quote refresh and rerenders.
+ */
+export function planUsdtVndAccountingSubmission({
+  frozenSubmission,
+  isAutomatic,
+  rateState,
+  nowMs = Date.now()
+} = {}) {
+  if (frozenSubmission) {
+    return {
+      action: ACCOUNTING_RATE_SUBMISSION_ACTION.RETRY_FROZEN,
+      intent: frozenSubmission,
+      rateState,
+      resolverRequired: false,
+      reason: null
+    };
+  }
+
+  if (isAutomatic !== true) {
+    return {
+      action: ACCOUNTING_RATE_SUBMISSION_ACTION.BUILD_NEW,
+      intent: null,
+      rateState,
+      resolverRequired: false,
+      reason: null
+    };
+  }
+
+  if ([ACCOUNTING_RATE_UI_STATUS.IDLE, ACCOUNTING_RATE_UI_STATUS.LOADING].includes(rateState?.status)) {
+    return {
+      action: ACCOUNTING_RATE_SUBMISSION_ACTION.BLOCK,
+      intent: null,
+      rateState,
+      resolverRequired: false,
+      reason: 'QUOTE_PENDING'
+    };
+  }
+
+  if (
+    rateState?.status === ACCOUNTING_RATE_UI_STATUS.AVAILABLE
+    && !isUsdtVndAccountingQuoteFreshAtSubmission(rateState, nowMs)
+  ) {
+    return {
+      action: ACCOUNTING_RATE_SUBMISSION_ACTION.BLOCK,
+      intent: null,
+      rateState: {
+        status: ACCOUNTING_RATE_UI_STATUS.LOADING,
+        quote: null,
+        reason: 'QUOTE_EXPIRED'
+      },
+      resolverRequired: true,
+      reason: 'QUOTE_EXPIRED'
+    };
+  }
+
+  return {
+    action: ACCOUNTING_RATE_SUBMISSION_ACTION.BUILD_NEW,
+    intent: null,
+    rateState,
+    resolverRequired: false,
+    reason: null
+  };
+}
+
 export function accountingRateFallbackMessage(reason) {
   const messages = {
     PROVIDER_NOT_ENABLED: 'Tự động quy đổi chưa được bật cho môi trường này.',
@@ -184,6 +301,7 @@ export function accountingRateFallbackMessage(reason) {
     PROVIDER_TIMEOUT: 'CoinGecko phản hồi quá chậm.',
     PROVIDER_ACCESS_DENIED: 'CoinGecko chưa cho phép môi trường này dùng dữ liệu quy đổi.',
     HISTORICAL_DATA_UNAVAILABLE: 'Gói dữ liệu CoinGecko hiện không cung cấp quan sát lịch sử được yêu cầu.',
+    QUOTE_PROOF_UNAVAILABLE: 'Máy chủ chưa thể xác thực tỷ giá tự động. Vui lòng nhập giá hạch toán VND.',
     EXECUTED_AT_REQUIRED: 'Vui lòng chọn thời gian giao dịch để lấy tỷ giá lịch sử.'
   };
   return messages[reason]

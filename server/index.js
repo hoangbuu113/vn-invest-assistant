@@ -45,6 +45,7 @@ import { getInvestmentBrief } from './src/investmentBrief.js';
 import { getMarketStrategist } from './src/marketStrategist.js';
 import {
   USDT_VND_ACCOUNTING_PROVENANCE,
+  attachAccountingRateQuoteProof,
   getAccountingRate,
   validateCoinGeckoAccountingRateWrite
 } from './src/accountingRate.js';
@@ -203,6 +204,8 @@ export function createApp(services = {}) {
     reversePortfolioTransactionFn = reversePortfolioTransaction,
     getAccountingRateFn = getAccountingRate,
     accountingRateEnabled = process.env.COINGECKO_ACCOUNTING_RATE_ENABLED,
+    accountingRateQuoteSecret = process.env.ACCOUNTING_RATE_QUOTE_SECRET,
+    accountingRateNowFn = () => new Date(),
     getCashOverviewFn = getCashOverview,
     getCashLedgerFn = getCashLedger,
     createCashMovementFn = createCashMovement,
@@ -797,9 +800,14 @@ export function createApp(services = {}) {
         quoteCurrency: quote.trim().toUpperCase(),
         at: normalizedAt
       });
+      const signedResult = attachAccountingRateQuoteProof(result, {
+        enabled: accountingRateEnabled,
+        secret: accountingRateQuoteSecret,
+        now: accountingRateNowFn()
+      });
 
       res.set('Cache-Control', 'no-store');
-      return res.json({ status: 'ok', data: result });
+      return res.json({ status: 'ok', data: signedResult });
     } catch {
       return res.status(500).json({
         status: 'error',
@@ -864,7 +872,8 @@ export function createApp(services = {}) {
         settlementCurrency,
         fxRateToVnd,
         fxProvenance,
-        fxObservedAt
+        fxObservedAt,
+        quoteProof
       } = body;
       const errors = [];
 
@@ -917,6 +926,17 @@ export function createApp(services = {}) {
 
       const normalizedFxProvenance = validateFxProvenance(fxProvenance, errors);
 
+      if (quoteProof !== undefined && (typeof quoteProof !== 'string' || !quoteProof.trim())) {
+        errors.push('quoteProof must be a non-empty string when provided');
+      }
+      if (
+        typeof quoteProof === 'string'
+        && quoteProof.trim()
+        && normalizedFxProvenance !== USDT_VND_ACCOUNTING_PROVENANCE
+      ) {
+        errors.push('quoteProof is only valid with COINGECKO_USDT_VND provenance');
+      }
+
       const idempotencyKey = parseIdempotencyKey(req, errors);
 
       let normalizedExecutedAt;
@@ -942,9 +962,14 @@ export function createApp(services = {}) {
           priceCurrency,
           settlementMode,
           fxRateToVnd,
-          fxObservedAt: normalizedFxObservedAt
+          fxProvenance: normalizedFxProvenance,
+          fxObservedAt: normalizedFxObservedAt,
+          executedAt: normalizedExecutedAt,
+          quoteProof
         }, {
-          enabled: accountingRateEnabled
+          enabled: accountingRateEnabled,
+          secret: accountingRateQuoteSecret,
+          now: accountingRateNowFn()
         }));
       }
 

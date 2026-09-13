@@ -10,14 +10,16 @@ import {
   validateRequiredVndAccountingPrice
 } from '../utils/transactionEntryDisplay.js';
 import {
+  ACCOUNTING_RATE_SUBMISSION_ACTION,
   ACCOUNTING_RATE_UI_STATUS,
   accountingRateFallbackMessage,
   buildUsdtVndAccountingRatePath,
   buildUsdtVndAccountingRateIntentKey,
   deriveUsdtVndAccountingPrice,
   getUsdtVndAccountingPresentation,
-  isUsdtVndAccountingQuoteFreshAtSubmission,
   normalizeUsdtVndAccountingRate,
+  planUsdtVndAccountingIntentTransition,
+  planUsdtVndAccountingSubmission,
   shouldResolveUsdtVndAccountingRate
 } from '../utils/accountingRate.js';
 
@@ -225,16 +227,6 @@ export default function TransactionModal({
     idempotencyKeyRef.current = getClientUUID();
   };
 
-  const invalidateAutomaticAccountingIntent = () => {
-    invalidateFrozenSubmission();
-    setAccountingRateState({
-      status: ACCOUNTING_RATE_UI_STATUS.IDLE,
-      quote: null,
-      reason: null
-    });
-    setAccountingPriceError(null);
-  };
-
   // Initialize or reset form on open
   useEffect(() => {
     if (isOpen) {
@@ -395,9 +387,20 @@ export default function TransactionModal({
     }
 
     const previousKey = previousAccountingRateIntentKeyRef.current;
-    if (previousKey !== null && previousKey !== accountingRateIntentKey) {
-      pendingSubmissionIntentRef.current = null;
-      idempotencyKeyRef.current = getClientUUID();
+    const transition = planUsdtVndAccountingIntentTransition({
+      previousIntentKey: previousKey,
+      nextIntentKey: accountingRateIntentKey,
+      isAutomatic: isAutomaticUsdtAccounting,
+      currentRateState: accountingRateState,
+      frozenSubmission: pendingSubmissionIntentRef.current,
+      idempotencyKey: idempotencyKeyRef.current,
+      createIdempotencyKey: getClientUUID
+    });
+    if (transition.intentChanged) {
+      pendingSubmissionIntentRef.current = transition.frozenSubmission;
+      idempotencyKeyRef.current = transition.idempotencyKey;
+      setAccountingRateState(transition.rateState);
+      setAccountingPriceError(null);
     }
     previousAccountingRateIntentKeyRef.current = accountingRateIntentKey;
   }, [isOpen, accountingRateIntentKey]);
@@ -532,14 +535,12 @@ export default function TransactionModal({
     if (type === 'SELL' && selectedSymbol && !heldSymbolMap.has(selectedSymbol.toUpperCase())) {
       const firstHeld = holdings[0]?.symbol || holdings[0]?.asset?.symbol;
       if (firstHeld) {
-        invalidateAutomaticAccountingIntent();
         setSelectedSymbol(firstHeld);
       }
     }
   };
 
   const handleSelectAsset = (sym) => {
-    invalidateAutomaticAccountingIntent();
     setSelectedSymbol(sym);
     setExecutionUnitPrice('');
     setIsAssetDropdownOpen(false);
@@ -628,10 +629,21 @@ export default function TransactionModal({
     setSuccessMsg(null);
     setAccountingPriceError(null);
 
-    // A request with unknown commit status is retried verbatim. Field-change
-    // handlers clear this ref before a genuinely new intent can be dispatched.
-    if (pendingSubmissionIntentRef.current) {
-      await dispatchFrozenSubmission(pendingSubmissionIntentRef.current);
+    const submissionPlan = planUsdtVndAccountingSubmission({
+      frozenSubmission: pendingSubmissionIntentRef.current,
+      isAutomatic: isAutomaticUsdtAccounting,
+      rateState: accountingRateState,
+      nowMs: Date.now()
+    });
+    if (submissionPlan.action === ACCOUNTING_RATE_SUBMISSION_ACTION.RETRY_FROZEN) {
+      await dispatchFrozenSubmission(submissionPlan.intent);
+      return;
+    }
+    if (submissionPlan.action === ACCOUNTING_RATE_SUBMISSION_ACTION.BLOCK) {
+      if (submissionPlan.resolverRequired) {
+        setAccountingRateState(submissionPlan.rateState);
+        setAccountingRateRefreshVersion((version) => version + 1);
+      }
       return;
     }
 
@@ -683,17 +695,7 @@ export default function TransactionModal({
     let numPrice;
     let selectedAutomaticQuote = null;
     if (isAutomaticUsdtAccounting) {
-      if (isAccountingRatePending) return;
       if (accountingRateState.status === ACCOUNTING_RATE_UI_STATUS.AVAILABLE) {
-        if (!isUsdtVndAccountingQuoteFreshAtSubmission(accountingRateState, Date.now())) {
-          setAccountingRateState({
-            status: ACCOUNTING_RATE_UI_STATUS.LOADING,
-            quote: null,
-            reason: 'QUOTE_EXPIRED'
-          });
-          setAccountingRateRefreshVersion((version) => version + 1);
-          return;
-        }
         if (!Number.isFinite(automaticAccountingPrice) || automaticAccountingPrice <= 0) {
           setErrorMsg('Không thể tính giá hạch toán VND từ giá thực hiện USDT.');
           return;
@@ -757,6 +759,7 @@ export default function TransactionModal({
         payload.fxRateToVnd = selectedAutomaticQuote.rate;
         payload.fxProvenance = selectedAutomaticQuote.provenance;
         payload.fxObservedAt = selectedAutomaticQuote.observedAt;
+        payload.quoteProof = selectedAutomaticQuote.quoteProof;
       // If priceCurrency is USD and user verified/confirmed current USD/VND rate
       } else if (priceCurrency === 'USD' && isFxPrefillConfirmed && currentUsdVndRate && !isCustomTime) {
         payload.fxRateToVnd = currentUsdVndRate;
@@ -1237,7 +1240,6 @@ export default function TransactionModal({
                       placeholder={`Ví dụ: ${isGold ? '2650' : (isCrypto ? '0.36402' : '95000')}`}
                       value={executionUnitPrice}
                       onChange={(e) => {
-                        invalidateAutomaticAccountingIntent();
                         setExecutionUnitPrice(e.target.value);
                         setIsFxPrefillConfirmed(false);
                       }}
@@ -1261,7 +1263,6 @@ export default function TransactionModal({
                     <select
                       value={priceCurrency}
                       onChange={(e) => {
-                        invalidateAutomaticAccountingIntent();
                         setPriceCurrency(e.target.value);
                         setIsFxPrefillConfirmed(false);
                       }}
@@ -1545,7 +1546,6 @@ export default function TransactionModal({
                 compact={isSimplifiedCryptoExternal}
                 settlementMode={settlementMode}
                 setSettlementMode={(value) => {
-                  invalidateAutomaticAccountingIntent();
                   setSettlementMode(value);
                 }}
                 settlementCurrency={settlementCurrency}
@@ -1589,7 +1589,6 @@ export default function TransactionModal({
                 <button
                   type="button"
                   onClick={() => {
-                    invalidateAutomaticAccountingIntent();
                     setIsCustomTime((prev) => !prev);
                   }}
                   style={{
@@ -1611,7 +1610,6 @@ export default function TransactionModal({
                   type="datetime-local"
                   value={customDateTime}
                   onChange={(e) => {
-                    invalidateAutomaticAccountingIntent();
                     setCustomDateTime(e.target.value);
                     setIsFxPrefillConfirmed(false);
                   }}

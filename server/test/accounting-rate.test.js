@@ -8,7 +8,9 @@ import {
   HISTORICAL_ACCOUNTING_RATE_MAX_DELTA_MS,
   USDT_VND_ACCOUNTING_PROVENANCE,
   getAccountingRate,
-  isCoinGeckoAccountingRateEnabled
+  isCoinGeckoAccountingRateEnabled,
+  issueAccountingRateQuoteProof,
+  verifyAccountingRateQuoteProof
 } from '../src/accountingRate.js';
 import {
   getCoinGeckoCurrentUsdtVndObservation,
@@ -32,6 +34,7 @@ import { ownerFetch } from './helpers/owner-auth.js';
 
 const NOW = new Date('2026-09-12T12:00:00.000Z');
 const PROFILE_ID = '22222222-2222-4222-8222-222222222222';
+const QUOTE_SECRET = 'test-accounting-rate-quote-secret-at-least-32-bytes';
 
 async function listen(app) {
   const server = http.createServer(app);
@@ -48,6 +51,65 @@ function okJson(data) {
     status: 200,
     json: async () => data
   };
+}
+
+function accountingRateResult({
+  rate = 25325,
+  observedAt = NOW.toISOString(),
+  mode = 'CURRENT',
+  requestedAt = mode === 'HISTORICAL' ? NOW.toISOString() : NOW.toISOString()
+} = {}) {
+  const requestedMs = Date.parse(requestedAt);
+  const observedMs = Date.parse(observedAt);
+  return {
+    availability: 'available',
+    baseCurrency: 'USDT',
+    quoteCurrency: 'VND',
+    rate,
+    provider: 'CoinGecko',
+    provenance: USDT_VND_ACCOUNTING_PROVENANCE,
+    observedAt,
+    requestedAt,
+    observationDeltaMs: Math.abs(observedMs - requestedMs),
+    mode,
+    reason: null
+  };
+}
+
+function signedAccountingRate(result, { now = NOW } = {}) {
+  const quoteProof = issueAccountingRateQuoteProof(result, {
+    secret: QUOTE_SECRET,
+    now
+  });
+  assert.equal(typeof quoteProof, 'string');
+  return { ...result, quoteProof };
+}
+
+function automaticTransactionBody(quote, overrides = {}) {
+  const executionUnitPrice = overrides.executionUnitPrice ?? 0.36402;
+  const fxRateToVnd = overrides.fxRateToVnd ?? quote.rate;
+  return {
+    symbol: 'ONDO',
+    transactionType: 'BUY',
+    quantity: 225.86,
+    price: executionUnitPrice * fxRateToVnd,
+    executionUnitPrice,
+    priceCurrency: 'USDT',
+    settlementMode: 'EXTERNAL_SETTLEMENT',
+    settlementCurrency: null,
+    fxRateToVnd,
+    fxProvenance: USDT_VND_ACCOUNTING_PROVENANCE,
+    fxObservedAt: quote.observedAt,
+    quoteProof: quote.quoteProof,
+    ...overrides
+  };
+}
+
+function tamperQuoteProofClaims(quoteProof, mutateClaims) {
+  const [encodedClaims, signature] = quoteProof.split('.');
+  const claims = JSON.parse(Buffer.from(encodedClaims, 'base64url').toString('utf8'));
+  mutateClaims(claims);
+  return `${Buffer.from(JSON.stringify(claims), 'utf8').toString('base64url')}.${signature}`;
 }
 
 describe('Automatic direct USDT/VND accounting rate', () => {
@@ -317,7 +379,10 @@ describe('Automatic direct USDT/VND accounting rate', () => {
           mode: request.at ? 'HISTORICAL' : 'CURRENT',
           reason: null
         };
-      }
+      },
+      accountingRateEnabled: true,
+      accountingRateQuoteSecret: QUOTE_SECRET,
+      accountingRateNowFn: () => NOW
     });
     const { server, baseUrl } = await listen(app);
 
@@ -330,6 +395,15 @@ describe('Automatic direct USDT/VND accounting rate', () => {
       assert.equal(current.headers.get('Cache-Control'), 'no-store');
       const currentBody = await current.json();
       assert.equal(currentBody.data.rate, 25300);
+      assert.equal(typeof currentBody.data.quoteProof, 'string');
+      const verifiedCurrent = verifyAccountingRateQuoteProof(currentBody.data.quoteProof, {
+        secret: QUOTE_SECRET
+      });
+      assert.equal(verifiedCurrent.valid, true);
+      assert.equal(verifiedCurrent.claims.rate, '25300');
+      assert.equal(verifiedCurrent.claims.mode, 'CURRENT');
+      assert.equal(verifiedCurrent.claims.requestedExecutedAt, null);
+      assert.doesNotMatch(JSON.stringify(currentBody), new RegExp(QUOTE_SECRET));
       assert.deepEqual(calls[0], {
         baseCurrency: 'USDT',
         quoteCurrency: 'VND',
@@ -340,6 +414,13 @@ describe('Automatic direct USDT/VND accounting rate', () => {
         `${baseUrl}/api/accounting-rate?base=USDT&quote=VND&at=2026-09-12T17%3A00%3A00%2B07%3A00`
       );
       assert.equal(historical.status, 200);
+      const historicalBody = await historical.json();
+      const verifiedHistorical = verifyAccountingRateQuoteProof(historicalBody.data.quoteProof, {
+        secret: QUOTE_SECRET
+      });
+      assert.equal(verifiedHistorical.valid, true);
+      assert.equal(verifiedHistorical.claims.mode, 'HISTORICAL');
+      assert.equal(verifiedHistorical.claims.requestedExecutedAt, '2026-09-12T10:00:00.000Z');
       assert.equal(calls[1].at, '2026-09-12T10:00:00.000Z');
 
       const invalid = await ownerFetch(
@@ -349,6 +430,50 @@ describe('Automatic direct USDT/VND accounting rate', () => {
       const invalidBody = await invalid.json();
       assert.match(invalidBody.errors[0], /explicit Z or UTC offset/);
       assert.equal(calls.length, 2);
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+
+  test('available accounting rate fails closed when the dedicated signing secret is missing', async () => {
+    let writes = 0;
+    const app = createApp({
+      getProfileByUserIdFn: async () => ({ id: PROFILE_ID }),
+      getAccountingRateFn: async () => accountingRateResult(),
+      createPortfolioTransactionFn: async () => {
+        writes += 1;
+        return { transaction: { id: 'unexpected-write' }, replayed: false };
+      },
+      accountingRateEnabled: true,
+      accountingRateQuoteSecret: null,
+      accountingRateNowFn: () => NOW
+    });
+    const { server, baseUrl } = await listen(app);
+
+    try {
+      const response = await ownerFetch(`${baseUrl}/api/accounting-rate?base=USDT&quote=VND`);
+      assert.equal(response.status, 200);
+      const body = await response.json();
+      assert.equal(body.data.availability, 'unavailable');
+      assert.equal(body.data.rate, null);
+      assert.equal(body.data.provenance, null);
+      assert.equal(body.data.quoteProof, null);
+      assert.equal(body.data.reason, 'QUOTE_PROOF_UNAVAILABLE');
+      assert.doesNotMatch(JSON.stringify(body), new RegExp(QUOTE_SECRET));
+
+      const signedQuote = signedAccountingRate(accountingRateResult());
+      const rejectedWrite = await ownerFetch(`${baseUrl}/api/transactions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'missing-signing-secret'
+        },
+        body: JSON.stringify(automaticTransactionBody(signedQuote))
+      });
+      assert.equal(rejectedWrite.status, 400);
+      assert.equal(writes, 0);
+      const rejectedBody = await rejectedWrite.json();
+      assert.match(rejectedBody.errors.join(' '), /quote signing is not configured/);
     } finally {
       await new Promise((resolve) => server.close(resolve));
     }
@@ -370,9 +495,12 @@ describe('Automatic direct USDT/VND accounting rate', () => {
         transactions.push(payload);
         return { transaction: { id: 'tx-ondo', ...payload }, replayed: false };
       },
-      accountingRateEnabled: true
+      accountingRateEnabled: true,
+      accountingRateQuoteSecret: QUOTE_SECRET,
+      accountingRateNowFn: () => NOW
     });
     const { server, baseUrl } = await listen(app);
+    const quote = signedAccountingRate(accountingRateResult());
     const body = {
       symbol: 'ONDO',
       transactionType: 'BUY',
@@ -384,7 +512,8 @@ describe('Automatic direct USDT/VND accounting rate', () => {
       settlementCurrency: null,
       fxRateToVnd: 25325,
       fxProvenance: 'coingecko_usdt_vnd',
-      fxObservedAt: NOW.toISOString()
+      fxObservedAt: NOW.toISOString(),
+      quoteProof: quote.quoteProof
     };
 
     try {
@@ -411,21 +540,12 @@ describe('Automatic direct USDT/VND accounting rate', () => {
     }
   });
 
-  test('transaction write boundary fails closed for disabled CoinGecko provenance without blocking manual fallback', async () => {
-    const automaticBody = {
-      symbol: 'ONDO',
-      transactionType: 'BUY',
-      quantity: 225.86,
-      price: 0.36402 * 25325,
-      executionUnitPrice: 0.36402,
-      priceCurrency: 'USDT',
-      settlementMode: 'EXTERNAL_SETTLEMENT',
-      settlementCurrency: null,
-      fxRateToVnd: 25325,
-      fxProvenance: USDT_VND_ACCOUNTING_PROVENANCE,
-      fxObservedAt: NOW.toISOString()
-    };
+  test('transaction write boundary requires an untampered server proof and preserves manual fallback', async () => {
+    const currentQuote = signedAccountingRate(accountingRateResult());
+    const automaticBody = automaticTransactionBody(currentQuote);
     const acceptedWrites = [];
+    let requestNumber = 0;
+    let resolverCalls = 0;
     const services = {
       getProfileByUserIdFn: async () => ({ id: PROFILE_ID }),
       getAssetBySymbolFn: async () => ({
@@ -439,31 +559,53 @@ describe('Automatic direct USDT/VND accounting rate', () => {
       createPortfolioTransactionFn: async (payload) => {
         acceptedWrites.push(payload);
         return { transaction: { id: `tx-${acceptedWrites.length}`, ...payload }, replayed: false };
+      },
+      getAccountingRateFn: async () => {
+        resolverCalls += 1;
+        throw new Error('POST must not resolve CoinGecko again');
+      },
+      accountingRateQuoteSecret: QUOTE_SECRET,
+      accountingRateNowFn: () => NOW
+    };
+
+    const post = (baseUrl, body) => ownerFetch(`${baseUrl}/api/transactions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': `accounting-authority-${++requestNumber}`
+      },
+      body: JSON.stringify(body)
+    });
+
+    const expectRejectedWithoutWrite = async (baseUrl, body, messagePattern) => {
+      const writesBefore = acceptedWrites.length;
+      const response = await post(baseUrl, body);
+      assert.equal(response.status, 400);
+      assert.equal(acceptedWrites.length, writesBefore);
+      if (messagePattern) {
+        const responseBody = await response.json();
+        assert.match(responseBody.errors.join(' '), messagePattern);
       }
     };
 
-    const disabled = await listen(createApp({ ...services, accountingRateEnabled: false }));
+    const disabled = await listen(createApp({
+      ...services,
+      accountingRateEnabled: false
+    }));
     try {
-      const rejectedAutomatic = await ownerFetch(`${disabled.baseUrl}/api/transactions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'auto-disabled-1' },
-        body: JSON.stringify(automaticBody)
-      });
-      assert.equal(rejectedAutomatic.status, 400);
-      assert.equal(acceptedWrites.length, 0);
-      const rejectedBody = await rejectedAutomatic.json();
-      assert.match(rejectedBody.errors.join(' '), /automatic accounting rates are disabled/);
+      await expectRejectedWithoutWrite(
+        disabled.baseUrl,
+        automaticBody,
+        /automatic accounting rates are disabled/
+      );
 
-      const acceptedManual = await ownerFetch(`${disabled.baseUrl}/api/transactions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'manual-disabled-1' },
-        body: JSON.stringify({
+      const acceptedManual = await post(disabled.baseUrl, {
           ...automaticBody,
           price: 9500,
           fxRateToVnd: undefined,
           fxObservedAt: undefined,
-          fxProvenance: 'USER_SUPPLIED_VND_BASIS'
-        })
+          fxProvenance: 'USER_SUPPLIED_VND_BASIS',
+          quoteProof: undefined
       });
       assert.equal(acceptedManual.status, 201);
       assert.equal(acceptedWrites[0].fxProvenance, 'USER_SUPPLIED_VND_BASIS');
@@ -471,26 +613,119 @@ describe('Automatic direct USDT/VND accounting rate', () => {
       await new Promise((resolve) => disabled.server.close(resolve));
     }
 
-    const enabled = await listen(createApp({ ...services, accountingRateEnabled: true }));
+    const enabled = await listen(createApp({
+      ...services,
+      accountingRateEnabled: true
+    }));
     try {
-      const acceptedAutomatic = await ownerFetch(`${enabled.baseUrl}/api/transactions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'auto-enabled-1' },
-        body: JSON.stringify(automaticBody)
-      });
+      await expectRejectedWithoutWrite(
+        enabled.baseUrl,
+        { ...automaticBody, quoteProof: undefined },
+        /quoteProof is invalid/
+      );
+
+      const [claims, signature] = automaticBody.quoteProof.split('.');
+      const forgedSignature = `${signature[0] === 'A' ? 'B' : 'A'}${signature.slice(1)}`;
+      await expectRejectedWithoutWrite(
+        enabled.baseUrl,
+        { ...automaticBody, quoteProof: `${claims}.${forgedSignature}` },
+        /QUOTE_PROOF_SIGNATURE_INVALID/
+      );
+
+      const acceptedAutomatic = await post(enabled.baseUrl, automaticBody);
       assert.equal(acceptedAutomatic.status, 201);
       assert.equal(acceptedWrites[1].fxProvenance, USDT_VND_ACCOUNTING_PROVENANCE);
       assert.equal(acceptedWrites[1].price, automaticBody.executionUnitPrice * automaticBody.fxRateToVnd);
+      assert.equal(Object.hasOwn(acceptedWrites[1], 'quoteProof'), false);
 
-      const rejectedMalformedAutomatic = await ownerFetch(`${enabled.baseUrl}/api/transactions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'auto-enabled-invalid-1' },
-        body: JSON.stringify({ ...automaticBody, price: automaticBody.price + 100 })
-      });
-      assert.equal(rejectedMalformedAutomatic.status, 400);
-      assert.equal(acceptedWrites.length, 2);
-      const malformedBody = await rejectedMalformedAutomatic.json();
-      assert.match(malformedBody.errors.join(' '), /price must match executionUnitPrice multiplied by fxRateToVnd/);
+      await expectRejectedWithoutWrite(enabled.baseUrl, automaticTransactionBody(currentQuote, {
+        fxRateToVnd: 26000,
+        price: 0.36402 * 26000
+      }), /quoteProof rate does not match/);
+
+      await expectRejectedWithoutWrite(enabled.baseUrl, {
+        ...automaticBody,
+        fxObservedAt: '2026-09-12T11:59:59.000Z'
+      }, /quoteProof observedAt does not match/);
+
+      await expectRejectedWithoutWrite(enabled.baseUrl, {
+        ...automaticBody,
+        fxProvenance: 'USER_SUPPLIED_VND_BASIS'
+      }, /quoteProof is only valid/);
+
+      await expectRejectedWithoutWrite(enabled.baseUrl, {
+        ...automaticBody,
+        price: automaticBody.price + 100
+      }, /price must match executionUnitPrice multiplied by fxRateToVnd/);
+
+      await expectRejectedWithoutWrite(enabled.baseUrl, {
+        ...automaticBody,
+        quoteProof: tamperQuoteProofClaims(automaticBody.quoteProof, (proofClaims) => {
+          proofClaims.mode = 'HISTORICAL';
+          proofClaims.requestedExecutedAt = NOW.toISOString();
+        })
+      }, /QUOTE_PROOF_SIGNATURE_INVALID/);
+
+      const exactCurrent = signedAccountingRate(accountingRateResult({
+        observedAt: new Date(NOW.getTime() - CURRENT_ACCOUNTING_RATE_MAX_AGE_MS).toISOString()
+      }));
+      const acceptedBoundary = await post(enabled.baseUrl, automaticTransactionBody(exactCurrent));
+      assert.equal(acceptedBoundary.status, 201);
+
+      const staleCurrent = signedAccountingRate(accountingRateResult({
+        observedAt: new Date(NOW.getTime() - CURRENT_ACCOUNTING_RATE_MAX_AGE_MS - 1).toISOString()
+      }));
+      await expectRejectedWithoutWrite(
+        enabled.baseUrl,
+        automaticTransactionBody(staleCurrent),
+        /CURRENT quoteProof observation is stale/
+      );
+
+      const historicalExecutedAt = '2026-09-12T10:00:00.000Z';
+      const exactHistorical = signedAccountingRate(accountingRateResult({
+        mode: 'HISTORICAL',
+        requestedAt: historicalExecutedAt,
+        observedAt: new Date(
+          Date.parse(historicalExecutedAt) - HISTORICAL_ACCOUNTING_RATE_MAX_DELTA_MS
+        ).toISOString()
+      }));
+      const acceptedHistoricalBoundary = await post(enabled.baseUrl, automaticTransactionBody(
+        exactHistorical,
+        { executedAt: historicalExecutedAt }
+      ));
+      assert.equal(acceptedHistoricalBoundary.status, 201);
+
+      const acceptedHistoricalEquivalent = await post(enabled.baseUrl, automaticTransactionBody(
+        exactHistorical,
+        { executedAt: '2026-09-12T17:00:00.000+07:00' }
+      ));
+      assert.equal(acceptedHistoricalEquivalent.status, 201);
+
+      const distantHistorical = signedAccountingRate(accountingRateResult({
+        mode: 'HISTORICAL',
+        requestedAt: historicalExecutedAt,
+        observedAt: new Date(
+          Date.parse(historicalExecutedAt) - HISTORICAL_ACCOUNTING_RATE_MAX_DELTA_MS - 1
+        ).toISOString()
+      }));
+      await expectRejectedWithoutWrite(
+        enabled.baseUrl,
+        automaticTransactionBody(distantHistorical, { executedAt: historicalExecutedAt }),
+        /more than 60 minutes/
+      );
+
+      await expectRejectedWithoutWrite(enabled.baseUrl, automaticTransactionBody(
+        exactHistorical,
+        { executedAt: '2026-09-12T10:01:00.000Z' }
+      ), /does not match submitted executedAt/);
+
+      await expectRejectedWithoutWrite(enabled.baseUrl, {
+        ...automaticTransactionBody(exactHistorical, { executedAt: historicalExecutedAt }),
+        quoteProof: tamperQuoteProofClaims(exactHistorical.quoteProof, (proofClaims) => {
+          proofClaims.requestedExecutedAt = '2026-09-12T10:01:00.000Z';
+        })
+      }, /QUOTE_PROOF_SIGNATURE_INVALID/);
+      assert.equal(resolverCalls, 0);
     } finally {
       await new Promise((resolve) => enabled.server.close(resolve));
     }
@@ -540,6 +775,7 @@ describe('Automatic direct USDT/VND accounting rate', () => {
       rate: 25325,
       provider: 'CoinGecko',
       provenance: USDT_VND_ACCOUNTING_PROVENANCE,
+      quoteProof: 'server-issued-proof',
       observedAt: NOW.toISOString(),
       requestedAt: NOW.toISOString(),
       observationDeltaMs: 0,
@@ -550,6 +786,22 @@ describe('Automatic direct USDT/VND accounting rate', () => {
     assert.equal(calculateNativeTransactionTotal(225.86, 0.36402), 82.2175572);
     assert.equal(formatNativeTransactionTotal(225.86, 0.36402, 'USDT'), '82,2175572 USDT');
     assert.equal(state.quote.provenance, USDT_VND_ACCOUNTING_PROVENANCE);
+    assert.equal(state.quote.quoteProof, 'server-issued-proof');
+
+    const missingProof = normalizeUsdtVndAccountingRate({
+      availability: 'available',
+      baseCurrency: 'USDT',
+      quoteCurrency: 'VND',
+      rate: 25325,
+      provider: 'CoinGecko',
+      provenance: USDT_VND_ACCOUNTING_PROVENANCE,
+      observedAt: NOW.toISOString(),
+      requestedAt: NOW.toISOString(),
+      observationDeltaMs: 0,
+      mode: 'CURRENT'
+    });
+    assert.equal(missingProof.status, ACCOUNTING_RATE_UI_STATUS.UNAVAILABLE);
+    assert.equal(missingProof.quote, null);
 
     const fakeUsd = normalizeUsdtVndAccountingRate({
       availability: 'available',
@@ -622,7 +874,8 @@ describe('Automatic direct USDT/VND accounting rate', () => {
       price: 0.36402 * 25325,
       fxRateToVnd: 25325,
       fxProvenance: USDT_VND_ACCOUNTING_PROVENANCE,
-      fxObservedAt: NOW.toISOString()
+      fxObservedAt: NOW.toISOString(),
+      quoteProof: 'server-issued-proof'
     };
     const first = freezeTransactionSubmissionIntent({
       previousIntent: null,
@@ -642,6 +895,7 @@ describe('Automatic direct USDT/VND accounting rate', () => {
     assert.equal(retry.payload.fxRateToVnd, 25325);
     assert.equal(retry.payload.fxProvenance, USDT_VND_ACCOUNTING_PROVENANCE);
     assert.equal(retry.payload.fxObservedAt, NOW.toISOString());
+    assert.equal(retry.payload.quoteProof, 'server-issued-proof');
     assert.equal(retry.payload.price, candidate.price);
 
     const changed = freezeTransactionSubmissionIntent({
