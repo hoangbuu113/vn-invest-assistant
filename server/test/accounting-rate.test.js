@@ -179,6 +179,28 @@ describe('Automatic direct USDT/VND accounting rate', () => {
     assert.equal(result.observationDeltaMs, 20 * 60 * 1000);
   });
 
+  test('historical policy accepts an actual observation at exactly 60 minutes', async () => {
+    const requestedAt = new Date('2026-09-12T10:00:00.000Z');
+    const result = await getAccountingRate({
+      baseCurrency: 'USDT',
+      quoteCurrency: 'VND',
+      at: requestedAt.toISOString()
+    }, {
+      enabled: true,
+      now: NOW,
+      getHistoricalObservationsFn: async () => [{
+        rate: 25300,
+        observedAt: new Date(
+          requestedAt.getTime() - HISTORICAL_ACCOUNTING_RATE_MAX_DELTA_MS
+        ).toISOString()
+      }]
+    });
+
+    assert.equal(result.availability, 'available');
+    assert.equal(result.rate, 25300);
+    assert.equal(result.observationDeltaMs, HISTORICAL_ACCOUNTING_RATE_MAX_DELTA_MS);
+  });
+
   test('historical policy never substitutes current data or a point over 60 minutes away', async () => {
     let currentCalls = 0;
     const tooDistant = await getAccountingRate({
@@ -347,7 +369,8 @@ describe('Automatic direct USDT/VND accounting rate', () => {
       createPortfolioTransactionFn: async (payload) => {
         transactions.push(payload);
         return { transaction: { id: 'tx-ondo', ...payload }, replayed: false };
-      }
+      },
+      accountingRateEnabled: true
     });
     const { server, baseUrl } = await listen(app);
     const body = {
@@ -385,6 +408,91 @@ describe('Automatic direct USDT/VND accounting rate', () => {
       assert.match(rejectedBody.errors[0], /non-empty string/);
     } finally {
       await new Promise((resolve) => server.close(resolve));
+    }
+  });
+
+  test('transaction write boundary fails closed for disabled CoinGecko provenance without blocking manual fallback', async () => {
+    const automaticBody = {
+      symbol: 'ONDO',
+      transactionType: 'BUY',
+      quantity: 225.86,
+      price: 0.36402 * 25325,
+      executionUnitPrice: 0.36402,
+      priceCurrency: 'USDT',
+      settlementMode: 'EXTERNAL_SETTLEMENT',
+      settlementCurrency: null,
+      fxRateToVnd: 25325,
+      fxProvenance: USDT_VND_ACCOUNTING_PROVENANCE,
+      fxObservedAt: NOW.toISOString()
+    };
+    const acceptedWrites = [];
+    const services = {
+      getProfileByUserIdFn: async () => ({ id: PROFILE_ID }),
+      getAssetBySymbolFn: async () => ({
+        id: 'asset-ondo',
+        symbol: 'ONDO',
+        asset_type: 'crypto',
+        quote_currency: 'USD',
+        portfolio_eligibility: 'PORTFOLIO_ELIGIBLE',
+        is_active: true
+      }),
+      createPortfolioTransactionFn: async (payload) => {
+        acceptedWrites.push(payload);
+        return { transaction: { id: `tx-${acceptedWrites.length}`, ...payload }, replayed: false };
+      }
+    };
+
+    const disabled = await listen(createApp({ ...services, accountingRateEnabled: false }));
+    try {
+      const rejectedAutomatic = await ownerFetch(`${disabled.baseUrl}/api/transactions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'auto-disabled-1' },
+        body: JSON.stringify(automaticBody)
+      });
+      assert.equal(rejectedAutomatic.status, 400);
+      assert.equal(acceptedWrites.length, 0);
+      const rejectedBody = await rejectedAutomatic.json();
+      assert.match(rejectedBody.errors.join(' '), /automatic accounting rates are disabled/);
+
+      const acceptedManual = await ownerFetch(`${disabled.baseUrl}/api/transactions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'manual-disabled-1' },
+        body: JSON.stringify({
+          ...automaticBody,
+          price: 9500,
+          fxRateToVnd: undefined,
+          fxObservedAt: undefined,
+          fxProvenance: 'USER_SUPPLIED_VND_BASIS'
+        })
+      });
+      assert.equal(acceptedManual.status, 201);
+      assert.equal(acceptedWrites[0].fxProvenance, 'USER_SUPPLIED_VND_BASIS');
+    } finally {
+      await new Promise((resolve) => disabled.server.close(resolve));
+    }
+
+    const enabled = await listen(createApp({ ...services, accountingRateEnabled: true }));
+    try {
+      const acceptedAutomatic = await ownerFetch(`${enabled.baseUrl}/api/transactions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'auto-enabled-1' },
+        body: JSON.stringify(automaticBody)
+      });
+      assert.equal(acceptedAutomatic.status, 201);
+      assert.equal(acceptedWrites[1].fxProvenance, USDT_VND_ACCOUNTING_PROVENANCE);
+      assert.equal(acceptedWrites[1].price, automaticBody.executionUnitPrice * automaticBody.fxRateToVnd);
+
+      const rejectedMalformedAutomatic = await ownerFetch(`${enabled.baseUrl}/api/transactions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'auto-enabled-invalid-1' },
+        body: JSON.stringify({ ...automaticBody, price: automaticBody.price + 100 })
+      });
+      assert.equal(rejectedMalformedAutomatic.status, 400);
+      assert.equal(acceptedWrites.length, 2);
+      const malformedBody = await rejectedMalformedAutomatic.json();
+      assert.match(malformedBody.errors.join(' '), /price must match executionUnitPrice multiplied by fxRateToVnd/);
+    } finally {
+      await new Promise((resolve) => enabled.server.close(resolve));
     }
   });
 

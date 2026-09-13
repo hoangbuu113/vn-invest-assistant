@@ -3,6 +3,13 @@ import { readFile } from 'node:fs/promises';
 import { describe, test } from 'node:test';
 
 import {
+  ACCOUNTING_RATE_UI_STATUS,
+  CURRENT_ACCOUNTING_RATE_MAX_AGE_MS,
+  HISTORICAL_ACCOUNTING_RATE_MAX_DELTA_MS,
+  buildUsdtVndAccountingRateIntentKey,
+  isUsdtVndAccountingQuoteFreshAtSubmission
+} from '../../client/src/utils/accountingRate.js';
+import {
   calculateNativeTransactionTotal,
   formatNativeTransactionTotal,
   getTransactionEntryDefaults,
@@ -107,8 +114,100 @@ describe('Crypto transaction form UX', () => {
     assert.match(source, /payload\.fxProvenance = selectedAutomaticQuote\.provenance/);
     assert.match(source, /payload\.fxObservedAt = selectedAutomaticQuote\.observedAt/);
     assert.match(source, /freezeTransactionSubmissionIntent/);
-    assert.match(source, /body: JSON\.stringify\(frozenPayload\)/);
+    assert.match(source, /body: JSON\.stringify\(intent\.payload\)/);
     assert.match(source, /'Idempotency-Key': intent\.idempotencyKey/);
+  });
+
+  test('stable accounting intent identity invalidates asset, execution, quote, settlement, and timestamp changes', async () => {
+    const baseIntent = {
+      assetId: 'asset-ondo',
+      assetSymbol: 'ONDO',
+      priceCurrency: 'USDT',
+      settlementMode: 'EXTERNAL_SETTLEMENT',
+      executionUnitPrice: '0.36402',
+      isCustomTime: false,
+      executedAt: ''
+    };
+    const ondo = buildUsdtVndAccountingRateIntentKey(baseIntent);
+
+    assert.equal(ondo, buildUsdtVndAccountingRateIntentKey({ ...baseIntent }));
+    assert.notEqual(ondo, buildUsdtVndAccountingRateIntentKey({ ...baseIntent, assetId: 'asset-btc', assetSymbol: 'BTC' }));
+    assert.notEqual(ondo, buildUsdtVndAccountingRateIntentKey({ ...baseIntent, executionUnitPrice: '0.4' }));
+    assert.notEqual(ondo, buildUsdtVndAccountingRateIntentKey({ ...baseIntent, priceCurrency: 'USD' }));
+    assert.notEqual(ondo, buildUsdtVndAccountingRateIntentKey({ ...baseIntent, settlementMode: 'INTERNAL_VND_CASH' }));
+    assert.notEqual(ondo, buildUsdtVndAccountingRateIntentKey({
+      ...baseIntent,
+      isCustomTime: true,
+      executedAt: '2026-09-12T10:00'
+    }));
+
+    const source = await readFile(
+      new URL('../../client/src/components/TransactionModal.jsx', import.meta.url),
+      'utf8'
+    );
+    assert.match(source, /isAutomaticUsdtAccounting,\s+accountingRateIntentKey,\s+accountingRateRefreshVersion/);
+    assert.match(source, /previousKey !== null && previousKey !== accountingRateIntentKey/);
+    assert.doesNotMatch(source, /\}, \[selectedAssetObject\]\);/);
+  });
+
+  test('current quote expiry blocks first dispatch and triggers refresh while historical validity uses observation delta', async () => {
+    const nowMs = Date.parse('2026-09-12T12:00:00.000Z');
+    const currentState = (ageMs) => ({
+      status: ACCOUNTING_RATE_UI_STATUS.AVAILABLE,
+      quote: {
+        mode: 'CURRENT',
+        observedAt: new Date(nowMs - ageMs).toISOString()
+      }
+    });
+
+    assert.equal(
+      isUsdtVndAccountingQuoteFreshAtSubmission(
+        currentState(CURRENT_ACCOUNTING_RATE_MAX_AGE_MS),
+        nowMs
+      ),
+      true
+    );
+    assert.equal(
+      isUsdtVndAccountingQuoteFreshAtSubmission(
+        currentState(CURRENT_ACCOUNTING_RATE_MAX_AGE_MS + 1),
+        nowMs
+      ),
+      false
+    );
+    assert.equal(isUsdtVndAccountingQuoteFreshAtSubmission({
+      status: ACCOUNTING_RATE_UI_STATUS.AVAILABLE,
+      quote: {
+        mode: 'HISTORICAL',
+        observedAt: '2020-01-01T00:00:00.000Z',
+        observationDeltaMs: HISTORICAL_ACCOUNTING_RATE_MAX_DELTA_MS
+      }
+    }, nowMs), true);
+
+    const source = await readFile(
+      new URL('../../client/src/components/TransactionModal.jsx', import.meta.url),
+      'utf8'
+    );
+    const submitStart = source.indexOf('const handleSubmit');
+    const expiryCheck = source.indexOf('if (!isUsdtVndAccountingQuoteFreshAtSubmission', submitStart);
+    const freezeStart = source.indexOf('freezeTransactionSubmissionIntent', submitStart);
+    assert.ok(expiryCheck > submitStart && expiryCheck < freezeStart);
+    assert.match(source.slice(expiryCheck, freezeStart), /setAccountingRateRefreshVersion\(\(version\) => version \+ 1\)/);
+  });
+
+  test('a dispatched timeout retry bypasses active quote rebuilding and reuses the frozen attempt', async () => {
+    const source = await readFile(
+      new URL('../../client/src/components/TransactionModal.jsx', import.meta.url),
+      'utf8'
+    );
+    const submitStart = source.indexOf('const handleSubmit');
+    const frozenRetry = source.indexOf('if (pendingSubmissionIntentRef.current)', submitStart);
+    const validations = source.indexOf('// Strict client validations', submitStart);
+    assert.ok(frozenRetry > submitStart && frozenRetry < validations);
+    assert.match(
+      source.slice(frozenRetry, validations),
+      /dispatchFrozenSubmission\(pendingSubmissionIntentRef\.current\)/
+    );
+    assert.match(source, /body: JSON\.stringify\(intent\.payload\)/);
   });
 
   test('custom transaction time invalidates and refetches the historical USDT/VND observation', async () => {
@@ -118,7 +217,8 @@ describe('Crypto transaction form UX', () => {
     );
 
     assert.match(source, /buildUsdtVndAccountingRatePath\(requestedAt\)/);
-    assert.match(source, /isAutomaticUsdtAccounting,\s+isCustomTime,\s+customDateTime/);
+    assert.match(source, /executedAt: customDateTime/);
+    assert.match(source, /isAutomaticUsdtAccounting,\s+accountingRateIntentKey/);
     assert.doesNotMatch(source, /priceCurrency === 'USDT'[^}]*currentUsdVndRate/);
   });
 

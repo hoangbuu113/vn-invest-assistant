@@ -13,8 +13,10 @@ import {
   ACCOUNTING_RATE_UI_STATUS,
   accountingRateFallbackMessage,
   buildUsdtVndAccountingRatePath,
+  buildUsdtVndAccountingRateIntentKey,
   deriveUsdtVndAccountingPrice,
   getUsdtVndAccountingPresentation,
+  isUsdtVndAccountingQuoteFreshAtSubmission,
   normalizeUsdtVndAccountingRate,
   shouldResolveUsdtVndAccountingRate
 } from '../utils/accountingRate.js';
@@ -206,6 +208,7 @@ export default function TransactionModal({
     quote: null,
     reason: null
   });
+  const [accountingRateRefreshVersion, setAccountingRateRefreshVersion] = useState(0);
 
   const [isCustomTime, setIsCustomTime] = useState(false);
   const [customDateTime, setCustomDateTime] = useState('');
@@ -214,7 +217,23 @@ export default function TransactionModal({
   const [successMsg, setSuccessMsg] = useState(null);
   const idempotencyKeyRef = useRef(null);
   const pendingSubmissionIntentRef = useRef(null);
+  const previousAccountingRateIntentKeyRef = useRef(null);
   const priceInputRef = useRef(null);
+
+  const invalidateFrozenSubmission = () => {
+    pendingSubmissionIntentRef.current = null;
+    idempotencyKeyRef.current = getClientUUID();
+  };
+
+  const invalidateAutomaticAccountingIntent = () => {
+    invalidateFrozenSubmission();
+    setAccountingRateState({
+      status: ACCOUNTING_RATE_UI_STATUS.IDLE,
+      quote: null,
+      reason: null
+    });
+    setAccountingPriceError(null);
+  };
 
   // Initialize or reset form on open
   useEffect(() => {
@@ -248,11 +267,13 @@ export default function TransactionModal({
         quote: null,
         reason: null
       });
+      setAccountingRateRefreshVersion(0);
       setIsCustomTime(false);
       setCustomDateTime('');
       setErrorMsg(null);
       setSuccessMsg(null);
       pendingSubmissionIntentRef.current = null;
+      previousAccountingRateIntentKeyRef.current = null;
     }
   }, [isOpen, defaultType, defaultAsset, holdings]);
 
@@ -323,6 +344,31 @@ export default function TransactionModal({
     settlementMode,
     priceCurrency
   });
+  const selectedAssetIdentity = selectedAssetObject?.id
+    || selectedAssetObject?.asset_id
+    || selectedSymbol.trim().toUpperCase();
+  const selectedAssetContractKey = [
+    selectedAssetIdentity,
+    selectedAssetObject?.asset_type || selectedAssetObject?.assetType || '',
+    selectedAssetObject?.quote_currency || selectedAssetObject?.quoteCurrency || ''
+  ].join('|');
+  const accountingRateIntentKey = useMemo(() => buildUsdtVndAccountingRateIntentKey({
+    assetId: selectedAssetIdentity,
+    assetSymbol: selectedSymbol,
+    priceCurrency,
+    settlementMode,
+    executionUnitPrice,
+    isCustomTime,
+    executedAt: customDateTime
+  }), [
+    selectedAssetIdentity,
+    selectedSymbol,
+    priceCurrency,
+    settlementMode,
+    executionUnitPrice,
+    isCustomTime,
+    customDateTime
+  ]);
   const automaticAccountingPrice = deriveUsdtVndAccountingPrice(
     executionUnitPrice,
     accountingRateState
@@ -341,7 +387,23 @@ export default function TransactionModal({
     priceCurrency
   );
 
-  // Set currency and settlement defaults when selected asset changes
+  // Invalidate a dispatched attempt whenever the semantic rate intent changes.
+  useEffect(() => {
+    if (!isOpen) {
+      previousAccountingRateIntentKeyRef.current = null;
+      return;
+    }
+
+    const previousKey = previousAccountingRateIntentKeyRef.current;
+    if (previousKey !== null && previousKey !== accountingRateIntentKey) {
+      pendingSubmissionIntentRef.current = null;
+      idempotencyKeyRef.current = getClientUUID();
+    }
+    previousAccountingRateIntentKeyRef.current = accountingRateIntentKey;
+  }, [isOpen, accountingRateIntentKey]);
+
+  // Set currency and settlement defaults when the selected asset contract changes.
+  // A refreshed assets array with identical semantics must not reset the form.
   useEffect(() => {
     if (!selectedAssetObject) return;
     const defaults = getTransactionEntryDefaults(selectedAssetObject);
@@ -358,7 +420,7 @@ export default function TransactionModal({
       quote: null,
       reason: null
     });
-  }, [selectedAssetObject]);
+  }, [selectedAssetContractKey]);
 
   // Fetch USD/VND rate for verified prefill path when relevant
   useEffect(() => {
@@ -385,7 +447,8 @@ export default function TransactionModal({
   }, [priceCurrency, isGold]);
 
   // Resolve a direct CoinGecko Tether/VND observation for crypto external
-  // settlement. A changed execution timestamp always invalidates the prior quote.
+  // settlement. The stable intent key covers asset, currency, settlement,
+  // execution price, and transaction timestamp without using object identity.
   useEffect(() => {
     if (!isOpen || !isAutomaticUsdtAccounting) {
       setAccountingRateState({
@@ -453,14 +516,15 @@ export default function TransactionModal({
   }, [
     isOpen,
     isAutomaticUsdtAccounting,
-    isCustomTime,
-    customDateTime
+    accountingRateIntentKey,
+    accountingRateRefreshVersion
   ]);
 
   if (!isOpen) return null;
 
   const handleTypeChange = (type) => {
     if (loading) return;
+    invalidateFrozenSubmission();
     setTransactionType(type);
     setErrorMsg(null);
     setSuccessMsg(null);
@@ -468,13 +532,16 @@ export default function TransactionModal({
     if (type === 'SELL' && selectedSymbol && !heldSymbolMap.has(selectedSymbol.toUpperCase())) {
       const firstHeld = holdings[0]?.symbol || holdings[0]?.asset?.symbol;
       if (firstHeld) {
+        invalidateAutomaticAccountingIntent();
         setSelectedSymbol(firstHeld);
       }
     }
   };
 
   const handleSelectAsset = (sym) => {
+    invalidateAutomaticAccountingIntent();
     setSelectedSymbol(sym);
+    setExecutionUnitPrice('');
     setIsAssetDropdownOpen(false);
     setAssetSearchQuery('');
     setErrorMsg(null);
@@ -482,6 +549,7 @@ export default function TransactionModal({
 
   const handleFillMaxQuantity = () => {
     if (currentHolding && typeof currentHolding.quantity === 'number') {
+      invalidateFrozenSubmission();
       setQuantityInput(String(currentHolding.quantity));
     }
   };
@@ -494,6 +562,7 @@ export default function TransactionModal({
       setErrorMsg('Vui lòng nhập giá thực hiện (USD) hợp lệ trước khi áp dụng tỷ giá.');
       return;
     }
+    invalidateFrozenSubmission();
     const calculatedVnd = Math.round(numExec * currentUsdVndRate);
     setPriceInput(String(calculatedVnd));
     setIsFxPrefillConfirmed(true);
@@ -507,6 +576,50 @@ export default function TransactionModal({
     setTimeout(() => priceInputRef.current?.focus(), 0);
   };
 
+  const dispatchFrozenSubmission = async (intent) => {
+    setLoading(true);
+
+    try {
+      const res = await apiFetch('/api/transactions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': intent.idempotencyKey
+        },
+        body: JSON.stringify(intent.payload)
+      });
+
+      const json = await res.json();
+
+      if (!res.ok || json.status !== 'ok') {
+        const backendMsg = json.details || json.message || `HTTP ${res.status}`;
+        throw new Error(translateErrorMessage(backendMsg));
+      }
+
+      // Rotate key after verified success so subsequent operations have a fresh key
+      idempotencyKeyRef.current = getClientUUID();
+      pendingSubmissionIntentRef.current = null;
+
+      const successText = intent.payload.transactionType === 'BUY'
+        ? 'Đã ghi nhận giao dịch mua.'
+        : 'Đã ghi nhận giao dịch bán.';
+
+      setSuccessMsg(successText);
+
+      if (onTransactionRecorded) {
+        onTransactionRecorded(json.data);
+      }
+
+      setTimeout(() => {
+        onClose();
+      }, 1000);
+    } catch (err) {
+      setErrorMsg(err.message || 'Đã có lỗi xảy ra khi ghi nhận giao dịch.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleSubmit = async (e) => {
     e?.preventDefault();
     if (loading) return;
@@ -514,6 +627,13 @@ export default function TransactionModal({
     setErrorMsg(null);
     setSuccessMsg(null);
     setAccountingPriceError(null);
+
+    // A request with unknown commit status is retried verbatim. Field-change
+    // handlers clear this ref before a genuinely new intent can be dispatched.
+    if (pendingSubmissionIntentRef.current) {
+      await dispatchFrozenSubmission(pendingSubmissionIntentRef.current);
+      return;
+    }
 
     // Strict client validations
     if (!selectedSymbol || !selectedSymbol.trim()) {
@@ -565,6 +685,15 @@ export default function TransactionModal({
     if (isAutomaticUsdtAccounting) {
       if (isAccountingRatePending) return;
       if (accountingRateState.status === ACCOUNTING_RATE_UI_STATUS.AVAILABLE) {
+        if (!isUsdtVndAccountingQuoteFreshAtSubmission(accountingRateState, Date.now())) {
+          setAccountingRateState({
+            status: ACCOUNTING_RATE_UI_STATUS.LOADING,
+            quote: null,
+            reason: 'QUOTE_EXPIRED'
+          });
+          setAccountingRateRefreshVersion((version) => version + 1);
+          return;
+        }
         if (!Number.isFinite(automaticAccountingPrice) || automaticAccountingPrice <= 0) {
           setErrorMsg('Không thể tính giá hạch toán VND từ giá thực hiện USDT.');
           return;
@@ -650,49 +779,7 @@ export default function TransactionModal({
     });
     pendingSubmissionIntentRef.current = intent;
     idempotencyKeyRef.current = intent.idempotencyKey;
-    const frozenPayload = intent.payload;
-
-    setLoading(true);
-
-    try {
-      const res = await apiFetch('/api/transactions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Idempotency-Key': intent.idempotencyKey
-        },
-        body: JSON.stringify(frozenPayload)
-      });
-
-      const json = await res.json();
-
-      if (!res.ok || json.status !== 'ok') {
-        const backendMsg = json.details || json.message || `HTTP ${res.status}`;
-        throw new Error(translateErrorMessage(backendMsg));
-      }
-
-      // Rotate key after verified success so subsequent operations have a fresh key
-      idempotencyKeyRef.current = getClientUUID();
-      pendingSubmissionIntentRef.current = null;
-
-      const successText = transactionType === 'BUY'
-        ? 'Đã ghi nhận giao dịch mua.'
-        : 'Đã ghi nhận giao dịch bán.';
-
-      setSuccessMsg(successText);
-
-      if (onTransactionRecorded) {
-        onTransactionRecorded(json.data);
-      }
-
-      setTimeout(() => {
-        onClose();
-      }, 1000);
-    } catch (err) {
-      setErrorMsg(err.message || 'Đã có lỗi xảy ra khi ghi nhận giao dịch.');
-    } finally {
-      setLoading(false);
-    }
+    await dispatchFrozenSubmission(intent);
   };
 
   return (
@@ -1104,7 +1191,10 @@ export default function TransactionModal({
                 min="0.00000001"
                 placeholder={isGold ? 'Ví dụ: 1 (troy ounce)' : (isCrypto ? 'Ví dụ: 0.05' : 'Ví dụ: 100')}
                 value={quantityInput}
-                onChange={(e) => setQuantityInput(e.target.value)}
+                onChange={(e) => {
+                  invalidateFrozenSubmission();
+                  setQuantityInput(e.target.value);
+                }}
                 disabled={loading}
                 style={{
                   width: '100%',
@@ -1147,6 +1237,7 @@ export default function TransactionModal({
                       placeholder={`Ví dụ: ${isGold ? '2650' : (isCrypto ? '0.36402' : '95000')}`}
                       value={executionUnitPrice}
                       onChange={(e) => {
+                        invalidateAutomaticAccountingIntent();
                         setExecutionUnitPrice(e.target.value);
                         setIsFxPrefillConfirmed(false);
                       }}
@@ -1170,6 +1261,7 @@ export default function TransactionModal({
                     <select
                       value={priceCurrency}
                       onChange={(e) => {
+                        invalidateAutomaticAccountingIntent();
                         setPriceCurrency(e.target.value);
                         setIsFxPrefillConfirmed(false);
                       }}
@@ -1380,6 +1472,7 @@ export default function TransactionModal({
                     placeholder="Ví dụ: 9500"
                     value={priceInput}
                     onChange={(event) => {
+                      invalidateFrozenSubmission();
                       setPriceInput(event.target.value);
                       setIsFxPrefillConfirmed(false);
                       setAccountingPriceError(null);
@@ -1422,6 +1515,7 @@ export default function TransactionModal({
                   placeholder={isGold ? 'Ví dụ: 68000000' : 'Ví dụ: 120000'}
                   value={priceInput}
                   onChange={(event) => {
+                    invalidateFrozenSubmission();
                     setPriceInput(event.target.value);
                     setIsFxPrefillConfirmed(false);
                   }}
@@ -1450,9 +1544,15 @@ export default function TransactionModal({
               <TransactionSettlementControls
                 compact={isSimplifiedCryptoExternal}
                 settlementMode={settlementMode}
-                setSettlementMode={setSettlementMode}
+                setSettlementMode={(value) => {
+                  invalidateAutomaticAccountingIntent();
+                  setSettlementMode(value);
+                }}
                 settlementCurrency={settlementCurrency}
-                setSettlementCurrency={setSettlementCurrency}
+                setSettlementCurrency={(value) => {
+                  invalidateFrozenSubmission();
+                  setSettlementCurrency(value);
+                }}
                 loading={loading}
               />
             )}
@@ -1488,7 +1588,10 @@ export default function TransactionModal({
                 </label>
                 <button
                   type="button"
-                  onClick={() => setIsCustomTime((prev) => !prev)}
+                  onClick={() => {
+                    invalidateAutomaticAccountingIntent();
+                    setIsCustomTime((prev) => !prev);
+                  }}
                   style={{
                     border: 'none',
                     background: 'none',
@@ -1508,6 +1611,7 @@ export default function TransactionModal({
                   type="datetime-local"
                   value={customDateTime}
                   onChange={(e) => {
+                    invalidateAutomaticAccountingIntent();
                     setCustomDateTime(e.target.value);
                     setIsFxPrefillConfirmed(false);
                   }}

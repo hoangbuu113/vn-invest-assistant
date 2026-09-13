@@ -43,7 +43,11 @@ import { runMarketContextCollector } from './src/context/collector.js';
 import { getOpportunities } from './src/opportunities.js';
 import { getInvestmentBrief } from './src/investmentBrief.js';
 import { getMarketStrategist } from './src/marketStrategist.js';
-import { getAccountingRate } from './src/accountingRate.js';
+import {
+  USDT_VND_ACCOUNTING_PROVENANCE,
+  getAccountingRate,
+  validateCoinGeckoAccountingRateWrite
+} from './src/accountingRate.js';
 import {
   createPortfolioTransaction,
   reversePortfolioTransaction,
@@ -198,6 +202,7 @@ export function createApp(services = {}) {
     createPortfolioTransactionFn = createPortfolioTransaction,
     reversePortfolioTransactionFn = reversePortfolioTransaction,
     getAccountingRateFn = getAccountingRate,
+    accountingRateEnabled = process.env.COINGECKO_ACCOUNTING_RATE_ENABLED,
     getCashOverviewFn = getCashOverview,
     getCashLedgerFn = getCashLedger,
     createCashMovementFn = createCashMovement,
@@ -928,6 +933,19 @@ export function createApp(services = {}) {
         if (!normalizedFxObservedAt) {
           errors.push('fxObservedAt must be a valid timestamp with an explicit Z or UTC offset');
         }
+      }
+
+      if (normalizedFxProvenance === USDT_VND_ACCOUNTING_PROVENANCE) {
+        errors.push(...validateCoinGeckoAccountingRateWrite({
+          price,
+          executionUnitPrice,
+          priceCurrency,
+          settlementMode,
+          fxRateToVnd,
+          fxObservedAt: normalizedFxObservedAt
+        }, {
+          enabled: accountingRateEnabled
+        }));
       }
 
       if (errors.length > 0) {

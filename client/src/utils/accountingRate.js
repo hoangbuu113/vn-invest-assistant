@@ -7,6 +7,8 @@ export const ACCOUNTING_RATE_UI_STATUS = Object.freeze({
 });
 
 const USDT_VND_PROVENANCE = 'COINGECKO_USDT_VND';
+export const CURRENT_ACCOUNTING_RATE_MAX_AGE_MS = 10 * 60 * 1000;
+export const HISTORICAL_ACCOUNTING_RATE_MAX_DELTA_MS = 60 * 60 * 1000;
 
 function positiveFiniteNumber(value) {
   const number = Number(value);
@@ -53,6 +55,37 @@ export function buildUsdtVndAccountingRatePath(at = null) {
   const query = new URLSearchParams({ base: 'USDT', quote: 'VND' });
   if (at) query.set('at', at);
   return `/api/accounting-rate?${query.toString()}`;
+}
+
+function normalizeIntentNumber(value) {
+  if (typeof value === 'string' && value.trim() === '') return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : String(value ?? '');
+}
+
+/**
+ * Builds a stable semantic identity for one automatic accounting-rate intent.
+ * Provider resolution must not depend on React object identity.
+ */
+export function buildUsdtVndAccountingRateIntentKey({
+  assetId,
+  assetSymbol,
+  priceCurrency,
+  settlementMode,
+  executionUnitPrice,
+  isCustomTime,
+  executedAt
+} = {}) {
+  return JSON.stringify({
+    assetIdentity: typeof assetId === 'string' && assetId.trim()
+      ? assetId.trim()
+      : String(assetSymbol || '').trim().toUpperCase(),
+    priceCurrency: String(priceCurrency || '').trim().toUpperCase(),
+    settlementMode: String(settlementMode || '').trim().toUpperCase(),
+    executionUnitPrice: normalizeIntentNumber(executionUnitPrice),
+    timestampMode: isCustomTime === true ? 'HISTORICAL' : 'CURRENT',
+    executedAt: isCustomTime === true ? String(executedAt || '').trim() : null
+  });
 }
 
 export function normalizeUsdtVndAccountingRate(data) {
@@ -118,6 +151,27 @@ export function deriveUsdtVndAccountingPrice(executionUnitPrice, rateState) {
   const rate = positiveFiniteNumber(rateState?.quote?.rate);
   if (executionPrice === null || rate === null) return null;
   return executionPrice * rate;
+}
+
+/**
+ * Revalidates an available quote immediately before its first dispatch.
+ * Historical observations are governed by their delta from executedAt rather
+ * than by wall-clock age.
+ */
+export function isUsdtVndAccountingQuoteFreshAtSubmission(rateState, nowMs = Date.now()) {
+  if (rateState?.status !== ACCOUNTING_RATE_UI_STATUS.AVAILABLE) return false;
+
+  if (rateState.quote?.mode === 'HISTORICAL') {
+    const deltaMs = rateState.quote?.observationDeltaMs;
+    return Number.isFinite(deltaMs)
+      && deltaMs >= 0
+      && deltaMs <= HISTORICAL_ACCOUNTING_RATE_MAX_DELTA_MS;
+  }
+
+  const observedMs = Date.parse(rateState.quote?.observedAt);
+  if (!Number.isFinite(observedMs) || !Number.isFinite(nowMs)) return false;
+  const ageMs = nowMs - observedMs;
+  return ageMs >= 0 && ageMs <= CURRENT_ACCOUNTING_RATE_MAX_AGE_MS;
 }
 
 export function accountingRateFallbackMessage(reason) {

@@ -7,6 +7,8 @@ export const USDT_VND_ACCOUNTING_PROVENANCE = 'COINGECKO_USDT_VND';
 export const CURRENT_ACCOUNTING_RATE_MAX_AGE_MS = 10 * 60 * 1000;
 export const HISTORICAL_ACCOUNTING_RATE_MAX_DELTA_MS = 60 * 60 * 1000;
 const HISTORICAL_QUERY_PADDING_MS = 2 * 60 * 60 * 1000;
+const ACCOUNTING_PRICE_ABSOLUTE_TOLERANCE_VND = 0.05;
+const ACCOUNTING_PRICE_RELATIVE_TOLERANCE = 0.0001;
 
 function normalizeCurrency(value) {
   return typeof value === 'string' && value.trim()
@@ -24,6 +26,60 @@ export function isCoinGeckoAccountingRateEnabled(
 ) {
   if (typeof value === 'boolean') return value;
   return typeof value === 'string' && ['1', 'true', 'yes', 'on'].includes(value.trim().toLowerCase());
+}
+
+function positiveFiniteNumber(value) {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0
+    ? value
+    : null;
+}
+
+/**
+ * Validates the client-carried fields for the server-authoritative CoinGecko
+ * provenance before an RPC write. The feature flag is intentionally enforced
+ * here as well as on the read-only resolver endpoint.
+ */
+export function validateCoinGeckoAccountingRateWrite({
+  price,
+  executionUnitPrice,
+  priceCurrency,
+  settlementMode,
+  fxRateToVnd,
+  fxObservedAt
+} = {}, { enabled } = {}) {
+  const errors = [];
+
+  if (!isCoinGeckoAccountingRateEnabled(enabled)) {
+    errors.push('COINGECKO_USDT_VND provenance is unavailable while automatic accounting rates are disabled');
+  }
+  if (normalizeCurrency(priceCurrency) !== 'USDT') {
+    errors.push('COINGECKO_USDT_VND provenance requires priceCurrency USDT');
+  }
+  if (typeof settlementMode !== 'string' || settlementMode.trim().toUpperCase() !== 'EXTERNAL_SETTLEMENT') {
+    errors.push('COINGECKO_USDT_VND provenance requires EXTERNAL_SETTLEMENT');
+  }
+
+  const executionPrice = positiveFiniteNumber(executionUnitPrice);
+  const rate = positiveFiniteNumber(fxRateToVnd);
+  const accountingPrice = positiveFiniteNumber(price);
+  if (executionPrice === null || rate === null || accountingPrice === null) {
+    errors.push('COINGECKO_USDT_VND provenance requires positive executionUnitPrice, fxRateToVnd, and price');
+  } else {
+    const expectedAccountingPrice = executionPrice * rate;
+    const difference = Math.abs(accountingPrice - expectedAccountingPrice);
+    if (
+      difference > ACCOUNTING_PRICE_ABSOLUTE_TOLERANCE_VND
+      && difference / expectedAccountingPrice > ACCOUNTING_PRICE_RELATIVE_TOLERANCE
+    ) {
+      errors.push('price must match executionUnitPrice multiplied by fxRateToVnd for COINGECKO_USDT_VND provenance');
+    }
+  }
+
+  if (!normalizeDate(fxObservedAt)) {
+    errors.push('COINGECKO_USDT_VND provenance requires a valid provider fxObservedAt timestamp');
+  }
+
+  return errors;
 }
 
 function resultBase({
