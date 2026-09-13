@@ -16,7 +16,10 @@ import {
   getCoinGeckoCurrentUsdtVndObservation,
   getCoinGeckoHistoricalUsdtVndObservations
 } from '../src/providers/coingecko.js';
-import { createPortfolioTransaction } from '../src/transactions.js';
+import {
+  createPortfolioTransaction,
+  hasPortfolioIdempotencyRecord
+} from '../src/transactions.js';
 import {
   ACCOUNTING_RATE_UI_STATUS,
   buildUsdtVndAccountingRatePath,
@@ -495,6 +498,7 @@ describe('Automatic direct USDT/VND accounting rate', () => {
         transactions.push(payload);
         return { transaction: { id: 'tx-ondo', ...payload }, replayed: false };
       },
+      hasPortfolioIdempotencyRecordFn: async () => false,
       accountingRateEnabled: true,
       accountingRateQuoteSecret: QUOTE_SECRET,
       accountingRateNowFn: () => NOW
@@ -564,6 +568,7 @@ describe('Automatic direct USDT/VND accounting rate', () => {
         resolverCalls += 1;
         throw new Error('POST must not resolve CoinGecko again');
       },
+      hasPortfolioIdempotencyRecordFn: async () => false,
       accountingRateQuoteSecret: QUOTE_SECRET,
       accountingRateNowFn: () => NOW
     };
@@ -729,6 +734,147 @@ describe('Automatic direct USDT/VND accounting rate', () => {
     } finally {
       await new Promise((resolve) => enabled.server.close(resolve));
     }
+  });
+
+  test('malformed quote proofs fail at the API boundary without an idempotency lookup or financial write', async () => {
+    const quote = signedAccountingRate(accountingRateResult());
+    let idempotencyLookups = 0;
+    let writes = 0;
+    const app = createApp({
+      getProfileByUserIdFn: async () => ({ id: PROFILE_ID }),
+      getAssetBySymbolFn: async () => ({
+        id: 'asset-ondo',
+        symbol: 'ONDO',
+        asset_type: 'crypto',
+        quote_currency: 'USD',
+        portfolio_eligibility: 'PORTFOLIO_ELIGIBLE',
+        is_active: true
+      }),
+      hasPortfolioIdempotencyRecordFn: async () => {
+        idempotencyLookups += 1;
+        return false;
+      },
+      createPortfolioTransactionFn: async () => {
+        writes += 1;
+        return { transaction: { id: 'unexpected-write' }, replayed: false };
+      },
+      accountingRateEnabled: true,
+      accountingRateQuoteSecret: QUOTE_SECRET,
+      accountingRateNowFn: () => NOW
+    });
+    const { server, baseUrl } = await listen(app);
+
+    try {
+      for (const [index, quoteProof] of ['not-a-token', 'abc.$$$'].entries()) {
+        const response = await ownerFetch(`${baseUrl}/api/transactions`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Idempotency-Key': `malformed-proof-${index}`
+          },
+          body: JSON.stringify(automaticTransactionBody(quote, { quoteProof }))
+        });
+        assert.equal(response.status, 400);
+        const body = await response.json();
+        assert.match(body.errors.join(' '), /QUOTE_PROOF_MALFORMED/);
+      }
+      assert.equal(idempotencyLookups, 0);
+      assert.equal(writes, 0);
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+
+  test('automatic accounting price uses only a bounded 0.05 VND absolute tolerance', async () => {
+    const quote = signedAccountingRate(accountingRateResult());
+    const writes = [];
+    let requestNumber = 0;
+    const app = createApp({
+      getProfileByUserIdFn: async () => ({ id: PROFILE_ID }),
+      getAssetBySymbolFn: async () => ({
+        id: 'asset-btc',
+        symbol: 'BTC',
+        asset_type: 'crypto',
+        quote_currency: 'USD',
+        portfolio_eligibility: 'PORTFOLIO_ELIGIBLE',
+        is_active: true
+      }),
+      hasPortfolioIdempotencyRecordFn: async () => false,
+      createPortfolioTransactionFn: async (payload) => {
+        writes.push(payload);
+        return { transaction: { id: `tx-${writes.length}`, ...payload }, replayed: false };
+      },
+      accountingRateEnabled: true,
+      accountingRateQuoteSecret: QUOTE_SECRET,
+      accountingRateNowFn: () => NOW
+    });
+    const { server, baseUrl } = await listen(app);
+    const executionUnitPrice = 100000;
+    const expectedPrice = executionUnitPrice * quote.rate;
+
+    const post = (price) => ownerFetch(`${baseUrl}/api/transactions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': `bounded-price-${++requestNumber}`
+      },
+      body: JSON.stringify(automaticTransactionBody(quote, {
+        symbol: 'BTC',
+        quantity: 1,
+        executionUnitPrice,
+        price
+      }))
+    });
+
+    try {
+      assert.equal((await post(expectedPrice)).status, 201);
+      assert.equal((await post(expectedPrice + 0.04)).status, 201);
+      assert.equal(writes.length, 2);
+
+      const outsideTolerance = await post(expectedPrice + 0.051);
+      assert.equal(outsideTolerance.status, 400);
+      assert.equal(writes.length, 2);
+
+      const auditedHighValueTamper = await post(expectedPrice + 200000);
+      assert.equal(auditedHighValueTamper.status, 400);
+      assert.equal(writes.length, 2);
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+
+  test('idempotency precheck reads only existence scoped to authenticated profile and key', async () => {
+    const calls = { table: null, columns: null, filters: [] };
+    const query = {
+      select(columns) {
+        calls.columns = columns;
+        return this;
+      },
+      eq(column, value) {
+        calls.filters.push([column, value]);
+        return this;
+      },
+      async maybeSingle() {
+        return { data: { idempotency_key: 'retry-key' }, error: null };
+      }
+    };
+    const exists = await hasPortfolioIdempotencyRecord({
+      profileId: PROFILE_ID,
+      idempotencyKey: ' retry-key '
+    }, {
+      from(table) {
+        calls.table = table;
+        return query;
+      }
+    });
+
+    assert.equal(exists, true);
+    assert.equal(calls.table, 'portfolio_idempotency_records');
+    assert.equal(calls.columns, 'idempotency_key');
+    assert.deepEqual(calls.filters, [
+      ['profile_id', PROFILE_ID],
+      ['idempotency_key', 'retry-key']
+    ]);
   });
 
   test('transaction service boundary does not preserve a competing provenance object shape', async () => {

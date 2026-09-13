@@ -54,6 +54,7 @@ import {
   reversePortfolioTransaction,
   FX_PROVENANCE_METHODS,
   getPortfolioTransactions,
+  hasPortfolioIdempotencyRecord,
   normalizeExplicitTimestamp,
   SETTLEMENT_MODES,
   TRANSACTION_METHODOLOGY,
@@ -202,6 +203,7 @@ export function createApp(services = {}) {
     getPortfolioTransactionsFn = getPortfolioTransactions,
     createPortfolioTransactionFn = createPortfolioTransaction,
     reversePortfolioTransactionFn = reversePortfolioTransaction,
+    hasPortfolioIdempotencyRecordFn = hasPortfolioIdempotencyRecord,
     getAccountingRateFn = getAccountingRate,
     accountingRateEnabled = process.env.COINGECKO_ACCOUNTING_RATE_ENABLED,
     accountingRateQuoteSecret = process.env.ACCOUNTING_RATE_QUOTE_SECRET,
@@ -956,7 +958,7 @@ export function createApp(services = {}) {
       }
 
       if (normalizedFxProvenance === USDT_VND_ACCOUNTING_PROVENANCE) {
-        errors.push(...validateCoinGeckoAccountingRateWrite({
+        const automaticWrite = {
           price,
           executionUnitPrice,
           priceCurrency,
@@ -966,11 +968,32 @@ export function createApp(services = {}) {
           fxObservedAt: normalizedFxObservedAt,
           executedAt: normalizedExecutedAt,
           quoteProof
-        }, {
+        };
+        const verificationNow = accountingRateNowFn();
+        // First validate every authority claim except the upper CURRENT age bound.
+        // Only a committed, profile-scoped P1A record may let that one bound be
+        // bypassed so the RPC can decide replay versus conflict authoritatively.
+        const authorityErrors = validateCoinGeckoAccountingRateWrite(automaticWrite, {
           enabled: accountingRateEnabled,
           secret: accountingRateQuoteSecret,
-          now: accountingRateNowFn()
-        }));
+          now: verificationNow,
+          allowExpiredCurrentObservation: true
+        });
+        errors.push(...authorityErrors);
+
+        if (authorityErrors.length === 0 && errors.length === 0) {
+          const hasCommittedIdempotencyRecord = idempotencyKey
+            ? await hasPortfolioIdempotencyRecordFn({ profileId, idempotencyKey }, transactionClient)
+            : false;
+
+          if (!hasCommittedIdempotencyRecord) {
+            errors.push(...validateCoinGeckoAccountingRateWrite(automaticWrite, {
+              enabled: accountingRateEnabled,
+              secret: accountingRateQuoteSecret,
+              now: verificationNow
+            }));
+          }
+        }
       }
 
       if (errors.length > 0) {

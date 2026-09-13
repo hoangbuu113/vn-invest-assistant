@@ -10,7 +10,6 @@ export const CURRENT_ACCOUNTING_RATE_MAX_AGE_MS = 10 * 60 * 1000;
 export const HISTORICAL_ACCOUNTING_RATE_MAX_DELTA_MS = 60 * 60 * 1000;
 const HISTORICAL_QUERY_PADDING_MS = 2 * 60 * 60 * 1000;
 const ACCOUNTING_PRICE_ABSOLUTE_TOLERANCE_VND = 0.05;
-const ACCOUNTING_PRICE_RELATIVE_TOLERANCE = 0.0001;
 const ACCOUNTING_RATE_QUOTE_VERSION = 1;
 const ACCOUNTING_RATE_QUOTE_PROVIDER = 'CoinGecko';
 const ACCOUNTING_RATE_QUOTE_SECRET_MIN_BYTES = 32;
@@ -224,7 +223,8 @@ export function validateCoinGeckoAccountingRateWrite({
 } = {}, {
   enabled,
   secret = process.env.ACCOUNTING_RATE_QUOTE_SECRET,
-  now = new Date()
+  now = new Date(),
+  allowExpiredCurrentObservation = false
 } = {}) {
   const errors = [];
 
@@ -246,10 +246,7 @@ export function validateCoinGeckoAccountingRateWrite({
   } else {
     const expectedAccountingPrice = executionPrice * rate;
     const difference = Math.abs(accountingPrice - expectedAccountingPrice);
-    if (
-      difference > ACCOUNTING_PRICE_ABSOLUTE_TOLERANCE_VND
-      && difference / expectedAccountingPrice > ACCOUNTING_PRICE_RELATIVE_TOLERANCE
-    ) {
+    if (difference > ACCOUNTING_PRICE_ABSOLUTE_TOLERANCE_VND) {
       errors.push('price must match executionUnitPrice multiplied by fxRateToVnd for COINGECKO_USDT_VND provenance');
     }
   }
@@ -302,7 +299,10 @@ export function validateCoinGeckoAccountingRateWrite({
       errors.push('CURRENT quoteProof cannot be used with an explicit executedAt');
     }
     const ageMs = nowDate.getTime() - observedMs;
-    if (ageMs < 0 || ageMs > CURRENT_ACCOUNTING_RATE_MAX_AGE_MS) {
+    if (
+      ageMs < 0
+      || (ageMs > CURRENT_ACCOUNTING_RATE_MAX_AGE_MS && allowExpiredCurrentObservation !== true)
+    ) {
       errors.push('CURRENT quoteProof observation is stale or invalid');
     }
   } else if (claims.mode === 'HISTORICAL') {

@@ -167,6 +167,32 @@ function transactionDatabaseError(error, fallbackMessage) {
   return err;
 }
 
+export async function hasPortfolioIdempotencyRecord({
+  profileId,
+  idempotencyKey
+} = {}, client = privateSupabase) {
+  const db = requireDatabaseClient(client);
+  const normalizedProfileId = typeof profileId === 'string' ? profileId.trim() : '';
+  const normalizedKey = typeof idempotencyKey === 'string' ? idempotencyKey.trim() : '';
+
+  if (!normalizedProfileId || !normalizedKey) return false;
+
+  // Existence is the only precheck signal required by the route. Response and
+  // request-hash authority remain inside the existing database RPC.
+  const { data, error } = await db
+    .from('portfolio_idempotency_records')
+    .select('idempotency_key')
+    .eq('profile_id', normalizedProfileId)
+    .eq('idempotency_key', normalizedKey)
+    .maybeSingle();
+
+  if (error) {
+    throw transactionDatabaseError(error, 'Failed to inspect portfolio idempotency record');
+  }
+
+  return Boolean(data);
+}
+
 export async function getPortfolioTransactions({ profileId, symbol } = {}, client = privateSupabase, options = {}) {
   const db = requireDatabaseClient(client);
   const targetProfileId = options?.profileId || profileId || null;

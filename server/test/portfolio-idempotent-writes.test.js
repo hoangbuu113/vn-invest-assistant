@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 
 import { PGlite } from '@electric-sql/pglite';
 import { createApp } from '../index.js';
+import { issueAccountingRateQuoteProof } from '../src/accountingRate.js';
 import { ownerFetch } from './helpers/owner-auth.js';
 
 const TEST_DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -18,6 +19,7 @@ const USER_ID = '11111111-1111-4111-8111-111111111111';
 const PROFILE_ID = '22222222-2222-4222-8222-222222222222';
 const FPT_ASSET_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const BTC_ASSET_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+const ACCOUNTING_RATE_QUOTE_SECRET = 'test-accounting-rate-quote-secret-at-least-32-bytes';
 
 async function createTestDatabase() {
   const db = new PGlite();
@@ -52,6 +54,86 @@ async function createTestDatabase() {
   `);
 
   return db;
+}
+
+function createPglitePortfolioClient(db, counters = {}) {
+  return {
+    from(table) {
+      const filters = {};
+      const query = {
+        select(columns) {
+          assert.equal(table, 'portfolio_idempotency_records');
+          assert.equal(columns, 'idempotency_key');
+          return this;
+        },
+        eq(column, value) {
+          filters[column] = value;
+          return this;
+        },
+        async maybeSingle() {
+          counters.idempotencyLookups = (counters.idempotencyLookups || 0) + 1;
+          const result = await db.query(`
+            SELECT idempotency_key
+            FROM public.portfolio_idempotency_records
+            WHERE profile_id = $1::uuid AND idempotency_key = $2::text
+            LIMIT 1
+          `, [filters.profile_id, filters.idempotency_key]);
+          return { data: result.rows[0] || null, error: null };
+        }
+      };
+      return query;
+    },
+    async rpc(name, args) {
+      assert.equal(name, 'create_portfolio_transaction');
+      counters.rpcCalls = (counters.rpcCalls || 0) + 1;
+      try {
+        const result = await db.query(`
+          SELECT public.create_portfolio_transaction(
+            p_profile_id => $1::uuid,
+            p_symbol => $2::text,
+            p_asset_id => $3::text,
+            p_transaction_type => $4::text,
+            p_quantity => $5::numeric,
+            p_price => $6::numeric,
+            p_executed_at => $7::timestamptz,
+            p_execution_unit_price => $8::numeric,
+            p_price_currency => $9::text,
+            p_settlement_mode => $10::text,
+            p_settlement_currency => $11::text,
+            p_fx_rate_to_vnd => $12::numeric,
+            p_fx_provenance => $13::text,
+            p_fx_observed_at => $14::timestamptz,
+            p_idempotency_key => $15::text
+          ) AS result
+        `, [
+          args.p_profile_id,
+          args.p_symbol,
+          args.p_asset_id,
+          args.p_transaction_type,
+          args.p_quantity,
+          args.p_price,
+          args.p_executed_at,
+          args.p_execution_unit_price,
+          args.p_price_currency,
+          args.p_settlement_mode,
+          args.p_settlement_currency,
+          args.p_fx_rate_to_vnd,
+          args.p_fx_provenance,
+          args.p_fx_observed_at,
+          args.p_idempotency_key
+        ]);
+        return { data: result.rows[0].result, error: null };
+      } catch (error) {
+        return {
+          data: null,
+          error: {
+            code: error.code,
+            message: error.message
+          }
+        };
+      }
+    }
+  };
 }
 
 describe('Portfolio P1A — Idempotent Financial Writes (Database Layer)', () => {
@@ -862,6 +944,129 @@ describe('Portfolio P1A — Express HTTP Route Integration', () => {
       assert.match(body4.errors[0], /1 and 128 characters/i);
     } finally {
       await new Promise((resolve) => server.close(resolve));
+    }
+  });
+
+  test('automatic CURRENT quote replay crosses expiry through the real P1A RPC while new keys stay stale and conflicts stay IC001', async () => {
+    const db = await createTestDatabase();
+    const counters = { idempotencyLookups: 0, rpcCalls: 0 };
+    const transactionClient = createPglitePortfolioClient(db, counters);
+    const observedAt = '2026-09-12T12:00:00.000Z';
+    const rate = 25325;
+    const executionUnitPrice = 0.36402;
+    const quoteProof = issueAccountingRateQuoteProof({
+      availability: 'available',
+      baseCurrency: 'USDT',
+      quoteCurrency: 'VND',
+      rate,
+      provider: 'CoinGecko',
+      provenance: 'COINGECKO_USDT_VND',
+      observedAt,
+      requestedAt: observedAt,
+      observationDeltaMs: 0,
+      mode: 'CURRENT',
+      reason: null
+    }, {
+      secret: ACCOUNTING_RATE_QUOTE_SECRET,
+      now: new Date(observedAt)
+    });
+    assert.equal(typeof quoteProof, 'string');
+
+    let serverNow = new Date('2026-09-12T12:09:59.000Z');
+    const app = createApp({
+      getProfileByUserIdFn: async () => ({ id: PROFILE_ID }),
+      getAssetBySymbolFn: async () => ({
+        id: BTC_ASSET_ID,
+        symbol: 'BTC',
+        asset_type: 'crypto',
+        quote_currency: 'USD',
+        portfolio_eligibility: 'PORTFOLIO_ELIGIBLE',
+        is_active: true
+      }),
+      transactionClient,
+      accountingRateEnabled: true,
+      accountingRateQuoteSecret: ACCOUNTING_RATE_QUOTE_SECRET,
+      accountingRateNowFn: () => serverNow
+    });
+    const server = http.createServer(app);
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const baseUrl = `http://127.0.0.1:${server.address().port}`;
+    const idempotencyKey = 'auto-expiry-p1a-key';
+    const body = {
+      symbol: 'BTC',
+      transactionType: 'BUY',
+      quantity: 1,
+      price: executionUnitPrice * rate,
+      executionUnitPrice,
+      priceCurrency: 'USDT',
+      settlementMode: 'EXTERNAL_SETTLEMENT',
+      settlementCurrency: null,
+      fxRateToVnd: rate,
+      fxProvenance: 'COINGECKO_USDT_VND',
+      fxObservedAt: observedAt,
+      quoteProof
+    };
+    const post = (key, payload = body) => ownerFetch(`${baseUrl}/api/transactions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': key
+      },
+      body: JSON.stringify(payload)
+    });
+
+    try {
+      const first = await post(idempotencyKey);
+      assert.equal(first.status, 201);
+      assert.equal(first.headers.get('Idempotent-Replayed'), null);
+      assert.equal((await first.json()).data.replayed, false);
+      assert.equal(counters.rpcCalls, 1);
+
+      serverNow = new Date('2026-09-12T12:10:00.001Z');
+      const replay = await post(idempotencyKey);
+      assert.equal(replay.status, 200);
+      assert.equal(replay.headers.get('Idempotent-Replayed'), 'true');
+      assert.equal((await replay.json()).data.replayed, true);
+      assert.equal(counters.rpcCalls, 2, 'replay must reach the authoritative P1A RPC');
+
+      let transactionCount = await db.query(`SELECT COUNT(*)::int AS count FROM public.portfolio_transactions`);
+      assert.equal(transactionCount.rows[0].count, 1);
+
+      const staleNewKey = await post('auto-expiry-new-key');
+      assert.equal(staleNewKey.status, 400);
+      assert.match((await staleNewKey.json()).errors.join(' '), /observation is stale/);
+      assert.equal(counters.rpcCalls, 2, 'expired proof with a new key must not reach the RPC');
+
+      const conflict = await post(idempotencyKey, { ...body, quantity: 2 });
+      assert.equal(conflict.status, 409);
+      assert.equal((await conflict.json()).code, 'IC001');
+      assert.equal(counters.rpcCalls, 3, 'conflict candidate must be decided by P1A');
+
+      const crossOperationKey = 'auto-expiry-cross-operation';
+      await db.query(`
+        SELECT public.create_cash_movement(
+          p_profile_id => '${PROFILE_ID}'::uuid,
+          p_entry_type => 'DEPOSIT',
+          p_amount => 1000,
+          p_idempotency_key => '${crossOperationKey}'
+        )
+      `);
+      const crossOperationConflict = await post(crossOperationKey);
+      assert.equal(crossOperationConflict.status, 409);
+      assert.equal((await crossOperationConflict.json()).code, 'IC001');
+      assert.equal(counters.rpcCalls, 4, 'another operation key must reach P1A only to conflict');
+
+      transactionCount = await db.query(`SELECT COUNT(*)::int AS count FROM public.portfolio_transactions`);
+      assert.equal(transactionCount.rows[0].count, 1);
+      const idempotencyCount = await db.query(`
+        SELECT COUNT(*)::int AS count
+        FROM public.portfolio_idempotency_records
+        WHERE profile_id = '${PROFILE_ID}' AND idempotency_key = '${idempotencyKey}'
+      `);
+      assert.equal(idempotencyCount.rows[0].count, 1);
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+      await db.close();
     }
   });
 
