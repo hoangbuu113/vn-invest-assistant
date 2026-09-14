@@ -71,11 +71,17 @@ function buildFundamentalsEvidenceDomain(fundamentals, asset) {
       availability: companyType === 'INDUSTRIAL' ? 'NOT_INGESTED' : 'UNSUPPORTED_COMPANY_TYPE',
       latestAnnual: null,
       latestQuarter: null,
+      latestYtd: null,
+      latestInterim: null,
       historicalPeriods: []
     };
   }
   const hasTrustedData = ['AVAILABLE', 'PARTIAL'].includes(fundamentals.availability);
-  const currentPeriods = [fundamentals.latestAnnual, fundamentals.latestQuarter].filter(Boolean);
+  const currentPeriods = [
+    fundamentals.latestAnnual,
+    fundamentals.latestQuarter,
+    fundamentals.latestYtd
+  ].filter(Boolean);
   return {
     status: hasTrustedData ? EQUITY_EVIDENCE_STATUS.AVAILABLE : EQUITY_EVIDENCE_STATUS.UNAVAILABLE,
     availability: fundamentals.availability,
@@ -84,6 +90,8 @@ function buildFundamentalsEvidenceDomain(fundamentals, asset) {
     expectedMetrics: fundamentals.expectedMetrics,
     latestAnnual: fundamentals.latestAnnual,
     latestQuarter: fundamentals.latestQuarter,
+    latestYtd: fundamentals.latestYtd,
+    latestInterim: fundamentals.latestInterim,
     historicalPeriods: fundamentals.historicalPeriods,
     limitations: fundamentals.limitations
   };

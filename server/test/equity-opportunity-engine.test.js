@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { createApp } from '../index.js';
+import { buildFundamentalsResponse } from '../src/equities/fundamentalsModel.js';
 import { createEquityEvidence } from '../src/equities/evidenceModel.js';
 import {
   buildEquityOpportunityShortlist,
@@ -46,6 +47,8 @@ const fpt = Object.freeze({
   quoteCurrency: 'VND',
   marketPolicy: 'VN_EXCHANGE',
   marketTimezone: 'Asia/Ho_Chi_Minh',
+  fundamentalsCompanyType: 'INDUSTRIAL',
+  fundamentals_company_type: 'INDUSTRIAL',
   isActive: true
 });
 
@@ -53,7 +56,9 @@ const vcb = Object.freeze({
   ...fpt,
   id: '22222222-2222-4222-8222-222222222222',
   symbol: 'VCB',
-  name: 'Ngân hàng TMCP Ngoại thương Việt Nam'
+  name: 'Ngân hàng TMCP Ngoại thương Việt Nam',
+  fundamentalsCompanyType: 'BANK',
+  fundamentals_company_type: 'BANK'
 });
 
 function evidence(asset = fpt, metric = 'close', numericValue = 100, overrides = {}) {
@@ -96,6 +101,32 @@ function fullMarketEvidence(asset = fpt, overrides = {}) {
   ];
 }
 
+function legacyFundamentalEvidence(asset = fpt) {
+  return createEquityEvidence({
+    assetId: asset.id,
+    symbol: asset.symbol,
+    exchange: asset.exchange,
+    companyName: asset.name,
+    evidenceType: 'fundamental',
+    metric: 'netRevenue',
+    numericValue: 999999,
+    unit: 'VND',
+    currency: 'VND',
+    referencePeriod: '2025-12-31',
+    publishedAt: '2026-03-30T02:00:00.000Z',
+    sourceAvailableAt: '2026-03-30T02:05:00.000Z',
+    fetchedAt: '2026-03-30T03:00:00.000Z',
+    firstSeenAt: '2026-03-30T03:00:00.000Z',
+    sourceId: 'legacy-manual',
+    sourceName: 'Legacy manual fundamentals',
+    sourceFamily: 'ISSUER_FILING',
+    dependencyGroup: 'FUNDAMENTALS',
+    authorityLevel: 'OFFICIAL',
+    provenance: { legacy: true },
+    freshness: 'historical'
+  }, { allowLegacyFundamental: true });
+}
+
 function evaluate(asset = fpt, facts = fullMarketEvidence(asset), asOf = '2026-09-04T09:00:00.000Z') {
   return evaluateEquityOpportunityAsOf({ asset, evidence: facts, asOf: new Date(asOf) });
 }
@@ -109,6 +140,11 @@ function createOpportunityDb(initialRows = []) {
     opportunityRows,
     checkpointRows,
     calls,
+    async rpc(name) {
+      calls.push({ operation: 'rpc', name });
+      if (name === 'read_vn_equity_fundamental_filings') return { data: [], error: null };
+      return { data: null, error: { code: 'UNKNOWN_RPC', message: name } };
+    },
     from(table) {
       calls.push({ operation: 'from', table });
       if (table === 'vn_equity_opportunity_evaluations') {
@@ -174,6 +210,23 @@ test('2. missing evidence is insufficient rather than negative and never becomes
   assert.ok(candidate.missingRequirements.includes('REPLAY_SAFE_COMPLETED_CLOSE'));
   assert.equal(candidate.evidenceRefs.length, 0);
   assert.equal(JSON.stringify(candidate).includes('"numericValue":0'), false);
+});
+
+test('2a. legacy generic fundamentals cannot override the governed V1A opportunity state', () => {
+  const legacy = legacyFundamentalEvidence();
+  const fundamentals = buildFundamentalsResponse(fpt, [], {
+    asOf: new Date('2026-09-04T09:00:00.000Z')
+  });
+  const candidate = evaluateEquityOpportunityAsOf({
+    asset: fpt,
+    evidence: [...fullMarketEvidence(), legacy],
+    fundamentals,
+    asOf: new Date('2026-09-04T09:00:00.000Z')
+  });
+  assert.equal(candidate.dataQuality.dimensions.fundamentals, 'not_ingested');
+  assert.ok(candidate.missingRequirements.includes('OFFICIAL_FUNDAMENTALS_NOT_INGESTED'));
+  assert.equal(candidate.evidenceRefs.some((ref) => ref.observationId === legacy.observationId), false);
+  assert.equal(JSON.stringify(candidate).includes('999999'), false);
 });
 
 test('3. positive opportunity reasons cannot exist without exact evidence references', () => {
@@ -302,13 +355,20 @@ test('10a. evaluateOpportunityAsOf resolves canonical persisted evidence without
     fetchEvidenceFn: async (symbol, client) => {
       calls.push({ operation: 'evidence', symbol, client });
       return fullMarketEvidence();
+    },
+    getFundamentalsFn: async (symbol) => {
+      calls.push({ operation: 'fundamentals', symbol });
+      return buildFundamentalsResponse(fpt, [], {
+        asOf: new Date('2026-09-04T09:00:00.000Z')
+      });
     }
   });
   assert.equal(candidate.symbol, 'FPT');
   assert.equal(candidate.qualificationStatus, EQUITY_QUALIFICATION_STATUS.WATCH);
   assert.deepEqual(calls.map((call) => [call.operation, call.symbol]), [
     ['asset', 'FPT'],
-    ['evidence', 'FPT']
+    ['evidence', 'FPT'],
+    ['fundamentals', 'FPT']
   ]);
 });
 
@@ -471,6 +531,10 @@ test('14. DB persistence failure publishes nothing to memory and records FAILED'
   clearEquityOpportunityMemory();
   const healthEvents = [];
   const failingDb = {
+    async rpc(name) {
+      assert.equal(name, 'read_vn_equity_fundamental_filings');
+      return { data: [], error: null };
+    },
     from(table) {
       assert.equal(table, 'vn_equity_opportunity_evaluations');
       return {
@@ -501,6 +565,9 @@ test('14a. deterministic evaluation failure records FAILED before rethrow', asyn
       client: { kind: 'production-like-client' },
       getAssetsFn: async () => [{ ...fpt, name: '' }],
       fetchEvidenceFn: async () => fullMarketEvidence(),
+      getFundamentalsFn: async () => buildFundamentalsResponse(fpt, [], {
+        asOf: new Date('2026-09-04T09:00:00.000Z')
+      }),
       persistEvaluationsFn: async () => {
         throw new Error('Persistence must not be reached');
       },

@@ -88,6 +88,7 @@ export async function getEquityFundamentals(symbol, {
   client,
   now = new Date(),
   asOf,
+  sourceProvisioned = true,
   getAssetBySymbolFn = getAssetBySymbol,
   fetchFilingsFn = fetchFundamentalFilings
 } = {}) {
@@ -112,5 +113,8 @@ export async function getEquityFundamentals(symbol, {
   const filings = eligibleEquity && companyType === 'INDUSTRIAL'
     ? await fetchFilingsFn(asset.id, client)
     : [];
-  return buildFundamentalsResponse(asset, filings, { asOf: effectiveAsOf });
+  return buildFundamentalsResponse(asset, filings, {
+    asOf: effectiveAsOf,
+    sourceProvisioned
+  });
 }

@@ -1,8 +1,10 @@
 import { getAssetBySymbol, getAssets } from '../supabase.js';
 import {
   buildEquityEvidenceResponse,
+  buildFundamentalsResponse,
   EQUITY_EVIDENCE_STATUS,
   EQUITY_EVIDENCE_TYPES,
+  getEquityFundamentals,
   selectLatestEquityEvidence,
   toReplayCompatibleEquityObservation
 } from '../equities/index.js';
@@ -74,7 +76,7 @@ function qualificationReason(code, evidenceRefs = []) {
   return { code, evidenceRefs };
 }
 
-export function evaluateEquityOpportunityAsOf({ asset, evidence = [], asOf } = {}) {
+export function evaluateEquityOpportunityAsOf({ asset, evidence = [], fundamentals = null, asOf } = {}) {
   const evaluationTime = normalizeAsOf(asOf);
   if (!isVietnamStockAsset(asset)) {
     const error = new Error('Equity opportunity evaluation supports canonical Vietnam stocks only');
@@ -95,22 +97,28 @@ export function evaluateEquityOpportunityAsOf({ asset, evidence = [], asOf } = {
   ));
   const eligibleVintages = replayEligibleEvidence(assetEvidence, evaluationTime);
   const latestEvidence = selectLatestEquityEvidence(eligibleVintages);
-  const evidenceResponse = buildEquityEvidenceResponse(asset, latestEvidence, { now: evaluationTime });
+  const authoritativeFundamentals = fundamentals || buildFundamentalsResponse(asset, [], {
+    asOf: evaluationTime
+  });
+  const evidenceResponse = buildEquityEvidenceResponse(asset, latestEvidence, {
+    now: evaluationTime,
+    fundamentals: authoritativeFundamentals
+  });
   const close = evidenceResponse.domains.marketPrice.facts.find((item) => item.metric === 'close') || null;
   const closePeriod = close?.referencePeriod || null;
   const samePeriodMarketFacts = closePeriod
     ? evidenceResponse.domains.marketPrice.facts.filter((item) => item.referencePeriod === closePeriod)
     : [];
-  const nonMarketFacts = latestEvidence.filter((item) => item.evidenceType !== EQUITY_EVIDENCE_TYPES.MARKET_PRICE);
+  const nonMarketFacts = latestEvidence.filter((item) => (
+    item.evidenceType !== EQUITY_EVIDENCE_TYPES.MARKET_PRICE
+    && item.evidenceType !== EQUITY_EVIDENCE_TYPES.FUNDAMENTAL
+  ));
   const participatingEvidence = [...samePeriodMarketFacts, ...nonMarketFacts]
     .sort((left, right) => left.observationId.localeCompare(right.observationId));
   const evidenceRefs = participatingEvidence.map(buildOpportunityEvidenceRef);
   const availableMetrics = new Set(samePeriodMarketFacts.map((item) => item.metric));
   const missingMarketMetrics = EXPECTED_MARKET_METRICS.filter((metric) => !availableMetrics.has(metric));
   const volume = samePeriodMarketFacts.find((item) => item.metric === 'volume') || null;
-  const fundamentalCount = nonMarketFacts.filter(
-    (item) => item.evidenceType === EQUITY_EVIDENCE_TYPES.FUNDAMENTAL
-  ).length;
   const disclosureCount = nonMarketFacts.filter(
     (item) => item.evidenceType === EQUITY_EVIDENCE_TYPES.DISCLOSURE
   ).length;
@@ -139,10 +147,15 @@ export function evaluateEquityOpportunityAsOf({ asset, evidence = [], asOf } = {
   }
 
   if (!volume) missingRequirements.push('COMPLETED_SESSION_VOLUME');
-  if (fundamentalCount === 0) {
+  const fundamentalsAvailability = evidenceResponse.domains.fundamentals.availability;
+  if (fundamentalsAvailability === 'NOT_INGESTED') {
+    missingRequirements.push('OFFICIAL_FUNDAMENTALS_NOT_INGESTED');
+  } else if (fundamentalsAvailability === 'SOURCE_NOT_PROVISIONED') {
     missingRequirements.push('OFFICIAL_FUNDAMENTALS_SOURCE_NOT_PROVISIONED');
-    missingRequirements.push('VALUATION_POLICY_NOT_PROVISIONED');
+  } else if (fundamentalsAvailability === 'UNSUPPORTED_COMPANY_TYPE') {
+    missingRequirements.push('OFFICIAL_FUNDAMENTALS_UNSUPPORTED_COMPANY_TYPE');
   }
+  missingRequirements.push('VALUATION_POLICY_NOT_PROVISIONED');
   if (disclosureCount === 0) missingRequirements.push('OFFICIAL_DISCLOSURES_SOURCE_NOT_PROVISIONED');
   missingRequirements.push('CALIBRATED_NUMERIC_QUALIFICATION_POLICY_NOT_PROVISIONED');
 
@@ -160,7 +173,13 @@ export function evaluateEquityOpportunityAsOf({ asset, evidence = [], asOf } = {
         : 'unavailable',
       liquidity: volume ? 'raw_volume_available_no_liquidity_judgment' : 'unavailable',
       valuation: 'source_not_provisioned',
-      fundamentals: fundamentalCount > 0 ? 'evidence_available_no_screening_rule' : 'source_not_provisioned',
+      fundamentals: {
+        AVAILABLE: 'evidence_available_no_screening_rule',
+        PARTIAL: 'evidence_available_no_screening_rule',
+        NOT_INGESTED: 'not_ingested',
+        UNSUPPORTED_COMPANY_TYPE: 'unsupported_company_type',
+        SOURCE_NOT_PROVISIONED: 'source_not_provisioned'
+      }[fundamentalsAvailability] || 'unavailable',
       disclosures: disclosureCount > 0 ? 'evidence_available_no_screening_rule' : 'source_not_provisioned'
     }
   };
@@ -191,7 +210,8 @@ export function evaluateEquityOpportunityAsOf({ asset, evidence = [], asOf } = {
 export async function evaluateOpportunityAsOf(symbol, asOf, {
   client,
   getAssetBySymbolFn = getAssetBySymbol,
-  fetchEvidenceFn = fetchEquityEvidenceVintages
+  fetchEvidenceFn = fetchEquityEvidenceVintages,
+  getFundamentalsFn = getEquityFundamentals
 } = {}) {
   const evaluationTime = normalizeAsOf(asOf);
   const normalizedSymbol = typeof symbol === 'string' ? symbol.trim().toUpperCase() : '';
@@ -204,8 +224,16 @@ export async function evaluateOpportunityAsOf(symbol, asOf, {
     error.status = 404;
     throw error;
   }
-  const evidence = await fetchEvidenceFn(normalizedSymbol, client);
-  return evaluateEquityOpportunityAsOf({ asset, evidence, asOf: evaluationTime });
+  const [evidence, fundamentals] = await Promise.all([
+    fetchEvidenceFn(normalizedSymbol, client),
+    getFundamentalsFn(normalizedSymbol, {
+      client,
+      now: evaluationTime,
+      asOf: evaluationTime.toISOString(),
+      getAssetBySymbolFn: async () => asset
+    })
+  ]);
+  return evaluateEquityOpportunityAsOf({ asset, evidence, fundamentals, asOf: evaluationTime });
 }
 
 export function buildEquityOpportunityShortlist(candidates = [], { generatedAt = null } = {}) {
@@ -252,6 +280,7 @@ export async function runVietnamEquityOpportunityRefresh({
   client,
   getAssetsFn = getAssets,
   fetchEvidenceFn = fetchEquityEvidenceVintages,
+  getFundamentalsFn = getEquityFundamentals,
   persistEvaluationsFn = persistEquityOpportunityEvaluations,
   explainFn = explainEquityOpportunity,
   recordHealthFn = recordJobHealth
@@ -266,9 +295,22 @@ export async function runVietnamEquityOpportunityRefresh({
     let evidenceRead = 0;
 
     for (const asset of stocks) {
-      const evidence = await fetchEvidenceFn(asset.symbol, client);
+      const [evidence, fundamentals] = await Promise.all([
+        fetchEvidenceFn(asset.symbol, client),
+        getFundamentalsFn(asset.symbol, {
+          client,
+          now: evaluationTime,
+          asOf: evaluationTime.toISOString(),
+          getAssetBySymbolFn: async () => asset
+        })
+      ]);
       evidenceRead += Array.isArray(evidence) ? evidence.length : 0;
-      const candidate = evaluateEquityOpportunityAsOf({ asset, evidence, asOf: evaluationTime });
+      const candidate = evaluateEquityOpportunityAsOf({
+        asset,
+        evidence,
+        fundamentals,
+        asOf: evaluationTime
+      });
       const explanation = await explainFn(candidate);
       candidates.push(candidate);
       records.push({ candidate, explanation });

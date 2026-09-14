@@ -408,11 +408,16 @@ $$\text{Source Adapter} \longrightarrow \text{Canonical Validation / Sanitizatio
 
 ### D.1. Vietnam Equity Fundamentals V1A
 - **Providerless Ingestion**: Official fundamentals enter only through the admin-authorized manual endpoint. No automated crawling, undocumented API, parser, commercial data vendor, or copied third-party table is an authority.
+- **Single Authority**: V1A filing/fact evidence is the only authoritative fundamentals path. Existing generic fundamental observations are preserved only as legacy records, excluded from public/opportunity fundamentals, and cannot be newly ingested.
 - **Eligibility Authority**: `assets.fundamentals_company_type` is canonical. V1A accepts `INDUSTRIAL` only; banks, securities firms, insurers, and unclassified issuers are unsupported rather than forced into an industrial metric model.
 - **Immutable Corrections**: Filing and fact rows are insert-only to the service role. A correction must append exactly the next revision and identify one prior filing via `supersedes_filing_id`; replay as-of time uses `max(source_available_at, first_seen_at)`.
+- **Canonical Filing Identity**: Persisted ticker, legal name, exchange, and company type are derived from `assets`. A filing requires `sourceDisclosureId` or document-byte SHA-256 evidence; DB unique indexes govern logical report/revision, disclosure, document, and one-child correction identities independent of URL query variants.
+- **Source Governance**: SSC, HOSE, and HNX inputs require their governed HTTPS host families. `ISSUER` input is rejected until canonical issuer-domain metadata is available; domains are never invented from caller input.
+- **Fact Temporal Contract**: Point-in-time balance-sheet metrics require `INSTANT`. Income and cash-flow metrics require coherent duration semantics. V1A enforces December fiscal-year windows and preserves quarter and YTD facts from the same filing as different temporal identities.
 - **Numeric and Missing Semantics**: Financial facts use PostgreSQL `NUMERIC` and decimal strings at the API boundary. Explicit zero is valid. Missing is null with a reason and is never normalized to zero.
-- **Trust Boundary**: Public projections admit numeric output only when both the filing and the individual fact are `VERIFIED`. Source URL, authority, filing identity, period, scope, audit status, source location, document hash when available, and verification metadata remain visible.
+- **Trust Boundary**: Public projections admit numeric output only when both the filing and the individual fact are `VERIFIED`. Source URL, authority, filing identity, fact period, scope, audit status, source location, document hash when available, and verification metadata remain visible. `AVAILABLE` and `PARTIAL` are distinct UI states.
 - **No Seeded Fundamentals**: The foundation creates no initial company financial values. Availability remains `NOT_INGESTED` until a filing is manually verified and persisted.
+- **State Contract**: `UNSUPPORTED_COMPANY_TYPE` means taxonomy outside V1A; `NOT_INGESTED` means supported manual ingestion exists but no verified filing is present; `SOURCE_NOT_PROVISIONED` means that source path has no governed ingestion mechanism.
 
 ### E. Deterministic Equity Opportunity Engine (Feature 01G)
 - **Deterministic Authority**: Evaluates Vietnam equity universe against persisted evidence into explicit categories: `QUALIFIED`, `WATCH`, `INSUFFICIENT_EVIDENCE`, `REJECTED`.

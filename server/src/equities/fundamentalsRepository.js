@@ -1,7 +1,12 @@
 import { privateSupabase } from '../supabase.js';
+import {
+  calculateFundamentalFilingIdentityHash,
+  calculateFundamentalFilingLogicalKey
+} from './fundamentalsModel.js';
 
 const memoryFilings = new Map();
 const memoryIdentityHashes = new Map();
+const memoryLogicalIdentities = new Map();
 
 function repositoryError(code, message, status = 503, cause = null) {
   const error = new Error(message);
@@ -14,12 +19,7 @@ function repositoryError(code, message, status = 503, cause = null) {
 export function fundamentalFilingToRpc(filing) {
   return {
     id: filing.id,
-    filing_identity_hash: filing.identityHash,
     asset_id: filing.assetId,
-    ticker: filing.ticker,
-    issuer_legal_name: filing.issuerLegalName,
-    exchange: filing.exchange,
-    company_type: filing.companyType,
     source_authority: filing.sourceAuthority,
     source_url: filing.sourceUrl,
     source_disclosure_id: filing.sourceDisclosureId,
@@ -50,6 +50,11 @@ export function fundamentalFactToRpc(fact) {
   return {
     id: fact.id,
     metric_code: fact.metricCode,
+    fact_period_kind: fact.factPeriodKind,
+    fact_period_start: fact.factPeriodStart,
+    fact_period_end: fact.factPeriodEnd,
+    fact_fiscal_year: fact.factFiscalYear,
+    fact_fiscal_quarter: fact.factFiscalQuarter,
     source_line_code: fact.sourceLineCode,
     source_label: fact.sourceLabel,
     numeric_value: fact.numericValue,
@@ -76,6 +81,13 @@ function rowToFundamentalFact(row) {
     id: row.id,
     filingId: row.filing_id,
     metricCode: row.metric_code,
+    factPeriodKind: row.fact_period_kind,
+    factPeriodStart: row.fact_period_start || null,
+    factPeriodEnd: row.fact_period_end,
+    factFiscalYear: Number(row.fact_fiscal_year),
+    factFiscalQuarter: row.fact_fiscal_quarter === null || row.fact_fiscal_quarter === undefined
+      ? null
+      : Number(row.fact_fiscal_quarter),
     sourceLineCode: row.source_line_code || null,
     sourceLabel: row.source_label,
     numericValue: decimalText(row.numeric_value),
@@ -103,9 +115,8 @@ export function rowToFundamentalFiling(row) {
   const facts = Array.isArray(row.facts)
     ? row.facts.map(rowToFundamentalFact)
     : [];
-  return Object.freeze({
+  const filing = {
     id: row.id,
-    identityHash: row.filing_identity_hash,
     assetId: row.asset_id,
     ticker: row.ticker,
     issuerLegalName: row.issuer_legal_name,
@@ -137,13 +148,15 @@ export function rowToFundamentalFiling(row) {
     verificationStatus: row.verification_status,
     methodologyVersion: row.methodology_version,
     facts: Object.freeze(facts)
+  };
+  return Object.freeze({
+    ...filing,
+    identityHash: calculateFundamentalFilingIdentityHash(filing)
   });
 }
 
 function immutableMemoryInsert(filing) {
-  if (memoryFilings.has(filing.id) || memoryIdentityHashes.has(filing.identityHash)) {
-    throw repositoryError('DUPLICATE_FUNDAMENTALS_FILING', 'This immutable filing already exists', 409);
-  }
+  const logicalIdentity = calculateFundamentalFilingLogicalKey(filing);
   if (filing.supersedesFilingId) {
     const previous = memoryFilings.get(filing.supersedesFilingId);
     if (!previous) {
@@ -153,8 +166,16 @@ function immutableMemoryInsert(filing) {
       throw repositoryError('FUNDAMENTALS_REVISION_CONFLICT', 'The superseded filing already has a correction', 409);
     }
   }
+  if (
+    memoryFilings.has(filing.id)
+    || memoryIdentityHashes.has(filing.identityHash)
+    || memoryLogicalIdentities.has(logicalIdentity)
+  ) {
+    throw repositoryError('DUPLICATE_FUNDAMENTALS_FILING', 'This immutable filing already exists', 409);
+  }
   memoryFilings.set(filing.id, filing);
   memoryIdentityHashes.set(filing.identityHash, filing.id);
+  memoryLogicalIdentities.set(logicalIdentity, filing.id);
   return filing;
 }
 
@@ -178,6 +199,12 @@ export async function persistManualFundamentalFiling(filing, client = privateSup
     }
     if (error.code === 'VF002') {
       throw repositoryError('FUNDAMENTALS_REVISION_CONFLICT', 'The filing revision chain is invalid', 409, error);
+    }
+    if (error.code === 'VF003') {
+      throw repositoryError('FUNDAMENTALS_ASSET_IDENTITY_MISMATCH', 'The canonical asset is not eligible', 422, error);
+    }
+    if (error.code === 'VF004') {
+      throw repositoryError('INVALID_FUNDAMENTAL_FACT', 'Fact temporal context does not match its filing', 400, error);
     }
     throw repositoryError('FUNDAMENTALS_PERSISTENCE_FAILED', 'The official filing was not persisted', 503, error);
   }
@@ -214,4 +241,5 @@ export async function fetchFundamentalFilings(assetId, client = privateSupabase)
 export function clearFundamentalFilingMemory() {
   memoryFilings.clear();
   memoryIdentityHashes.clear();
+  memoryLogicalIdentities.clear();
 }

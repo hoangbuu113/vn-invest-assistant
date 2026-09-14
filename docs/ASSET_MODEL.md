@@ -241,10 +241,13 @@ The double-ledger architecture is the sole authoritative mechanism for portfolio
 
 - `assets.fundamentals_company_type` is the canonical eligibility classification for Fundamentals V1A: `INDUSTRIAL`, `BANK`, `SECURITIES`, `INSURANCE`, or null when not classified.
 - V1A supports only `stock` assets on `VN_EXCHANGE` classified as `INDUSTRIAL`. Financial issuers and unclassified companies return `UNSUPPORTED_COMPANY_TYPE`; their reporting models are not approximated with industrial metrics.
-- Filing metadata includes canonical asset/ticker/exchange, official source authority and URL, publication/source-availability timestamps, period, statement scope, audit status, fiscal identity, and revision lineage.
+- Filing ticker, legal name, exchange, and company classification are derived from the canonical asset, never trusted from caller strings. Filing identity requires an official disclosure ID or document-byte hash and is DB-unique by logical report/revision independently of URL query variants.
+- SSC, HOSE, and HNX source URLs must match their governed HTTPS host families. `ISSUER` is unprovisioned until canonical issuer-domain metadata exists.
+- Each fact owns its temporal identity. `totalAssets`, `totalLiabilities`, `equity`, and `cashAndCashEquivalents` require `INSTANT`; income and cash-flow metrics require coherent `QUARTER`, `YTD`, `HALF_YEAR`, or `ANNUAL` duration windows. V1A supports December fiscal-year-end issuers only and never merges quarter-only with YTD values.
 - Facts use decimal strings over PostgreSQL `NUMERIC`; each fact preserves currency, source unit scale, source line/label/location, value kind, confidence, validation status, and an explicit missing reason when numeric value is null.
 - Public reads expose only verified filings and verified facts. Missing does not equal zero, and unverified numeric values cannot be promoted into the trusted projection.
 - Corrections are new immutable filing revisions linked through `supersedes_filing_id`. Historical as-of selection cannot see a revision before `max(sourceAvailableAt, firstSeenAt)`.
+- V1A filing/fact evidence is the sole trusted fundamentals authority. Legacy generic fundamental evidence may still be read for historical compatibility but cannot be newly written or selected as current fundamentals.
 
 ---
 

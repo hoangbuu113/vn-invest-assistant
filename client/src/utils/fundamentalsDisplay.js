@@ -26,6 +26,21 @@ const AUDIT_LABELS = Object.freeze({
   AUDITED: 'Đã kiểm toán'
 });
 
+const AVAILABILITY_DISPLAY = Object.freeze({
+  AVAILABLE: Object.freeze({
+    label: 'Dữ liệu đã xác minh đầy đủ',
+    badgeClass: 'badge-gain'
+  }),
+  PARTIAL: Object.freeze({
+    label: 'Dữ liệu xác minh chưa đầy đủ',
+    badgeClass: 'badge-warn'
+  })
+});
+
+export function buildFundamentalsAvailabilityDisplay(availability) {
+  return AVAILABILITY_DISPLAY[availability] || null;
+}
+
 export function formatDecimalText(value) {
   if (typeof value !== 'string' || !/^-?\d+(?:\.\d+)?$/.test(value)) return '—';
   const negative = value.startsWith('-');

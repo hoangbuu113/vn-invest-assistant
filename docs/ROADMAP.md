@@ -115,9 +115,10 @@ V1.3 delivers institutional-grade market intelligence, historical evidence repla
 
 ### Fundamentals V1A: Providerless Official-Filing Evidence Foundation
 - **Scope**: Manual, administrator-authorized ingestion of official filings for canonically classified industrial/non-financial Vietnam-listed stocks only.
-- **Evidence Contract**: Immutable filing identity/revision metadata plus decimal-safe, source-located facts for the governed balance-sheet, income-statement, and cash-flow metric set.
+- **Evidence Contract**: Immutable, DB-unique logical filing revisions plus decimal-safe, source-located facts. Fact-level temporal identity preserves balance-sheet instants separately from quarter, YTD, half-year, and annual duration values.
 - **Truthfulness**: No vendor, crawler, parser, seeded financial values, fabricated zero, or inferred missing facts. Only verified filings and verified facts enter the public projection.
-- **Reads**: `GET /api/equities/:symbol/fundamentals` exposes annual/interim periods, statement scope, audit status, source provenance, revision lineage, and explicit availability.
+- **Authority**: V1A filing/fact rows are the only trusted fundamentals path. Legacy generic fundamental observations are retained but excluded, and new generic-fundamental ingestion is prohibited.
+- **Reads**: `GET /api/equities/:symbol/fundamentals` exposes annual, quarter, and YTD/interim periods without conflation, plus statement scope, audit status, source provenance, revision lineage, and explicit availability. Supported issuers with no filing are `NOT_INGESTED`; issuer-host ingestion without governed domain metadata is `SOURCE_NOT_PROVISIONED`.
 - **Risk Tier**: HIGH RISK because it adds forward database structures and a privileged ingestion boundary; full server regression, executable migration verification, client build, and diff checks are required.
 
 ### Feature 01G: Deterministic Equity Opportunity Engine

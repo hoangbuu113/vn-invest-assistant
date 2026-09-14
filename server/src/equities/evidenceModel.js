@@ -99,7 +99,7 @@ export function buildEquityObservationId({ factId, referencePeriod, sourceConten
   return `${factId}:${normalizeString(referencePeriod) || 'undated'}:h_${sourceContentHash.slice(0, 16)}`;
 }
 
-export function createEquityEvidence(payload = {}) {
+export function createEquityEvidence(payload = {}, { allowLegacyFundamental = false } = {}) {
   const assetId = normalizeString(payload.assetId);
   const symbol = normalizeString(payload.symbol)?.toUpperCase() || null;
   const exchange = normalizeString(payload.exchange)?.toUpperCase() || null;
@@ -121,6 +121,11 @@ export function createEquityEvidence(payload = {}) {
   }
   if (!Object.values(EQUITY_EVIDENCE_TYPES).includes(evidenceType)) {
     throw new TypeError('Equity evidence has an invalid evidenceType');
+  }
+  if (evidenceType === EQUITY_EVIDENCE_TYPES.FUNDAMENTAL && !allowLegacyFundamental) {
+    const error = new TypeError('New generic fundamental evidence is disabled; use the governed V1A filing/fact authority');
+    error.code = 'LEGACY_GENERIC_FUNDAMENTAL_INGESTION_REJECTED';
+    throw error;
   }
   if (!metric || !/^[a-z][a-z0-9_]*$/.test(metric)) {
     throw new TypeError('Equity evidence metric must be a canonical lower-snake-case identifier');

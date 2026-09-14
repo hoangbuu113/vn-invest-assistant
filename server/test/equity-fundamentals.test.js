@@ -6,10 +6,12 @@ import { PGlite } from '@electric-sql/pglite';
 import { createApp } from '../index.js';
 import {
   buildFundamentalsResponse,
+  createEquityEvidence,
   createManualFundamentalFiling,
   FUNDAMENTALS_METRICS,
   getEquityFundamentals,
-  ingestManualOfficialFundamentalFiling
+  ingestManualOfficialFundamentalFiling,
+  persistEquityEvidence
 } from '../src/equities/index.js';
 import {
   clearFundamentalFilingMemory,
@@ -18,6 +20,7 @@ import {
   rowToFundamentalFiling
 } from '../src/equities/fundamentalsRepository.js';
 import {
+  buildFundamentalsAvailabilityDisplay,
   buildFundamentalsPeriodDisplay,
   formatFundamentalFact
 } from '../../client/src/utils/fundamentalsDisplay.js';
@@ -59,9 +62,29 @@ function uuidFactory() {
   return () => `00000000-0000-4000-8000-${String(next++).padStart(12, '0')}`;
 }
 
-function facts({ validationStatus = 'VERIFIED', overrides = {} } = {}) {
+const POINT_IN_TIME_METRICS = new Set([
+  'totalAssets',
+  'totalLiabilities',
+  'equity',
+  'cashAndCashEquivalents'
+]);
+
+function facts({
+  validationStatus = 'VERIFIED',
+  overrides = {},
+  fiscalYear = 2025,
+  fiscalQuarter = null,
+  periodKind = 'ANNUAL',
+  periodStart = '2025-01-01',
+  periodEnd = '2025-12-31'
+} = {}) {
   return FUNDAMENTALS_METRICS.map((metricCode, index) => ({
     metricCode,
+    factPeriodKind: POINT_IN_TIME_METRICS.has(metricCode) ? 'INSTANT' : periodKind,
+    factPeriodStart: POINT_IN_TIME_METRICS.has(metricCode) ? null : periodStart,
+    factPeriodEnd: periodEnd,
+    factFiscalYear: fiscalYear,
+    factFiscalQuarter: fiscalQuarter,
     sourceLineCode: String(100 + index),
     sourceLabel: `Official line ${metricCode}`,
     numericValue: METRIC_VALUES[metricCode],
@@ -80,7 +103,7 @@ function facts({ validationStatus = 'VERIFIED', overrides = {} } = {}) {
 }
 
 function filingPayload(overrides = {}) {
-  return {
+  const payload = {
     assetId: FPT.id,
     ticker: 'FPT',
     issuerLegalName: 'FPT Corporation',
@@ -105,9 +128,18 @@ function filingPayload(overrides = {}) {
     supersedesFilingId: null,
     documentHash: 'a'.repeat(64),
     verificationStatus: 'VERIFIED',
-    facts: facts(),
     ...overrides
   };
+  if (!Object.hasOwn(overrides, 'facts')) {
+    payload.facts = facts({
+      fiscalYear: payload.fiscalYear,
+      fiscalQuarter: payload.fiscalQuarter,
+      periodKind: payload.periodKind,
+      periodStart: payload.periodStart,
+      periodEnd: payload.periodEnd
+    });
+  }
+  return payload;
 }
 
 function companyAsset(companyType) {
@@ -156,7 +188,31 @@ test('filing validation rejects unsafe identity, source, period, currency, unit,
     { asset: FPT, now: NOW, idFactory: uuidFactory() }
   );
   assert.throws(build({ ticker: 'HPG' }), (error) => error.code === 'FUNDAMENTALS_ASSET_IDENTITY_MISMATCH');
+  assert.throws(build({ issuerLegalName: 'Wrong Issuer' }), (error) => error.code === 'FUNDAMENTALS_ASSET_IDENTITY_MISMATCH');
   assert.throws(build({ sourceUrl: 'https://example.com/not-hose' }), (error) => error.code === 'INVALID_OFFICIAL_SOURCE_URL');
+  assert.throws(build({ sourceAuthority: 'ISSUER', sourceUrl: 'https://example.com/issuer-report' }), (error) => (
+    error.code === 'FUNDAMENTALS_SOURCE_AUTHORITY_NOT_PROVISIONED'
+  ));
+  assert.throws(build({ sourceDisclosureId: null, documentHash: null }), (error) => (
+    error.code === 'FUNDAMENTALS_SOURCE_IDENTITY_REQUIRED'
+  ));
+  assert.throws(build({ publishedAt: '2026-02-30T02:00:00.000Z' }), /valid calendar timestamp/);
+  assert.throws(build({ publishedAt: '2026-03-30T02:00:00' }), /explicit timezone/);
+  assert.throws(build({ publishedAt: '2026-03-30T02:00:00+15:00' }), /valid calendar timestamp/);
+  assert.throws(build({ fiscalYear: 2026 }), /ANNUAL must cover the December fiscal year/);
+  assert.throws(build({
+    fiscalYear: 2025,
+    fiscalQuarter: 5,
+    periodKind: 'QUARTER',
+    periodStart: '2025-10-01',
+    periodEnd: '2025-12-31'
+  }), /fiscalQuarter must be between 1 and 4/);
+  assert.throws(build({
+    fiscalQuarter: 2,
+    periodKind: 'QUARTER',
+    periodStart: '2025-04-02',
+    periodEnd: '2025-06-30'
+  }), /QUARTER window does not match fiscalQuarter/);
   assert.throws(build({ periodStart: '2026-01-01', periodEnd: '2025-12-31' }), /periodStart cannot follow periodEnd/);
   assert.throws(build({ sourceAvailableAt: '2026-09-14T00:00:00.000Z' }), /sourceAvailableAt cannot be in the future/);
   assert.throws(build({ fetchedAt: '2026-03-30T02:01:00.000Z' }), /fetchedAt cannot precede sourceAvailableAt/);
@@ -165,6 +221,101 @@ test('filing validation rejects unsafe identity, source, period, currency, unit,
   assert.throws(build({ facts: facts({ overrides: { totalAssets: { numericValue: '1e12' } } }) }), /plain decimal/);
   assert.throws(build({ facts: facts({ overrides: { totalAssets: { numericValue: 1.1 } } }) }), /must be supplied as a decimal string/);
   assert.throws(build({ facts: facts({ overrides: { totalAssets: { numericValue: null, missingReason: null } } }) }), /missingReason is required/);
+});
+
+test('canonical issuer identity is derived even when redundant caller fields are omitted', () => {
+  const filing = createManualFundamentalFiling(filingPayload({
+    ticker: undefined,
+    issuerLegalName: undefined,
+    exchange: undefined,
+    companyType: undefined
+  }), { asset: FPT, now: NOW, idFactory: uuidFactory() });
+  assert.equal(filing.ticker, FPT.symbol);
+  assert.equal(filing.issuerLegalName, FPT.name);
+  assert.equal(filing.exchange, FPT.marketCode);
+  assert.equal(filing.companyType, FPT.fundamentalsCompanyType);
+});
+
+test('generic fundamental ingestion is rejected while an explicit legacy row remains readable only as legacy evidence', async () => {
+  const payload = {
+    assetId: FPT.id,
+    symbol: FPT.symbol,
+    exchange: FPT.exchange,
+    companyName: FPT.name,
+    evidenceType: 'fundamental',
+    metric: 'netRevenue',
+    numericValue: 1,
+    unit: 'VND',
+    currency: 'VND',
+    referencePeriod: '2025-12-31',
+    publishedAt: '2026-03-30T02:00:00.000Z',
+    sourceAvailableAt: '2026-03-30T02:05:00.000Z',
+    fetchedAt: '2026-03-30T03:00:00.000Z',
+    firstSeenAt: '2026-03-30T03:00:00.000Z',
+    sourceId: 'legacy-manual',
+    sourceName: 'Legacy manual evidence',
+    sourceFamily: 'ISSUER_FILING',
+    dependencyGroup: 'FUNDAMENTALS',
+    authorityLevel: 'OFFICIAL',
+    provenance: { legacy: true },
+    freshness: 'historical'
+  };
+  assert.throws(
+    () => createEquityEvidence(payload),
+    (error) => error.code === 'LEGACY_GENERIC_FUNDAMENTAL_INGESTION_REJECTED'
+  );
+  const legacy = createEquityEvidence(payload, { allowLegacyFundamental: true });
+  await assert.rejects(
+    persistEquityEvidence([legacy], null),
+    (error) => error.code === 'LEGACY_GENERIC_FUNDAMENTAL_INGESTION_REJECTED'
+  );
+});
+
+test('fact temporal semantics classify point and duration metrics without conflating quarter and YTD', () => {
+  const quarterFacts = facts({
+    fiscalYear: 2026,
+    fiscalQuarter: 2,
+    periodKind: 'QUARTER',
+    periodStart: '2026-04-01',
+    periodEnd: '2026-06-30'
+  });
+  const totalAssets = quarterFacts.find((fact) => fact.metricCode === 'totalAssets');
+  const quarterRevenue = quarterFacts.find((fact) => fact.metricCode === 'netRevenue');
+  const ytdRevenue = {
+    ...quarterRevenue,
+    factPeriodKind: 'YTD',
+    factPeriodStart: '2026-01-01',
+    numericValue: '120000000000000'
+  };
+  const payload = filingPayload({
+    sourceDisclosureId: 'FPT-Q2-2026-TEMPORAL',
+    fiscalYear: 2026,
+    fiscalQuarter: 2,
+    periodKind: 'QUARTER',
+    periodStart: '2026-04-01',
+    periodEnd: '2026-06-30',
+    facts: [totalAssets, quarterRevenue, ytdRevenue]
+  });
+  const filing = createManualFundamentalFiling(payload, { asset: FPT, now: NOW, idFactory: uuidFactory() });
+  const response = buildFundamentalsResponse(FPT, [filing], { asOf: NOW });
+
+  assert.equal(filing.facts.find((fact) => fact.metricCode === 'totalAssets').factPeriodKind, 'INSTANT');
+  assert.equal(response.latestQuarter.facts.netRevenue.numericValue, METRIC_VALUES.netRevenue);
+  assert.equal(response.latestQuarter.facts.netRevenue.factPeriodKind, 'QUARTER');
+  assert.equal(response.latestYtd.facts.netRevenue.numericValue, '120000000000000');
+  assert.equal(response.latestYtd.facts.netRevenue.factPeriodKind, 'YTD');
+  assert.equal(response.historicalPeriods.length, 2);
+
+  assert.throws(() => createManualFundamentalFiling(filingPayload({
+    facts: [{ ...facts()[0], factPeriodKind: 'QUARTER', factPeriodStart: '2025-10-01', factFiscalQuarter: 4 }]
+  }), { asset: FPT, now: NOW, idFactory: uuidFactory() }), /totalAssets requires INSTANT/);
+  assert.throws(() => createManualFundamentalFiling(filingPayload({
+    facts: [{
+      ...facts().find((fact) => fact.metricCode === 'netRevenue'),
+      factPeriodKind: 'INSTANT',
+      factPeriodStart: null
+    }]
+  }), { asset: FPT, now: NOW, idFactory: uuidFactory() }), /netRevenue cannot use INSTANT/);
 });
 
 test('canonical company-type gate supports industrial issuers and truthfully rejects financial issuers or unclassified stocks', () => {
@@ -185,6 +336,15 @@ test('canonical company-type gate supports industrial issuers and truthfully rej
     () => createManualFundamentalFiling(filingPayload(), { asset: unclassified, now: NOW, idFactory: uuidFactory() }),
     (error) => error.code === 'UNSUPPORTED_COMPANY_TYPE'
   );
+});
+
+test('fundamentals source states distinguish supported-empty, unsupported, and genuinely unprovisioned paths', () => {
+  const supported = buildFundamentalsResponse(FPT, [], { asOf: NOW });
+  const unsupported = buildFundamentalsResponse(companyAsset('BANK'), [], { asOf: NOW });
+  const unprovisioned = buildFundamentalsResponse(FPT, [], { asOf: NOW, sourceProvisioned: false });
+  assert.equal(supported.availability, 'NOT_INGESTED');
+  assert.equal(unsupported.availability, 'UNSUPPORTED_COMPANY_TYPE');
+  assert.equal(unprovisioned.availability, 'SOURCE_NOT_PROVISIONED');
 });
 
 test('annual and interim filings retain scope, audit status, provenance, and complete availability', async () => {
@@ -292,7 +452,10 @@ test('duplicate filings and competing correction branches are rejected replay-sa
     client: null, now: NOW, getAssetByIdFn: async () => FPT, idFactory
   });
   await assert.rejects(
-    ingestManualOfficialFundamentalFiling(originalPayload, {
+    ingestManualOfficialFundamentalFiling({
+      ...originalPayload,
+      sourceUrl: `${originalPayload.sourceUrl}?download=1`
+    }, {
       client: null, now: NOW, getAssetByIdFn: async () => FPT, idFactory: uuidFactory()
     }),
     (error) => error.code === 'DUPLICATE_FUNDAMENTALS_FILING' && error.status === 409
@@ -320,6 +483,19 @@ test('duplicate filings and competing correction branches are rejected replay-sa
     }),
     (error) => error.code === 'FUNDAMENTALS_REVISION_CONFLICT' && error.status === 409
   );
+
+  const separate = await ingestManualOfficialFundamentalFiling(filingPayload({
+    statementScope: 'SEPARATE'
+  }), {
+    client: null, now: NOW, getAssetByIdFn: async () => FPT, idFactory
+  });
+  assert.equal(separate.ticker, FPT.symbol);
+  const projected = await getEquityFundamentals('FPT', {
+    client: null,
+    now: NOW,
+    getAssetBySymbolFn: async () => FPT
+  });
+  assert.equal(projected.historicalPeriods.some((period) => period.statementScope === 'SEPARATE'), true);
 });
 
 test('unverified filings and facts never become trusted numeric output', () => {
@@ -336,8 +512,8 @@ test('unverified filings and facts never become trusted numeric output', () => {
   }), { asset: FPT, now: NOW, idFactory: uuidFactory() });
   const factResponse = buildFundamentalsResponse(FPT, [pendingFactFiling], { asOf: NOW });
   assert.equal(factResponse.availability, 'PARTIAL');
-  assert.equal(Object.keys(factResponse.latestAnnual.facts).length, 0);
-  assert.equal(factResponse.latestAnnual.missingMetrics.length, FUNDAMENTALS_METRICS.length);
+  assert.equal(factResponse.latestAnnual, null);
+  assert.equal(factResponse.reason, 'VERIFIED_VALUES_MISSING');
 });
 
 test('a pending correction cannot displace the last verified filing in the trusted projection', () => {
@@ -360,7 +536,7 @@ test('a pending correction cannot displace the last verified filing in the trust
 
 test('database row mapping recomputes replay authority and preserves numeric text', () => {
   const filing = rowToFundamentalFiling({
-    id: '00000000-0000-4000-8000-000000000099', filing_identity_hash: 'a'.repeat(64),
+    id: '00000000-0000-4000-8000-000000000099',
     asset_id: FPT.id, ticker: 'FPT', issuer_legal_name: FPT.name, exchange: 'HOSE', company_type: 'INDUSTRIAL',
     source_authority: 'HOSE', source_url: 'https://www.hsx.vn/a', source_disclosure_id: null, source_title: 'A',
     published_at: '2026-03-30T02:00:00.000Z', source_available_at: '2026-09-11T02:00:00.000Z',
@@ -368,8 +544,8 @@ test('database row mapping recomputes replay authority and preserves numeric tex
     system_knowable_at: '2000-01-01T00:00:00.000Z', statement_scope: 'CONSOLIDATED', audit_status: 'AUDITED',
     accounting_regime: 'VAS', fiscal_year: 2025, fiscal_quarter: null, period_start: '2025-01-01',
     period_end: '2025-12-31', period_kind: 'ANNUAL', revision_number: 1, supersedes_filing_id: null,
-    document_hash: null, verification_status: 'VERIFIED', methodology_version: 'vn-equity-fundamentals-v1a',
-    facts: [{ id: '00000000-0000-4000-8000-000000000100', filing_id: '00000000-0000-4000-8000-000000000099', metric_code: 'totalAssets', source_line_code: '100', source_label: 'Assets', numeric_value: '12345678901234567890.25', currency_code: 'VND', unit_scale: 1, source_page: 1, source_sheet: null, source_cell: null, value_kind: 'REPORTED', derivation_formula: null, confidence: '1', validation_status: 'VERIFIED', missing_reason: null }]
+    document_hash: '9'.repeat(64), verification_status: 'VERIFIED', methodology_version: 'vn-equity-fundamentals-v1a',
+    facts: [{ id: '00000000-0000-4000-8000-000000000100', filing_id: '00000000-0000-4000-8000-000000000099', metric_code: 'totalAssets', fact_period_kind: 'INSTANT', fact_period_start: null, fact_period_end: '2025-12-31', fact_fiscal_year: 2025, fact_fiscal_quarter: null, source_line_code: '100', source_label: 'Assets', numeric_value: '12345678901234567890.25', currency_code: 'VND', unit_scale: 1, source_page: 1, source_sheet: null, source_cell: null, value_kind: 'REPORTED', derivation_formula: null, confidence: '1', validation_status: 'VERIFIED', missing_reason: null }]
   });
   assert.equal(filing.systemKnowableAt, '2026-09-11T02:00:00.000Z');
   assert.equal(filing.facts[0].numericValue, '12345678901234567890.25');
@@ -447,6 +623,14 @@ test('frontend shows only verified values, uses a dash for missing data, and ret
   assert.equal(formatFundamentalFact({ validationStatus: 'VERIFIED', numericValue: null, unitScale: 1, currencyCode: 'VND' }), '—');
   assert.equal(formatFundamentalFact({ validationStatus: 'PENDING', numericValue: '99', unitScale: 1, currencyCode: 'VND' }), '—');
   assert.equal(formatFundamentalFact({ validationStatus: 'VERIFIED', numericValue: '1234567.89', unitScale: 1_000_000, currencyCode: 'VND' }), '1.234.567,89 triệu VND');
+  assert.deepEqual(buildFundamentalsAvailabilityDisplay('AVAILABLE'), {
+    label: 'Dữ liệu đã xác minh đầy đủ',
+    badgeClass: 'badge-gain'
+  });
+  assert.deepEqual(buildFundamentalsAvailabilityDisplay('PARTIAL'), {
+    label: 'Dữ liệu xác minh chưa đầy đủ',
+    badgeClass: 'badge-warn'
+  });
 
   const period = createManualFundamentalFiling(filingPayload(), { asset: FPT, now: NOW, idFactory: uuidFactory() });
   const response = buildFundamentalsResponse(FPT, [period], { asOf: NOW });
@@ -460,7 +644,7 @@ test('frontend shows only verified values, uses a dash for missing data, and ret
   const component = await readFile(new URL('../../client/src/components/EquityFundamentalsSection.jsx', import.meta.url), 'utf8');
   const app = await readFile(new URL('../../client/src/App.jsx', import.meta.url), 'utf8');
   assert.match(component, /\/api\/equities\/\$\{encodeURIComponent\(asset\.symbol\)\}\/fundamentals/);
-  assert.match(component, /Đã xác minh/);
+  assert.match(component, /buildFundamentalsAvailabilityDisplay/);
   assert.match(component, /Xem nguồn chính thức/);
   assert.match(component, /target="_blank" rel="noreferrer noopener"/);
   assert.match(app, /<EquityFundamentalsSection asset=\{assetDetail\} \/>/);
@@ -475,6 +659,11 @@ test('migration and schema make storage immutable, decimal-safe, service-only, a
     assert.match(sql, /numeric_value NUMERIC\(52, 12\)/);
     assert.match(sql, /system_knowable_at = GREATEST\(first_seen_at, source_available_at\)/);
     assert.match(sql, /uq_vn_equity_fundamental_filings_superseded_once/);
+    assert.match(sql, /uq_vn_equity_fundamental_filings_logical_revision/);
+    assert.match(sql, /uq_vn_equity_fundamental_facts_temporal_identity/);
+    assert.match(sql, /vn_equity_evidence_no_new_generic_fundamentals/);
+    assert.match(sql, /fact_period_kind VARCHAR\(16\) NOT NULL/);
+    assert.doesNotMatch(sql, /filing_identity_hash/);
     assert.match(sql, /FOR UPDATE/);
     assert.match(sql, /REVOKE ALL ON public\.vn_equity_fundamental_filings FROM PUBLIC, anon, authenticated, service_role/);
     assert.match(sql, /REVOKE ALL ON public\.vn_equity_fundamental_facts FROM PUBLIC, anon, authenticated, service_role/);
@@ -490,19 +679,47 @@ test('actual migration executes and its RPCs preserve decimal text while direct 
       CREATE ROLE anon NOLOGIN;
       CREATE ROLE authenticated NOLOGIN;
       CREATE ROLE service_role NOLOGIN;
-      CREATE TABLE public.assets (id UUID PRIMARY KEY, symbol TEXT NOT NULL);
-      INSERT INTO public.assets (id, symbol) VALUES ('${FPT.id}', 'FPT');
+      CREATE TABLE public.assets (
+        id UUID PRIMARY KEY,
+        symbol TEXT NOT NULL,
+        name TEXT NOT NULL,
+        asset_type TEXT,
+        exchange TEXT,
+        market_code TEXT,
+        market_policy TEXT
+      );
+      CREATE TABLE public.vn_equity_evidence_observations (evidence_type TEXT NOT NULL);
+      INSERT INTO public.vn_equity_evidence_observations (evidence_type) VALUES ('fundamental');
+      INSERT INTO public.assets (id, symbol, name, asset_type, exchange, market_code, market_policy)
+      VALUES ('${FPT.id}', 'FPT', 'FPT Corporation', 'stock', 'HOSE', 'HOSE', 'VN_EXCHANGE');
     `);
     const migration = await readFile(new URL('../../supabase/migrations/20260913000000_create_verified_equity_fundamentals.sql', import.meta.url), 'utf8');
     await db.exec(migration);
 
+    const legacyRows = await db.query(
+      "SELECT COUNT(*)::INTEGER AS count FROM public.vn_equity_evidence_observations WHERE evidence_type = 'fundamental'"
+    );
+    assert.equal(legacyRows.rows[0].count, 1);
+    await assert.rejects(
+      db.exec("INSERT INTO public.vn_equity_evidence_observations (evidence_type) VALUES ('fundamental')"),
+      /vn_equity_evidence_no_new_generic_fundamentals/i
+    );
+    await db.exec("INSERT INTO public.vn_equity_evidence_observations (evidence_type) VALUES ('disclosure')");
+
+    const dbIds = uuidFactory();
     const filing = createManualFundamentalFiling(filingPayload(), {
-      asset: FPT, now: NOW, idFactory: uuidFactory()
+      asset: FPT, now: NOW, idFactory: dbIds
     });
     await db.exec('SET ROLE service_role');
+    const rpcFiling = {
+      ...fundamentalFilingToRpc(filing),
+      ticker: 'WRONG',
+      issuer_legal_name: 'Wrong Issuer',
+      exchange: 'WRONG'
+    };
     const inserted = await db.query(
       'SELECT public.insert_vn_equity_fundamental_filing($1::jsonb, $2::jsonb) AS id',
-      [JSON.stringify(fundamentalFilingToRpc(filing)), JSON.stringify(filing.facts.map(fundamentalFactToRpc))]
+      [JSON.stringify(rpcFiling), JSON.stringify(filing.facts.map(fundamentalFactToRpc))]
     );
     assert.equal(inserted.rows[0].id, filing.id);
 
@@ -513,6 +730,110 @@ test('actual migration executes and its RPCs preserve decimal text while direct 
     assert.equal(read.rows[0].result.length, 1);
     assert.equal(read.rows[0].result[0].facts.find((fact) => fact.metric_code === 'operatingCashFlow').numeric_value, '0');
     assert.equal(read.rows[0].result[0].facts.find((fact) => fact.metric_code === 'totalAssets').numeric_value, METRIC_VALUES.totalAssets);
+    assert.equal(read.rows[0].result[0].ticker, FPT.symbol);
+    assert.equal(read.rows[0].result[0].issuer_legal_name, FPT.name);
+    assert.equal(read.rows[0].result[0].exchange, FPT.marketCode);
+
+    const invalidHostRpc = { ...fundamentalFilingToRpc(filing), id: dbIds(), source_url: 'https://example.com/report' };
+    await assert.rejects(
+      db.query(
+        'SELECT public.insert_vn_equity_fundamental_filing($1::jsonb, $2::jsonb)',
+        [JSON.stringify(invalidHostRpc), JSON.stringify(filing.facts.map((fact) => ({ ...fundamentalFactToRpc(fact), id: dbIds() })))]
+      ),
+      /violates check constraint/i
+    );
+
+    const concurrencyPayload = filingPayload({
+      sourceUrl: 'https://www.hsx.vn/fpt-2024',
+      sourceDisclosureId: 'FPT-2024-AFS',
+      fiscalYear: 2024,
+      periodStart: '2024-01-01',
+      periodEnd: '2024-12-31'
+    });
+    const originalA = createManualFundamentalFiling(concurrencyPayload, { asset: FPT, now: NOW, idFactory: dbIds });
+    const originalB = createManualFundamentalFiling({
+      ...concurrencyPayload,
+      sourceUrl: 'https://www.hsx.vn/fpt-2024?download=1'
+    }, { asset: FPT, now: NOW, idFactory: dbIds });
+    const originalResults = await Promise.allSettled([originalA, originalB].map((candidate) => db.query(
+      'SELECT public.insert_vn_equity_fundamental_filing($1::jsonb, $2::jsonb)',
+      [JSON.stringify(fundamentalFilingToRpc(candidate)), JSON.stringify(candidate.facts.map(fundamentalFactToRpc))]
+    )));
+    assert.equal(originalResults.filter((result) => result.status === 'fulfilled').length, 1);
+    assert.equal(originalResults.filter((result) => result.status === 'rejected').length, 1);
+
+    const correctionPayload = {
+      revisionNumber: 2,
+      supersedesFilingId: filing.id,
+      sourceDisclosureId: 'FPT-2025-AFS-CORRECTION-A',
+      sourceUrl: 'https://www.hsx.vn/fpt-2025-correction-a',
+      documentHash: 'c'.repeat(64)
+    };
+    const correctionA = createManualFundamentalFiling(filingPayload(correctionPayload), {
+      asset: FPT, now: NOW, idFactory: dbIds
+    });
+    const correctionB = createManualFundamentalFiling(filingPayload({
+      ...correctionPayload,
+      sourceDisclosureId: 'FPT-2025-AFS-CORRECTION-B',
+      sourceUrl: 'https://www.hsx.vn/fpt-2025-correction-b',
+      documentHash: 'd'.repeat(64)
+    }), { asset: FPT, now: NOW, idFactory: dbIds });
+    const correctionResults = await Promise.allSettled([correctionA, correctionB].map((candidate) => db.query(
+      'SELECT public.insert_vn_equity_fundamental_filing($1::jsonb, $2::jsonb)',
+      [JSON.stringify(fundamentalFilingToRpc(candidate)), JSON.stringify(candidate.facts.map(fundamentalFactToRpc))]
+    )));
+    assert.equal(correctionResults.filter((result) => result.status === 'fulfilled').length, 1);
+    assert.equal(correctionResults.filter((result) => result.status === 'rejected').length, 1);
+
+    const separate = createManualFundamentalFiling(filingPayload({ statementScope: 'SEPARATE' }), {
+      asset: FPT, now: NOW, idFactory: dbIds
+    });
+    const separateInsert = await db.query(
+      'SELECT public.insert_vn_equity_fundamental_filing($1::jsonb, $2::jsonb) AS id',
+      [JSON.stringify(fundamentalFilingToRpc(separate)), JSON.stringify(separate.facts.map(fundamentalFactToRpc))]
+    );
+    assert.equal(separateInsert.rows[0].id, separate.id);
+
+    const q2Facts = facts({
+      fiscalYear: 2026,
+      fiscalQuarter: 2,
+      periodKind: 'QUARTER',
+      periodStart: '2026-04-01',
+      periodEnd: '2026-06-30'
+    });
+    const q2Revenue = q2Facts.find((fact) => fact.metricCode === 'netRevenue');
+    const mixedTemporal = createManualFundamentalFiling(filingPayload({
+      sourceUrl: 'https://www.hsx.vn/fpt-q2-2026-mixed-periods',
+      sourceDisclosureId: 'FPT-Q2-2026-MIXED-PERIODS',
+      fiscalYear: 2026,
+      fiscalQuarter: 2,
+      periodStart: '2026-04-01',
+      periodEnd: '2026-06-30',
+      periodKind: 'QUARTER',
+      facts: [
+        q2Facts.find((fact) => fact.metricCode === 'totalAssets'),
+        q2Revenue,
+        {
+          ...q2Revenue,
+          factPeriodKind: 'YTD',
+          factPeriodStart: '2026-01-01',
+          numericValue: '120000000000000'
+        }
+      ]
+    }), { asset: FPT, now: NOW, idFactory: dbIds });
+    await db.query(
+      'SELECT public.insert_vn_equity_fundamental_filing($1::jsonb, $2::jsonb)',
+      [JSON.stringify(fundamentalFilingToRpc(mixedTemporal)), JSON.stringify(mixedTemporal.facts.map(fundamentalFactToRpc))]
+    );
+    const mixedRead = await db.query(
+      'SELECT public.read_vn_equity_fundamental_filings($1::uuid) AS result',
+      [FPT.id]
+    );
+    const storedMixed = mixedRead.rows[0].result.find((item) => item.id === mixedTemporal.id);
+    assert.deepEqual(
+      storedMixed.facts.filter((fact) => fact.metric_code === 'netRevenue').map((fact) => fact.fact_period_kind).sort(),
+      ['QUARTER', 'YTD']
+    );
 
     await assert.rejects(
       db.exec(`UPDATE public.vn_equity_fundamental_filings SET source_title = 'mutated' WHERE id = '${filing.id}'`),

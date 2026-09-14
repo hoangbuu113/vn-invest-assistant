@@ -2,6 +2,7 @@ import { privateSupabase } from '../supabase.js';
 import {
   createEquityEvidence,
   EQUITY_EVIDENCE_STATUS,
+  EQUITY_EVIDENCE_TYPES,
   selectLatestEquityEvidence
 } from './evidenceModel.js';
 
@@ -79,7 +80,7 @@ export function rowToEquityEvidence(row) {
     revisionMarker: row.revision_marker,
     sourceContentHash: row.source_content_hash,
     methodologyVersion: row.methodology_version
-  });
+  }, { allowLegacyFundamental: row.evidence_type === EQUITY_EVIDENCE_TYPES.FUNDAMENTAL });
 }
 
 function persistenceResult(overrides = {}) {
@@ -99,6 +100,14 @@ function persistenceResult(overrides = {}) {
  * the process cache is updated; exact duplicate IDs are ignored by the DB.
  */
 export async function persistEquityEvidence(items, client = privateSupabase) {
+  if ((Array.isArray(items) ? items : []).some(
+    (item) => item?.evidenceType === EQUITY_EVIDENCE_TYPES.FUNDAMENTAL
+  )) {
+    const error = new Error('New generic fundamental evidence is disabled; use the governed V1A filing/fact authority');
+    error.code = 'LEGACY_GENERIC_FUNDAMENTAL_INGESTION_REJECTED';
+    error.status = 409;
+    throw error;
+  }
   const valid = (Array.isArray(items) ? items : []).filter(
     (item) => item && item.status !== EQUITY_EVIDENCE_STATUS.UNAVAILABLE && equityEvidenceToRow(item)
   );

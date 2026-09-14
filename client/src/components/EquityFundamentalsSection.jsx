@@ -1,6 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '../utils/api.js';
-import { buildFundamentalsPeriodDisplay } from '../utils/fundamentalsDisplay.js';
+import {
+  buildFundamentalsAvailabilityDisplay,
+  buildFundamentalsPeriodDisplay
+} from '../utils/fundamentalsDisplay.js';
 import { TiltCard } from './MotionHelpers.jsx';
 
 function formatDate(value) {
@@ -13,13 +16,13 @@ function formatDate(value) {
 
 function EmptyFundamentals({ availability }) {
   const unsupported = availability === 'UNSUPPORTED_COMPANY_TYPE';
-  const noAnnualOrQuarter = ['AVAILABLE', 'PARTIAL'].includes(availability);
+  const noDisplayPeriod = ['AVAILABLE', 'PARTIAL'].includes(availability);
   return (
     <div className="fintech-banner banner-warning" style={{ margin: 0 }}>
       {unsupported
         ? 'Fundamentals V1A hiện chỉ hỗ trợ doanh nghiệp công nghiệp/phi tài chính.'
-        : noAnnualOrQuarter
-          ? 'Chưa có kỳ năm hoặc kỳ quý đã xác minh để hiển thị.'
+        : noDisplayPeriod
+          ? 'Chưa có kỳ năm hoặc kỳ giữa niên đã xác minh để hiển thị.'
           : availability === 'SOURCE_NOT_PROVISIONED'
             ? 'Nguồn báo cáo chính thức chưa được cấu hình.'
             : 'Chưa nhập báo cáo chính thức đã xác minh cho doanh nghiệp này.'}
@@ -31,13 +34,13 @@ export function EquityFundamentalsSection({ asset }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [selectedPeriod, setSelectedPeriod] = useState('quarter');
+  const [selectedPeriod, setSelectedPeriod] = useState('interim');
   const isVietnamEquity = asset?.asset_type === 'stock' && asset?.market_policy === 'VN_EXCHANGE';
 
   useEffect(() => {
     setData(null);
     setError(null);
-    setSelectedPeriod('quarter');
+    setSelectedPeriod('interim');
     if (!isVietnamEquity || !asset?.symbol) return undefined;
 
     const controller = new AbortController();
@@ -63,10 +66,14 @@ export function EquityFundamentalsSection({ asset }) {
 
   const activePeriod = useMemo(() => {
     if (!data) return null;
-    if (selectedPeriod === 'annual') return data.latestAnnual || data.latestQuarter;
-    return data.latestQuarter || data.latestAnnual;
+    if (selectedPeriod === 'annual') return data.latestAnnual || data.latestInterim;
+    return data.latestInterim || data.latestQuarter || data.latestYtd || data.latestAnnual;
   }, [data, selectedPeriod]);
   const display = useMemo(() => buildFundamentalsPeriodDisplay(activePeriod), [activePeriod]);
+  const availabilityDisplay = useMemo(
+    () => buildFundamentalsAvailabilityDisplay(data?.availability),
+    [data?.availability]
+  );
 
   if (!isVietnamEquity) return null;
 
@@ -78,15 +85,19 @@ export function EquityFundamentalsSection({ asset }) {
             <h3 style={{ margin: 0, fontSize: '1.1rem', color: 'var(--color-slate-900)', fontWeight: 800 }}>
               Chỉ số tài chính cơ bản
             </h3>
-            {display && <span className="fintech-badge badge-gain">Đã xác minh</span>}
+            {availabilityDisplay && (
+              <span className={`fintech-badge ${availabilityDisplay.badgeClass}`}>
+                {availabilityDisplay.label}
+              </span>
+            )}
           </div>
           <p style={{ margin: '4px 0 0', fontSize: '0.78rem', color: 'var(--color-slate-500)' }}>
             Nhập thủ công từ báo cáo chính thức; không suy diễn số liệu còn thiếu.
           </p>
         </div>
-        {data?.latestAnnual && data?.latestQuarter && (
+        {data?.latestAnnual && data?.latestInterim && (
           <div style={{ display: 'flex', gap: '6px' }} aria-label="Chọn kỳ báo cáo">
-            <button type="button" className={`fintech-btn btn-sm ${selectedPeriod === 'quarter' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setSelectedPeriod('quarter')}>
+            <button type="button" className={`fintech-btn btn-sm ${selectedPeriod === 'interim' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setSelectedPeriod('interim')}>
               Kỳ gần nhất
             </button>
             <button type="button" className={`fintech-btn btn-sm ${selectedPeriod === 'annual' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setSelectedPeriod('annual')}>

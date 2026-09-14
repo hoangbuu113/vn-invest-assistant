@@ -131,10 +131,12 @@ Portfolio P1C Multi-Asset Activity Display is implemented locally. Activity and 
 - Completed price evidence is supported. Official issuer disclosures remain `SOURCE_NOT_PROVISIONED`.
 
 ### Vietnam Equity Fundamentals V1A (Implemented Locally, Not Deployed)
-- Providerless fundamentals ingestion is a deliberate admin-only manual workflow for official SSC, HOSE, HNX, or issuer filings. It performs no crawling, scraping, document parsing, or vendor lookup.
-- `public.vn_equity_fundamental_filings` and `public.vn_equity_fundamental_facts` are service-only immutable stores. Corrections append a revision linked by `supersedes_filing_id`; prior facts remain queryable under replay-safe `system_knowable_at` semantics.
+- Providerless fundamentals ingestion is a deliberate admin-only manual workflow for official SSC, HOSE, or HNX filings. Issuer-host ingestion remains `SOURCE_NOT_PROVISIONED` until canonical issuer-domain metadata exists; arbitrary issuer hosts are rejected. The workflow performs no crawling, scraping, document parsing, or vendor lookup.
+- `public.vn_equity_fundamental_filings` and `public.vn_equity_fundamental_facts` are the sole governed fundamentals authority. Historical generic `evidence_type = 'fundamental'` rows remain stored as legacy evidence but are excluded from trusted projections, and new generic-fundamental ingestion is rejected.
+- Filing and fact stores are service-only and immutable. Corrections append a revision linked by `supersedes_filing_id`; prior facts remain queryable under replay-safe `system_knowable_at` semantics. Canonical issuer identity comes from `assets`, while DB uniqueness uses logical report/revision plus disclosure or document identity rather than caller hashes or URL variants.
 - Fundamentals V1A supports only canonically classified `INDUSTRIAL` Vietnam-listed stocks. `BANK`, `SECURITIES`, `INSURANCE`, and unclassified issuers return an explicit unsupported state.
-- The public `GET /api/equities/:symbol/fundamentals` projection exposes only verified filings and verified facts. Missing values remain null and display as `—`; explicit numeric zero remains zero.
+- Temporal identity lives on each fact: balance-sheet metrics are `INSTANT`, while income/cash-flow metrics use coherent `QUARTER`, `YTD`, `HALF_YEAR`, or `ANNUAL` windows for a December fiscal year. Quarter and YTD values from one filing remain separate.
+- The public `GET /api/equities/:symbol/fundamentals` projection exposes only verified filings and verified facts. `AVAILABLE` means complete current annual and interim coverage; `PARTIAL` is visibly incomplete verified coverage; `NOT_INGESTED`, `UNSUPPORTED_COMPANY_TYPE`, and `SOURCE_NOT_PROVISIONED` retain distinct meanings. Missing values display as `—`; explicit numeric zero remains zero.
 - No production filing values are seeded. Forward migration `20260913000000_create_verified_equity_fundamentals.sql` is local and unapplied remotely.
 
 ### Deterministic Equity Opportunity Engine (01G)
