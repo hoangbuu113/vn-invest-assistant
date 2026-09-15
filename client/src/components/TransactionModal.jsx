@@ -3,9 +3,11 @@ import { apiFetch } from '../utils/api.js';
 import { formatAssetType } from '../utils/formatting.js';
 import { isPortfolioTradeableAsset } from '../utils/assetCapabilities.js';
 import {
+  buildTransactionConfirmationSummary,
   formatNativeTransactionTotal,
   freezeTransactionSubmissionIntent,
   getTransactionEntryDefaults,
+  getTransactionEntryUnitLabels,
   isSimplifiedCryptoExternalEntry,
   validateRequiredVndAccountingPrice
 } from '../utils/transactionEntryDisplay.js';
@@ -63,6 +65,110 @@ function translateErrorMessage(msg) {
   }
 
   return msg;
+}
+
+function ConfirmationRow({ label, value, testId }) {
+  return (
+    <div
+      data-testid={testId}
+      style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'flex-start',
+        gap: '16px',
+        padding: '0.55rem 0'
+      }}
+    >
+      <span style={{ color: 'var(--color-slate-500)', fontSize: '0.8rem' }}>{label}</span>
+      <strong style={{ color: 'var(--color-slate-900)', fontSize: '0.84rem', textAlign: 'right' }}>
+        {value}
+      </strong>
+    </div>
+  );
+}
+
+function TransactionConfirmation({ summary, errorMsg, successMsg }) {
+  return (
+    <div data-testid="transaction-confirmation-summary">
+      <div
+        style={{
+          padding: '0.8rem 0.9rem',
+          marginBottom: '1rem',
+          border: '1px solid rgba(245, 158, 11, 0.35)',
+          borderRadius: '10px',
+          backgroundColor: 'rgba(245, 158, 11, 0.08)',
+          color: 'var(--color-slate-700)',
+          fontSize: '0.8rem',
+          lineHeight: 1.45
+        }}
+      >
+        Kiểm tra kỹ số lượng và giá thực hiện trước khi ghi nhận. Ứng dụng chỉ hiển thị lại dữ liệu bạn đã nhập, không suy đoán giao dịch đúng.
+      </div>
+
+      <div style={{ marginBottom: '1rem' }}>
+        <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--color-slate-500)', textTransform: 'uppercase' }}>
+          Giao dịch
+        </div>
+        <div style={{ marginTop: '3px', fontSize: '1.05rem', fontWeight: 800, color: 'var(--color-slate-900)' }}>
+          {summary.actionLabel} · {summary.assetSymbol}
+        </div>
+      </div>
+
+      <div
+        data-testid="transaction-confirmation-native"
+        style={{
+          padding: '0.55rem 0.9rem',
+          border: '1px solid rgba(37, 99, 235, 0.2)',
+          borderRadius: '10px',
+          backgroundColor: 'rgba(37, 99, 235, 0.04)',
+          marginBottom: '0.85rem'
+        }}
+      >
+        <div style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--color-brand-700, #1d4ed8)', marginBottom: '0.15rem' }}>
+          GIÁ TRỊ GIAO DỊCH GỐC · {summary.nativeCurrency}
+        </div>
+        <ConfirmationRow label="Số lượng" value={summary.quantityLabel} testId="confirmation-quantity" />
+        <ConfirmationRow label="Giá thực hiện" value={summary.executionPriceLabel} testId="confirmation-execution-price" />
+        <ConfirmationRow label="Tổng giá trị giao dịch" value={summary.nativeTotalLabel} testId="confirmation-native-total" />
+      </div>
+
+      <div
+        data-testid="transaction-confirmation-accounting"
+        style={{
+          padding: '0.55rem 0.9rem',
+          border: '1px solid var(--color-slate-200, #e2e8f0)',
+          borderRadius: '10px',
+          backgroundColor: 'var(--color-slate-50, #f8fafc)',
+          marginBottom: '0.85rem'
+        }}
+      >
+        <div style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--color-slate-700)', marginBottom: '0.15rem' }}>
+          GIÁ TRỊ HẠCH TOÁN · VND
+        </div>
+        <ConfirmationRow label="Giá hạch toán VND" value={summary.accountingUnitPriceLabel} testId="confirmation-accounting-price" />
+        <ConfirmationRow label="Tổng giá trị hạch toán" value={summary.accountingTotalLabel} testId="confirmation-accounting-total" />
+        <div style={{ borderTop: '1px solid var(--color-slate-200, #e2e8f0)', paddingTop: '0.55rem', color: 'var(--color-slate-500)', fontSize: '0.74rem', lineHeight: 1.4 }}>
+          Phần VND dùng cho giá vốn và lãi/lỗ; không thay thế giá giao dịch {summary.nativeCurrency} ở trên.
+        </div>
+      </div>
+
+      <div style={{ padding: '0 0.25rem' }}>
+        <ConfirmationRow label="Thanh toán" value={summary.settlementModeLabel} testId="confirmation-settlement-mode" />
+        <ConfirmationRow label="Thời gian giao dịch" value={summary.transactionTimeLabel} testId="confirmation-transaction-time" />
+      </div>
+
+      {errorMsg && (
+        <div style={{ marginTop: '0.85rem', padding: '0.75rem 1rem', borderRadius: '10px', border: '1px solid var(--color-loss-200, #fecaca)', backgroundColor: 'var(--color-loss-50, #fef2f2)', color: 'var(--color-loss-700, #b91c1c)', fontSize: '0.85rem' }}>
+          ⚠️ {errorMsg}
+        </div>
+      )}
+      {successMsg && (
+        <div style={{ marginTop: '0.85rem', padding: '0.75rem 1rem', borderRadius: '10px', border: '1px solid var(--color-gain-200, #a7f3d0)', backgroundColor: 'var(--color-gain-50, #ecfdf5)', color: 'var(--color-gain-700, #047857)', fontSize: '0.85rem' }}>
+          ✓ {successMsg}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function TransactionSettlementControls({
@@ -217,6 +323,7 @@ export default function TransactionModal({
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState(null);
   const [successMsg, setSuccessMsg] = useState(null);
+  const [pendingConfirmation, setPendingConfirmation] = useState(null);
   const idempotencyKeyRef = useRef(null);
   const pendingSubmissionIntentRef = useRef(null);
   const previousAccountingRateIntentKeyRef = useRef(null);
@@ -264,6 +371,7 @@ export default function TransactionModal({
       setCustomDateTime('');
       setErrorMsg(null);
       setSuccessMsg(null);
+      setPendingConfirmation(null);
       pendingSubmissionIntentRef.current = null;
       previousAccountingRateIntentKeyRef.current = null;
     }
@@ -376,6 +484,10 @@ export default function TransactionModal({
   const nativeTransactionTotalLabel = formatNativeTransactionTotal(
     quantityInput,
     executionUnitPrice,
+    priceCurrency
+  );
+  const transactionEntryUnits = getTransactionEntryUnitLabels(
+    selectedSymbol,
     priceCurrency
   );
 
@@ -600,6 +712,7 @@ export default function TransactionModal({
       // Rotate key after verified success so subsequent operations have a fresh key
       idempotencyKeyRef.current = getClientUUID();
       pendingSubmissionIntentRef.current = null;
+      setPendingConfirmation(null);
 
       const successText = intent.payload.transactionType === 'BUY'
         ? 'Đã ghi nhận giao dịch mua.'
@@ -621,60 +734,40 @@ export default function TransactionModal({
     }
   };
 
-  const handleSubmit = async (e) => {
-    e?.preventDefault();
-    if (loading) return;
-
+  const buildSubmissionCandidate = () => {
+    if (loading) return null;
     setErrorMsg(null);
     setSuccessMsg(null);
     setAccountingPriceError(null);
 
-    const submissionPlan = planUsdtVndAccountingSubmission({
-      frozenSubmission: pendingSubmissionIntentRef.current,
-      isAutomatic: isAutomaticUsdtAccounting,
-      rateState: accountingRateState,
-      nowMs: Date.now()
-    });
-    if (submissionPlan.action === ACCOUNTING_RATE_SUBMISSION_ACTION.RETRY_FROZEN) {
-      await dispatchFrozenSubmission(submissionPlan.intent);
-      return;
-    }
-    if (submissionPlan.action === ACCOUNTING_RATE_SUBMISSION_ACTION.BLOCK) {
-      if (submissionPlan.resolverRequired) {
-        setAccountingRateState(submissionPlan.rateState);
-        setAccountingRateRefreshVersion((version) => version + 1);
-      }
-      return;
-    }
-
     // Strict client validations
     if (!selectedSymbol || !selectedSymbol.trim()) {
       setErrorMsg('Vui lòng chọn tài sản giao dịch.');
-      return;
+      return null;
     }
 
     const rawQty = quantityInput.trim();
     if (!rawQty) {
       setErrorMsg('Vui lòng nhập số lượng giao dịch.');
-      return;
+      return null;
     }
     const numQty = parseFloat(rawQty);
     if (!Number.isFinite(numQty) || numQty <= 0) {
       setErrorMsg('Số lượng giao dịch phải là số dương lớn hơn 0.');
-      return;
+      return null;
     }
 
     let numExecUnitPrice = null;
     const rawExecutionPrice = executionUnitPrice.trim();
     if (isSimplifiedCryptoExternal && !rawExecutionPrice) {
       setErrorMsg(`Vui lòng nhập giá thực hiện (${priceCurrency}).`);
-      return;
+      return null;
     }
     if (isNonVnd && rawExecutionPrice) {
       numExecUnitPrice = parseFloat(rawExecutionPrice);
       if (!Number.isFinite(numExecUnitPrice) || numExecUnitPrice <= 0) {
         setErrorMsg(`Giá thực hiện (${priceCurrency}) phải là số dương lớn hơn 0.`);
-        return;
+        return null;
       }
     }
 
@@ -682,12 +775,12 @@ export default function TransactionModal({
     if (isCustomTime) {
       if (!customDateTime) {
         setErrorMsg('Vui lòng chọn thời gian giao dịch.');
-        return;
+        return null;
       }
       const dt = new Date(customDateTime);
       if (isNaN(dt.getTime())) {
         setErrorMsg('Thời gian giao dịch không hợp lệ.');
-        return;
+        return null;
       }
       normalizedExecutedAt = dt.toISOString();
     }
@@ -698,7 +791,7 @@ export default function TransactionModal({
       if (accountingRateState.status === ACCOUNTING_RATE_UI_STATUS.AVAILABLE) {
         if (!Number.isFinite(automaticAccountingPrice) || automaticAccountingPrice <= 0) {
           setErrorMsg('Không thể tính giá hạch toán VND từ giá thực hiện USDT.');
-          return;
+          return null;
         }
         numPrice = automaticAccountingPrice;
         selectedAutomaticQuote = accountingRateState.quote;
@@ -706,7 +799,7 @@ export default function TransactionModal({
         const accountingValidation = validateRequiredVndAccountingPrice(priceInput.trim());
         if (!accountingValidation.valid) {
           revealAccountingPriceError(accountingValidation.message);
-          return;
+          return null;
         }
         numPrice = accountingValidation.price;
       }
@@ -716,17 +809,17 @@ export default function TransactionModal({
         const accountingValidation = validateRequiredVndAccountingPrice(rawPrice);
         if (!accountingValidation.valid) {
           revealAccountingPriceError(accountingValidation.message);
-          return;
+          return null;
         }
       }
       if (!rawPrice) {
         setErrorMsg(isNonVnd ? 'Vui lòng nhập giá vốn / giá trị quy đổi VND.' : 'Vui lòng nhập giá giao dịch.');
-        return;
+        return null;
       }
       numPrice = parseFloat(rawPrice);
       if (!Number.isFinite(numPrice) || numPrice <= 0) {
         setErrorMsg('Giá vốn quy đổi VND phải là số dương lớn hơn 0.');
-        return;
+        return null;
       }
     }
 
@@ -774,9 +867,56 @@ export default function TransactionModal({
       payload.settlementCurrency = 'VND';
     }
 
+    const transactionTimeLabel = normalizedExecutedAt
+      ? new Date(normalizedExecutedAt).toLocaleString('vi-VN')
+      : 'Thời gian hiện tại (khi xác nhận)';
+
+    return {
+      payload,
+      summary: buildTransactionConfirmationSummary(payload, { transactionTimeLabel })
+    };
+  };
+
+  const handleSubmit = (event) => {
+    event?.preventDefault();
+    const candidate = buildSubmissionCandidate();
+    if (!candidate) return;
+    setPendingConfirmation(candidate);
+  };
+
+  const handleConfirmSubmission = async () => {
+    if (loading || !pendingConfirmation) return;
+
+    setErrorMsg(null);
+    setSuccessMsg(null);
+
+    // The quote is checked only when the user explicitly confirms. If it has
+    // expired, discard the preview and require a fresh, visible confirmation.
+    const submissionPlan = planUsdtVndAccountingSubmission({
+      frozenSubmission: pendingSubmissionIntentRef.current,
+      isAutomatic: isAutomaticUsdtAccounting,
+      rateState: accountingRateState,
+      nowMs: Date.now()
+    });
+    if (submissionPlan.action === ACCOUNTING_RATE_SUBMISSION_ACTION.RETRY_FROZEN) {
+      await dispatchFrozenSubmission(submissionPlan.intent);
+      return;
+    }
+    if (submissionPlan.action === ACCOUNTING_RATE_SUBMISSION_ACTION.BLOCK) {
+      setPendingConfirmation(null);
+      setErrorMsg(submissionPlan.reason === 'QUOTE_EXPIRED'
+        ? 'Tỷ giá hạch toán đã hết hiệu lực và đang được làm mới. Vui lòng kiểm tra rồi xác nhận lại.'
+        : 'Tỷ giá hạch toán chưa sẵn sàng. Vui lòng chờ rồi kiểm tra lại giao dịch.');
+      if (submissionPlan.resolverRequired) {
+        setAccountingRateState(submissionPlan.rateState);
+        setAccountingRateRefreshVersion((version) => version + 1);
+      }
+      return;
+    }
+
     const intent = freezeTransactionSubmissionIntent({
       previousIntent: pendingSubmissionIntentRef.current,
-      candidatePayload: payload,
+      candidatePayload: pendingConfirmation.payload,
       idempotencyKey: idempotencyKeyRef.current,
       createIdempotencyKey: getClientUUID
     });
@@ -875,7 +1015,14 @@ export default function TransactionModal({
 
         {/* Scrollable Form Body */}
         <div style={{ overflowY: 'auto', padding: '1.25rem 1.5rem', flex: 1 }}>
-          <form onSubmit={handleSubmit} id="transaction-entry-form">
+          {pendingConfirmation ? (
+            <TransactionConfirmation
+              summary={pendingConfirmation.summary}
+              errorMsg={errorMsg}
+              successMsg={successMsg}
+            />
+          ) : (
+            <form onSubmit={handleSubmit} id="transaction-entry-form">
             {/* Gold Troy Ounce Explanatory Banner */}
             {isGold && (
               <div
@@ -1186,7 +1333,8 @@ export default function TransactionModal({
             {/* Quantity Input */}
             <div style={{ marginBottom: '1.25rem' }}>
               <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 700, color: 'var(--color-slate-700)', marginBottom: '0.4rem' }}>
-                Số lượng giao dịch <span style={{ color: 'var(--color-loss-600)' }}>*</span>
+                Số lượng <span data-testid="transaction-quantity-unit" style={{ color: 'var(--color-slate-500)', fontWeight: 600 }}>({transactionEntryUnits.quantityUnit})</span>{' '}
+                <span style={{ color: 'var(--color-loss-600)' }}>*</span>
               </label>
               <input
                 type="number"
@@ -1230,7 +1378,9 @@ export default function TransactionModal({
                 <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '10px', marginBottom: '0.75rem' }}>
                   <div>
                     <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 700, color: 'var(--color-slate-600)', marginBottom: '0.35rem' }}>
-                      {isSimplifiedCryptoExternal ? 'Giá thực hiện' : `Giá thực hiện (${priceCurrency})`}
+                      {isSimplifiedCryptoExternal
+                        ? <>Giá thực hiện <span data-testid="transaction-execution-price-unit">({transactionEntryUnits.executionPriceUnit})</span></>
+                        : `Giá thực hiện (${priceCurrency})`}
                       {isSimplifiedCryptoExternal && <span style={{ color: 'var(--color-loss-600)' }}> *</span>}
                     </label>
                     <input
@@ -1686,7 +1836,8 @@ export default function TransactionModal({
                 <span>{successMsg}</span>
               </div>
             )}
-          </form>
+            </form>
+          )}
         </div>
 
         {/* Modal Footer Actions */}
@@ -1702,16 +1853,25 @@ export default function TransactionModal({
         >
           <button
             type="button"
-            onClick={onClose}
+            onClick={() => {
+              if (pendingConfirmation) {
+                setPendingConfirmation(null);
+                setErrorMsg(null);
+                setSuccessMsg(null);
+                return;
+              }
+              onClose();
+            }}
             disabled={loading}
             className="fintech-btn btn-secondary btn-sm"
             style={{ padding: '0.6rem 1.15rem' }}
           >
-            Hủy
+            {pendingConfirmation ? 'Quay lại chỉnh sửa' : 'Hủy'}
           </button>
           <button
-            type="submit"
-            form="transaction-entry-form"
+            type={pendingConfirmation ? 'button' : 'submit'}
+            form={pendingConfirmation ? undefined : 'transaction-entry-form'}
+            onClick={pendingConfirmation ? handleConfirmSubmission : undefined}
             disabled={loading || isAccountingRatePending}
             className="fintech-btn btn-primary btn-sm"
             style={{
@@ -1723,7 +1883,9 @@ export default function TransactionModal({
               ? 'Đang lưu...'
               : isAccountingRatePending
                 ? 'Đang lấy tỷ giá...'
-                : 'Ghi nhận giao dịch'}
+                : pendingConfirmation
+                  ? 'Xác nhận và ghi nhận'
+                  : 'Kiểm tra giao dịch'}
           </button>
         </div>
       </div>

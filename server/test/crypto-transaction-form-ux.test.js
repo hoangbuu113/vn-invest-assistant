@@ -13,10 +13,12 @@ import {
   planUsdtVndAccountingSubmission
 } from '../../client/src/utils/accountingRate.js';
 import {
+  buildTransactionConfirmationSummary,
   calculateNativeTransactionTotal,
   formatNativeTransactionTotal,
   freezeTransactionSubmissionIntent,
   getTransactionEntryDefaults,
+  getTransactionEntryUnitLabels,
   isSimplifiedCryptoExternalEntry,
   validateRequiredVndAccountingPrice
 } from '../../client/src/utils/transactionEntryDisplay.js';
@@ -83,6 +85,59 @@ describe('Crypto transaction form UX', () => {
     assert.equal(formatNativeTransactionTotal(225, 0.36402, 'USDT'), '81,9045 USDT');
   });
 
+  test('quantity and execution-price units make the asset/quote direction explicit', () => {
+    assert.deepEqual(getTransactionEntryUnitLabels('ONDO', 'USDT'), {
+      quantityUnit: 'ONDO',
+      executionPriceUnit: 'USDT / ONDO'
+    });
+    assert.deepEqual(getTransactionEntryUnitLabels('ONDO', 'USD'), {
+      quantityUnit: 'ONDO',
+      executionPriceUnit: 'USD / ONDO'
+    });
+  });
+
+  test('confirmation keeps ONDO native execution values separate from VND accounting values', () => {
+    const accountingPriceVnd = 0.36402 * 25325;
+    const summary = buildTransactionConfirmationSummary({
+      symbol: 'ONDO',
+      transactionType: 'BUY',
+      quantity: 225.86,
+      price: accountingPriceVnd,
+      executionUnitPrice: 0.36402,
+      priceCurrency: 'USDT',
+      settlementMode: 'EXTERNAL_SETTLEMENT',
+      settlementCurrency: 'USDT'
+    }, {
+      transactionTimeLabel: '14/09/2026, 22:30'
+    });
+
+    assert.equal(summary.actionLabel, 'MUA (BUY)');
+    assert.equal(summary.assetSymbol, 'ONDO');
+    assert.equal(summary.quantityLabel, '225,86 ONDO');
+    assert.equal(summary.executionPriceLabel, '0,36402 USDT / ONDO');
+    assert.ok(Math.abs(summary.nativeTotal - 82.2175572) < Number.EPSILON * 100);
+    assert.equal(summary.nativeTotalLabel, '82,2175572 USDT');
+    assert.equal(summary.nativeCurrency, 'USDT');
+    assert.equal(summary.accountingUnitPriceVnd, accountingPriceVnd);
+    assert.match(summary.accountingUnitPriceLabel, /VND \/ ONDO$/);
+    assert.match(summary.accountingTotalLabel, /VND$/);
+    assert.doesNotMatch(summary.nativeTotalLabel, /USD(?!T)|VND/);
+    assert.doesNotMatch(summary.accountingTotalLabel, /USDT|USD/);
+    assert.equal(summary.settlementModeLabel, 'Ví / sàn bên ngoài');
+    assert.equal(summary.transactionTimeLabel, '14/09/2026, 22:30');
+
+    const sellSummary = buildTransactionConfirmationSummary({
+      symbol: 'ONDO',
+      transactionType: 'SELL',
+      quantity: 1,
+      price: 9000,
+      executionUnitPrice: 0.35,
+      priceCurrency: 'USDT',
+      settlementMode: 'EXTERNAL_SETTLEMENT'
+    });
+    assert.equal(sellSummary.actionLabel, 'BÁN (SELL)');
+  });
+
   test('native total formatting preserves the explicit USD or USDT quote currency', () => {
     assert.equal(formatNativeTransactionTotal(2, 1.25, 'USDT'), '2,5 USDT');
     assert.equal(formatNativeTransactionTotal(2, 1.25, 'USD'), '2,5 USD');
@@ -113,7 +168,9 @@ describe('Crypto transaction form UX', () => {
     const settlementStart = source.indexOf('Non-VND Settlement Options', advancedStart);
     const advancedSection = source.slice(advancedStart, settlementStart);
 
-    assert.match(source, /isSimplifiedCryptoExternal \? 'Giá thực hiện'/);
+    assert.match(source, /data-testid="transaction-quantity-unit"/);
+    assert.match(source, /data-testid="transaction-execution-price-unit"/);
+    assert.match(source, /transactionEntryUnits\.executionPriceUnit/);
     assert.match(source, /isSimplifiedCryptoExternal \? 'Đồng giá'/);
     assert.match(source, /data-testid="crypto-native-total"/);
     assert.match(source, /Tổng giá trị giao dịch/);
@@ -137,7 +194,53 @@ describe('Crypto transaction form UX', () => {
 
     assert.match(source, /setIsAdvancedAccountingOpen\(true\)/);
     assert.match(source, /priceInputRef\.current\?\.focus\(\)/);
-    assert.match(source, /if \(!accountingValidation\.valid\) \{\s+revealAccountingPriceError\(accountingValidation\.message\);\s+return;/);
+    assert.match(source, /if \(!accountingValidation\.valid\) \{\s+revealAccountingPriceError\(accountingValidation\.message\);\s+return null;/);
+  });
+
+  test('first submit shows a complete review while only confirmation can freeze and dispatch', async () => {
+    const source = await readFile(
+      new URL('../../client/src/components/TransactionModal.jsx', import.meta.url),
+      'utf8'
+    );
+    const previewStart = source.indexOf('const handleSubmit = (event) =>');
+    const confirmStart = source.indexOf('const handleConfirmSubmission = async () =>');
+    const confirmEnd = source.indexOf('\n  return (', confirmStart);
+    const previewSection = source.slice(previewStart, confirmStart);
+    const confirmationSection = source.slice(confirmStart, confirmEnd);
+
+    assert.match(source, /data-testid="transaction-confirmation-summary"/);
+    assert.match(source, /data-testid="transaction-confirmation-native"/);
+    assert.match(source, /data-testid="transaction-confirmation-accounting"/);
+    assert.match(source, /Giá thực hiện/);
+    assert.match(source, /Tổng giá trị giao dịch/);
+    assert.match(source, /Giá hạch toán VND/);
+    assert.match(source, /Tổng giá trị hạch toán/);
+    assert.match(source, /Thanh toán/);
+    assert.match(source, /Thời gian giao dịch/);
+    assert.match(previewSection, /setPendingConfirmation\(candidate\)/);
+    assert.doesNotMatch(previewSection, /dispatchFrozenSubmission|freezeTransactionSubmissionIntent/);
+    assert.match(confirmationSection, /planUsdtVndAccountingSubmission/);
+    assert.match(confirmationSection, /freezeTransactionSubmissionIntent/);
+    assert.match(confirmationSection, /await dispatchFrozenSubmission\(intent\)/);
+    assert.ok(
+      confirmationSection.indexOf('planUsdtVndAccountingSubmission')
+        < confirmationSection.indexOf('freezeTransactionSubmissionIntent')
+    );
+  });
+
+  test('expired automatic quote discards the preview and requires refreshed confirmation', async () => {
+    const source = await readFile(
+      new URL('../../client/src/components/TransactionModal.jsx', import.meta.url),
+      'utf8'
+    );
+    const confirmStart = source.indexOf('const handleConfirmSubmission = async () =>');
+    const confirmEnd = source.indexOf('\n  return (', confirmStart);
+    const confirmationSection = source.slice(confirmStart, confirmEnd);
+
+    assert.match(confirmationSection, /submissionPlan\.reason === 'QUOTE_EXPIRED'/);
+    assert.match(confirmationSection, /setPendingConfirmation\(null\)/);
+    assert.match(confirmationSection, /setAccountingRateRefreshVersion\(\(version\) => version \+ 1\)/);
+    assert.match(confirmationSection, /Vui lòng kiểm tra rồi xác nhận lại/);
   });
 
   test('automatic or fallback VND basis remains current price and submission intent is frozen', async () => {

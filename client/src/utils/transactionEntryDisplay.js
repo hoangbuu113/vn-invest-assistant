@@ -11,6 +11,12 @@ function normalizedAssetType(asset) {
   return typeof value === 'string' ? value.trim().toLowerCase() : '';
 }
 
+function normalizedUppercase(value) {
+  return typeof value === 'string' && value.trim()
+    ? value.trim().toUpperCase()
+    : null;
+}
+
 export function getTransactionEntryDefaults(asset) {
   const assetType = normalizedAssetType(asset);
   const symbol = typeof asset?.symbol === 'string' ? asset.symbol.trim().toUpperCase() : '';
@@ -57,6 +63,70 @@ export function formatNativeTransactionTotal(quantity, executionUnitPrice, price
   return formatNativeAmount(total, currency, {
     decimals: currency === 'VND' ? 0 : 8
   });
+}
+
+export function getTransactionEntryUnitLabels(assetSymbol, priceCurrency) {
+  const assetUnit = normalizedUppercase(assetSymbol);
+  const quoteCurrency = normalizedUppercase(priceCurrency);
+
+  return {
+    quantityUnit: assetUnit || 'đơn vị',
+    executionPriceUnit: quoteCurrency && assetUnit
+      ? `${quoteCurrency} / ${assetUnit}`
+      : quoteCurrency || 'đồng giá'
+  };
+}
+
+export function buildTransactionConfirmationSummary(payload, {
+  transactionTimeLabel = 'Thời gian hiện tại (khi xác nhận)'
+} = {}) {
+  const assetSymbol = normalizedUppercase(payload?.symbol);
+  const priceCurrency = normalizedUppercase(payload?.priceCurrency) || 'VND';
+  const quantity = positiveFiniteNumber(payload?.quantity);
+  const accountingUnitPriceVnd = positiveFiniteNumber(payload?.price);
+  const executionUnitPrice = positiveFiniteNumber(
+    payload?.executionUnitPrice ?? (priceCurrency === 'VND' ? payload?.price : null)
+  );
+  const nativeTotal = calculateNativeTransactionTotal(quantity, executionUnitPrice);
+  const accountingTotalVnd = quantity !== null && accountingUnitPriceVnd !== null
+    ? quantity * accountingUnitPriceVnd
+    : null;
+  const units = getTransactionEntryUnitLabels(assetSymbol, priceCurrency);
+  const transactionType = payload?.transactionType === 'SELL' ? 'SELL' : 'BUY';
+
+  return {
+    transactionType,
+    actionLabel: transactionType === 'SELL' ? 'BÁN (SELL)' : 'MUA (BUY)',
+    assetSymbol: assetSymbol || '—',
+    quantity,
+    quantityUnit: units.quantityUnit,
+    quantityLabel: quantity === null
+      ? '—'
+      : formatNativeAmount(quantity, units.quantityUnit, { decimals: 8 }),
+    executionUnitPrice,
+    executionPriceUnit: units.executionPriceUnit,
+    executionPriceLabel: executionUnitPrice === null
+      ? '—'
+      : `${formatNativeAmount(executionUnitPrice, priceCurrency, { decimals: priceCurrency === 'VND' ? 0 : 8 })}${assetSymbol ? ` / ${assetSymbol}` : ''}`,
+    nativeCurrency: priceCurrency,
+    nativeTotal,
+    nativeTotalLabel: nativeTotal === null
+      ? '—'
+      : formatNativeAmount(nativeTotal, priceCurrency, { decimals: priceCurrency === 'VND' ? 0 : 8 }),
+    accountingUnitPriceVnd,
+    accountingUnitPriceLabel: accountingUnitPriceVnd === null
+      ? '—'
+      : `${formatNativeAmount(accountingUnitPriceVnd, 'VND', { decimals: 8 })}${assetSymbol ? ` / ${assetSymbol}` : ''}`,
+    accountingTotalVnd,
+    accountingTotalLabel: accountingTotalVnd === null
+      ? '—'
+      : formatNativeAmount(accountingTotalVnd, 'VND', { decimals: 8 }),
+    settlementMode: payload?.settlementMode || null,
+    settlementModeLabel: payload?.settlementMode === 'EXTERNAL_SETTLEMENT'
+      ? 'Ví / sàn bên ngoài'
+      : 'Tiền mặt VND trong ứng dụng',
+    transactionTimeLabel
+  };
 }
 
 export function validateRequiredVndAccountingPrice(value) {
