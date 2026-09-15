@@ -212,7 +212,7 @@ describe('Portfolio V1 P0.2.1 native-currency opening positions', () => {
       { cash_available: 200000000 },
       [cryptoHolding()],
       { BTC: { price: 0.91, currency: 'USD', priceAsOf: '2026-09-09T00:00:00.000Z' } },
-      { USD: { baseCurrency: 'USD', quoteCurrency: 'VND', rate: 25000, availability: 'available', provider: 'test-fx', sourceTimestamp: '2026-09-09T00:00:00.000Z', freshness: 'current' } },
+      { USDT: { baseCurrency: 'USDT', quoteCurrency: 'VND', rate: 25000, availability: 'available', provider: 'test-fx', sourceTimestamp: '2026-09-09T00:00:00.000Z', freshness: 'current' } },
       { BTC: { price: 0.91, currency: 'USDT', source: 'Binance', priceAsOf: '2026-09-09T00:00:01.000Z' } }
     );
 
@@ -242,7 +242,8 @@ describe('Portfolio V1 P0.2.1 native-currency opening positions', () => {
     assert.equal(result.holdings[0].nativeCurrentPrice, null);
     assert.equal(result.holdings[0].nativeUnrealizedPnL, null);
     assert.equal(result.holdings[0].nativePnlStatus, 'unavailable');
-    assert.equal(result.holdings[0].reportingMarketValue, 1234 * 0.91 * 25000);
+    assert.equal(result.holdings[0].reportingMarketValue, null);
+    assert.equal(result.holdings[0].nativeMarketValue, null);
   });
 
   test('later ledger replay cannot fabricate a VND basis for an unknown-cost opening position', () => {
@@ -283,14 +284,14 @@ describe('Portfolio V1 P0.2.1 native-currency opening positions', () => {
         };
       },
       getFxRateFn: async () => ({
-        baseCurrency: 'USD', quoteCurrency: 'VND', rate: 25000, availability: 'available',
+        baseCurrency: 'USDT', quoteCurrency: 'VND', rate: 25000, availability: 'available',
         provider: 'test-fx', sourceTimestamp: '2026-09-09T00:00:00.000Z', freshness: 'current'
       })
     });
 
     assert.equal(snapshotCalls, 1);
     assert.equal(realtimeCalls, 1);
-    assert.equal(result.holdings[0].reportingMarketValue, 1234 * 25000);
+    assert.equal(result.holdings[0].reportingMarketValue, 1234 * 1.1 * 25000);
     assert.equal(result.holdings[0].nativeCurrentPrice, 1.1);
     assert.equal(result.holdings[0].nativeCurrentPriceAsOf, '2026-09-09T00:00:01.000Z');
     assert.equal(result.holdings[0].nativeCurrentPriceSource, 'binance_websocket');

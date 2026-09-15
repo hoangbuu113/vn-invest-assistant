@@ -13,7 +13,9 @@ export const FX_PROVENANCE_METHODS = Object.freeze([
 
 export const TRANSACTION_METHODOLOGY = Object.freeze({
   costBasisMethod: 'weighted_average',
-  realizedPnLMethod: '(sellPrice - preSellAverageCost) * sellQuantity',
+  nativeCostBasisMethod: 'weighted_average_when_acquisition_currencies_match',
+  realizedPnLMethod: 'VND realized P/L is calculated only when both VND sale price and pre-sale VND cost are available',
+  nativeRealizedPnLMethod: '(nativeExecutionPrice - preTradeNativeAverageCost) * sellQuantity when currencies match',
   cashAmountMethod: 'quantity * price',
   cashReconciliation: 'tracked-cash BUY/SELL affect holdings and cash atomically at executedAt; createdAt remains audit time',
   legacyTransactionsCashReconciled: false,
@@ -22,6 +24,7 @@ export const TRANSACTION_METHODOLOGY = Object.freeze({
   legacyHoldingsMayPredateLedger: true,
   duplicateRequestSemantics: 'separate_transactions',
   reportingCurrency: 'VND',
+  missingAccountingSemantics: 'UNAVAILABLE_NEVER_ZERO',
   settlementModes: ['INTERNAL_VND_CASH', 'EXTERNAL_SETTLEMENT']
 });
 
@@ -115,7 +118,7 @@ export function normalizeTransaction(row) {
     assetType: row.asset_type || asset.asset_type || null,
     transactionType: row.transaction_type || row.transactionType,
     quantity: normalizeDatabaseNumber(row.quantity, 'transaction quantity'),
-    price: normalizeDatabaseNumber(row.price, 'transaction price'),
+    price: normalizeDatabaseNumber(row.price, 'transaction price', { nullable: true }),
     realizedPnL: normalizeDatabaseNumber(row.realized_pnl ?? row.realizedPnL, 'realized P/L', { nullable: true }),
     executionUnitPrice: normalizeDatabaseNumber(
       row.execution_unit_price ?? row.executionUnitPrice,
@@ -136,7 +139,50 @@ export function normalizeTransaction(row) {
     createdAt: row.created_at || row.createdAt,
     reversalOfId: row.reversal_of_id || row.reversalOfId || null,
     isReversal: row.is_reversal === true || row.isReversal === true,
-    isReversed: row.is_reversed === true || row.isReversed === true
+    isReversed: row.is_reversed === true || row.isReversed === true,
+    accountingStatus: (row.accounting_status || row.accountingStatus) === 'UNAVAILABLE' || row.price === null
+      ? 'UNAVAILABLE'
+      : 'AVAILABLE',
+    preTradeHoldingExists: row.pre_trade_holding_exists ?? row.preTradeHoldingExists ?? null,
+    preTradeQuantity: normalizeDatabaseNumber(
+      row.pre_trade_quantity ?? row.preTradeQuantity,
+      'pre-trade quantity',
+      { nullable: true, nonNegative: true }
+    ),
+    preTradeOpeningPositionId: row.pre_trade_opening_position_id || row.preTradeOpeningPositionId || null,
+    preTradeAverageCost: normalizeDatabaseNumber(
+      row.pre_trade_average_cost ?? row.preTradeAverageCost,
+      'pre-trade average cost',
+      { nullable: true, nonNegative: true }
+    ),
+    preTradeNativeAverageCost: normalizeDatabaseNumber(
+      row.pre_trade_native_average_cost ?? row.preTradeNativeAverageCost,
+      'pre-trade native average cost',
+      { nullable: true, nonNegative: true }
+    ),
+    preTradeNativeCostCurrency: row.pre_trade_native_cost_currency || row.preTradeNativeCostCurrency || null,
+    nativeRealizedPnL: (() => {
+      const type = row.transaction_type || row.transactionType;
+      const executionPrice = normalizeDatabaseNumber(
+        row.execution_unit_price ?? row.executionUnitPrice,
+        'execution unit price',
+        { nullable: true }
+      );
+      const preTradeNativeAverage = normalizeDatabaseNumber(
+        row.pre_trade_native_average_cost ?? row.preTradeNativeAverageCost,
+        'pre-trade native average cost',
+        { nullable: true, nonNegative: true }
+      );
+      const preTradeCurrency = row.pre_trade_native_cost_currency || row.preTradeNativeCostCurrency || null;
+      const executionCurrency = row.price_currency || row.priceCurrency || 'VND';
+      if (type !== 'SELL'
+          || executionPrice === null
+          || preTradeNativeAverage === null
+          || preTradeCurrency !== executionCurrency) return null;
+      const value = (executionPrice - preTradeNativeAverage)
+        * normalizeDatabaseNumber(row.quantity, 'transaction quantity');
+      return value;
+    })()
   };
 }
 
@@ -148,7 +194,13 @@ function normalizeHoldingState(row) {
     assetId: row.asset_id || row.assetId,
     openingPositionId: row.opening_position_id || row.openingPositionId || null,
     quantity: normalizeDatabaseNumber(row.quantity, 'holding quantity'),
-    averageCost: normalizeDatabaseNumber(row.average_cost ?? row.averageCost, 'holding average cost'),
+    averageCost: normalizeDatabaseNumber(row.average_cost ?? row.averageCost, 'holding average cost', { nullable: true, nonNegative: true }),
+    nativeAverageCost: normalizeDatabaseNumber(
+      row.native_average_cost ?? row.nativeAverageCost,
+      'holding native average cost',
+      { nullable: true, nonNegative: true }
+    ),
+    nativeCostCurrency: row.native_cost_currency || row.nativeCostCurrency || null,
     createdAt: row.created_at || row.createdAt,
     updatedAt: row.updated_at || row.updatedAt
   };
@@ -293,6 +345,9 @@ export async function createPortfolioTransaction({
     holdingRemoved: data.holdingRemoved === true,
     cashEntry: normalizeCashLedgerEntry(data.cashEntry),
     currentCash: normalizeDatabaseNumber(data.currentCash, 'current cash', { nonNegative: true }),
+    accountingStatus: data.accountingStatus === 'UNAVAILABLE' || data.transaction?.price === null
+      ? 'UNAVAILABLE'
+      : 'AVAILABLE',
     replayed: data.replayed === true
   };
 }

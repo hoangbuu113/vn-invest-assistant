@@ -114,43 +114,19 @@ export function buildTransactionConfirmationSummary(payload, {
       ? '—'
       : formatNativeAmount(nativeTotal, priceCurrency, { decimals: priceCurrency === 'VND' ? 0 : 8 }),
     accountingUnitPriceVnd,
+    accountingStatus: accountingUnitPriceVnd === null ? 'UNAVAILABLE' : 'AVAILABLE',
     accountingUnitPriceLabel: accountingUnitPriceVnd === null
-      ? '—'
+      ? 'Chưa có tỷ giá quy đổi VND'
       : `${formatNativeAmount(accountingUnitPriceVnd, 'VND', { decimals: 8 })}${assetSymbol ? ` / ${assetSymbol}` : ''}`,
     accountingTotalVnd,
     accountingTotalLabel: accountingTotalVnd === null
-      ? '—'
+      ? 'Chưa có tỷ giá quy đổi VND'
       : formatNativeAmount(accountingTotalVnd, 'VND', { decimals: 8 }),
     settlementMode: payload?.settlementMode || null,
     settlementModeLabel: payload?.settlementMode === 'EXTERNAL_SETTLEMENT'
       ? 'Ví / sàn bên ngoài'
       : 'Tiền mặt VND trong ứng dụng',
     transactionTimeLabel
-  };
-}
-
-export function validateRequiredVndAccountingPrice(value) {
-  const price = positiveFiniteNumber(value);
-  if (price !== null) {
-    return {
-      valid: true,
-      price,
-      expandAdvancedAccounting: false,
-      message: null
-    };
-  }
-
-  const isMissing = value === null
-    || value === undefined
-    || (typeof value === 'string' && value.trim() === '');
-
-  return {
-    valid: false,
-    price: null,
-    expandAdvancedAccounting: true,
-    message: isMissing
-      ? 'Vui lòng nhập giá hạch toán VND bắt buộc để tính giá vốn và lãi/lỗ.'
-      : 'Giá hạch toán VND phải là số dương lớn hơn 0.'
   };
 }
 

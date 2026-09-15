@@ -19,8 +19,7 @@ import {
   freezeTransactionSubmissionIntent,
   getTransactionEntryDefaults,
   getTransactionEntryUnitLabels,
-  isSimplifiedCryptoExternalEntry,
-  validateRequiredVndAccountingPrice
+  isSimplifiedCryptoExternalEntry
 } from '../../client/src/utils/transactionEntryDisplay.js';
 import { buildPortfolioRecentActivity } from '../../client/src/utils/portfolioSnapshotDisplay.js';
 
@@ -79,10 +78,10 @@ describe('Crypto transaction form UX', () => {
   });
 
   test('ONDO quantity and execution price produce a precise read-only USDT total', () => {
-    const total = calculateNativeTransactionTotal(225, 0.36402);
+    const total = calculateNativeTransactionTotal(226, 0.36402);
 
-    assert.ok(Math.abs(total - 81.9045) < Number.EPSILON * 100);
-    assert.equal(formatNativeTransactionTotal(225, 0.36402, 'USDT'), '81,9045 USDT');
+    assert.ok(Math.abs(total - 82.26852) < Number.EPSILON * 100);
+    assert.equal(formatNativeTransactionTotal(226, 0.36402, 'USDT'), '82,26852 USDT');
   });
 
   test('quantity and execution-price units make the asset/quote direction explicit', () => {
@@ -144,30 +143,29 @@ describe('Crypto transaction form UX', () => {
     assert.equal(formatNativeTransactionTotal('', 1.25, 'USDT'), '—');
   });
 
-  test('required VND basis validation blocks missing/invalid values without fabricating zero', () => {
-    const missing = validateRequiredVndAccountingPrice('');
-    const invalid = validateRequiredVndAccountingPrice('0');
-    const valid = validateRequiredVndAccountingPrice('9500');
+  test('missing VND enrichment is explicit and never fabricated as zero', () => {
+    const summary = buildTransactionConfirmationSummary({
+      symbol: 'ONDO',
+      transactionType: 'BUY',
+      quantity: 226,
+      price: null,
+      executionUnitPrice: 0.36402,
+      priceCurrency: 'USDT',
+      settlementMode: 'EXTERNAL_SETTLEMENT'
+    });
 
-    assert.equal(missing.valid, false);
-    assert.equal(missing.price, null);
-    assert.equal(missing.expandAdvancedAccounting, true);
-    assert.match(missing.message, /bắt buộc/);
-    assert.equal(invalid.valid, false);
-    assert.equal(invalid.price, null);
-    assert.equal(valid.valid, true);
-    assert.equal(valid.price, 9500);
+    assert.equal(summary.nativeTotal, 82.26852);
+    assert.equal(summary.accountingStatus, 'UNAVAILABLE');
+    assert.equal(summary.accountingUnitPriceVnd, null);
+    assert.equal(summary.accountingTotalVnd, null);
+    assert.equal(summary.accountingUnitPriceLabel, 'Chưa có tỷ giá quy đổi VND');
   });
 
-  test('modal keeps native crypto inputs primary and shows manual VND only as governed fallback', async () => {
+  test('modal keeps native crypto inputs primary and never asks for manual VND accounting', async () => {
     const source = await readFile(
       new URL('../../client/src/components/TransactionModal.jsx', import.meta.url),
       'utf8'
     );
-    const advancedStart = source.indexOf('Required VND accounting price: advanced only');
-    const settlementStart = source.indexOf('Non-VND Settlement Options', advancedStart);
-    const advancedSection = source.slice(advancedStart, settlementStart);
-
     assert.match(source, /data-testid="transaction-quantity-unit"/);
     assert.match(source, /data-testid="transaction-execution-price-unit"/);
     assert.match(source, /transactionEntryUnits\.executionPriceUnit/);
@@ -177,24 +175,29 @@ describe('Crypto transaction form UX', () => {
     assert.match(source, /data-testid="automatic-usdt-vnd-accounting"/);
     assert.match(source, /Giá hạch toán VND được tự động tính theo dữ liệu CoinGecko/);
     assert.match(source, /Nguồn: \{accountingRateState\.quote\.provider\}/);
-    assert.match(source, /shouldShowManualAccounting \? \(/);
-    assert.match(advancedSection, /<details/);
-    assert.match(advancedSection, /open=\{isAdvancedAccountingOpen\}/);
-    assert.match(advancedSection, /data-testid="automatic-accounting-fallback"/);
-    assert.match(advancedSection, /Thông tin hạch toán nâng cao/);
-    assert.match(advancedSection, /Giá hạch toán VND \(₫\/đơn vị\)/);
-    assert.match(advancedSection, /Ứng dụng hiện cần giá trị VND để tính giá vốn, lãi\/lỗ và lịch sử danh mục/);
+    assert.match(source, /data-testid="automatic-accounting-unavailable"/);
+    assert.match(source, /Chưa có tỷ giá quy đổi VND/);
+    assert.match(source, /requiresVndAccountingInput/);
+    assert.doesNotMatch(source, /Thông tin hạch toán nâng cao/);
+    assert.doesNotMatch(source, /USER_SUPPLIED_VND_BASIS/);
   });
 
-  test('missing VND basis expands, focuses, and blocks before payload submission', async () => {
+  test('provider unavailability keeps a null VND price and allows confirmation', async () => {
     const source = await readFile(
       new URL('../../client/src/components/TransactionModal.jsx', import.meta.url),
       'utf8'
     );
 
-    assert.match(source, /setIsAdvancedAccountingOpen\(true\)/);
-    assert.match(source, /priceInputRef\.current\?\.focus\(\)/);
-    assert.match(source, /if \(!accountingValidation\.valid\) \{\s+revealAccountingPriceError\(accountingValidation\.message\);\s+return null;/);
+    assert.match(source, /let numPrice = null/);
+    assert.match(source, /price: numPrice/);
+    assert.doesNotMatch(source, /revealAccountingPriceError/);
+    const unavailablePlan = planUsdtVndAccountingSubmission({
+      frozenSubmission: null,
+      isAutomatic: true,
+      rateState: { status: ACCOUNTING_RATE_UI_STATUS.UNAVAILABLE, quote: null },
+      nowMs: Date.now()
+    });
+    assert.equal(unavailablePlan.action, ACCOUNTING_RATE_SUBMISSION_ACTION.BUILD_NEW);
   });
 
   test('first submit shows a complete review while only confirmation can freeze and dispatch', async () => {
@@ -243,7 +246,7 @@ describe('Crypto transaction form UX', () => {
     assert.match(confirmationSection, /Vui lòng kiểm tra rồi xác nhận lại/);
   });
 
-  test('automatic or fallback VND basis remains current price and submission intent is frozen', async () => {
+  test('automatic VND enrichment remains current price while native-only intent is frozen exactly', async () => {
     const source = await readFile(
       new URL('../../client/src/components/TransactionModal.jsx', import.meta.url),
       'utf8'
@@ -581,7 +584,7 @@ describe('Crypto transaction form UX', () => {
       }]
     });
 
-    assert.match(activity.detail, /0,364 USDT/);
+    assert.match(activity.detail, /0,36402 USDT/);
     assert.doesNotMatch(activity.detail, /USD(?!T)|9\.500|₫/);
   });
 });

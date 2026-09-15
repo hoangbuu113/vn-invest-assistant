@@ -962,7 +962,7 @@ describe('Automatic direct USDT/VND accounting rate', () => {
     assert.equal(deriveUsdtVndAccountingPrice(0.36402, fakeUsd), null);
   });
 
-  test('UI presentation hides manual VND on automatic success and exposes it on unavailable or stale', () => {
+  test('UI presentation keeps optional automatic VND status visible without a manual fallback', () => {
     const loading = getUsdtVndAccountingPresentation({
       isAutomatic: true,
       isSimplifiedCryptoExternal: true,
@@ -992,8 +992,8 @@ describe('Automatic direct USDT/VND accounting rate', () => {
         status
       }), {
         isPending: false,
-        showAutomatic: false,
-        showManual: true
+        showAutomatic: true,
+        showManual: false
       });
     }
   });

@@ -47,13 +47,15 @@ export function getUsdtVndAccountingPresentation({
   const showAutomatic = isAutomatic === true && [
     ACCOUNTING_RATE_UI_STATUS.IDLE,
     ACCOUNTING_RATE_UI_STATUS.LOADING,
-    ACCOUNTING_RATE_UI_STATUS.AVAILABLE
+    ACCOUNTING_RATE_UI_STATUS.AVAILABLE,
+    ACCOUNTING_RATE_UI_STATUS.UNAVAILABLE,
+    ACCOUNTING_RATE_UI_STATUS.STALE
   ].includes(status);
 
   return {
     isPending,
     showAutomatic,
-    showManual: isSimplifiedCryptoExternal === true && !showAutomatic
+    showManual: false
   };
 }
 
@@ -301,9 +303,9 @@ export function accountingRateFallbackMessage(reason) {
     PROVIDER_TIMEOUT: 'CoinGecko phản hồi quá chậm.',
     PROVIDER_ACCESS_DENIED: 'CoinGecko chưa cho phép môi trường này dùng dữ liệu quy đổi.',
     HISTORICAL_DATA_UNAVAILABLE: 'Gói dữ liệu CoinGecko hiện không cung cấp quan sát lịch sử được yêu cầu.',
-    QUOTE_PROOF_UNAVAILABLE: 'Máy chủ chưa thể xác thực tỷ giá tự động. Vui lòng nhập giá hạch toán VND.',
+    QUOTE_PROOF_UNAVAILABLE: 'Chưa có tỷ giá quy đổi VND.',
     EXECUTED_AT_REQUIRED: 'Vui lòng chọn thời gian giao dịch để lấy tỷ giá lịch sử.'
   };
   return messages[reason]
-    || 'Không thể tự động lấy USDT/VND. Vui lòng nhập giá hạch toán VND.';
+    || 'Chưa có tỷ giá quy đổi VND.';
 }

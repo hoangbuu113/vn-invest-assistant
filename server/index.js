@@ -919,8 +919,19 @@ export function createApp(services = {}) {
         errors.push('quantity must be a finite number greater than 0');
       }
 
-      if (!isValidFinancialNumber(price, { allowZero: false })) {
-        errors.push('price must be a finite number greater than 0');
+      const normalizedPriceCurrency = typeof priceCurrency === 'string' && priceCurrency.trim()
+        ? priceCurrency.trim().toUpperCase()
+        : 'VND';
+      const normalizedSettlementMode = typeof settlementMode === 'string' && settlementMode.trim()
+        ? settlementMode.trim().toUpperCase()
+        : 'INTERNAL_VND_CASH';
+      const nativeOnlyEligible = normalizedSettlementMode === 'EXTERNAL_SETTLEMENT'
+        && normalizedPriceCurrency !== 'VND';
+
+      if (price !== undefined && price !== null && !isValidFinancialNumber(price, { allowZero: false })) {
+        errors.push('price must be a finite number greater than 0 when provided');
+      } else if ((price === undefined || price === null) && !nativeOnlyEligible) {
+        errors.push('price is required for VND and INTERNAL_VND_CASH transactions');
       }
 
       if (executionUnitPrice !== undefined && !isValidFinancialNumber(executionUnitPrice, { allowZero: false })) {
@@ -944,6 +955,15 @@ export function createApp(services = {}) {
       }
 
       const normalizedFxProvenance = validateFxProvenance(fxProvenance, errors);
+
+      if ((price === undefined || price === null) && (
+        (fxRateToVnd !== undefined && fxRateToVnd !== null)
+        || (fxProvenance !== undefined && fxProvenance !== null)
+        || (fxObservedAt !== undefined && fxObservedAt !== null)
+        || (quoteProof !== undefined && quoteProof !== null)
+      )) {
+        errors.push('native-only transaction cannot include partial VND accounting evidence');
+      }
 
       if (quoteProof !== undefined && (typeof quoteProof !== 'string' || !quoteProof.trim())) {
         errors.push('quoteProof must be a non-empty string when provided');
@@ -1021,25 +1041,35 @@ export function createApp(services = {}) {
         });
       }
 
-      await resolvePortfolioAsset({
+      const portfolioAsset = await resolvePortfolioAsset({
         assetId: hasAssetId ? assetId.trim() : null,
         symbol: hasSymbol ? symbol.trim().toUpperCase() : null
       });
+      const assetQuoteCurrency = typeof (portfolioAsset.quoteCurrency ?? portfolioAsset.quote_currency) === 'string'
+        ? (portfolioAsset.quoteCurrency ?? portfolioAsset.quote_currency).trim().toUpperCase()
+        : null;
+      if ((price === undefined || price === null) && assetQuoteCurrency === 'VND') {
+        return res.status(400).json({
+          status: 'error',
+          message: 'Invalid portfolio transaction data',
+          errors: ['price is required for VND and INTERNAL_VND_CASH transactions']
+        });
+      }
 
       const transactionPayload = {
         symbol: hasSymbol ? symbol.trim() : undefined,
         assetId: hasAssetId ? assetId.trim() : undefined,
         transactionType: normalizedTransactionType,
         quantity,
-        price,
+        price: price ?? null,
         executedAt: normalizedExecutedAt
       };
       if (executionUnitPrice !== undefined) transactionPayload.executionUnitPrice = executionUnitPrice;
       if (priceCurrency !== undefined && typeof priceCurrency === 'string' && priceCurrency.trim()) {
-        transactionPayload.priceCurrency = priceCurrency.trim().toUpperCase();
+        transactionPayload.priceCurrency = normalizedPriceCurrency;
       }
       if (settlementMode !== undefined && typeof settlementMode === 'string' && settlementMode.trim()) {
-        transactionPayload.settlementMode = settlementMode.trim().toUpperCase();
+        transactionPayload.settlementMode = normalizedSettlementMode;
       }
       if (settlementCurrency !== undefined && typeof settlementCurrency === 'string' && settlementCurrency.trim()) {
         transactionPayload.settlementCurrency = settlementCurrency.trim().toUpperCase();

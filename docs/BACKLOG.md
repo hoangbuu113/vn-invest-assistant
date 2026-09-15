@@ -23,7 +23,7 @@ The following items are deferred for future phases and are strictly marked as **
 The following design decisions are unresolved and intentionally deferred. They must not be assumed or decided prematurely:
 
 - **Historical Multicurrency Portfolio Performance**:
-  - `UNKNOWN`: Authoritative historical FX series, timestamp alignment, and replay rules needed to value non-VND holdings through time. Current transaction-time VND basis and current valuation FX do not solve historical performance.
+  - `UNKNOWN`: Authoritative historical FX series, timestamp alignment, enrichment/backfill policy, and replay rules needed to value non-VND holdings through time. Native-only transactions deliberately leave this VND history unavailable.
 - **Multicurrency Cash**:
   - `UNKNOWN`: Multi-currency cash account architecture and cash ledger conversion tracking.
 - **Foreign Exchange History**:
@@ -60,6 +60,7 @@ Statuses describe the repository state after the local Portfolio P0.7 implementa
 | P1 | Realized/unrealized decomposition | Transactions, holdings, dated marks | Period and cumulative P/L definitions | API and UI separate realized, unrealized, and total accounting P/L with coverage/as-of metadata | PARTIAL |
 | P1 | Income/fees/taxes event model | New authoritative ledger event types | Dividends are income; fees/taxes affect cash/cost/performance exactly once | No fee/dividend/tax amount is inferred; supported events reconcile across cash, P/L, and performance | MISSING |
 | P1 | Transaction/activity projection | Execution price/currency, VND basis, settlement, FX provenance | Immutable event display | History shows native execution and VND accounting values truthfully; no hard-coded VND-only rendering | COMPLETE_P1C |
+| P1 | Native-first external accounting | Native execution, optional governed VND enrichment, pre-trade projection snapshots | Native authority survives provider failure; missing VND stays null | External non-VND trades succeed without manual VND input; compatible native cost is weighted; reversals restore exact snapshots; internal VND rules stay strict | COMPLETE |
 | P1 | Performance request efficiency | Ever-held asset identities and shared valuations | Fetch only required histories; reuse one performance result | Cash-only requests make zero asset-history calls; benchmark does not recompute portfolio performance independently | PARTIAL_P0.2 |
 | P1 | Export/reconciliation | Snapshot, ledgers, price/FX evidence | Stable audit columns and totals | Export can reproduce cash, positions, cost basis, valuations, and P/L for a stated snapshot | MISSING |
 | P2 | Contribution analytics | Reconciled historical snapshots | Deterministic contribution method | Contributions sum to governed portfolio result and expose missing-data limits | DEFERRED |

@@ -48,8 +48,9 @@ The following architectural and product decisions are confirmed and authoritativ
   - Market data and history fetching require an explicit provider mapping in `public.asset_provider_mappings`.
   - Implicit symbol manipulation (such as automatically appending `.VN`) is completely removed. Unknown assets without explicit mappings fail safely without provider calls.
 - **Multi-Asset Accounting Guard**:
-  - The single cash ledger remains strictly `VND`; the transaction ledger preserves native execution metadata while its authoritative accounting unit price and cost basis remain VND.
-  - Non-VND BUY/SELL requires explicit governed execution currency, VND accounting basis, settlement mode, and FX provenance where applicable. A cash-neutral existing-position baseline may instead preserve supported native acquisition cost with its VND basis unknown. `USDT` is never silently treated as `USD`, and no multi-currency cash balance is implied.
+  - The single cash ledger remains strictly `VND`; the transaction ledger preserves native execution metadata as its immutable economic authority.
+  - For `EXTERNAL_SETTLEMENT` with a non-VND execution currency, VND accounting is optional system-derived enrichment. A missing conversion is persisted as `price = NULL` and `accountingStatus = UNAVAILABLE`, never zero, and does not block the native trade. VND-denominated and `INTERNAL_VND_CASH` transactions still require an exact VND price. `USDT` is never silently treated as `USD`, and no multi-currency cash balance is implied.
+  - The direct CoinGecko USDT/VND enrichment path remains governed by `COINGECKO_ACCOUNTING_RATE_ENABLED`, disabled by default, and fail-closed. Enabling it is a separate production release decision.
 - **Zero-Loss Data Migration**:
   - Existing asset UUIDs are preserved in place without deletion or re-creation.
   - All existing holdings, portfolio transactions, cash ledger entries, watchlist items, and price alerts remain linked to their original asset UUIDs.
@@ -95,7 +96,7 @@ The following architectural and product decisions are confirmed and authoritativ
   - Missing or invalid FX produces explicit partial valuation, never assumed 1:1 fallback or fake 0 prices.
   - No currency inversion or multi-hop FX conversion in V1.
   - FX resolution is provider-neutral and executed on demand without a persistent FX database table or caching subsystem in Feature 19.
-  - Non-VND transaction records may carry an explicit authoritative VND acquisition basis. Cash-neutral opening positions may instead retain only their supported native acquisition price/currency and leave the authoritative VND basis null; current FX rates must never be used to fabricate missing historical acquisition cost.
+  - Eligible external non-VND transaction records and cash-neutral opening positions may retain only their supported native acquisition price/currency and leave the historical VND basis null. Current FX rates must never be used to fabricate missing historical acquisition cost.
   - Historical non-VND portfolio performance remains unavailable without authoritative historical FX aligned to the performance timeline.
   - Portfolio Composition consumes authoritative Feature 05 reporting values and never computes FX conversions independently.
 - **Market Provider Abstraction (Feature 18)**:
@@ -111,7 +112,7 @@ The following architectural and product decisions are confirmed and authoritativ
   - **Alpha Vantage**: Production provider for Gold Spot (`XAU/USD`) using `GOLD_SILVER_SPOT` with `symbol=XAU` (spot bullion, NOT COMEX `GC=F` futures).
   - **Yahoo Finance**: Retained as production provider for Vietnamese equities and exchange-traded ETFs (`FUEVFVND.VN`, `FUESSVFL.VN`).
   - Canonical `USD/VND` asset is market context only; it is not a cash account and does not enable holding USD cash.
-  - Asset onboarding alone does not authorize accounting. Later governed cross-currency transaction support requires explicit VND basis and settlement metadata; it does not create foreign-currency cash accounts.
+  - Asset onboarding alone does not authorize accounting. Governed cross-currency transactions require explicit native execution and settlement metadata; eligible external non-VND execution may leave VND enrichment unavailable. This does not create foreign-currency cash accounts.
   - Asset calendar policies: crypto uses `CONTINUOUS_24_7` with `UTC` timezone; Gold Spot uses `GLOBAL_24_5` with `UTC` timezone.
   - Crypto and gold spot historical bars remain explicitly unsupported (`UNSUPPORTED_MARKET_POLICY`) until Feature 21.
   - Open-ended NAV mutual funds remain deferred.
@@ -282,7 +283,7 @@ $$\text{Source Adapter} \longrightarrow \text{Canonical Validation / Sanitizatio
 ### A. Canonical Crypto Valuation vs Native Market-Data Boundary
 - **Canonical Valuation Snapshot**: **CoinGecko** (quoted in `USD`) is the authoritative Crypto snapshot for portfolio/accounting valuation and other canonical snapshot consumers.
 - **Realtime, History & Analysis**: **Binance Spot** (quoted in native `USDT`) is authoritative for rolling-24h realtime reference, completed UTC daily OHLCV history, and Feature 22 Analysis V2 inputs.
-- **Accounting Isolation**: Canonical Crypto `quote_currency` remains `USD`. Binance `USDT` observations, history, analysis, and approximate VND references must never replace the CoinGecko USD valuation snapshot or enter portfolio/accounting calculations.
+- **Accounting Isolation**: Canonical Crypto `quote_currency` remains `USD` for the generic market snapshot. A holding with authoritative USDT acquisition cost may separately use the exact Binance USDT current price for native value/P&L, and only a direct governed USDT/VND quote may convert that current value to VND. Binance history/analysis and approximate references do not fabricate historical accounting.
 - **No Stablecoin Assumption**: The system does not assert or encode `1 USDT = 1 USD`.
 - **Binance Service Architecture**:
   - One shared backend realtime stream connection (`wss://stream.binance.com:9443/ws/!miniTicker@arr`).
@@ -318,7 +319,7 @@ $$\text{Source Adapter} \longrightarrow \text{Canonical Validation / Sanitizatio
 - Stale universal `~15 phút` text is removed from Gold, Crypto, Alerts, Watchlist, and Portfolio; replaced with truthful provider-neutral wording: *"Dữ liệu theo thời điểm cập nhật của nhà cung cấp"*.
 
 ### G. Ledger Authority & Non-VND Gating
-- BUY/SELL for non-VND assets requires the governed VND-basis cross-currency contract and explicit settlement semantics. A cash-neutral opening position may preserve supported native acquisition cost while leaving historical VND basis unknown. Cash settlement and cash balances remain VND-only; Binance `USDT` reference prices never become canonical USD accounting values.
+- BUY/SELL preserves explicit settlement semantics and the native execution pair. External non-VND trades may have no historical VND basis; internal VND cash and VND-denominated trades may not. Cash settlement and balances remain VND-only; Binance `USDT` prices never become USD accounting values.
 
 ---
 
@@ -485,7 +486,7 @@ $$\text{Source Adapter} \longrightarrow \text{Canonical Validation / Sanitizatio
 - `position_opening_baselines.execution_unit_price` and `price_currency` are the canonical native acquisition-cost pair for cash-neutral existing-position declarations; no duplicate native-cost columns are introduced.
 - `position_opening_baselines.opening_average_cost` and the holdings projection `average_cost` are optional authoritative historical VND basis fields. Unknown is `NULL`, never zero and never a conversion using current FX.
 - Native unrealized P/L is permitted only against a current price in exactly the same currency and only while the opening position remains unmodified by later ledger activity. VND unrealized P/L remains unavailable without authoritative historical VND cost.
-- Binance USDT may supply a display-only current reference for USDT-native opening cost. CoinGecko USD remains the canonical Crypto accounting snapshot, and no USDT/USD equivalence is assumed.
+- Binance USDT may supply the current native price for a USDT-cost holding. Current VND valuation then requires a valid direct USDT/VND quote; absence of that quote leaves VND valuation unavailable. No USDT/USD equivalence is assumed.
 
 ### K. P0.3 Unified Current-State Snapshot
 - `GET /api/portfolio/snapshot` is the authoritative current-state read projection for Portfolio Summary, Holdings, and Allocation. Those blocks consume one response and one `snapshotId`; Performance and Benchmark retain their separate historical clocks.
@@ -539,6 +540,8 @@ $$\text{Source Adapter} \longrightarrow \text{Canonical Validation / Sanitizatio
 
 - **Scope Boundary**: P1C changes only Activity and transaction-history presentation/normalization. It does not change database fields, API contracts, portfolio accounting, settlement, FX, or reversal behavior.
 - **Native Execution Authority**: `executionUnitPrice` and `priceCurrency` are one canonical pair. They are the only authority for displaying execution unit price and native execution total for VND, USD, and USDT; USDT is never treated as USD.
-- **VND Accounting Basis**: `price` remains the authoritative VND accounting unit price. For non-VND transactions, its unit value and total may be shown only as a separately labelled VND accounting basis, never substituted for native execution price.
+- **VND Accounting Basis**: `price` is the authoritative VND accounting unit price when present. It may be `NULL` only for eligible external non-VND transactions without conversion evidence. Its value may be shown only as separately labelled VND accounting, never substituted for native execution price.
+- **Native Cost Projection**: holdings retain `native_average_cost` and `native_cost_currency`. Compatible BUY currencies use exact weighted average. Mixed or unknown currencies clear both fields; no conversion or USDT/USD assumption repairs them.
+- **Reversal Projection**: new transaction rows preserve immutable pre-trade holding existence, quantity, opening link, VND average cost, and native cost pair. P1B reversals restore this snapshot without consulting current market or FX data.
 - **Unavailable Metadata**: Missing or invalid native execution metadata renders as unavailable. The UI must not invent zero, VND, FX, or a historical native value.
 - **Reversal and Cash Events**: `BUY_REVERSAL` and `SELL_REVERSAL` render the native pair copied from the original transaction. Manual cash movements are signed VND ledger amounts and are not transaction execution prices.

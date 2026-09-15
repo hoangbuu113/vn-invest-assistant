@@ -456,6 +456,10 @@ function normalizeHolding(row) {
     average_cost: row.average_cost === null || row.average_cost === undefined
       ? null
       : (typeof row.average_cost === 'number' ? row.average_cost : Number(row.average_cost)),
+    native_average_cost: row.native_average_cost === null || row.native_average_cost === undefined
+      ? null
+      : (typeof row.native_average_cost === 'number' ? row.native_average_cost : Number(row.native_average_cost)),
+    native_cost_currency: row.native_cost_currency || null,
     created_at: row.created_at,
     updated_at: row.updated_at,
     asset: row.assets || null,
@@ -542,6 +546,8 @@ export async function getHoldings(client = privateSupabase) {
       opening_position_id,
       quantity,
       average_cost,
+      native_average_cost,
+      native_cost_currency,
       created_at,
       updated_at,
       assets (id, symbol, name, asset_type, exchange, quote_currency, quantity_unit),

@@ -127,6 +127,31 @@ describe('Portfolio P1C — Multi-Asset Activity Display', () => {
     assert.doesNotMatch(activity.detail, /USD(?!T)/);
   });
 
+  test('native-only USDT transaction shows unavailable VND accounting without a fake zero', () => {
+    const transaction = normalizeTransaction(transactionRow({
+      id: 'usdt-native-only',
+      symbol: 'ONDO',
+      asset_type: 'crypto',
+      quantity: 226,
+      price: null,
+      execution_unit_price: 0.36402,
+      price_currency: 'USDT',
+      settlement_mode: 'EXTERNAL_SETTLEMENT',
+      settlement_currency: 'USDT'
+    }));
+    const display = buildPortfolioTransactionDisplay(transaction);
+    const activity = recentTransaction(transaction);
+
+    assert.equal(transaction.accountingStatus, 'UNAVAILABLE');
+    assert.equal(display.accountingStatus, 'UNAVAILABLE');
+    assert.equal(display.accountingUnitPriceVnd, null);
+    assert.equal(display.accountingUnitPriceLabel, 'Chưa có tỷ giá quy đổi VND');
+    assert.equal(display.showAccountingBasis, true);
+    assert.match(activity.detail, /0,36402 USDT/);
+    assert.match(activity.detail, /Hạch toán VND: Chưa có tỷ giá quy đổi VND/);
+    assert.doesNotMatch(activity.detail, /USD(?!T)|\b0 VND\b/);
+  });
+
   test('BUY_REVERSAL and SELL_REVERSAL preserve and render the inherited native execution pair', () => {
     const cases = [
       { transactionType: 'BUY_REVERSAL', currency: 'USD', executionPrice: 60_000, expected: '60.000 USD' },

@@ -8,8 +8,7 @@ import {
   freezeTransactionSubmissionIntent,
   getTransactionEntryDefaults,
   getTransactionEntryUnitLabels,
-  isSimplifiedCryptoExternalEntry,
-  validateRequiredVndAccountingPrice
+  isSimplifiedCryptoExternalEntry
 } from '../utils/transactionEntryDisplay.js';
 import {
   ACCOUNTING_RATE_SUBMISSION_ACTION,
@@ -309,8 +308,6 @@ export default function TransactionModal({
   const [currentUsdVndRate, setCurrentUsdVndRate] = useState(null);
   const [fxObservedAt, setFxObservedAt] = useState(null);
   const [isFxPrefillConfirmed, setIsFxPrefillConfirmed] = useState(false);
-  const [isAdvancedAccountingOpen, setIsAdvancedAccountingOpen] = useState(false);
-  const [accountingPriceError, setAccountingPriceError] = useState(null);
   const [accountingRateState, setAccountingRateState] = useState({
     status: ACCOUNTING_RATE_UI_STATUS.IDLE,
     quote: null,
@@ -327,7 +324,6 @@ export default function TransactionModal({
   const idempotencyKeyRef = useRef(null);
   const pendingSubmissionIntentRef = useRef(null);
   const previousAccountingRateIntentKeyRef = useRef(null);
-  const priceInputRef = useRef(null);
 
   const invalidateFrozenSubmission = () => {
     pendingSubmissionIntentRef.current = null;
@@ -435,6 +431,7 @@ export default function TransactionModal({
     ? (selectedAssetObject.quote_currency === 'VND' || selectedAssetObject.quoteCurrency === 'VND') && !isCrypto && !isGold
     : true;
   const isNonVnd = !isVndAsset;
+  const requiresVndAccountingInput = !isNonVnd || settlementMode === 'INTERNAL_VND_CASH';
   const isSimplifiedCryptoExternal = isSimplifiedCryptoExternalEntry(
     selectedAssetObject,
     settlementMode
@@ -480,7 +477,6 @@ export default function TransactionModal({
   });
   const isAccountingRatePending = accountingRatePresentation.isPending;
   const shouldShowAutomaticAccounting = accountingRatePresentation.showAutomatic;
-  const shouldShowManualAccounting = accountingRatePresentation.showManual;
   const nativeTransactionTotalLabel = formatNativeTransactionTotal(
     quantityInput,
     executionUnitPrice,
@@ -528,8 +524,6 @@ export default function TransactionModal({
     setExecutionUnitPrice('');
     setSettlementCurrency('');
     setIsFxPrefillConfirmed(false);
-    setIsAdvancedAccountingOpen(false);
-    setAccountingPriceError(null);
     setAccountingRateState({
       status: ACCOUNTING_RATE_UI_STATUS.IDLE,
       quote: null,
@@ -582,7 +576,6 @@ export default function TransactionModal({
           quote: null,
           reason: 'EXECUTED_AT_REQUIRED'
         });
-        setAccountingPriceError(null);
         return undefined;
       }
       requestedAt = new Date(customDateTime).toISOString();
@@ -595,7 +588,6 @@ export default function TransactionModal({
       quote: null,
       reason: null
     });
-    setAccountingPriceError(null);
 
     apiFetch(buildUsdtVndAccountingRatePath(requestedAt), { signal: controller.signal })
       .then(async (response) => {
@@ -609,9 +601,6 @@ export default function TransactionModal({
         if (!active) return;
         setAccountingRateState(nextState);
         if (nextState.status === ACCOUNTING_RATE_UI_STATUS.AVAILABLE) {
-          setIsAdvancedAccountingOpen(false);
-        } else {
-          setIsAdvancedAccountingOpen(true);
         }
       })
       .catch((error) => {
@@ -621,7 +610,6 @@ export default function TransactionModal({
           quote: null,
           reason: 'PROVIDER_UNAVAILABLE'
         });
-        setIsAdvancedAccountingOpen(true);
       });
 
     return () => {
@@ -682,13 +670,6 @@ export default function TransactionModal({
     setErrorMsg(null);
   };
 
-  const revealAccountingPriceError = (message) => {
-    setIsAdvancedAccountingOpen(true);
-    setAccountingPriceError(message);
-    setErrorMsg(message);
-    setTimeout(() => priceInputRef.current?.focus(), 0);
-  };
-
   const dispatchFrozenSubmission = async (intent) => {
     setLoading(true);
 
@@ -738,7 +719,6 @@ export default function TransactionModal({
     if (loading) return null;
     setErrorMsg(null);
     setSuccessMsg(null);
-    setAccountingPriceError(null);
 
     // Strict client validations
     if (!selectedSymbol || !selectedSymbol.trim()) {
@@ -759,7 +739,7 @@ export default function TransactionModal({
 
     let numExecUnitPrice = null;
     const rawExecutionPrice = executionUnitPrice.trim();
-    if (isSimplifiedCryptoExternal && !rawExecutionPrice) {
+    if (isNonVnd && !rawExecutionPrice) {
       setErrorMsg(`Vui lòng nhập giá thực hiện (${priceCurrency}).`);
       return null;
     }
@@ -785,9 +765,14 @@ export default function TransactionModal({
       normalizedExecutedAt = dt.toISOString();
     }
 
-    let numPrice;
+    const requiresVndAccountingPrice = !isNonVnd || settlementMode === 'INTERNAL_VND_CASH';
+    let numPrice = null;
     let selectedAutomaticQuote = null;
     if (isAutomaticUsdtAccounting) {
+      if ([ACCOUNTING_RATE_UI_STATUS.IDLE, ACCOUNTING_RATE_UI_STATUS.LOADING].includes(accountingRateState.status)) {
+        setErrorMsg('Đang kiểm tra tỷ giá quy đổi VND. Vui lòng chờ trong giây lát.');
+        return null;
+      }
       if (accountingRateState.status === ACCOUNTING_RATE_UI_STATUS.AVAILABLE) {
         if (!Number.isFinite(automaticAccountingPrice) || automaticAccountingPrice <= 0) {
           setErrorMsg('Không thể tính giá hạch toán VND từ giá thực hiện USDT.');
@@ -795,23 +780,9 @@ export default function TransactionModal({
         }
         numPrice = automaticAccountingPrice;
         selectedAutomaticQuote = accountingRateState.quote;
-      } else {
-        const accountingValidation = validateRequiredVndAccountingPrice(priceInput.trim());
-        if (!accountingValidation.valid) {
-          revealAccountingPriceError(accountingValidation.message);
-          return null;
-        }
-        numPrice = accountingValidation.price;
       }
-    } else {
+    } else if (requiresVndAccountingPrice) {
       const rawPrice = priceInput.trim();
-      if (isSimplifiedCryptoExternal) {
-        const accountingValidation = validateRequiredVndAccountingPrice(rawPrice);
-        if (!accountingValidation.valid) {
-          revealAccountingPriceError(accountingValidation.message);
-          return null;
-        }
-      }
       if (!rawPrice) {
         setErrorMsg(isNonVnd ? 'Vui lòng nhập giá vốn / giá trị quy đổi VND.' : 'Vui lòng nhập giá giao dịch.');
         return null;
@@ -821,6 +792,8 @@ export default function TransactionModal({
         setErrorMsg('Giá vốn quy đổi VND phải là số dương lớn hơn 0.');
         return null;
       }
+    } else if (priceCurrency === 'USD' && isFxPrefillConfirmed && currentUsdVndRate && !isCustomTime) {
+      numPrice = Number(executionUnitPrice) * currentUsdVndRate;
     }
 
     // Build payload ensuring numeric JSON values and approved cross-currency contract
@@ -854,12 +827,10 @@ export default function TransactionModal({
         payload.fxObservedAt = selectedAutomaticQuote.observedAt;
         payload.quoteProof = selectedAutomaticQuote.quoteProof;
       // If priceCurrency is USD and user verified/confirmed current USD/VND rate
-      } else if (priceCurrency === 'USD' && isFxPrefillConfirmed && currentUsdVndRate && !isCustomTime) {
+      } else if (numPrice !== null && priceCurrency === 'USD' && isFxPrefillConfirmed && currentUsdVndRate && !isCustomTime) {
         payload.fxRateToVnd = currentUsdVndRate;
         payload.fxProvenance = 'TWELVE_DATA_USD_VND';
         payload.fxObservedAt = fxObservedAt || new Date().toISOString();
-      } else {
-        payload.fxProvenance = 'USER_SUPPLIED_VND_BASIS';
       }
     } else {
       payload.priceCurrency = 'VND';
@@ -1470,6 +1441,7 @@ export default function TransactionModal({
                 {priceCurrency === 'USDT' && (
                   <div style={{ fontSize: '0.75rem', color: 'var(--color-slate-500)', lineHeight: 1.4, marginBottom: '0.5rem' }}>
                     ℹ️ Giá và tổng giao dịch giữ nguyên USDT. Ứng dụng không quy đổi USDT thành USD; giá hạch toán chỉ dùng tỷ giá USDT/VND trực tiếp.
+                    {' '}Phần hạch toán không thay đổi giá giao dịch {priceCurrency} ở trên.
                   </div>
                 )}
 
@@ -1553,113 +1525,30 @@ export default function TransactionModal({
                       </div>
                     </details>
                   </>
-                ) : (
+                ) : [ACCOUNTING_RATE_UI_STATUS.IDLE, ACCOUNTING_RATE_UI_STATUS.LOADING].includes(accountingRateState.status) ? (
                   <div>
                     {accountingRateState.reason === 'EXECUTED_AT_REQUIRED'
                       ? accountingRateFallbackMessage(accountingRateState.reason)
                       : 'Đang lấy tỷ giá USDT/VND trực tiếp từ CoinGecko...'}
                   </div>
+                ) : (
+                  <div data-testid="automatic-accounting-unavailable">
+                    <strong>Chưa có tỷ giá quy đổi VND</strong>
+                    <div style={{ marginTop: '0.2rem', color: 'var(--color-slate-500)' }}>
+                      Giao dịch gốc vẫn có thể được ghi nhận bằng {priceCurrency}; phần hạch toán VND sẽ ở trạng thái chưa khả dụng.
+                    </div>
+                  </div>
                 )}
               </div>
             )}
 
-            {/* Required VND accounting price: advanced only for the simplified external crypto flow */}
-            {shouldShowManualAccounting ? (
-              <details
-                open={isAdvancedAccountingOpen}
-                onToggle={(event) => setIsAdvancedAccountingOpen(event.currentTarget.open)}
-                style={{
-                  marginBottom: '1.25rem',
-                  border: accountingPriceError
-                    ? '1px solid var(--color-loss-300, #fca5a5)'
-                    : '1px solid var(--color-slate-200, #e2e8f0)',
-                  borderRadius: '10px',
-                  backgroundColor: 'var(--color-slate-50, #f8fafc)',
-                  overflow: 'hidden'
-                }}
-              >
-                <summary
-                  style={{
-                    padding: '0.7rem 0.85rem',
-                    cursor: 'pointer',
-                    fontSize: '0.82rem',
-                    fontWeight: 700,
-                    color: accountingPriceError
-                      ? 'var(--color-loss-700, #b91c1c)'
-                      : 'var(--color-slate-700)'
-                  }}
-                >
-                  Thông tin hạch toán nâng cao
-                </summary>
-                <div style={{ padding: '0 0.85rem 0.85rem' }}>
-                  {isAutomaticUsdtAccounting && (
-                    <div
-                      data-testid="automatic-accounting-fallback"
-                      style={{
-                        marginBottom: '0.65rem',
-                        padding: '0.55rem 0.65rem',
-                        borderRadius: '8px',
-                        backgroundColor: 'rgba(245, 158, 11, 0.1)',
-                        color: 'var(--color-slate-700)',
-                        fontSize: '0.75rem',
-                        lineHeight: 1.4
-                      }}
-                    >
-                      {accountingRateFallbackMessage(accountingRateState.reason)}
-                    </div>
-                  )}
-                  <label
-                    htmlFor="transaction-vnd-accounting-price"
-                    style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: 'var(--color-slate-700)', marginBottom: '0.4rem' }}
-                  >
-                    Giá hạch toán VND (₫/đơn vị) <span style={{ color: 'var(--color-loss-600)' }}>*</span>
-                  </label>
-                  <input
-                    ref={priceInputRef}
-                    id="transaction-vnd-accounting-price"
-                    type="number"
-                    step="any"
-                    min="1"
-                    placeholder="Ví dụ: 9500"
-                    value={priceInput}
-                    onChange={(event) => {
-                      invalidateFrozenSubmission();
-                      setPriceInput(event.target.value);
-                      setIsFxPrefillConfirmed(false);
-                      setAccountingPriceError(null);
-                    }}
-                    aria-invalid={Boolean(accountingPriceError)}
-                    disabled={loading}
-                    style={{
-                      width: '100%',
-                      padding: '0.65rem 0.85rem',
-                      fontSize: '0.92rem',
-                      border: accountingPriceError
-                        ? '1px solid var(--color-loss-500, #ef4444)'
-                        : '1px solid var(--border-default, #cbd5e1)',
-                      borderRadius: '10px',
-                      outline: 'none',
-                      backgroundColor: 'var(--color-surface, #ffffff)',
-                      color: 'var(--color-slate-900)'
-                    }}
-                  />
-                  <div style={{ fontSize: '0.75rem', color: 'var(--color-slate-500)', marginTop: '5px', lineHeight: 1.45 }}>
-                    Ứng dụng hiện cần giá trị VND để tính giá vốn, lãi/lỗ và lịch sử danh mục.
-                    {' '}Thông tin này không thay đổi giá giao dịch {priceCurrency} ở trên.
-                  </div>
-                  {accountingPriceError && (
-                    <div style={{ fontSize: '0.75rem', color: 'var(--color-loss-700, #b91c1c)', marginTop: '5px', fontWeight: 600 }}>
-                      {accountingPriceError}
-                    </div>
-                  )}
-                </div>
-              </details>
-            ) : !isSimplifiedCryptoExternal ? (
+            {requiresVndAccountingInput && (
               <div style={{ marginBottom: '1.25rem' }}>
                 <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 700, color: 'var(--color-slate-700)', marginBottom: '0.4rem' }}>
-                  {isNonVnd ? 'Giá vốn / Giá trị quy đổi VND (₫/đơn vị)' : 'Giá giao dịch (₫)'} <span style={{ color: 'var(--color-loss-600)' }}>*</span>
+                  {isNonVnd ? 'Giá hạch toán VND (₫/đơn vị)' : 'Giá giao dịch (₫)'} <span style={{ color: 'var(--color-loss-600)' }}>*</span>
                 </label>
                 <input
+                  id="transaction-vnd-accounting-price"
                   type="number"
                   step="any"
                   min="1"
@@ -1684,11 +1573,11 @@ export default function TransactionModal({
                 />
                 <div style={{ fontSize: '0.75rem', color: 'var(--color-slate-500)', marginTop: '4px' }}>
                   {isNonVnd
-                    ? 'Đây là giá trị VND đơn vị làm căn cứ xác định giá vốn, lãi/lỗ và giá trị danh mục.'
+                    ? 'Bắt buộc vì giao dịch này dùng tiền mặt VND đang theo dõi trong ứng dụng.'
                     : 'Giá tiền đồng cho mỗi đơn vị tài sản.'}
                 </div>
               </div>
-            ) : null}
+            )}
 
             {/* Non-VND Settlement Options */}
             {isNonVnd && (

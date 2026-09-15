@@ -375,11 +375,12 @@ export function buildPortfolioTransactionDisplay(transaction = {}) {
   const accountingTotalVnd = accountingUnitPriceVnd !== null && quantity !== null
     ? quantity * accountingUnitPriceVnd
     : null;
-  const showAccountingBasis = accountingUnitPriceVnd !== null && (
-    !hasNativeExecutionPrice
-    || executionCurrency !== 'VND'
-    || executionUnitPrice !== accountingUnitPriceVnd
-  );
+  const accountingStatus = accountingUnitPriceVnd === null ? 'UNAVAILABLE' : 'AVAILABLE';
+  const showAccountingBasis = hasNativeExecutionPrice && executionCurrency !== 'VND'
+    ? true
+    : accountingUnitPriceVnd !== null && (
+      !hasNativeExecutionPrice || executionUnitPrice !== accountingUnitPriceVnd
+    );
 
   return {
     quantity,
@@ -388,20 +389,25 @@ export function buildPortfolioTransactionDisplay(transaction = {}) {
     executionUnitPrice: hasNativeExecutionPrice ? executionUnitPrice : null,
     executionCurrency: hasNativeExecutionPrice ? executionCurrency : null,
     executionPriceLabel: hasNativeExecutionPrice
-      ? formatNativeAmount(executionUnitPrice, executionCurrency)
+      ? formatNativeAmount(executionUnitPrice, executionCurrency, {
+        decimals: executionCurrency === 'VND' ? 0 : 8
+      })
       : '—',
     executionTotal,
     executionTotalLabel: executionTotal !== null
-      ? formatNativeAmount(executionTotal, executionCurrency)
+      ? formatNativeAmount(executionTotal, executionCurrency, {
+        decimals: executionCurrency === 'VND' ? 0 : 8
+      })
       : '—',
     accountingUnitPriceVnd,
+    accountingStatus,
     accountingUnitPriceLabel: accountingUnitPriceVnd !== null
       ? formatVNDReporting(accountingUnitPriceVnd)
-      : '—',
+      : 'Chưa có tỷ giá quy đổi VND',
     accountingTotalVnd,
     accountingTotalLabel: accountingTotalVnd !== null
       ? formatVNDReporting(accountingTotalVnd)
-      : '—',
+      : 'Chưa có tỷ giá quy đổi VND',
     showAccountingBasis
   };
 }
@@ -435,6 +441,9 @@ export function buildPortfolioRecentActivity({ transactions = [], holdings = [],
       detail += transactionDisplay.hasNativeExecutionPrice
         ? ` · ${transactionDisplay.executionPriceLabel}`
         : ' · Giá thực hiện: —';
+      if (transactionDisplay.showAccountingBasis && transactionDisplay.accountingStatus === 'UNAVAILABLE') {
+        detail += ' · Hạch toán VND: Chưa có tỷ giá quy đổi VND';
+      }
 
       const isReversedStatus = t.isReversed ? ' (Đã hoàn tác)' : '';
 

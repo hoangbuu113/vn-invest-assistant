@@ -180,6 +180,39 @@ export async function getFxRate(baseCurrency, quoteCurrency = REPORTING_CURRENCY
     return getTwelveDataFxRate(requestedBase, requestedQuote, options);
   }
 
+  if (requestedBase === 'USDT' && requestedQuote === 'VND') {
+    const { getAccountingRate } = await import('./accountingRate.js');
+    const resolveAccountingRate = options.getAccountingRateFn || getAccountingRate;
+    const result = await resolveAccountingRate({
+      baseCurrency: requestedBase,
+      quoteCurrency: requestedQuote
+    }, {
+      enabled: options.accountingRateEnabled,
+      now: options.now,
+      fetchFn: options.fetchFn,
+      apiKey: options.apiKey,
+      getCurrentObservationFn: options.getCurrentObservationFn
+    });
+
+    if (result?.availability !== 'available') {
+      return createUnavailableFxRate(requestedBase, requestedQuote, result?.reason || 'FX_UNAVAILABLE', {
+        provider: result?.provider,
+        sourceTimestamp: result?.observedAt,
+        freshness: result?.availability === 'stale' ? 'stale' : 'unknown'
+      });
+    }
+
+    return normalizeFxRate({
+      baseCurrency: requestedBase,
+      quoteCurrency: requestedQuote,
+      rate: result.rate,
+      provider: result.provider,
+      sourceTimestamp: result.observedAt,
+      availability: 'available',
+      freshness: 'current'
+    }, requestedBase, requestedQuote);
+  }
+
   return createUnavailableFxRate(
     requestedBase,
     requestedQuote,

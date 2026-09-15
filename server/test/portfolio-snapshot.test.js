@@ -251,15 +251,15 @@ describe('Portfolio V1 P0.3 unified current-state snapshot', () => {
         }
       }],
       { BTC: { price: 60_000, currency: 'USD', source: 'CoinGecko', priceAsOf: '2026-09-10T02:00:00.000Z' } },
-      { USD: { baseCurrency: 'USD', quoteCurrency: 'VND', rate: 25_000, availability: 'available', provider: 'Twelve Data', sourceTimestamp: '2026-09-10T01:00:00.000Z', freshness: 'current' } },
+      { USDT: { baseCurrency: 'USDT', quoteCurrency: 'VND', rate: 25_000, availability: 'available', provider: 'CoinGecko', sourceTimestamp: '2026-09-10T01:00:00.000Z', freshness: 'current' } },
       { BTC: { price: 61_000, currency: 'USDT', source: 'Binance', observedAt: '2026-09-10T02:00:01.000Z' } }
     );
     const snapshot = buildPortfolioSnapshot({ profileId: PROFILE_ID, overview, calculatedAt: CALCULATED_AT });
     const holding = snapshot.holdings[0];
 
     assert.equal(holding.quantityUnit, 'coin');
-    assert.equal(holding.nativeCurrency, 'USD');
-    assert.equal(holding.reportingMarketValue, 3_000_000_000);
+    assert.equal(holding.nativeCurrency, 'USDT');
+    assert.equal(holding.reportingMarketValue, 3_050_000_000);
     assert.equal(holding.fxRateToReporting, 25_000);
     assert.equal(holding.fxAsOf, '2026-09-10T01:00:00.000Z');
     assert.equal(holding.averageCost, null);
@@ -270,8 +270,8 @@ describe('Portfolio V1 P0.3 unified current-state snapshot', () => {
     assert.equal(holding.nativeUnrealizedPnL, 22_000);
     assert.equal(snapshot.totalCostBasis, null);
     assert.equal(snapshot.unrealizedPnL, null);
-    assert.equal(snapshot.sources.prices[0].source, 'CoinGecko');
-    assert.equal(snapshot.sources.fx[0].provider, 'Twelve Data');
+    assert.equal(snapshot.sources.prices[0].source, 'Binance');
+    assert.equal(snapshot.sources.fx[0].provider, 'CoinGecko');
   });
 
   test('cash-only production path is provider-free and reports truthful applicability', async () => {

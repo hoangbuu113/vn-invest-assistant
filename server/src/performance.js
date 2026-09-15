@@ -33,6 +33,14 @@ const WEEKEND_CARRY_POLICIES = new Set(['VN_EXCHANGE', 'GLOBAL_24_5']);
 
 const DATE_KEY_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
 
+function optionalFiniteNumber(value) {
+  if (value === null || value === undefined) return null;
+  const parsed = typeof value === 'number'
+    ? value
+    : (typeof value === 'string' && value.trim() ? Number(value) : NaN);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function performanceError(message, code, status = 400) {
   const error = new Error(message);
   error.code = code;
@@ -266,6 +274,9 @@ export function reconstructCashBalance(dateKey, cashActivation, cashEntries = []
  */
 export function reconstructHoldingsState(dateKey, positionBaselines = [], transactions = []) {
   const holdingsMap = new Map();
+  const transactionsById = new Map(
+    transactions.map((tx) => [tx.id, tx])
+  );
 
   // 1. Initialize from non-cancelled opening baselines
   for (const baseline of positionBaselines) {
@@ -312,14 +323,14 @@ export function reconstructHoldingsState(dateKey, positionBaselines = [], transa
     const assetId = tx.assetId || tx.asset_id;
     const txType = tx.transactionType || tx.transaction_type;
     const qty = typeof tx.quantity === 'number' ? tx.quantity : Number(tx.quantity || 0);
-    const price = typeof tx.price === 'number' ? tx.price : Number(tx.price || 0);
+    const price = optionalFiniteNumber(tx.price);
 
     let holding = holdingsMap.get(assetId);
     if (!holding) {
       holding = {
         assetId,
         quantity: 0,
-        averageCost: 0,
+        averageCost: null,
         baselineCutoff: null,
         hasBaseline: false
       };
@@ -337,9 +348,11 @@ export function reconstructHoldingsState(dateKey, positionBaselines = [], transa
 
     if (txType === 'BUY') {
       const newQty = holding.quantity + qty;
-      const newAverageCost = holding.quantity > 0 && holding.averageCost === null
+      const newAverageCost = price === null || (holding.quantity > 0 && holding.averageCost === null)
         ? null
-        : ((holding.quantity * holding.averageCost) + (qty * price)) / newQty;
+        : holding.quantity > 0
+          ? ((holding.quantity * holding.averageCost) + (qty * price)) / newQty
+          : price;
       holding.quantity = newQty;
       holding.averageCost = newAverageCost;
     } else if (txType === 'SELL') {
@@ -349,17 +362,37 @@ export function reconstructHoldingsState(dateKey, positionBaselines = [], transa
         holding.averageCost = 0;
       }
     } else if (txType === 'BUY_REVERSAL') {
+      const original = transactionsById.get(tx.reversalOfId || tx.reversal_of_id);
+      const originalSnapshotExists = original?.preTradeHoldingExists ?? original?.pre_trade_holding_exists;
+      if (originalSnapshotExists === false) {
+        holdingsMap.delete(assetId);
+        continue;
+      }
+      if (originalSnapshotExists === true) {
+        holding.quantity = optionalFiniteNumber(original.preTradeQuantity ?? original.pre_trade_quantity);
+        holding.averageCost = optionalFiniteNumber(original.preTradeAverageCost ?? original.pre_trade_average_cost);
+        continue;
+      }
       const newQty = Math.max(0, holding.quantity - qty);
       let newAverageCost = holding.averageCost;
       if (newQty === 0) {
         newAverageCost = 0;
-      } else if (holding.averageCost !== null) {
+      } else if (holding.averageCost !== null && price !== null) {
         const remainingTotalCost = (holding.quantity * holding.averageCost) - (qty * price);
-        newAverageCost = remainingTotalCost > 0 ? remainingTotalCost / newQty : 0;
+        newAverageCost = remainingTotalCost >= 0 ? remainingTotalCost / newQty : null;
+      } else {
+        newAverageCost = null;
       }
       holding.quantity = newQty;
       holding.averageCost = newAverageCost;
     } else if (txType === 'SELL_REVERSAL') {
+      const original = transactionsById.get(tx.reversalOfId || tx.reversal_of_id);
+      const originalSnapshotExists = original?.preTradeHoldingExists ?? original?.pre_trade_holding_exists;
+      if (originalSnapshotExists === true) {
+        holding.quantity = optionalFiniteNumber(original.preTradeQuantity ?? original.pre_trade_quantity);
+        holding.averageCost = optionalFiniteNumber(original.preTradeAverageCost ?? original.pre_trade_average_cost);
+        continue;
+      }
       const restoredQty = holding.quantity + qty;
       const preTradeAvgCost = tx.preTradeAverageCost ?? tx.pre_trade_average_cost ?? holding.averageCost;
       holding.quantity = restoredQty;
@@ -666,6 +699,7 @@ export function solveXirr(cashFlows) {
 export function getExternalSettlementFlowForDate(dateKey, transactions = []) {
   let contributions = 0;
   let withdrawals = 0;
+  let accountingComplete = true;
 
   for (const tx of transactions) {
     const mode = tx.settlementMode || tx.settlement_mode || 'INTERNAL_VND_CASH';
@@ -676,7 +710,11 @@ export function getExternalSettlementFlowForDate(dateKey, transactions = []) {
 
     const type = tx.transactionType || tx.transaction_type;
     const qty = typeof tx.quantity === 'number' ? tx.quantity : Number(tx.quantity || 0);
-    const price = typeof tx.price === 'number' ? tx.price : Number(tx.price || 0);
+    const price = optionalFiniteNumber(tx.price);
+    if (price === null) {
+      accountingComplete = false;
+      continue;
+    }
     const amount = qty * price;
 
     if (type === 'BUY') {
@@ -691,9 +729,11 @@ export function getExternalSettlementFlowForDate(dateKey, transactions = []) {
   }
 
   return {
-    contributions,
-    withdrawals,
-    netExternalSettlementFlow: contributions - withdrawals
+    contributions: accountingComplete ? contributions : null,
+    withdrawals: accountingComplete ? withdrawals : null,
+    netExternalSettlementFlow: accountingComplete ? contributions - withdrawals : null,
+    accountingComplete,
+    reason: accountingComplete ? null : 'EXTERNAL_SETTLEMENT_VND_BASIS_UNAVAILABLE'
   };
 }
 
@@ -848,11 +888,18 @@ export function calculatePortfolioPerformance({
     const cashCapitalFlow = deposits - withdrawals;
     const externalSettlement = getExternalSettlementFlowForDate(dateKey, transactions);
     const externalSettlementFlow = externalSettlement.netExternalSettlementFlow;
-    const netExternalFlow = cashCapitalFlow + externalSettlementFlow;
+    const netExternalFlow = externalSettlement.accountingComplete
+      ? cashCapitalFlow + externalSettlementFlow
+      : null;
 
     let holdingsValue = 0;
     let dateHasMissing = false;
     let dateHasNonVnd = false;
+
+    if (!externalSettlement.accountingComplete) {
+      dateHasMissing = true;
+      coverageReasons.add(externalSettlement.reason);
+    }
 
     for (const [assetId, holding] of holdingsMap.entries()) {
       if (holding.quantity <= 0) continue;
@@ -1063,14 +1110,19 @@ export function calculatePortfolioPerformance({
   let cumulativeRealizedPnlToEnd = 0;
   let unrealizedPnlAtEnd = null;
   let totalAccountingPnlAtEnd = null;
+  let realizedPnlComplete = true;
 
   for (const tx of transactions) {
     const txDate = normalizeTimestampToDateKey(tx.executedAt || tx.executed_at);
     if (!txDate) continue;
 
-    const realized = typeof tx.realizedPnL === 'number'
-      ? tx.realizedPnL
-      : (typeof tx.realized_pnl === 'number' ? tx.realized_pnl : Number(tx.realized_pnl || 0));
+    const type = tx.transactionType || tx.transaction_type;
+    if (!['SELL', 'SELL_REVERSAL'].includes(type)) continue;
+    const realized = optionalFiniteNumber(tx.realizedPnL ?? tx.realized_pnl);
+    if (realized === null) {
+      if (txDate <= actualEndDate) realizedPnlComplete = false;
+      continue;
+    }
 
     if (txDate <= actualEndDate) {
       cumulativeRealizedPnlToEnd += realized;
@@ -1110,12 +1162,18 @@ export function calculatePortfolioPerformance({
     endUnrealizedSum += (marketValue - costBasis);
   }
 
-  if (endPnlComplete) {
+  if (endPnlComplete && realizedPnlComplete) {
     unrealizedPnlAtEnd = endUnrealizedSum;
     totalAccountingPnlAtEnd = cumulativeRealizedPnlToEnd + unrealizedPnlAtEnd;
   } else {
     pnlStatus = 'partial';
-    pnlReason = 'NON_VND_OR_MISSING_END_PRICE';
+    pnlReason = !realizedPnlComplete
+      ? 'VND_REALIZED_PNL_UNAVAILABLE'
+      : 'NON_VND_OR_MISSING_END_PRICE';
+    if (!realizedPnlComplete) {
+      realizedPnlDuringPeriod = null;
+      cumulativeRealizedPnlToEnd = null;
+    }
   }
 
   return {

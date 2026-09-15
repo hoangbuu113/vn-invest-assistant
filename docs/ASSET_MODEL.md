@@ -39,8 +39,8 @@ Features 16 through 30 and V1.1 Improvements establish the canonical schema, led
     $$\text{Canonical Asset} \longrightarrow \text{Explicit Provider Mapping} \longrightarrow \text{Provider Adapter} \longrightarrow \text{Normalized Snapshot / History}$$
   - Multi-source news architecture (`server/src/news/`):
     $$\text{Source Adapter} \longrightarrow \text{Sanitization} \longrightarrow \text{Deduplication} \longrightarrow \text{Relevance Engine} \longrightarrow \text{Canonical News Feed}$$
-  - Universal reporting currency is strictly `VND`; native non-VND asset valuations are converted on demand via direct `quoteCurrency -> VND` FX rates.
-  - Dual-settlement VND-basis cross-currency accounting foundation: Crypto and Gold spot current VND valuations operate through current USD/VND authority.
+  - Universal reporting currency is `VND`; native non-VND current valuations are converted only through an exact supported native-currency-to-VND rate. Without one, native value remains available and VND value is unavailable.
+  - Dual settlement is native-first for external non-VND execution. VND accounting is optional governed enrichment there, while VND and internal-cash trades retain mandatory VND accounting.
   - Canonical Portfolio eligibility is explicit asset metadata: supported stocks, ETFs, funds, Gold, and Crypto are `PORTFOLIO_ELIGIBLE`; the `USD/VND` market-context pair is `REFERENCE_ONLY`. Server routes and database triggers enforce this authority.
   - Public Multi-User Supabase Auth: Every user has an isolated `investor_profile` (`user_id UUID NOT NULL UNIQUE REFERENCES auth.users(id)`). New profiles start empty with `cash_available = 0`, 0 holdings, and 0 transactions. Legacy 20M test data was completely purged.
   - Background Price Alert Scheduler & Web Push: Price alerts evaluate on a 15-minute background cron schedule (`POST /api/internal/alerts/evaluate`), triggering multi-device push notifications via first-party Web Push (`public.push_subscriptions`, `public.alert_notification_deliveries`).
@@ -53,8 +53,8 @@ Features 16 through 30 and V1.1 Improvements establish the canonical schema, led
   - USD/VND deterministic analysis remains unsupported until trustworthy completed historical capability exists.
   - Historical non-VND portfolio performance remains truthfully unavailable when historical FX authority is missing.
   - Gold Spot history remains close-only, so OHLC-dependent analysis metrics remain unavailable for Gold. Crypto uses completed Binance OHLCV history.
-  - Non-VND BUY/SELL transactions retain the governed VND accounting and settlement contract. Cash-neutral opening positions may retain supported native acquisition price/currency with an unknown (`NULL`) historical VND basis; current FX is never used to backfill that basis. They do not create foreign-currency cash balances and never assume USDT equals USD.
-  - Historical non-VND performance remains unavailable without authoritative dated FX, even though current VND valuation and transaction-time VND accounting basis are supported.
+  - External non-VND BUY/SELL and cash-neutral opening positions may retain supported native acquisition price/currency with an unknown (`NULL`) historical VND basis; current FX is never used to backfill it. They do not create foreign-currency cash balances and never assume USDT equals USD.
+  - Historical non-VND performance remains unavailable without authoritative dated FX. Missing transaction-time VND enrichment does not become a zero flow or zero cost.
   - The single VND cash ledger remains authoritative for all cash operations (no multi-currency cash balances).
   - Open-ended mutual funds (NAV scheduled) remain deferred.
   - No article database persistence (news is dynamically cached in memory with per-source TTLs).
@@ -257,5 +257,5 @@ The following items are intentionally open questions and remain classified as `U
 
 - `UNKNOWN`: Open-ended mutual fund NAV strike mechanics and provider onboarding (deferred).
 - `UNKNOWN`: Provider failover orchestration and multi-source redundancy policy (deferred).
-- `UNKNOWN`: Multi-currency cash accounts and acquisition-time FX cost basis accounting for non-VND asset trading.
+- `UNKNOWN`: Multi-currency cash accounts and historical native-to-VND enrichment/backfill policy for non-VND asset trading.
 - `UNKNOWN`: USD/VND historical daily bar timezone alignment and provider selection for FX historical time series.

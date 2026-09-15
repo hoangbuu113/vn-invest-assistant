@@ -91,29 +91,38 @@ export function calculatePortfolioValuation(
       : 'MALFORMED_HOLDING_COST';
 
     const symbol = holding.asset?.symbol || null;
-    const nativeCurrency = canonicalQuoteCurrency(holding);
+    const canonicalCurrency = canonicalQuoteCurrency(holding);
     const openingPosition = holding.opening_position ?? holding.openingPosition ?? null;
     const openingIsUnmodified = Boolean(
       openingPosition
       && !(openingPosition.locked_at || openingPosition.lockedAt)
       && !(openingPosition.cancelled_at || openingPosition.cancelledAt)
     );
-    const nativeAverageCost = openingIsUnmodified
+    const persistedNativeAverageCost = normalizeNonNegativeFinancialNumber(
+      holding.native_average_cost ?? holding.nativeAverageCost
+    );
+    const persistedNativeCostCurrency = normalizeCurrency(
+      holding.native_cost_currency ?? holding.nativeCostCurrency
+    );
+    const nativeAverageCost = persistedNativeAverageCost ?? (openingIsUnmodified
       ? normalizeNonNegativeFinancialNumber(
           openingPosition.execution_unit_price
           ?? openingPosition.executionUnitPrice
           ?? openingPosition.native_average_cost
           ?? openingPosition.nativeAverageCost
         )
-      : null;
-    const nativeCostCurrency = openingIsUnmodified
+      : null);
+    const nativeCostCurrency = persistedNativeCostCurrency ?? (openingIsUnmodified
       ? normalizeCurrency(
           openingPosition.price_currency
           ?? openingPosition.priceCurrency
           ?? openingPosition.native_cost_currency
           ?? openingPosition.nativeCostCurrency
         )
-      : null;
+      : null);
+    const nativeCurrency = nativeAverageCost !== null && nativeCostCurrency
+      ? nativeCostCurrency
+      : canonicalCurrency;
 
     let latestPrice = null;
     let marketValue = null;
@@ -159,7 +168,12 @@ export function calculatePortfolioValuation(
 
     const nativeCostBasis = quantity !== null && averageCost !== null ? quantity * averageCost : null;
 
-    const snapshot = symbol ? snapshotsMap[symbol] : null;
+    const canonicalSnapshot = symbol ? snapshotsMap[symbol] : null;
+    const nativeReference = symbol ? priceReferenceForSymbol(nativePriceReferencesMap, symbol) : null;
+    const snapshot = validPositiveNumber(nativeReference?.price)
+      && normalizeCurrency(nativeReference?.currency) === nativeCurrency
+      ? nativeReference
+      : canonicalSnapshot;
     const hasValidPrice = validPositiveNumber(snapshot?.price);
 
     if (hasValidPrice) {
@@ -171,7 +185,6 @@ export function calculatePortfolioValuation(
       marketCacheStatus = snapshot.cacheStatus || null;
     }
 
-    const nativeReference = symbol ? priceReferenceForSymbol(nativePriceReferencesMap, symbol) : null;
     const sameCurrencySnapshot = hasValidPrice
       && normalizeCurrency(snapshot?.currency) === nativeCostCurrency
       ? snapshot
@@ -465,16 +478,21 @@ export async function getPortfolioOverview({
 
   const snapshotsMap = Object.fromEntries(snapshotsEntries);
 
-  // Binance USDT is a display-only same-currency reference for an unmodified
-  // opening position. It never replaces the canonical USD accounting snapshot.
+  // Binance USDT is an exact native current-price source for holdings whose
+  // persisted acquisition-cost currency is USDT. It never substitutes USD.
   const nativeReferenceSymbols = Array.from(new Set(
     (holdings || [])
       .filter((holding) => {
         const opening = holding.opening_position;
-        return opening
+        const persistedCurrency = normalizeCurrency(
+          holding.native_cost_currency ?? holding.nativeCostCurrency
+        );
+        return persistedCurrency === 'USDT' || (
+          opening
           && !opening.locked_at
           && !opening.cancelled_at
-          && normalizeCurrency(opening.price_currency) === 'USDT';
+          && normalizeCurrency(opening.price_currency) === 'USDT'
+        );
       })
       .map((holding) => holding.asset?.symbol)
       .filter((symbol) => typeof symbol === 'string' && symbol.trim())
@@ -493,15 +511,54 @@ export async function getPortfolioOverview({
   const fxCurrencies = Array.from(new Set(
     (holdings || [])
       .filter((holding) => {
-        const currency = canonicalQuoteCurrency(holding);
+        const persistedNativeAverage = normalizeNonNegativeFinancialNumber(
+          holding.native_average_cost ?? holding.nativeAverageCost
+        );
+        const persistedNativeCurrency = normalizeCurrency(
+          holding.native_cost_currency ?? holding.nativeCostCurrency
+        );
+        const opening = holding.opening_position ?? holding.openingPosition;
+        const openingNativeCurrency = opening && !(opening.locked_at || opening.lockedAt)
+          && !(opening.cancelled_at || opening.cancelledAt)
+          && normalizeNonNegativeFinancialNumber(
+            opening.execution_unit_price ?? opening.executionUnitPrice
+          ) !== null
+          ? normalizeCurrency(opening.price_currency ?? opening.priceCurrency)
+          : null;
+        const currency = persistedNativeAverage !== null && persistedNativeCurrency
+          ? persistedNativeCurrency
+          : openingNativeCurrency || canonicalQuoteCurrency(holding);
         const symbol = holding.asset?.symbol;
-        const snapshot = typeof symbol === 'string' ? snapshotsMap[symbol] : null;
-        return currency
-          && currency !== REPORTING_CURRENCY
-          && validPositiveNumber(snapshot?.price)
-          && !providerCurrencyMismatch(snapshot, currency);
+        const canonicalSnapshot = typeof symbol === 'string' ? snapshotsMap[symbol] : null;
+        const nativeReference = typeof symbol === 'string' ? nativePriceReferencesMap[symbol] : null;
+        const hasCompatiblePrice = (
+          validPositiveNumber(nativeReference?.price)
+          && normalizeCurrency(nativeReference?.currency) === currency
+        ) || (
+          validPositiveNumber(canonicalSnapshot?.price)
+          && normalizeCurrency(canonicalSnapshot?.currency) === currency
+        );
+        return currency && currency !== REPORTING_CURRENCY && hasCompatiblePrice;
       })
-      .map(canonicalQuoteCurrency)
+      .map((holding) => {
+        const persistedNativeAverage = normalizeNonNegativeFinancialNumber(
+          holding.native_average_cost ?? holding.nativeAverageCost
+        );
+        const persistedNativeCurrency = normalizeCurrency(
+          holding.native_cost_currency ?? holding.nativeCostCurrency
+        );
+        const opening = holding.opening_position ?? holding.openingPosition;
+        const openingNativeCurrency = opening && !(opening.locked_at || opening.lockedAt)
+          && !(opening.cancelled_at || opening.cancelledAt)
+          && normalizeNonNegativeFinancialNumber(
+            opening.execution_unit_price ?? opening.executionUnitPrice
+          ) !== null
+          ? normalizeCurrency(opening.price_currency ?? opening.priceCurrency)
+          : null;
+        return persistedNativeAverage !== null && persistedNativeCurrency
+          ? persistedNativeCurrency
+          : openingNativeCurrency || canonicalQuoteCurrency(holding);
+      })
   ));
 
   const fxRateEntries = await Promise.all(
