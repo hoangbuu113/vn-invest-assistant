@@ -114,6 +114,12 @@ export const LOCAL_DEVELOPMENT_ORIGINS = [
   'http://127.0.0.1:5173'
 ];
 
+function reportUnexpectedOpeningPositionError(operation, error) {
+  const rawCode = typeof error?.code === 'string' ? error.code.trim().toUpperCase() : '';
+  const code = /^[A-Z0-9][A-Z0-9_]{1,31}$/.test(rawCode) ? rawCode : 'UNKNOWN';
+  console.error('[opening-position] unexpected persistence failure', { operation, code });
+}
+
 export function getCorsAllowedOrigins(configuredOrigins = process.env.CORS_ORIGINS) {
   const origins = new Set(LOCAL_DEVELOPMENT_ORIGINS);
 
@@ -656,9 +662,12 @@ export function createApp(services = {}) {
       });
     } catch (error) {
       const statusCode = error.statusCode || 500;
+      if (!error.statusCode) {
+        reportUnexpectedOpeningPositionError('create', error);
+      }
       return res.status(statusCode).json({
         status: 'error',
-        code: error.code,
+        code: error.statusCode ? error.code : 'OPENING_POSITION_CREATE_FAILED',
         message: error.statusCode ? error.message : 'Failed to create opening position'
       });
     }

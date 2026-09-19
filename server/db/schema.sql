@@ -10734,3 +10734,21 @@ GRANT EXECUTE ON FUNCTION public.list_portfolio_transactions(UUID, TEXT) TO serv
 GRANT EXECUTE ON FUNCTION public.reverse_portfolio_transaction(UUID, UUID, TEXT, TEXT) TO service_role;
 
 COMMIT;
+
+-- Migration: 20260919000000_allow_recreated_opening_positions.sql
+-- Preserve cancelled opening-position history while allowing a new active
+-- declaration for the same profile and asset.
+
+BEGIN;
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_position_opening_baseline_profile_asset_active
+    ON public.position_opening_baselines (profile_id, asset_id)
+    WHERE cancelled_at IS NULL;
+
+ALTER TABLE public.position_opening_baselines
+    DROP CONSTRAINT IF EXISTS uq_position_opening_baseline_profile_asset;
+
+COMMENT ON INDEX public.uq_position_opening_baseline_profile_asset_active IS
+    'Allows immutable cancelled opening-position history while enforcing one active baseline per profile and asset.';
+
+COMMIT;

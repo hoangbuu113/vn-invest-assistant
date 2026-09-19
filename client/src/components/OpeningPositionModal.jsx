@@ -260,7 +260,11 @@ export default function OpeningPositionModal({
         });
         const json = await res.json();
         if (!res.ok || json.status !== 'ok') {
-          throw new Error(json.message || `HTTP ${res.status}`);
+          const safeCode = typeof json.code === 'string' && /^[A-Z0-9_]{2,64}$/.test(json.code)
+            ? json.code
+            : null;
+          const safeMessage = json.message || `HTTP ${res.status}`;
+          throw new Error(safeCode ? `${safeCode}: ${safeMessage}` : safeMessage);
         }
         idempotencyKeyRef.current = getClientUUID();
         if (onSuccess) {

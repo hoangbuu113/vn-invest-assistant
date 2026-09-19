@@ -21,6 +21,12 @@ const MIGRATION_PATH = path.join(
   'migrations',
   '20260909000000_portfolio_native_opening_cost.sql'
 );
+const RECREATED_OPENING_MIGRATION_PATH = path.join(
+  REPO_ROOT,
+  'supabase',
+  'migrations',
+  '20260919000000_allow_recreated_opening_positions.sql'
+);
 const OPENING_MODAL_PATH = path.join(REPO_ROOT, 'client', 'src', 'components', 'OpeningPositionModal.jsx');
 const APP_PATH = path.join(REPO_ROOT, 'client', 'src', 'App.jsx');
 const PORTFOLIO_HOLDINGS_PATH = path.join(REPO_ROOT, 'client', 'src', 'components', 'PortfolioSummaryHoldings.jsx');
@@ -30,6 +36,7 @@ const PROFILE_ID = '11111111-1111-4111-8111-111111111111';
 const BTC_ID = '22222222-2222-4222-8222-222222222222';
 const FPT_ID = '33333333-3333-4333-8333-333333333333';
 const FX_ID = '44444444-4444-4444-8444-444444444444';
+const ONDO_ID = '55555555-5555-4555-8555-555555555555';
 
 async function createDatabase() {
   const db = new PGlite();
@@ -42,6 +49,46 @@ async function createDatabase() {
     CREATE SCHEMA extensions;
   `);
   return db;
+}
+
+function createPglitePositionClient(db) {
+  return {
+    async rpc(name, args) {
+      if (name !== 'create_opening_position') {
+        return { data: null, error: { code: 'PGRST202', message: `Unsupported test RPC: ${name}` } };
+      }
+
+      try {
+        const result = await db.query(`
+          SELECT public.create_opening_position(
+            $1::uuid, $2::text, $3::numeric, $4::numeric, $5::numeric,
+            $6::text, $7::numeric, $8::text, $9::timestamptz, $10::text
+          ) AS result
+        `, [
+          args.p_profile_id,
+          args.p_asset_id,
+          args.p_quantity,
+          args.p_average_cost,
+          args.p_execution_unit_price ?? null,
+          args.p_price_currency ?? 'VND',
+          args.p_fx_rate_to_vnd ?? null,
+          args.p_fx_provenance ?? null,
+          args.p_fx_observed_at ?? null,
+          args.p_idempotency_key ?? null
+        ]);
+        return { data: result.rows[0].result, error: null };
+      } catch (error) {
+        return {
+          data: null,
+          error: {
+            code: error.code,
+            message: error.message,
+            constraint: error.constraint_name || error.constraint || null
+          }
+        };
+      }
+    }
+  };
 }
 
 function cryptoHolding() {
@@ -150,6 +197,60 @@ describe('Portfolio V1 P0.2.1 native-currency opening positions', () => {
       ]);
       assert.equal(createCalls, 0);
     } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+
+  test('unexpected opening-position persistence errors expose a stable public code and log only sanitized diagnostics', async () => {
+    const sensitiveMessage = 'duplicate row contained secret-token-value and internal database details';
+    const app = createApp({
+      getProfileByUserIdFn: async () => ({ id: PROFILE_ID }),
+      getAssetByIdFn: async () => ({
+        id: ONDO_ID,
+        symbol: 'ONDO',
+        asset_type: 'crypto',
+        quote_currency: 'USD',
+        portfolio_eligibility: 'PORTFOLIO_ELIGIBLE',
+        is_active: true
+      }),
+      createOpeningPositionFn: async () => {
+        const error = new Error(sensitiveMessage);
+        error.code = '23505';
+        throw error;
+      }
+    });
+    const server = http.createServer(app);
+    const logs = [];
+    const originalConsoleError = console.error;
+    console.error = (...args) => logs.push(args);
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+
+    try {
+      const response = await ownerFetch(`http://127.0.0.1:${server.address().port}/api/positions/opening`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          assetId: ONDO_ID,
+          quantity: 226,
+          averageCost: null,
+          executionUnitPrice: 0.36402,
+          priceCurrency: 'USDT'
+        })
+      });
+      const body = await response.json();
+      assert.equal(response.status, 500);
+      assert.deepEqual(body, {
+        status: 'error',
+        code: 'OPENING_POSITION_CREATE_FAILED',
+        message: 'Failed to create opening position'
+      });
+      assert.deepEqual(logs, [[
+        '[opening-position] unexpected persistence failure',
+        { operation: 'create', code: '23505' }
+      ]]);
+      assert.equal(JSON.stringify({ body, logs }).includes(sensitiveMessage), false);
+    } finally {
+      console.error = originalConsoleError;
       await new Promise((resolve) => server.close(resolve));
     }
   });
@@ -373,6 +474,166 @@ describe('Portfolio V1 P0.2.1 native-currency opening positions', () => {
     }
   });
 
+  test('production route recreates exact ONDO native opening position after a cancelled baseline without financial ledger writes', async () => {
+    const db = await createDatabase();
+    try {
+      await db.exec(await readFile(SCHEMA_PATH, 'utf8'));
+      await db.exec(`
+        INSERT INTO auth.users (id) VALUES ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
+        INSERT INTO public.investor_profile (
+          id, user_id, cash_available, risk_tolerance, investment_horizon
+        ) VALUES (
+          '${PROFILE_ID}', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 200000000, 'moderate', 'long'
+        );
+        INSERT INTO public.assets (
+          id, symbol, name, asset_type, market_code, quote_currency,
+          market_policy, market_timezone, quantity_unit, is_active, portfolio_eligibility
+        ) VALUES (
+          '${ONDO_ID}', 'ONDO', 'Ondo', 'crypto', 'CRYPTO', 'USD',
+          'CONTINUOUS_24_7', 'UTC', 'coin', TRUE, 'PORTFOLIO_ELIGIBLE'
+        );
+        INSERT INTO public.asset_provider_mappings (
+          asset_id, provider, provider_symbol, provider_market
+        ) VALUES (
+          '${ONDO_ID}', 'binance', 'ONDOUSDT', 'SPOT'
+        );
+      `);
+
+      const initial = await db.query(`
+        SELECT public.create_opening_position(
+          '${PROFILE_ID}'::uuid, '${ONDO_ID}', 1, NULL, 0.5, 'USDT',
+          NULL, NULL, NULL, 'cancelled-ondo-key'
+        ) AS result
+      `);
+      await db.query(`
+        SELECT public.cancel_opening_position(
+          '${PROFILE_ID}'::uuid,
+          '${initial.rows[0].result.openingPosition.id}'
+        )
+      `);
+
+      const before = await db.query(`
+        SELECT
+          (SELECT cash_available FROM public.investor_profile WHERE id = '${PROFILE_ID}') AS cash_available,
+          (SELECT COUNT(*)::int FROM public.cash_ledger_entries WHERE profile_id = '${PROFILE_ID}') AS cash_entries,
+          (SELECT COUNT(*)::int FROM public.portfolio_transactions WHERE profile_id = '${PROFILE_ID}') AS transactions
+      `);
+
+      const app = createApp({
+        getProfileByUserIdFn: async () => ({ id: PROFILE_ID }),
+        getAssetByIdFn: async () => ({
+          id: ONDO_ID,
+          symbol: 'ONDO',
+          asset_type: 'crypto',
+          quote_currency: 'USD',
+          portfolio_eligibility: 'PORTFOLIO_ELIGIBLE',
+          is_active: true
+        }),
+        positionClient: createPglitePositionClient(db)
+      });
+      const server = http.createServer(app);
+      await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+
+      try {
+        const request = {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Idempotency-Key': 'recreated-ondo-key'
+          },
+          body: JSON.stringify({
+            assetId: ONDO_ID,
+            quantity: 226,
+            averageCost: null,
+            executionUnitPrice: 0.36402,
+            priceCurrency: 'USDT',
+            idempotencyKey: 'recreated-ondo-key'
+          })
+        };
+        const url = `http://127.0.0.1:${server.address().port}/api/positions/opening`;
+        const response = await ownerFetch(url, request);
+        const body = await response.json();
+
+        assert.equal(response.status, 201);
+        assert.equal(body.status, 'ok');
+        assert.equal(body.data.openingPosition.openingQuantity, 226);
+        assert.equal(body.data.openingPosition.openingAverageCost, null);
+        assert.equal(body.data.openingPosition.nativeAverageCost, 0.36402);
+        assert.equal(body.data.openingPosition.nativeCostCurrency, 'USDT');
+        assert.equal(body.data.openingPosition.openingQuantity * body.data.openingPosition.nativeAverageCost, 82.26852);
+
+        const replay = await ownerFetch(url, request);
+        assert.equal(replay.status, 200);
+        assert.equal(replay.headers.get('idempotent-replayed'), 'true');
+        assert.equal((await replay.json()).data.replayed, true);
+
+        const duplicateResponse = await ownerFetch(url, {
+          ...request,
+          headers: {
+            ...request.headers,
+            'Idempotency-Key': 'duplicate-active-ondo-key'
+          },
+          body: JSON.stringify({
+            ...JSON.parse(request.body),
+            idempotencyKey: 'duplicate-active-ondo-key'
+          })
+        });
+        const duplicateBody = await duplicateResponse.json();
+        assert.equal(duplicateResponse.status, 400);
+        assert.equal(duplicateBody.code, 'OP003');
+
+        const persisted = await db.query(`
+          SELECT b.opening_quantity, b.opening_average_cost, b.execution_unit_price,
+                 b.price_currency, h.quantity, h.average_cost,
+                 h.native_average_cost, h.native_cost_currency
+          FROM public.position_opening_baselines b
+          JOIN public.holdings h ON h.opening_position_id = b.id
+          WHERE b.profile_id = '${PROFILE_ID}'
+            AND b.asset_id = '${ONDO_ID}'
+            AND b.cancelled_at IS NULL
+        `);
+        assert.equal(persisted.rows.length, 1);
+        assert.equal(Number(persisted.rows[0].opening_quantity), 226);
+        assert.equal(persisted.rows[0].opening_average_cost, null);
+        assert.equal(Number(persisted.rows[0].execution_unit_price), 0.36402);
+        assert.equal(persisted.rows[0].price_currency, 'USDT');
+        assert.equal(Number(persisted.rows[0].quantity), 226);
+        assert.equal(persisted.rows[0].average_cost, null);
+        assert.equal(Number(persisted.rows[0].native_average_cost), 0.36402);
+        assert.equal(persisted.rows[0].native_cost_currency, 'USDT');
+
+        const after = await db.query(`
+          SELECT
+            (SELECT cash_available FROM public.investor_profile WHERE id = '${PROFILE_ID}') AS cash_available,
+            (SELECT COUNT(*)::int FROM public.cash_ledger_entries WHERE profile_id = '${PROFILE_ID}') AS cash_entries,
+            (SELECT COUNT(*)::int FROM public.portfolio_transactions WHERE profile_id = '${PROFILE_ID}') AS transactions,
+            (SELECT COUNT(*)::int FROM public.position_opening_baselines WHERE profile_id = '${PROFILE_ID}' AND asset_id = '${ONDO_ID}') AS baselines,
+            (SELECT COUNT(*)::int FROM public.position_opening_baselines WHERE profile_id = '${PROFILE_ID}' AND asset_id = '${ONDO_ID}' AND cancelled_at IS NOT NULL) AS cancelled_baselines,
+            (SELECT COUNT(*)::int FROM public.position_opening_baselines WHERE profile_id = '${PROFILE_ID}' AND asset_id = '${ONDO_ID}' AND cancelled_at IS NULL) AS active_baselines
+        `);
+        assert.equal(after.rows[0].cash_available, before.rows[0].cash_available);
+        assert.equal(after.rows[0].cash_entries, before.rows[0].cash_entries);
+        assert.equal(after.rows[0].transactions, before.rows[0].transactions);
+        assert.equal(after.rows[0].baselines, 2);
+        assert.equal(after.rows[0].cancelled_baselines, 1);
+        assert.equal(after.rows[0].active_baselines, 1);
+      } finally {
+        await new Promise((resolve) => server.close(resolve));
+      }
+    } finally {
+      await db.close();
+    }
+  });
+
+  test('replacement migration preserves cancelled history and limits uniqueness to active baselines', async () => {
+    const migration = await readFile(RECREATED_OPENING_MIGRATION_PATH, 'utf8');
+    assert.match(migration, /CREATE UNIQUE INDEX IF NOT EXISTS uq_position_opening_baseline_profile_asset_active/);
+    assert.match(migration, /ON public\.position_opening_baselines \(profile_id, asset_id\)\s+WHERE cancelled_at IS NULL/);
+    assert.match(migration, /DROP CONSTRAINT IF EXISTS uq_position_opening_baseline_profile_asset/);
+    assert.doesNotMatch(migration, /\bUPDATE\s+public\.position_opening_baselines\b/i);
+    assert.doesNotMatch(migration, /\bDELETE\s+FROM\s+public\.position_opening_baselines\b/i);
+  });
+
   test('forward migration is additive, nullable, capability-based, and never derives VND cost from FX', async () => {
     const migration = await readFile(MIGRATION_PATH, 'utf8');
     assert.match(migration, /ALTER COLUMN opening_average_cost DROP NOT NULL/);
@@ -469,6 +730,8 @@ describe('Portfolio V1 P0.2.1 native-currency opening positions', () => {
     assert.match(displayModel, /nativeCurrentPrice/);
     assert.match(displayModel, /nativeUnrealizedPnL/);
     assert.match(displayModel, /nativeCostCurrency/);
+    assert.match(modal, /json\.code/);
+    assert.match(modal, /OPENING_POSITION_CREATE_FAILED|safeCode/);
     assert.match(holdingsView, /holding\.averageCost/);
     assert.match(holdingsView, /holding\.currentPrice/);
     assert.match(holdingsView, /holding\.unrealizedPnl/);
