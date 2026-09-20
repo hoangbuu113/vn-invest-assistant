@@ -1474,15 +1474,23 @@ function App({ onLogout }) {
                     {portfolioOverview && (() => {
                       const holdingsList = Array.isArray(portfolioOverview.holdings) ? portfolioOverview.holdings : [];
                       const holdingsCount = holdingsList.length;
-                      const unpricedCount = holdingsList.filter(
-                        (h) => h.pricingStatus !== 'available' || h.latestPrice === null
-                      ).length;
+                      const unvalued = holdingsList.filter(
+                        (h) => !(['available', 'stale'].includes(h?.valuationStatus) && typeof h?.reportingMarketValue === 'number')
+                      );
+                      const unpricedCount = unvalued.length;
+                      const hasMissingFxOnly = unvalued.length > 0 && unvalued.every(
+                        (h) => h?.pricingStatus === 'available' || h?.valuationReason?.startsWith('FX_') || (typeof h?.nativePrice === 'number' && h?.nativePrice > 0)
+                      );
 
                       return (
                         <>
                           {portfolioOverview.summary.valuationStatus === 'partial' && unpricedCount > 0 && (
                             <div className="fintech-banner banner-warning" style={{ marginBottom: '1rem', padding: '0.55rem 0.85rem', fontSize: '0.8rem' }}>
-                              <span>⚠️ <strong>Định giá một phần:</strong> {unpricedCount} mã chưa có dữ liệu giá thị trường.</span>
+                              <span>⚠️ <strong>Định giá một phần:</strong> {
+                                hasMissingFxOnly
+                                  ? `${unpricedCount} mã chưa thể quy đổi sang VND.`
+                                  : `${unpricedCount} mã chưa có dữ liệu giá thị trường.`
+                              }</span>
                             </div>
                           )}
 
@@ -1856,18 +1864,31 @@ function App({ onLogout }) {
               )}
 
               {/* Partial Valuation Warning Banner */}
-              {!portfolioLoading && portfolioOverview && portfolioOverview.summary?.valuationStatus === 'partial' && (
-                <div className="fintech-banner banner-warning">
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    <span>⚠️</span>
-                    <span>
-                      <strong>Định giá một phần</strong> — {portfolioOverview.summary?.cashStatus === 'unavailable'
-                        ? 'số dư tiền mặt có thẩm quyền hiện chưa khả dụng.'
-                        : 'một số tài sản chưa có dữ liệu giá thị trường từ sàn.'}
-                    </span>
+              {!portfolioLoading && portfolioOverview && portfolioOverview.summary?.valuationStatus === 'partial' && (() => {
+                const holdingsList = Array.isArray(portfolioOverview.holdings) ? portfolioOverview.holdings : [];
+                const unvalued = holdingsList.filter(
+                  (h) => !(['available', 'stale'].includes(h?.valuationStatus) && typeof h?.reportingMarketValue === 'number')
+                );
+                const hasMissingFxOnly = unvalued.length > 0 && unvalued.every(
+                  (h) => h?.pricingStatus === 'available' || h?.valuationReason?.startsWith('FX_') || (typeof h?.nativePrice === 'number' && h?.nativePrice > 0)
+                );
+                const partialMessage = portfolioOverview.summary?.cashStatus === 'unavailable'
+                  ? 'số dư tiền mặt có thẩm quyền hiện chưa khả dụng.'
+                  : hasMissingFxOnly
+                    ? 'Một số tài sản đã có giá thị trường nhưng chưa thể quy đổi sang VND.'
+                    : 'một số tài sản chưa có dữ liệu giá thị trường từ sàn.';
+
+                return (
+                  <div className="fintech-banner banner-warning">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <span>⚠️</span>
+                      <span>
+                        <strong>Định giá một phần</strong> — {partialMessage}
+                      </span>
+                    </div>
                   </div>
-                </div>
-              )}
+                );
+              })()}
 
               {!portfolioLoading && portfolioOverview && portfolioOverview.summary?.valuationStatus === 'stale' && (
                 <div className="fintech-banner banner-warning">

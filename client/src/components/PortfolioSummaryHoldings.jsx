@@ -168,7 +168,18 @@ function HoldingsDesktop({ holdings }) {
                   <span><small>Giá mua TB</small>{formatMoneyValue(holding.averageCost)}</span>
                 </div>
               </td>
-              <td><strong>{holding.marketValueVnd === null ? '—' : `${holding.isApproximateVnd ? '≈ ' : ''}${formatVNDReporting(holding.marketValueVnd)}`}</strong></td>
+              <td>
+                {holding.marketValueVnd !== null ? (
+                  <strong>{holding.isApproximateVnd ? '≈ ' : ''}{formatVNDReporting(holding.marketValueVnd)}</strong>
+                ) : holding.hasNativeMarketValue ? (
+                  <div className="portfolio-native-market-value">
+                    <strong>≈ {formatNativeAmount(holding.nativeMarketValue, holding.nativeMarketCurrency)}</strong>
+                    <small style={{ display: 'block', fontSize: '0.75rem', color: 'var(--color-slate-500)', fontWeight: 400 }}>VND chưa khả dụng</small>
+                  </div>
+                ) : (
+                  <strong>—</strong>
+                )}
+              </td>
               <td><HoldingPnl holding={holding} /></td>
               <td>{holding.weightPct === null ? '—' : formatPercentVN(holding.weightPct, false)}</td>
               <td><HoldingState holding={holding} /></td>
@@ -191,7 +202,16 @@ function HoldingsMobile({ holdings }) {
               <small>{formatAssetType(holding.assetType)}</small>
             </span>
             <span className="portfolio-holding-card-value">
-              <strong>{holding.marketValueVnd === null ? '—' : `${holding.isApproximateVnd ? '≈ ' : ''}${formatVNDReporting(holding.marketValueVnd)}`}</strong>
+              {holding.marketValueVnd !== null ? (
+                <strong>{holding.isApproximateVnd ? '≈ ' : ''}{formatVNDReporting(holding.marketValueVnd)}</strong>
+              ) : holding.hasNativeMarketValue ? (
+                <div style={{ textAlign: 'right' }}>
+                  <strong>≈ {formatNativeAmount(holding.nativeMarketValue, holding.nativeMarketCurrency)}</strong>
+                  <small style={{ display: 'block', fontSize: '0.75rem', color: 'var(--color-slate-500)', fontWeight: 400 }}>VND chưa khả dụng</small>
+                </div>
+              ) : (
+                <strong>—</strong>
+              )}
               <StateBadge tone={holding.stateTone}>{holding.stateLabel}</StateBadge>
             </span>
           </summary>

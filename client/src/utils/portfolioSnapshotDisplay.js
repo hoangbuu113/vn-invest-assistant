@@ -183,8 +183,14 @@ function selectUnrealizedPnl(holding) {
 function holdingStatusText(holding, state) {
   if (state === PORTFOLIO_DISPLAY_STATES.STALE) return 'Dữ liệu cũ';
   if (state === PORTFOLIO_DISPLAY_STATES.AVAILABLE) return 'Đã cập nhật';
-  if (holding?.valuationReason === 'FX_UNAVAILABLE' || holding?.valuationReason === 'FX_RESOLUTION_FAILED') {
-    return 'Chưa có tỷ giá quy đổi';
+  if (
+    holding?.valuationReason?.startsWith('FX_')
+    || holding?.valuationReason === 'FX_UNAVAILABLE'
+    || holding?.valuationReason === 'FX_RESOLUTION_FAILED'
+    || holding?.valuationReason === 'FX_PROVIDER_UNCONFIGURED'
+    || holding?.valuationReason === 'FX_PROVIDER_UNAVAILABLE'
+  ) {
+    return 'Thiếu tỷ giá VND';
   }
   if (holding?.valuationReason === 'MISSING_NATIVE_PRICE') return 'Chưa có dữ liệu giá';
   if (state === PORTFOLIO_DISPLAY_STATES.PARTIAL) return 'Dữ liệu một phần';
@@ -197,6 +203,15 @@ export function buildPortfolioHoldingDisplay(holding, allocation) {
   const marketValueVnd = displayableNumber(holding?.reportingMarketValue, state);
   const weightPct = finiteNumber(allocationItem?.weightPct) ? allocationItem.weightPct : null;
   const currentPrice = selectCurrentPrice(holding);
+  const nativeMarketValue = finiteNumber(holding?.nativeMarketValue)
+    ? holding.nativeMarketValue
+    : (finiteNumber(holding?.quantity) && finiteNumber(currentPrice?.value)
+      ? holding.quantity * currentPrice.value
+      : null);
+  const nativeMarketCurrency = currentPrice?.currency || holding?.nativeCurrency || null;
+  const hasNativeMarketValue = nativeMarketValue !== null
+    && Boolean(nativeMarketCurrency)
+    && nativeMarketCurrency !== 'VND';
 
   return {
     id: holding?.id || holding?.assetId || holding?.symbol || null,
@@ -211,6 +226,9 @@ export function buildPortfolioHoldingDisplay(holding, allocation) {
     averageCost: selectAverageCost(holding),
     unrealizedPnl: selectUnrealizedPnl(holding),
     marketValueVnd,
+    nativeMarketValue,
+    nativeMarketCurrency,
+    hasNativeMarketValue,
     isApproximateVnd: Boolean(holding?.nativeCurrency && holding.nativeCurrency !== 'VND'),
     weightPct,
     state,

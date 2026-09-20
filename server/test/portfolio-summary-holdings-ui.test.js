@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 
+import { formatNativeAmount } from '../../client/src/utils/formatting.js';
 import {
   buildPortfolioHoldingDisplay,
   buildPortfolioHoldingsDisplay,
@@ -260,7 +261,45 @@ describe('Portfolio V1 P0.4 Summary and Holdings display', () => {
     assert.deepEqual(views.map((item) => item.weightPct), [30, 20]);
   });
 
-  test('component contract has one compact summary, one empty state, and mobile expandable cards', async () => {
+  test('holding with native market price but missing VND FX shows "Thiếu tỷ giá VND" and native market value fallback', () => {
+    const holding = {
+      id: 'holding-ondo',
+      assetId: 'asset-ondo',
+      symbol: 'ONDO',
+      name: 'Ondo',
+      assetType: 'crypto',
+      quantity: 100,
+      quantityUnit: 'coin',
+      nativePrice: 0.36402,
+      nativeCurrency: 'USDT',
+      averageCost: null,
+      reportingMarketValue: null,
+      valuationStatus: 'unavailable',
+      valuationReason: 'FX_PROVIDER_UNCONFIGURED',
+      dataStatus: 'UNAVAILABLE',
+      pricingStatus: 'available',
+      priceAsOf: '2026-09-20T12:00:00.000Z'
+    };
+
+    const view = buildPortfolioHoldingDisplay(holding, { holdingAllocations: [] });
+
+    assert.equal(view.stateLabel, 'Thiếu tỷ giá VND');
+    assert.equal(view.hasNativeMarketValue, true);
+    assert.equal(view.nativeMarketValue, 36.402);
+    assert.equal(view.nativeMarketCurrency, 'USDT');
+    assert.equal(view.marketValueVnd, null);
+  });
+
+  test('crypto price precision preserves user-entered precision without visual reduction', () => {
+    assert.equal(formatNativeAmount(0.36402, 'USDT'), '0,36402 USDT');
+    assert.equal(formatNativeAmount(0.1641, 'USDT'), '0,1641 USDT');
+    assert.equal(formatNativeAmount(62000, 'USD'), '62.000 USD');
+    assert.equal(formatNativeAmount(62000.5, 'USD'), '62.000,5 USD');
+    assert.equal(formatNativeAmount(1.25, 'USDT'), '1,25 USDT');
+    assert.equal(formatNativeAmount(0.5, 'USD'), '0,5 USD');
+  });
+
+  test('component contract has one compact summary, one empty state, mobile expandable cards, and truthful warnings', async () => {
     const [componentSource, appSource, cssSource, activitySource] = await Promise.all([
       readFile(new URL('../../client/src/components/PortfolioSummaryHoldings.jsx', import.meta.url), 'utf8'),
       readFile(new URL('../../client/src/App.jsx', import.meta.url), 'utf8'),
@@ -275,8 +314,11 @@ describe('Portfolio V1 P0.4 Summary and Holdings display', () => {
     assert.match(componentSource, /Ghi giao dịch/);
     assert.match(componentSource, /Khai báo tài sản đang có/);
     assert.match(componentSource, /Quản lý tiền mặt/);
+    assert.match(componentSource, /portfolio-native-market-value/);
+    assert.match(componentSource, /VND chưa khả dụng/);
     assert.equal((appSource.match(/<PortfolioSummaryHoldings/g) || []).length, 1);
     assert.doesNotMatch(appSource, /Tiền sẵn sàng đầu tư/);
+    assert.match(appSource, /Một số tài sản đã có giá thị trường nhưng chưa thể quy đổi sang VND/);
     const portfolioSection = appSource.slice(
       appSource.indexOf("{activeTab === 'portfolio'"),
       appSource.indexOf('{/* TAB: WATCHLIST')

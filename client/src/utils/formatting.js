@@ -87,11 +87,9 @@ export function formatNativeAmount(value, currency = 'VND', options = {}) {
     if (abs >= 1000) {
       decimals = num % 1 === 0 ? 0 : 2;
     } else if (abs >= 1) {
-      decimals = 2;
-    } else if (abs >= 0.0001) {
       decimals = 4;
     } else {
-      decimals = 6;
+      decimals = 8;
     }
   } else {
     decimals = abs < 1 ? 4 : 2;
@@ -125,8 +123,6 @@ export function formatMarketChange(value, currency = 'VND', options = {}) {
   } else if (abs >= 1000) {
     decimals = 2;
   } else if (abs >= 1) {
-    decimals = 2;
-  } else if (abs >= 0.0001) {
     decimals = 4;
   } else {
     decimals = 6;
