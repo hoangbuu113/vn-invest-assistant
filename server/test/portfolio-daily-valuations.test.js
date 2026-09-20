@@ -11,6 +11,7 @@ import {
   capturePortfolioDailyValuationForProfile,
   createDailyValuationEvidenceHash,
   getDailyValuationSchedule,
+  persistPortfolioDailyValuation,
   runScheduledPortfolioDailyValuationCapture
 } from '../src/portfolioDailyValuations.js';
 import {
@@ -458,6 +459,49 @@ describe('Portfolio daily valuation history foundation', () => {
     assert.equal(first.capturedCount, 1);
     assert.equal(second.replayedCount, 1);
     assert.equal(stored.size, 1);
+  });
+
+  test('multi-profile isolation ensures one profile failure does not halt or contaminate others', async () => {
+    const executed = [];
+    const options = {
+      now: new Date('2026-09-20T16:45:00.000Z'),
+      client: {},
+      listProfileIdsFn: async () => [PROFILE_ID, OTHER_PROFILE_ID],
+      captureProfileFn: async ({ profileId }) => {
+        executed.push(profileId);
+        if (profileId === PROFILE_ID) {
+          throw new Error('Database connection failed for profile 1');
+        }
+        return { replayed: false };
+      }
+    };
+    const summary = await runScheduledPortfolioDailyValuationCapture(options);
+    assert.deepEqual(executed, [PROFILE_ID, OTHER_PROFILE_ID]);
+    assert.equal(summary.capturedCount, 1);
+    assert.equal(summary.failedCount, 1);
+    assert.equal(summary.profileCount, 2);
+  });
+
+  test('persistPortfolioDailyValuation propagates non-23505 database errors', async () => {
+    const mockClient = {
+      from: () => ({
+        insert: () => ({
+          select: () => ({
+            single: async () => ({
+              data: null,
+              error: { code: '42P01', message: 'relation does not exist' }
+            })
+          })
+        })
+      })
+    };
+    await assert.rejects(
+      () => persistPortfolioDailyValuation({
+        profileId: PROFILE_ID,
+        valuationDate: '2026-09-20'
+      }, mockClient),
+      /Failed to persist portfolio daily valuation: relation does not exist/
+    );
   });
 
   test('scheduler Worker calls the protected existing-infrastructure endpoint only when due', async () => {
