@@ -35,6 +35,7 @@ Portfolio is a personal multi-asset tracking capability that supports this broad
 ## 6. Core Product Goals
 - **Primary**: Deliver public market intelligence, macroeconomic regime tracking, multi-asset context, multi-source news, watchlists, price alerts, and future AI synthesis.
 - **Supporting**: Track personal holdings, immutable transaction history, and auditable cash flows within isolated user profiles, with truthful valuation and freshness states.
+- Accumulate append-only daily Portfolio valuation evidence from the first legitimate capture forward so performance can develop without fabricated historical prices, FX, or cash flows.
 - Provide deterministic quantitative analysis, trends, and comparisons across Vietnam equities, crypto, gold, and FX.
 - Maintain transparent data integrity (never fabricate missing prices, timestamps, or FX rates; missing is never zero).
 

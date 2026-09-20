@@ -1243,15 +1243,29 @@ describe('Feature 25B — VND Portfolio Performance Engine', () => {
 
   it('P0.2: cash-only performance makes zero market-provider requests', async () => {
     let historyCalls = 0;
+    const observations = generateDateSpan('2026-08-21', '2026-08-28').map((valuationDate, index) => ({
+      profileId: 'profile-cash-only',
+      valuationDate,
+      status: 'AVAILABLE',
+      totalPortfolioValueVnd: 100,
+      unrealizedPnlVnd: 0,
+      totalHoldingsCount: 0,
+      valuedHoldingsCount: 0,
+      flowStatus: index === 0 ? 'NOT_APPLICABLE' : 'AVAILABLE',
+      flowIntervalType: index === 0 ? 'FIRST_OBSERVATION' : 'CONSECUTIVE_DAILY_BOUNDARY',
+      boundaryExternalFlowVnd: index === 0 ? null : 0,
+      observationEvidence: {
+        valuation: { coverageReasons: [], unrealizedPnlStatus: 'NOT_APPLICABLE' },
+        flowInterval: { events: [] }
+      }
+    }));
     const result = await getPortfolioPerformance({
+      profileId: 'profile-cash-only',
       range: '1W',
       now: fixedNow,
       client: {},
-      getCashActivationFn: async () => ({ openingBalanceAmount: 100, activatedAt: '2026-08-21T09:00:00.000Z' }),
-      getCashLedgerFn: async () => [],
-      getPositionOpeningBaselinesFn: async () => [],
       getPortfolioTransactionsFn: async () => [],
-      getAssetsFn: async () => [assetFpt, assetVcb, assetBtc],
+      listPortfolioDailyValuationsFn: async () => observations,
       getMarketHistoryFn: async () => {
         historyCalls += 1;
         throw new Error('cash-only path must not call a market provider');

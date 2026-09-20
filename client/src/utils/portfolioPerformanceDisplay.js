@@ -19,6 +19,13 @@ const STATE_LABELS = Object.freeze({
 export const PERFORMANCE_REASON_MESSAGES = Object.freeze({
   PORTFOLIO_NOT_ACTIVATED: 'Chưa có mốc bắt đầu để tính hiệu suất danh mục.',
   NO_STARTING_VALUATION: 'Chưa có định giá đầu kỳ phù hợp để tính hiệu suất.',
+  NO_DAILY_VALUATION_HISTORY: 'Lịch sử định giá hằng ngày sẽ bắt đầu từ quan sát hợp lệ đầu tiên; không có dữ liệu hồi tố được tạo.',
+  INSUFFICIENT_VALUATION_OBSERVATIONS: 'Cần ít nhất hai mốc định giá hoàn chỉnh liên tiếp để tính TWR.',
+  MISSING_DAILY_OBSERVATION: 'Chuỗi định giá có ngày bị thiếu nên không được nối giả thành hiệu suất liên tục.',
+  INCOMPLETE_DAILY_VALUATION: 'Một mốc định giá chưa đầy đủ nên không đủ điều kiện tính hiệu suất.',
+  DAILY_VALUATION_UNAVAILABLE: 'Mốc định giá danh mục không khả dụng.',
+  EXTERNAL_FLOW_EVIDENCE_UNAVAILABLE: 'Chưa đủ bằng chứng dòng tiền VND giữa hai mốc định giá.',
+  VND_UNREALIZED_PNL_UNAVAILABLE: 'Lãi/lỗ chưa thực hiện bằng VND chưa có cơ sở đầy đủ.',
   INSUFFICIENT_DATE_SPAN: 'Khoảng thời gian hiện chưa có đủ dữ liệu hoàn chỉnh.',
   INSUFFICIENT_HISTORY: 'Chưa đủ lịch sử để tính lợi suất quy năm.',
   INSUFFICIENT_CASH_FLOW_COUNT: 'Chưa đủ dòng tiền để tính lợi suất theo dòng tiền.',
@@ -109,7 +116,11 @@ export function buildPortfolioPerformanceDisplay(performance, { holdingsCount = 
   const primaryReason = coverageReasons[0] || performance?.twr?.reason || null;
   const state = normalizePerformanceState(performance.status, coverageReasons);
   const series = validPerformanceSeries(performance.series);
-  const observationCount = series.length;
+  const reportedObservationCount = performance?.valuationCoverage?.observationCount
+    ?? performance?.valuationCoverage?.valuationMarks;
+  const observationCount = Number.isInteger(reportedObservationCount) && reportedObservationCount >= 0
+    ? reportedObservationCount
+    : series.length;
   const twr = metricValue(performance.twr, 'returnPct');
   const isCashOnly = holdingsCount === 0;
   const historyMode = observationCount <= 1

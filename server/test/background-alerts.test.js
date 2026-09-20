@@ -468,7 +468,7 @@ describe('V1.1 Improvement 04 — reliable background price alerts', () => {
 
     try {
       await cloudflareWorker.scheduled(
-        null,
+        { scheduledTime: Date.parse('2026-09-01T10:15:00.000Z') },
         { ALERT_SCHEDULER_TOKEN: SCHEDULER_TOKEN },
         {
           waitUntil(promise) {
@@ -491,6 +491,8 @@ describe('V1.1 Improvement 04 — reliable background price alerts', () => {
       assert.deepEqual(results[1].value, { success: true, persisted: 6 });
       assert.equal(results[2].status, 'fulfilled');
       assert.deepEqual(results[2].value, { success: true, persisted: 6 });
+      assert.equal(results[3].status, 'fulfilled');
+      assert.deepEqual(results[3].value, { due: false, valuationDate: '2026-09-01' });
     } finally {
       globalThis.fetch = originalFetch;
       console.error = originalConsoleError;

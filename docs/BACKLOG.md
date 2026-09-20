@@ -23,7 +23,7 @@ The following items are deferred for future phases and are strictly marked as **
 The following design decisions are unresolved and intentionally deferred. They must not be assumed or decided prematurely:
 
 - **Historical Multicurrency Portfolio Performance**:
-  - `UNKNOWN`: Authoritative historical FX series, timestamp alignment, enrichment/backfill policy, and replay rules needed to value non-VND holdings through time. Native-only transactions deliberately leave this VND history unavailable.
+  - `UNKNOWN`: Authoritative pre-foundation historical FX series, timestamp alignment, and any future governed backfill/replay policy. The daily valuation foundation deliberately starts forward from the first captured observation and does not resolve this backfill question.
 - **Multicurrency Cash**:
   - `UNKNOWN`: Multi-currency cash account architecture and cash ledger conversion tracking.
 - **Foreign Exchange History**:
@@ -46,6 +46,7 @@ Statuses describe the repository state after the local Portfolio P0.7 implementa
 | P0 | Completeness/freshness contract | Provider timestamps, FX timestamps, refresh attempts/results | Governed six-state vocabulary | Current Summary/Holdings/Allocation metrics expose explicit state/reason; missing/error/NaN never becomes zero or ready | COMPLETE_P0.3 |
 | P0 | Cash validation trust boundary | `get_cash_overview` result | Fail closed on malformed/missing authority | Overview rejects unavailable/malformed authoritative cash rather than coercing it to zero | COMPLETE_P0.2 |
 | P0 | Performance eligibility correction | Authority start, dated valuations, cash flows | No annualization below one year; explicit insufficient/not-applicable cases | Short history never displays annualized XIRR; failed XIRR remains null; cash-only and one-point cases have explicit states | COMPLETE_P0.2 |
+| P0 | Daily Portfolio valuation history | Reconciled snapshot, immutable price/FX evidence, external-flow intervals | One observation per profile/date; no backfill; gaps never bridged | Forward TWR/drawdown can accumulate from complete consecutive captured boundaries; MWR uses exact dated flows and legitimate endpoints | COMPLETE_LOCAL |
 | P0 | Performance information architecture | Portfolio performance projection and governed states | TWR primary; accounting P/L distinct; secondary MWR/drawdown; at most one chart | Sparse/cash-only states stay compact; measured period and EOD clock are explicit; missing metrics never become zero | COMPLETE_P0.5 |
 | P0 | Native-cost existing-position entry | Opening baseline native price/currency; optional historical VND basis | Native cost stays native; unknown VND basis stays null; opening remains cash-neutral | Crypto/Gold can be declared from remembered native cost without current-FX historical backfill; native and VND P/L remain explicitly separate | COMPLETE_P0.2.1 |
 | P0 | Historical transaction timing consistency | Transaction `executedAt`/`createdAt`, cash-ledger link, opening cutoff | Linked BUY/SELL use transaction execution as economic time; ambiguous history fails closed | A back-entered internal BUY/SELL cannot create a period where the position effect and matching cash effect occur on different dates | COMPLETE_P0.1 |

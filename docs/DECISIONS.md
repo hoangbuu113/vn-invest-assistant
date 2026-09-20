@@ -499,6 +499,15 @@ $$\text{Source Adapter} \longrightarrow \text{Canonical Validation / Sanitizatio
 - When holdings exist and none has a current VND value, aggregate invested and total Portfolio VND values are unavailable, even when cash is known. If only some holdings are valued, the known subtotal remains visibly partial rather than being presented as complete.
 - Legacy overview and composition routes remain temporarily available for compatibility and are not the current Portfolio page authority.
 
+### L. Daily Portfolio Valuation History
+- Historical Portfolio performance begins at the first legitimate persisted daily observation. No pre-foundation observation or retroactive price/FX reconstruction is created.
+- The governed valuation timezone is `Asia/Ho_Chi_Minh`; the existing Cloudflare cron captures at 23:45 local time. The current local day remains excluded from Performance until it is a completed captured valuation day.
+- `public.portfolio_daily_valuations` is private, append-only, profile-scoped, and unique on `(profile_id, valuation_date)`. Same-day retries reuse the existing immutable row, including a prior `PARTIAL` or `UNAVAILABLE` result.
+- Every observation preserves exact `observedAt`, price, and FX timestamps, sanitized holding/quantity evidence, valuation completeness, and a deterministic evidence hash. Unknown values remain `NULL`; confirmed numeric zero remains zero.
+- External capital flow is attached to the exact boundary interval `(previous observedAt, current observedAt]`. Consecutive dates use `CONSECUTIVE_DAILY_BOUNDARY`; a missing valuation date produces `MULTI_DAY_GAP` and TWR/drawdown never bridge it.
+- TWR requires at least two complete consecutive boundaries and available flow evidence. Drawdown consumes only the resulting valid wealth-index sequence. MWR/XIRR uses legitimate valuation endpoints and the exact dates of persisted external-flow events, retaining the 365-day annualization threshold.
+- Fresh CoinMarketCap direct USDT/VND may be persisted only as evidence for that captured current valuation. It never becomes transaction-time FX, opening-position VND cost, historical acquisition basis, or fabricated accounting P/L. USDT is never treated as USD and no CoinGecko fallback is introduced.
+
 ---
 
 ## 16. Portfolio P1A: Idempotent Financial Writes

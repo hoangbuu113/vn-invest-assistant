@@ -35,6 +35,7 @@ import { getPortfolioOverview } from './src/portfolio.js';
 import { getPortfolioComposition } from './src/composition.js';
 import { getPortfolioSnapshot } from './src/portfolioSnapshot.js';
 import { getPortfolioPerformance } from './src/performance.js';
+import { runScheduledPortfolioDailyValuationCapture } from './src/portfolioDailyValuations.js';
 import { getPortfolioBenchmark } from './src/benchmarks.js';
 import { getBinanceHealth } from './src/providers/index.js';
 import { getAssetAnalysis } from './src/analysis.js';
@@ -185,6 +186,7 @@ export function createApp(services = {}) {
     getPortfolioCompositionFn = getPortfolioComposition,
     getPortfolioSnapshotFn = getPortfolioSnapshot,
     getPortfolioPerformanceFn = getPortfolioPerformance,
+    runScheduledPortfolioDailyValuationCaptureFn = runScheduledPortfolioDailyValuationCapture,
     getPortfolioBenchmarkFn = getPortfolioBenchmark,
     getBinanceHealthFn = getBinanceHealth,
     checkSupabaseConnectionFn = checkSupabaseConnection,
@@ -2177,6 +2179,24 @@ export function createApp(services = {}) {
       return res.status(500).json({
         status: 'error',
         message: 'Failed to evaluate price alerts'
+      });
+    }
+  });
+
+  app.post('/api/internal/portfolio/daily-valuations/capture', requireAlertScheduler, async (_req, res) => {
+    try {
+      const summary = await runScheduledPortfolioDailyValuationCaptureFn({
+        now: new Date(),
+        client: supabaseAuthClient
+      });
+      return res.status(summary.failedCount > 0 ? 503 : 200).json({
+        status: summary.failedCount > 0 ? 'degraded' : 'ok',
+        data: summary
+      });
+    } catch {
+      return res.status(500).json({
+        status: 'error',
+        message: 'Failed to capture Portfolio daily valuations'
       });
     }
   });

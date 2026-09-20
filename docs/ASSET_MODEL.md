@@ -41,6 +41,7 @@ Features 16 through 30 and V1.1 Improvements establish the canonical schema, led
     $$\text{Source Adapter} \longrightarrow \text{Sanitization} \longrightarrow \text{Deduplication} \longrightarrow \text{Relevance Engine} \longrightarrow \text{Canonical News Feed}$$
   - Universal reporting currency is `VND`; native non-VND current valuations are converted only through an exact supported native-currency-to-VND rate. Without one, native value remains available and VND value is unavailable.
   - Current USDT-native Portfolio value uses Binance for the asset/USDT price and CoinMarketCap for the direct current USDT/VND conversion. These independent current observations never backfill historical VND cost basis.
+  - A fresh current native-price/FX pair may be retained inside an immutable daily Portfolio valuation observation as evidence for that observation boundary. This creates forward valuation history only; it does not convert or repair acquisition accounting.
   - Dual settlement is native-first for external non-VND execution. VND accounting is optional governed enrichment there, while VND and internal-cash trades retain mandatory VND accounting.
   - Canonical Portfolio eligibility is explicit asset metadata: supported stocks, ETFs, funds, Gold, and Crypto are `PORTFOLIO_ELIGIBLE`; the `USD/VND` market-context pair is `REFERENCE_ONLY`. Server routes and database triggers enforce this authority.
   - Public Multi-User Supabase Auth: Every user has an isolated `investor_profile` (`user_id UUID NOT NULL UNIQUE REFERENCES auth.users(id)`). New profiles start empty with `cash_available = 0`, 0 holdings, and 0 transactions. Legacy 20M test data was completely purged.
@@ -52,7 +53,7 @@ Features 16 through 30 and V1.1 Improvements establish the canonical schema, led
 - **Current Intentional Limitations**:
   - USD/VND historical bars remain unsupported due to unresolved daily timezone compatibility.
   - USD/VND deterministic analysis remains unsupported until trustworthy completed historical capability exists.
-  - Historical non-VND portfolio performance remains truthfully unavailable when historical FX authority is missing.
+  - Pre-foundation historical non-VND portfolio performance remains truthfully unavailable when historical FX authority is missing. Forward performance may use persisted daily boundaries whose exact native-price and direct-to-VND evidence was available at capture time.
   - Gold Spot history remains close-only, so OHLC-dependent analysis metrics remain unavailable for Gold. Crypto uses completed Binance OHLCV history.
   - External non-VND BUY/SELL and cash-neutral opening positions may retain supported native acquisition price/currency with an unknown (`NULL`) historical VND basis; current FX is never used to backfill it. They do not create foreign-currency cash balances and never assume USDT equals USD.
   - Historical non-VND performance remains unavailable without authoritative dated FX. Missing transaction-time VND enrichment does not become a zero flow or zero cost.

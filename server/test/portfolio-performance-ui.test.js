@@ -28,6 +28,7 @@ function makePerformance(overrides = {}) {
     },
     valuationCoverage: {
       status: 'complete',
+      observationCount: 5,
       valuationMarks: 5,
       carriedForwardMarks: 0,
       missingValuationMarks: 0,
@@ -102,7 +103,17 @@ describe('Portfolio V1 P0.5 performance display model', () => {
   });
 
   test('two or three observations remain a compact sparse period instead of a large chart', () => {
-    const view = buildPortfolioPerformanceDisplay(makePerformance({ series: makeSeries(3) }), { holdingsCount: 1 });
+    const view = buildPortfolioPerformanceDisplay(makePerformance({
+      valuationCoverage: {
+        status: 'complete',
+        observationCount: 3,
+        valuationMarks: 3,
+        carriedForwardMarks: 0,
+        missingValuationMarks: 0,
+        reasons: []
+      },
+      series: makeSeries(3)
+    }), { holdingsCount: 1 });
     assert.equal(view.historyMode, 'SPARSE');
     assert.equal(view.observationCount, 3);
     assert.equal(view.twr.value, 4);
@@ -112,12 +123,51 @@ describe('Portfolio V1 P0.5 performance display model', () => {
   test('a single valuation is insufficient history and never becomes zero return', () => {
     const view = buildPortfolioPerformanceDisplay(makePerformance({
       status: 'insufficient_data',
+      valuationCoverage: {
+        status: 'complete',
+        observationCount: 1,
+        valuationMarks: 1,
+        carriedForwardMarks: 0,
+        missingValuationMarks: 0,
+        reasons: []
+      },
       twr: { status: 'insufficient_data', returnPct: null, reason: 'INSUFFICIENT_DATE_SPAN' },
       series: makeSeries(1)
     }), { holdingsCount: 1 });
     assert.equal(view.historyMode, 'INSUFFICIENT_HISTORY');
     assert.equal(view.twr.value, null);
     assert.equal(view.twr.state, PERFORMANCE_DATA_STATES.INSUFFICIENT_HISTORY);
+  });
+
+  test('one persisted partial daily valuation is counted even when no TWR point can be formed', () => {
+    const view = buildPortfolioPerformanceDisplay(makePerformance({
+      status: 'partial',
+      valuationCoverage: {
+        status: 'partial',
+        observationCount: 1,
+        valuationMarks: 0,
+        carriedForwardMarks: 0,
+        missingValuationMarks: 1,
+        reasons: ['INCOMPLETE_DAILY_VALUATION']
+      },
+      twr: {
+        status: 'unavailable',
+        returnPct: null,
+        reason: 'INCOMPLETE_DAILY_VALUATION'
+      },
+      series: [{
+        date: '2026-09-01',
+        portfolioValueVnd: null,
+        netExternalFlowVnd: null,
+        twrIndex: null
+      }]
+    }), { holdingsCount: 1 });
+
+    assert.equal(view.observationCount, 1);
+    assert.equal(view.state, PERFORMANCE_DATA_STATES.PARTIAL);
+    assert.equal(view.historyMode, 'INSUFFICIENT_HISTORY');
+    assert.equal(view.twr.value, null);
+    assert.equal(view.canRenderChart, false);
   });
 
   test('MWR below one year stays unavailable with insufficient-history state', () => {

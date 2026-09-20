@@ -14,6 +14,7 @@ Portfolio P1B Auditable Correction / Reversal is implemented and verified locall
 Portfolio P1C Multi-Asset Activity Display is implemented locally. Activity and expanded transaction history use the canonical native execution pair (`executionUnitPrice` + `priceCurrency`) for VND, USD, and USDT. VND accounting price and total remain separately labelled; missing native execution metadata remains unavailable instead of falling back to a fabricated zero or VND execution price. Reversal transactions preserve the original native pair, while manual cash activity remains VND.
 Portfolio Native-First Accounting is implemented locally. Normal `EXTERNAL_SETTLEMENT` transactions whose execution currency is not VND persist their native quantity, execution unit price, and exact currency even when no VND conversion is available. `price` and affected VND P/L are then `NULL` with `accountingStatus: UNAVAILABLE`, never zero. `INTERNAL_VND_CASH` and VND-denominated transactions still require an exact VND price. Holdings project compatible-currency native weighted cost, while P1B reversals restore immutable pre-trade VND/native snapshots exactly.
 CoinMarketCap Basic is the approved authenticated provider for current USDT/VND Portfolio valuation. The server resolves only the direct `id=825` Tether-to-`VND` conversion, verifies VND through the provider fiat map, reuses a shared five-minute cache, and rejects observations older than ten minutes. Provider failure preserves native current value while current VND value remains unavailable. The separate CoinGecko transaction-time/historical accounting provider remains fail-closed and disabled by default through `COINGECKO_ACCOUNTING_RATE_ENABLED=false`.
+Portfolio Daily Valuation History is implemented locally. The existing Cloudflare 15-minute scheduler invokes one authenticated capture at 23:45 `Asia/Ho_Chi_Minh`. Each profile/date has at most one append-only observation containing the reconciled current snapshot, exact price/FX timestamps, holding quantities, valuation completeness, and the actual external-flow interval since the prior observation. No observations are seeded or backfilled.
 
 ## Portfolio — Verified Working Today
 - Supabase Auth user identity resolves through `investor_profile.user_id` to private `investor_profile.id`; protected Express routes pass that profile ID to service-role data access and profile-scoped financial RPCs.
@@ -25,7 +26,7 @@ CoinMarketCap Basic is the approved authenticated provider for current USDT/VND 
 - If holdings exist but none has a current VND value, invested value and total Portfolio VND value remain unavailable rather than displaying `0đ`; a partial known subtotal is labelled as partial.
 - Composition derives from one overview inside its own request and distinguishes complete, partial, unavailable, and cash-only allocation bases.
 - `GET /api/portfolio/snapshot` obtains one Portfolio overview and derives Summary, Holdings, and Allocation from that exact payload. Each block carries one deterministic `snapshotId`; the response also exposes a deterministic ledger-state checkpoint, calculation boundary, valuation coverage, and per-source price/FX timestamps.
-- Performance exposes daily chained end-of-day TWR, XIRR/MWR, wealth-index drawdown, accounting P/L, coverage reasons, and completed-date series for 1W/1M/3M/6M/1Y.
+- Performance consumes immutable captured daily observations for daily chained end-of-day TWR, XIRR/MWR, wealth-index drawdown, accounting P/L, coverage reasons, and completed-date series for 1W/1M/3M/6M/1Y. History begins at the first legitimate capture.
 - Missing or malformed authoritative cash is exposed as unavailable/partial rather than zero. Confirmed authoritative zero remains a valid zero.
 - MWR/XIRR is annualized only when the evaluated cash-flow span is at least 365 days; shorter or unsolved cases return a null metric with an explicit reason.
 - Historical valuation carry-forward is limited by the asset market policy: VN/global weekday markets may carry a completed close across weekend non-trading dates, while a missing subsequent trading-day close is stale and ineligible for TWR, MWR, drawdown, and end-period P/L.
@@ -100,12 +101,13 @@ CoinMarketCap Basic is the approved authenticated provider for current USDT/VND 
 
 ## Portfolio — Partial
 - Performance and benchmark remain historical/EOD projections separate from the P0.3 current Summary/Holdings/Allocation snapshot clock.
-- Historical performance supports only holdings that can be valued directly in VND. Historical non-VND performance remains unavailable because authoritative historical FX is not integrated.
+- Forward daily performance can include non-VND holdings only when that captured boundary contains trustworthy native-price and direct-to-VND evidence. Missing or partial captured boundaries remain explicit and cannot enter TWR/drawdown.
 
 ## Portfolio — Missing
 - Governed fee, tax, dividend/income, adjustment, and asset-transfer ledger events.
 - Daily P/L and unified total/accounting P/L in the overview API.
 - Historical FX authority for non-VND portfolio performance.
+- Pre-foundation daily Portfolio observations and any retroactive valuation backfill remain intentionally unavailable.
 
 ## Portfolio — Unverified Runtime Facts
 - Provider availability and current price/FX freshness were not live-probed.

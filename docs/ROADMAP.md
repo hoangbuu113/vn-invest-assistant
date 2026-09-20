@@ -76,7 +76,13 @@ Post-V1 engineering is structured as targeted **V1.1 Improvements** (NOT Feature
 ### V1.1 Improvement 19 & 25: Cross-Currency Accounting Foundation
 - **Scope**: Dual-settlement VND-basis cross-currency accounting foundation.
 - **Valuation**: Generic USD-quoted Crypto and Gold current VND valuations use the direct USD/VND authority. A holding with authoritative USDT native cost uses Binance USDT for its current native value and authenticated CoinMarketCap ID `825` direct-to-VND conversion for current VND reporting only; USDT is never aliased to USD.
-- **Historical Invariant**: Historical non-VND portfolio performance remains truthfully unavailable when historical FX authority is missing.
+- **Historical Invariant**: Pre-foundation non-VND performance remains unavailable without authoritative dated FX. Forward daily performance may accumulate only from immutable observations captured with trustworthy current native-price and direct-to-VND evidence; no backfill is permitted.
+
+### Portfolio Daily Valuation History Foundation
+- **Status**: Implemented locally; migration and scheduler deployment remain pending controlled release.
+- **Authority**: One immutable private observation per profile and `Asia/Ho_Chi_Minh` valuation date, captured at 23:45 by the existing authenticated Cloudflare scheduler.
+- **Performance**: Persisted complete consecutive boundaries drive TWR and drawdown; exact dated external-flow evidence and legitimate endpoints drive MWR/XIRR. Missing days and partial/unavailable boundaries remain explicit.
+- **Safety**: No seeded observations, no historical FX reconstruction, no acquisition-basis mutation, no USDT/USD alias, and no CoinGecko fallback.
 
 ### V1.1 Improvement 27: Macro & Regime Hardening
 - **Scope**: CPI reliability improvements active (NSO CPI archive cross-checks).

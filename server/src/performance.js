@@ -4,16 +4,9 @@ import {
   PUBLIC_HISTORY_RANGES
 } from './history.js';
 import { REPORTING_CURRENCY } from './fx.js';
-import {
-  getAssets,
-  getCashActivation,
-  getHoldings,
-  getPositionOpeningBaselines,
-  privateSupabase
-} from './supabase.js';
-import { getCashLedger } from './cash.js';
+import { privateSupabase } from './supabase.js';
 import { getPortfolioTransactions } from './transactions.js';
-import { getMarketHistory } from './market.js';
+import { listPortfolioDailyValuations } from './portfolioDailyValuations.js';
 
 export const PERFORMANCE_TIMEZONE = 'Asia/Ho_Chi_Minh';
 export const PUBLIC_PERFORMANCE_RANGES = PUBLIC_HISTORY_RANGES;
@@ -1227,6 +1220,418 @@ export function calculatePortfolioPerformance({
   };
 }
 
+function dailyHistoryUnavailableResult({ range, requestedStartDate, endDate, reason }) {
+  const insufficient = reason === 'INSUFFICIENT_VALUATION_OBSERVATIONS';
+  return {
+    status: insufficient ? 'insufficient_data' : 'unavailable',
+    reportingCurrency: REPORTING_CURRENCY,
+    period: {
+      range,
+      requestedStartDate,
+      actualStartDate: null,
+      endDate,
+      inceptionDate: null,
+      clippedToInception: false,
+      performanceTimezone: PERFORMANCE_TIMEZONE
+    },
+    valuationCoverage: {
+      status: 'unavailable',
+      observationCount: 0,
+      valuationMarks: 0,
+      carriedForwardMarks: 0,
+      missingValuationMarks: 0,
+      reasons: [reason]
+    },
+    twr: {
+      status: insufficient ? 'insufficient_data' : 'unavailable',
+      returnPct: null,
+      methodology: PERFORMANCE_METHODOLOGY.twrMethodology,
+      exact: false,
+      reason
+    },
+    mwr: {
+      status: insufficient ? 'insufficient_data' : 'unavailable',
+      annualizedReturnPct: null,
+      methodology: PERFORMANCE_METHODOLOGY.mwrMethodology,
+      dayCountConvention: PERFORMANCE_METHODOLOGY.dayCountConvention,
+      reason
+    },
+    pnl: {
+      status: 'unavailable',
+      currency: REPORTING_CURRENCY,
+      asOfDate: endDate,
+      realizedPnlDuringPeriod: null,
+      cumulativeRealizedPnlToEnd: null,
+      unrealizedPnlAtEnd: null,
+      totalAccountingPnlAtEnd: null,
+      reason
+    },
+    drawdown: {
+      status: insufficient ? 'insufficient_data' : 'unavailable',
+      currentDrawdownPct: null,
+      maxDrawdownPct: null,
+      peakDate: null,
+      troughDate: null,
+      reason
+    },
+    benchmarkEligibility: { status: 'not_applicable', reason },
+    methodology: PERFORMANCE_METHODOLOGY,
+    series: []
+  };
+}
+
+function observationIsComplete(observation) {
+  return observation?.status === 'AVAILABLE'
+    && Number.isFinite(observation?.totalPortfolioValueVnd)
+    && observation.totalPortfolioValueVnd >= 0;
+}
+
+function observationCoverageReasons(observation) {
+  const reasons = observation?.observationEvidence?.valuation?.coverageReasons;
+  return Array.isArray(reasons) ? reasons.filter(Boolean) : [];
+}
+
+function calculateDailyObservationAccountingPnl({ observations, transactions, actualStartDate, actualEndDate }) {
+  const terminal = observations.at(-1);
+  let realizedPnlDuringPeriod = 0;
+  let cumulativeRealizedPnlToEnd = 0;
+  let realizedComplete = true;
+
+  for (const transaction of transactions) {
+    const dateKey = normalizeTimestampToDateKey(transaction.executedAt || transaction.executed_at);
+    if (!dateKey || dateKey > actualEndDate) continue;
+    const type = transaction.transactionType || transaction.transaction_type;
+    if (!['SELL', 'SELL_REVERSAL'].includes(type)) continue;
+    const realized = optionalFiniteNumber(transaction.realizedPnL ?? transaction.realized_pnl);
+    if (realized === null) {
+      realizedComplete = false;
+      continue;
+    }
+    cumulativeRealizedPnlToEnd += realized;
+    if (dateKey > actualStartDate) realizedPnlDuringPeriod += realized;
+  }
+
+  const unrealizedStatus = terminal?.observationEvidence?.valuation?.unrealizedPnlStatus;
+  const unrealizedComplete = ['AVAILABLE', 'NOT_APPLICABLE'].includes(unrealizedStatus)
+    && Number.isFinite(terminal?.unrealizedPnlVnd);
+  const status = realizedComplete && unrealizedComplete ? 'available' : 'partial';
+  const unrealizedPnlAtEnd = unrealizedComplete ? terminal.unrealizedPnlVnd : null;
+
+  return {
+    status,
+    currency: REPORTING_CURRENCY,
+    asOfDate: actualEndDate,
+    realizedPnlDuringPeriod: realizedComplete ? realizedPnlDuringPeriod : null,
+    cumulativeRealizedPnlToEnd: realizedComplete ? cumulativeRealizedPnlToEnd : null,
+    unrealizedPnlAtEnd,
+    totalAccountingPnlAtEnd: realizedComplete && unrealizedComplete
+      ? cumulativeRealizedPnlToEnd + unrealizedPnlAtEnd
+      : null,
+    reason: status === 'available'
+      ? null
+      : (!realizedComplete ? 'VND_REALIZED_PNL_UNAVAILABLE' : 'VND_UNREALIZED_PNL_UNAVAILABLE')
+  };
+}
+
+/**
+ * Calculates historical performance exclusively from immutable captured
+ * valuation boundaries. Missing dates and incomplete observations remain
+ * visible coverage failures; no price or FX value is reconstructed.
+ */
+export function calculatePortfolioPerformanceFromDailyValuations({
+  range = '1M',
+  now = new Date(),
+  observations = [],
+  transactions = []
+} = {}) {
+  const { completedEndDate, requestedStartDate } = getPerformanceCalendarWindow(range, now);
+  const ordered = [...observations]
+    .filter((observation) => observation?.valuationDate <= completedEndDate)
+    .sort((left, right) => left.valuationDate.localeCompare(right.valuationDate));
+  if (ordered.length === 0) {
+    return dailyHistoryUnavailableResult({
+      range,
+      requestedStartDate,
+      endDate: completedEndDate,
+      reason: 'NO_DAILY_VALUATION_HISTORY'
+    });
+  }
+
+  const inceptionDate = ordered[0].valuationDate;
+  const actualStartDate = requestedStartDate < inceptionDate ? inceptionDate : requestedStartDate;
+  const clippedToInception = requestedStartDate < inceptionDate;
+  const periodObservations = ordered.filter((observation) => (
+    observation.valuationDate >= actualStartDate
+    && observation.valuationDate <= completedEndDate
+  ));
+  if (periodObservations.length === 0) {
+    const unavailable = dailyHistoryUnavailableResult({
+      range,
+      requestedStartDate,
+      endDate: completedEndDate,
+      reason: 'INSUFFICIENT_VALUATION_OBSERVATIONS'
+    });
+    unavailable.period.inceptionDate = inceptionDate;
+    unavailable.period.clippedToInception = clippedToInception;
+    return unavailable;
+  }
+
+  const byDate = new Map(periodObservations.map((observation) => [observation.valuationDate, observation]));
+  const expectedDates = generateDateSpan(actualStartDate, completedEndDate);
+  const missingDates = expectedDates.filter((dateKey) => !byDate.has(dateKey));
+  const incompleteObservations = periodObservations.filter((observation) => !observationIsComplete(observation));
+  const coverageReasons = new Set();
+  if (missingDates.length > 0) coverageReasons.add('MISSING_DAILY_OBSERVATION');
+  for (const observation of incompleteObservations) {
+    const reasons = observationCoverageReasons(observation);
+    if (reasons.length === 0) coverageReasons.add('INCOMPLETE_DAILY_VALUATION');
+    reasons.forEach((reason) => coverageReasons.add(reason));
+  }
+
+  let flowCoverageComplete = true;
+  for (let index = 1; index < periodObservations.length; index += 1) {
+    const current = periodObservations[index];
+    const previous = periodObservations[index - 1];
+    const consecutive = addCalendarDays(previous.valuationDate, 1) === current.valuationDate;
+    if (!consecutive || current.flowIntervalType !== 'CONSECUTIVE_DAILY_BOUNDARY') {
+      coverageReasons.add('MISSING_DAILY_OBSERVATION');
+      flowCoverageComplete = false;
+    } else if (current.flowStatus !== 'AVAILABLE' || !Number.isFinite(current.boundaryExternalFlowVnd)) {
+      coverageReasons.add('EXTERNAL_FLOW_EVIDENCE_UNAVAILABLE');
+      flowCoverageComplete = false;
+    }
+  }
+
+  const hasEnoughBoundaries = periodObservations.length >= 2;
+  const valuationCoverageComplete = missingDates.length === 0 && incompleteObservations.length === 0;
+  let twrStatus = 'available';
+  let twrReason = null;
+  if (!hasEnoughBoundaries) {
+    twrStatus = 'insufficient_data';
+    twrReason = 'INSUFFICIENT_VALUATION_OBSERVATIONS';
+  } else if (!valuationCoverageComplete) {
+    twrStatus = 'unavailable';
+    twrReason = coverageReasons.has('MISSING_DAILY_OBSERVATION')
+      ? 'MISSING_DAILY_OBSERVATION'
+      : (Array.from(coverageReasons)[0] || 'INCOMPLETE_DAILY_VALUATION');
+  } else if (!flowCoverageComplete) {
+    twrStatus = 'unavailable';
+    twrReason = Array.from(coverageReasons)[0] || 'EXTERNAL_FLOW_EVIDENCE_UNAVAILABLE';
+  } else if (periodObservations[0].totalPortfolioValueVnd <= 0) {
+    twrStatus = 'unavailable';
+    twrReason = 'ZERO_STARTING_VALUATION';
+  }
+
+  let twrIndex = 100;
+  let peakIndex = 100;
+  let maxDrawdownPct = 0;
+  let peakDate = periodObservations[0].valuationDate;
+  let troughDate = periodObservations[0].valuationDate;
+  const calculatedSeries = [];
+
+  if (twrStatus === 'available') {
+    calculatedSeries.push({
+      date: periodObservations[0].valuationDate,
+      portfolioValueVnd: periodObservations[0].totalPortfolioValueVnd,
+      netExternalFlowVnd: null,
+      cashCapitalFlowVnd: null,
+      externalSettlementFlowVnd: null,
+      twrIndex,
+      drawdownPct: 0
+    });
+    for (let index = 1; index < periodObservations.length; index += 1) {
+      const previous = periodObservations[index - 1];
+      const current = periodObservations[index];
+      if (previous.totalPortfolioValueVnd <= 0) {
+        twrStatus = 'unavailable';
+        twrReason = 'ZERO_CAPITAL_BREAK';
+        break;
+      }
+      const subperiodReturn = (
+        (current.totalPortfolioValueVnd - current.boundaryExternalFlowVnd)
+        / previous.totalPortfolioValueVnd
+      ) - 1;
+      twrIndex *= 1 + subperiodReturn;
+      if (!Number.isFinite(twrIndex)) {
+        twrStatus = 'unavailable';
+        twrReason = 'INVALID_TWR_RESULT';
+        break;
+      }
+      if (twrIndex > peakIndex) {
+        peakIndex = twrIndex;
+        peakDate = current.valuationDate;
+      }
+      const drawdownPct = ((twrIndex - peakIndex) / peakIndex) * 100;
+      if (drawdownPct < maxDrawdownPct) {
+        maxDrawdownPct = drawdownPct;
+        troughDate = current.valuationDate;
+      }
+      calculatedSeries.push({
+        date: current.valuationDate,
+        portfolioValueVnd: current.totalPortfolioValueVnd,
+        netExternalFlowVnd: current.boundaryExternalFlowVnd,
+        cashCapitalFlowVnd: null,
+        externalSettlementFlowVnd: null,
+        twrIndex,
+        drawdownPct
+      });
+    }
+  }
+
+  const series = twrStatus === 'available'
+    ? calculatedSeries
+    : periodObservations.map((observation) => ({
+        date: observation.valuationDate,
+        portfolioValueVnd: observationIsComplete(observation)
+          ? observation.totalPortfolioValueVnd
+          : null,
+        netExternalFlowVnd: observation.flowStatus === 'AVAILABLE'
+          ? observation.boundaryExternalFlowVnd
+          : null,
+        cashCapitalFlowVnd: null,
+        externalSettlementFlowVnd: null,
+        twrIndex: null,
+        drawdownPct: null
+      }));
+
+  const drawdown = twrStatus === 'available'
+    ? {
+        status: 'available',
+        currentDrawdownPct: series.at(-1)?.drawdownPct ?? 0,
+        maxDrawdownPct,
+        peakDate,
+        troughDate,
+        reason: null
+      }
+    : {
+        status: twrStatus,
+        currentDrawdownPct: null,
+        maxDrawdownPct: null,
+        peakDate: null,
+        troughDate: null,
+        reason: twrReason
+      };
+
+  let mwr;
+  const endpointObservations = periodObservations.filter(observationIsComplete);
+  const firstEndpoint = endpointObservations[0];
+  const lastEndpoint = endpointObservations.at(-1);
+  const firstEndpointIndex = firstEndpoint ? periodObservations.indexOf(firstEndpoint) : -1;
+  const lastEndpointIndex = lastEndpoint ? periodObservations.indexOf(lastEndpoint) : -1;
+  const endpointFlowIntervals = firstEndpointIndex >= 0 && lastEndpointIndex > firstEndpointIndex
+    ? periodObservations.slice(firstEndpointIndex + 1, lastEndpointIndex + 1)
+    : [];
+  const flowEvidenceAvailable = endpointFlowIntervals.every((observation) => (
+    observation.flowStatus === 'AVAILABLE'
+    && Number.isFinite(observation.boundaryExternalFlowVnd)
+    && Array.isArray(observation?.observationEvidence?.flowInterval?.events)
+  ));
+  if (!firstEndpoint || !lastEndpoint || firstEndpoint === lastEndpoint) {
+    mwr = {
+      status: 'insufficient_data',
+      annualizedReturnPct: null,
+      methodology: PERFORMANCE_METHODOLOGY.mwrMethodology,
+      dayCountConvention: PERFORMANCE_METHODOLOGY.dayCountConvention,
+      reason: 'INSUFFICIENT_VALUATION_OBSERVATIONS'
+    };
+  } else if (!flowEvidenceAvailable) {
+    mwr = {
+      status: 'unavailable',
+      annualizedReturnPct: null,
+      methodology: PERFORMANCE_METHODOLOGY.mwrMethodology,
+      dayCountConvention: PERFORMANCE_METHODOLOGY.dayCountConvention,
+      reason: 'EXTERNAL_FLOW_EVIDENCE_UNAVAILABLE'
+    };
+  } else {
+    const xirrFlows = [{
+      dateKey: firstEndpoint.valuationDate,
+      amount: -firstEndpoint.totalPortfolioValueVnd
+    }];
+    for (let index = firstEndpointIndex + 1; index <= lastEndpointIndex; index += 1) {
+      const observation = periodObservations[index];
+      const events = observation.observationEvidence.flowInterval.events;
+      for (const event of events) {
+        const amount = optionalFiniteNumber(event?.amountVnd);
+        const dateKey = normalizeTimestampToDateKey(event?.economicAt);
+        if (amount === null || !dateKey) {
+          mwr = {
+            status: 'unavailable',
+            annualizedReturnPct: null,
+            methodology: PERFORMANCE_METHODOLOGY.mwrMethodology,
+            dayCountConvention: PERFORMANCE_METHODOLOGY.dayCountConvention,
+            reason: 'EXTERNAL_FLOW_EVIDENCE_UNAVAILABLE'
+          };
+          break;
+        }
+        if (amount === 0) continue;
+        xirrFlows.push({
+          dateKey,
+          amount: -amount
+        });
+      }
+      if (mwr) break;
+    }
+    if (!mwr) {
+      xirrFlows.push({
+        dateKey: lastEndpoint.valuationDate,
+        amount: lastEndpoint.totalPortfolioValueVnd
+      });
+      mwr = solveXirr(xirrFlows);
+    }
+  }
+
+  const actualEndDate = periodObservations.at(-1).valuationDate;
+  const pnl = calculateDailyObservationAccountingPnl({
+    observations: periodObservations,
+    transactions,
+    actualStartDate,
+    actualEndDate
+  });
+  const completeCount = periodObservations.filter(observationIsComplete).length;
+  const coverageStatus = valuationCoverageComplete && flowCoverageComplete ? 'complete' : 'partial';
+  const hasHoldings = periodObservations.at(-1).totalHoldingsCount > 0;
+
+  return {
+    status: twrStatus === 'available'
+      ? 'available'
+      : (twrStatus === 'insufficient_data' ? 'insufficient_data' : 'partial'),
+    reportingCurrency: REPORTING_CURRENCY,
+    period: {
+      range,
+      requestedStartDate,
+      actualStartDate,
+      endDate: completedEndDate,
+      inceptionDate,
+      clippedToInception,
+      performanceTimezone: PERFORMANCE_TIMEZONE
+    },
+    valuationCoverage: {
+      status: coverageStatus,
+      observationCount: periodObservations.length,
+      valuationMarks: completeCount,
+      carriedForwardMarks: 0,
+      missingValuationMarks: missingDates.length + incompleteObservations.length,
+      reasons: Array.from(coverageReasons),
+      missingDates
+    },
+    twr: {
+      status: twrStatus,
+      returnPct: twrStatus === 'available' ? (twrIndex - 100) : null,
+      methodology: PERFORMANCE_METHODOLOGY.twrMethodology,
+      exact: false,
+      reason: twrReason
+    },
+    mwr,
+    pnl,
+    drawdown,
+    benchmarkEligibility: hasHoldings
+      ? { status: 'eligible', reason: null }
+      : { status: 'not_applicable', reason: 'CASH_ONLY_PORTFOLIO' },
+    methodology: PERFORMANCE_METHODOLOGY,
+    series
+  };
+}
+
 /**
  * Service function to retrieve and compute portfolio performance from database & market adapters.
  */
@@ -1235,68 +1640,19 @@ export async function getPortfolioPerformance({
   range = '1M',
   now = new Date(),
   client = privateSupabase,
-  getCashActivationFn = getCashActivation,
-  getCashLedgerFn = getCashLedger,
-  getPositionOpeningBaselinesFn = getPositionOpeningBaselines,
   getPortfolioTransactionsFn = getPortfolioTransactions,
-  getAssetsFn = getAssets,
-  getMarketHistoryFn = getMarketHistory
+  listPortfolioDailyValuationsFn = listPortfolioDailyValuations
 } = {}) {
-  const profileOptions = profileId ? { profileId } : {};
-
-  // 1. Fetch immutable data concurrently
-  const [
-    cashActivation,
-    cashEntries,
-    positionBaselines,
-    transactions,
-    assets
-  ] = await Promise.all([
-    getCashActivationFn(client, profileOptions),
-    getCashLedgerFn(client, profileOptions),
-    getPositionOpeningBaselinesFn(client, profileOptions),
-    getPortfolioTransactionsFn(profileOptions, client, profileOptions),
-    getAssetsFn(client)
+  if (!profileId) throw performanceError('profileId is required', 'PROFILE_REQUIRED', 403);
+  const { completedEndDate } = getPerformanceCalendarWindow(range, now);
+  const [observations, transactions] = await Promise.all([
+    listPortfolioDailyValuationsFn({ profileId, endDate: completedEndDate }, client),
+    getPortfolioTransactionsFn({ profileId }, client, { profileId })
   ]);
-
-  // 2. Identify all asset symbols that need historical price bars
-  const requiredAssetIds = new Set([
-    ...positionBaselines
-      .filter((baseline) => !baseline.cancelledAt && !baseline.cancelled_at)
-      .map((baseline) => baseline.assetId || baseline.asset_id),
-    ...transactions.map((transaction) => transaction.assetId || transaction.asset_id)
-  ].filter(Boolean));
-
-  const relevantAssets = assets.filter((asset) => requiredAssetIds.has(asset.id));
-  const assetSymbols = Array.from(new Set(
-    relevantAssets
-      .map((a) => a.symbol)
-      .filter((sym) => typeof sym === 'string' && sym.trim().length > 0)
-  ));
-
-  // 3. Fetch completed daily history for each asset (1Y lookback to cover full history needed)
-  const priceHistoryEntries = await Promise.all(
-    assetSymbols.map(async (symbol) => {
-      try {
-        const history = await getMarketHistoryFn(symbol, '1Y', now);
-        return [symbol, history?.bars || []];
-      } catch {
-        return [symbol, []];
-      }
-    })
-  );
-
-  const priceHistoryMap = Object.fromEntries(priceHistoryEntries);
-
-  // 4. Calculate pure deterministic performance
-  return calculatePortfolioPerformance({
+  return calculatePortfolioPerformanceFromDailyValuations({
     range,
     now,
-    cashActivation,
-    cashEntries,
-    positionBaselines,
-    transactions,
-    assets: relevantAssets,
-    priceHistoryMap
+    observations,
+    transactions
   });
 }
