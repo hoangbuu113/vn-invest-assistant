@@ -51,6 +51,7 @@ The following architectural and product decisions are confirmed and authoritativ
   - The single cash ledger remains strictly `VND`; the transaction ledger preserves native execution metadata as its immutable economic authority.
   - For `EXTERNAL_SETTLEMENT` with a non-VND execution currency, VND accounting is optional system-derived enrichment. A missing conversion is persisted as `price = NULL` and `accountingStatus = UNAVAILABLE`, never zero, and does not block the native trade. VND-denominated and `INTERNAL_VND_CASH` transactions still require an exact VND price. `USDT` is never silently treated as `USD`, and no multi-currency cash balance is implied.
   - The direct CoinGecko USDT/VND enrichment path remains governed by `COINGECKO_ACCOUNTING_RATE_ENABLED`, disabled by default, and fail-closed. Enabling it is a separate production release decision.
+  - CoinMarketCap Basic is separately approved for **current Portfolio valuation only**. Its authenticated server-side `v2/tools/price-conversion` request uses Tether CMC ID `825` and direct `convert=VND`; it cannot provide transaction-time or historical accounting evidence.
 - **Zero-Loss Data Migration**:
   - Existing asset UUIDs are preserved in place without deletion or re-creation.
   - All existing holdings, portfolio transactions, cash ledger entries, watchlist items, and price alerts remain linked to their original asset UUIDs.
@@ -109,6 +110,7 @@ The following architectural and product decisions are confirmed and authoritativ
 - **Representative Real Multi-Asset Providers (Feature 20A)**:
   - **Twelve Data**: Production provider for direct `USD/VND` FX exchange rate resolution.
   - **CoinGecko**: Production provider for crypto spot snapshots using explicit, immutable coin IDs (`bitcoin`, `ethereum`, `solana`).
+  - **CoinMarketCap**: Production provider for authenticated direct current `USDT/VND` Portfolio valuation using Tether ID `825`. The server-side result is cached for five minutes and rejected after ten minutes; provider failure is fail-closed without CoinGecko or USD fallback.
   - **Alpha Vantage**: Production provider for Gold Spot (`XAU/USD`) using `GOLD_SILVER_SPOT` with `symbol=XAU` (spot bullion, NOT COMEX `GC=F` futures).
   - **Yahoo Finance**: Retained as production provider for Vietnamese equities and exchange-traded ETFs (`FUEVFVND.VN`, `FUESSVFL.VN`).
   - Canonical `USD/VND` asset is market context only; it is not a cash account and does not enable holding USD cash.
@@ -281,9 +283,9 @@ $$\text{Source Adapter} \longrightarrow \text{Canonical Validation / Sanitizatio
 ## 8. Multi-Asset Capability Integration & Hybrid Crypto Authority (Features 24 & 26)
 
 ### A. Canonical Crypto Valuation vs Native Market-Data Boundary
-- **Canonical Valuation Snapshot**: **CoinGecko** (quoted in `USD`) is the authoritative Crypto snapshot for portfolio/accounting valuation and other canonical snapshot consumers.
+- **Canonical Valuation Snapshot**: **CoinGecko** (quoted in `USD`) remains the authoritative generic Crypto snapshot. It is not a substitute for the native USDT price of a USDT-cost holding and does not authorize USDT/USD equivalence.
 - **Realtime, History & Analysis**: **Binance Spot** (quoted in native `USDT`) is authoritative for rolling-24h realtime reference, completed UTC daily OHLCV history, and Feature 22 Analysis V2 inputs.
-- **Accounting Isolation**: Canonical Crypto `quote_currency` remains `USD` for the generic market snapshot. A holding with authoritative USDT acquisition cost may separately use the exact Binance USDT current price for native value/P&L, and only a direct governed USDT/VND quote may convert that current value to VND. Binance history/analysis and approximate references do not fabricate historical accounting.
+- **Accounting Isolation**: Canonical Crypto `quote_currency` remains `USD` for the generic market snapshot. A holding with authoritative USDT acquisition cost may separately use the exact Binance USDT current price for native value/P&L, and only the authenticated CoinMarketCap direct Tether ID `825` to VND conversion may convert that current value to VND. That current conversion, Binance history/analysis, and approximate references never fabricate historical accounting.
 - **No Stablecoin Assumption**: The system does not assert or encode `1 USDT = 1 USD`.
 - **Binance Service Architecture**:
   - One shared backend realtime stream connection (`wss://stream.binance.com:9443/ws/!miniTicker@arr`).
@@ -486,7 +488,7 @@ $$\text{Source Adapter} \longrightarrow \text{Canonical Validation / Sanitizatio
 - `position_opening_baselines.execution_unit_price` and `price_currency` are the canonical native acquisition-cost pair for cash-neutral existing-position declarations; no duplicate native-cost columns are introduced.
 - `position_opening_baselines.opening_average_cost` and the holdings projection `average_cost` are optional authoritative historical VND basis fields. Unknown is `NULL`, never zero and never a conversion using current FX.
 - Native unrealized P/L is permitted only against a current price in exactly the same currency and only while the opening position remains unmodified by later ledger activity. VND unrealized P/L remains unavailable without authoritative historical VND cost.
-- Binance USDT may supply the current native price for a USDT-cost holding. Current VND valuation then requires a valid direct USDT/VND quote; absence of that quote leaves VND valuation unavailable. No USDT/USD equivalence is assumed.
+- Binance USDT may supply the current native price for a USDT-cost holding. Current VND valuation then requires a fresh authenticated CoinMarketCap direct USDT/VND observation; absence, staleness, rate limiting, malformed data, or authorization failure leaves VND valuation unavailable. No CoinGecko fallback and no USDT/USD equivalence are permitted.
 
 ### K. P0.3 Unified Current-State Snapshot
 - `GET /api/portfolio/snapshot` is the authoritative current-state read projection for Portfolio Summary, Holdings, and Allocation. Those blocks consume one response and one `snapshotId`; Performance and Benchmark retain their separate historical clocks.
@@ -494,6 +496,7 @@ $$\text{Source Adapter} \longrightarrow \text{Canonical Validation / Sanitizatio
 - `snapshotId` is derived from that ledger checkpoint plus the exact price, FX, valuation, P/L, and source-as-of inputs used. Recalculating identical inputs preserves identity; a changed authoritative input changes identity.
 - `valuationAsOf` is the explicit calculation boundary. Per-source `priceAsOf` and `fxAsOf` remain visible because provider observations are not transactionally simultaneous.
 - Current-state metrics use the governed six-state vocabulary. A partial projection may expose known subtotals, but unknown cash, prices, FX, cost basis, or P/L remain null rather than zero.
+- When holdings exist and none has a current VND value, aggregate invested and total Portfolio VND values are unavailable, even when cash is known. If only some holdings are valued, the known subtotal remains visibly partial rather than being presented as complete.
 - Legacy overview and composition routes remain temporarily available for compatibility and are not the current Portfolio page authority.
 
 ---

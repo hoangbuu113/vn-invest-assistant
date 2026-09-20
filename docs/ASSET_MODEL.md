@@ -20,7 +20,7 @@ Features 16 through 30 and V1.1 Improvements establish the canonical schema, led
     - `BTC`, `ETH`, `SOL`, `BNB`, `XRP`, `TRX`, `ZEC`, `DOGE`, `LINK`, `ADA`, `XLM`, `BCH`, `GRAM`, `LTC`, `HBAR`, `AVAX`, `SHIB`, `SUI`, `UNI`, `NEAR`, `TAO`, `PUMP`, `AAVE`, `ASTER`, `WLFI`, `ONDO`, `ENA`, `MORPHO`, `PEPE`, `DOT`, `WLD`, `ETC`, `POL`, `ATOM`, `JUP`, `APT`, `ARB`, `FET`, `INJ`, `FIL`
     - Canonical valuation snapshot provider: `coingecko` $\rightarrow$ `<EXPLICIT_COINGECKO_ID>` (quoted in `USD`). This authority feeds portfolio/accounting valuation.
     - Realtime, history, and Analysis V2 provider: `binance` $\rightarrow$ `<EXPLICIT_SPOT_USDT_PAIR>` (quoted in native `USDT`). Realtime uses one shared server-side miniTicker stream WebSocket; completed UTC daily OHLCV history uses one shared multiplexed Binance WebSocket API connection.
-    - `USDT` is never silently redefined as `USD`. Current `≈VND` is approximate/reference-only and never enters accounting or historical analysis.
+    - `USDT` is never silently redefined as `USD`. Authenticated CoinMarketCap Tether ID `825` direct-to-VND conversion may enrich current Portfolio reporting only; it never enters historical accounting or analysis.
     - News: CoinDesk official RSS integration with contextual ticker disambiguation
   - **Gold Spot** (`GLOBAL_24_5`, `UTC`, base: `XAU`, quote: `USD`, `oz`):
     - `XAU/USD` (provider: `alphavantage` $\rightarrow$ `XAU` via `GOLD_SILVER_SPOT`)
@@ -40,6 +40,7 @@ Features 16 through 30 and V1.1 Improvements establish the canonical schema, led
   - Multi-source news architecture (`server/src/news/`):
     $$\text{Source Adapter} \longrightarrow \text{Sanitization} \longrightarrow \text{Deduplication} \longrightarrow \text{Relevance Engine} \longrightarrow \text{Canonical News Feed}$$
   - Universal reporting currency is `VND`; native non-VND current valuations are converted only through an exact supported native-currency-to-VND rate. Without one, native value remains available and VND value is unavailable.
+  - Current USDT-native Portfolio value uses Binance for the asset/USDT price and CoinMarketCap for the direct current USDT/VND conversion. These independent current observations never backfill historical VND cost basis.
   - Dual settlement is native-first for external non-VND execution. VND accounting is optional governed enrichment there, while VND and internal-cash trades retain mandatory VND accounting.
   - Canonical Portfolio eligibility is explicit asset metadata: supported stocks, ETFs, funds, Gold, and Crypto are `PORTFOLIO_ELIGIBLE`; the `USD/VND` market-context pair is `REFERENCE_ONLY`. Server routes and database triggers enforce this authority.
   - Public Multi-User Supabase Auth: Every user has an isolated `investor_profile` (`user_id UUID NOT NULL UNIQUE REFERENCES auth.users(id)`). New profiles start empty with `cash_available = 0`, 0 holdings, and 0 transactions. Legacy 20M test data was completely purged.
@@ -151,6 +152,8 @@ Historical time series analysis requires asset-aware handling:
   - Every FX conversion must track the FX rate value, rate timestamp, and rate provider.
   - If a required FX rate is missing or unavailable, the asset valuation must yield an explicit **partial valuation** (`valuationStatus: 'partial'`).
   - **Never** assume an FX rate of 1.0 or silently bypass conversion.
+  - CoinMarketCap current USDT/VND evidence is process-cached for approximately five minutes and has a hard maximum observation age of ten minutes. Stale evidence is not persisted or reused as historical accounting authority.
+  - Unknown aggregate VND value is `null`, never numeric zero. A subtotal over only valued holdings must remain explicitly partial.
 
 ---
 
@@ -180,6 +183,7 @@ The double-ledger architecture is the sole authoritative mechanism for portfolio
   - **Yahoo Finance**: Vietnamese listed equities & ETFs.
   - **CoinGecko**: Canonical USD valuation snapshots for 40 cryptocurrencies.
   - **Binance Spot**: Native USDT realtime, completed daily OHLCV history, and Analysis V2 inputs for 40 cryptocurrencies.
+  - **CoinMarketCap**: Authenticated direct current Tether (`id=825`) to VND conversion for current Portfolio valuation only.
   - **Alpha Vantage**: Gold Spot (`XAU/USD`).
   - **Twelve Data**: `USD/VND` exchange rate.
 - Application code must never build provider-specific query parameters directly.

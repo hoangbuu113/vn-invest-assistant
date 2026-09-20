@@ -81,6 +81,33 @@ describe('Portfolio V1 P0.4 Summary and Holdings display', () => {
     assert.equal(view.isCashOnly, true);
   });
 
+  test('partial summary labels a known subtotal without presenting it as complete', () => {
+    const view = buildPortfolioSummaryDisplay(snapshot({
+      status: 'PARTIAL',
+      investedMarketValue: 10_000_000,
+      totalPortfolioValue: 30_000_000,
+      summary: {
+        metricStates: {
+          totalPortfolioValue: 'PARTIAL',
+          investedMarketValue: 'PARTIAL',
+          unrealizedPnl: 'UNAVAILABLE'
+        }
+      },
+      holdings: [vndHolding(), vndHolding({
+        id: 'holding-unknown',
+        assetId: 'asset-unknown',
+        symbol: 'UNKNOWN',
+        reportingMarketValue: null,
+        valuationStatus: 'unavailable',
+        dataStatus: 'UNAVAILABLE'
+      })]
+    }));
+
+    assert.equal(view.total, 30_000_000);
+    assert.equal(view.totalState, 'PARTIAL');
+    assert.equal(view.totalLabel, 'Tạm tính phần đã định giá');
+  });
+
   test('normal holding uses snapshot allocation rather than calculating a second weight', () => {
     const holding = vndHolding();
     const view = buildPortfolioHoldingDisplay(holding, {
@@ -241,7 +268,8 @@ describe('Portfolio V1 P0.4 Summary and Holdings display', () => {
       readFile(new URL('../../client/src/components/PortfolioActivitySection.jsx', import.meta.url), 'utf8')
     ]);
 
-    assert.equal((componentSource.match(/Tổng giá trị danh mục/g) || []).length, 1);
+    assert.equal((componentSource.match(/id="portfolio-summary-title"/g) || []).length, 1);
+    assert.match(componentSource, /\{view\.totalLabel\}/);
     assert.equal((componentSource.match(/Hiện danh mục đang giữ tiền mặt\./g) || []).length, 1);
     assert.match(componentSource, /<details className="portfolio-holding-card"/);
     assert.match(componentSource, /Ghi giao dịch/);

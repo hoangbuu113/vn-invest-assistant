@@ -75,7 +75,7 @@ Post-V1 engineering is structured as targeted **V1.1 Improvements** (NOT Feature
 
 ### V1.1 Improvement 19 & 25: Cross-Currency Accounting Foundation
 - **Scope**: Dual-settlement VND-basis cross-currency accounting foundation.
-- **Valuation**: Crypto and Gold spot current VND valuations operate through current USD/VND authority.
+- **Valuation**: Generic USD-quoted Crypto and Gold current VND valuations use the direct USD/VND authority. A holding with authoritative USDT native cost uses Binance USDT for its current native value and authenticated CoinMarketCap ID `825` direct-to-VND conversion for current VND reporting only; USDT is never aliased to USD.
 - **Historical Invariant**: Historical non-VND portfolio performance remains truthfully unavailable when historical FX authority is missing.
 
 ### V1.1 Improvement 27: Macro & Regime Hardening

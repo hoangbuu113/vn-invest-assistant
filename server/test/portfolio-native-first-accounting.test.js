@@ -338,7 +338,7 @@ describe('Native-first portfolio accounting', () => {
       { cash_available: 0 }, holdings, {}, {
         USDT: {
           baseCurrency: 'USDT', quoteCurrency: 'VND', rate: 25000,
-          provider: 'CoinGecko', sourceTimestamp: '2026-09-15T01:00:00Z',
+          provider: 'COINMARKETCAP', sourceTimestamp: '2026-09-15T01:00:00Z',
           availability: 'available', freshness: 'current'
         }
       }, nativeReference
@@ -347,33 +347,40 @@ describe('Native-first portfolio accounting', () => {
     assert.ok(Math.abs(available.holdings[0].nativeUnrealizedPnL - (226 * (0.5 - 0.36402))) < 1e-12);
   });
 
-  test('current USDT/VND valuation uses only the governed direct pair and stays unavailable when disabled', async () => {
-    const disabled = await getFxRate('USDT', 'VND', {
-      accountingRateEnabled: false,
-      getAccountingRateFn: async (pair, options) => {
-        assert.deepEqual(pair, { baseCurrency: 'USDT', quoteCurrency: 'VND' });
-        assert.equal(options.enabled, false);
+  test('current USDT/VND valuation uses only the approved CoinMarketCap direct pair', async () => {
+    let coinGeckoCalls = 0;
+    const unavailable = await getFxRate('USDT', 'VND', {
+      getCurrentUsdtVndRateFn: async ({ baseCurrency, quoteCurrency }) => {
+        assert.deepEqual([baseCurrency, quoteCurrency], ['USDT', 'VND']);
         return {
           availability: 'unavailable',
-          reason: 'PROVIDER_NOT_ENABLED',
-          provider: 'CoinGecko'
+          reason: 'FX_PROVIDER_UNCONFIGURED',
+          provider: 'COINMARKETCAP'
         };
+      },
+      getAccountingRateFn: async () => {
+        coinGeckoCalls += 1;
+        throw new Error('CoinGecko accounting must not resolve current valuation');
       }
     });
-    assert.equal(disabled.availability, 'unavailable');
-    assert.equal(disabled.rate, null);
+    assert.equal(unavailable.availability, 'unavailable');
+    assert.equal(unavailable.rate, null);
+    assert.equal(coinGeckoCalls, 0);
 
     const direct = await getFxRate('USDT', 'VND', {
-      accountingRateEnabled: true,
-      getAccountingRateFn: async (pair) => {
-        assert.deepEqual(pair, { baseCurrency: 'USDT', quoteCurrency: 'VND' });
+      getCurrentUsdtVndRateFn: async ({ baseCurrency, quoteCurrency }) => {
+        assert.deepEqual([baseCurrency, quoteCurrency], ['USDT', 'VND']);
         return {
           availability: 'available',
           baseCurrency: 'USDT',
           quoteCurrency: 'VND',
           rate: 25000,
-          provider: 'CoinGecko',
-          observedAt: '2026-09-15T01:00:00.000Z'
+          provider: 'COINMARKETCAP',
+          providerTimestamp: '2026-09-15T01:00:00.000Z',
+          lastUpdated: '2026-09-15T01:00:00.000Z',
+          fetchedAt: '2026-09-15T01:00:01.000Z',
+          sourceAssetId: 825,
+          sourceAssetSymbol: 'USDT'
         };
       }
     });
@@ -381,7 +388,8 @@ describe('Native-first portfolio accounting', () => {
     assert.equal(direct.baseCurrency, 'USDT');
     assert.equal(direct.quoteCurrency, 'VND');
     assert.equal(direct.rate, 25000);
-    assert.equal(direct.provider, 'CoinGecko');
+    assert.equal(direct.provider, 'COINMARKETCAP');
+    assert.equal(direct.sourceAssetId, 825);
   });
 
   test('performance treats missing accounting as unavailable but preserves explicit zero', () => {

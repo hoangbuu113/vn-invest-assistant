@@ -78,7 +78,7 @@ function Summary({ snapshot, actions }) {
       <div className="portfolio-summary-heading">
         <div>
           <span className="portfolio-eyebrow">Tổng quan hiện tại</span>
-          <h3 id="portfolio-summary-title">Tổng giá trị danh mục</h3>
+          <h3 id="portfolio-summary-title">{view.totalLabel}</h3>
         </div>
         <div className="portfolio-summary-freshness">
           <StateBadge tone={view.stateTone}>{view.stateLabel}</StateBadge>

@@ -82,6 +82,9 @@ export function buildPortfolioSummaryDisplay(snapshot) {
     valuationAsOf: snapshot?.valuationAsOf || snapshot?.calculatedAt || null,
     total,
     totalState,
+    totalLabel: totalState === PORTFOLIO_DISPLAY_STATES.PARTIAL && total !== null
+      ? 'Tạm tính phần đã định giá'
+      : 'Tổng giá trị danh mục',
     cash,
     cashState,
     invested,

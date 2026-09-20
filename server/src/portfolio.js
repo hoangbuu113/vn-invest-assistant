@@ -356,6 +356,7 @@ export function calculatePortfolioValuation(
   let totalCostBasis = 0;
   let pricedCostBasis = 0;
   let totalMarketValue = 0;
+  let valuedHoldingsCount = 0;
   let pnlComparableMarketValue = 0;
   let hasUnavailablePricing = false;
   let hasStalePricing = false;
@@ -371,6 +372,7 @@ export function calculatePortfolioValuation(
     }
     if (['available', 'stale'].includes(item.valuationStatus) && typeof item.reportingMarketValue === 'number') {
       totalMarketValue += item.reportingMarketValue;
+      valuedHoldingsCount += 1;
       if (item.valuationStatus === 'stale') hasStalePricing = true;
     } else {
       hasUnavailablePricing = true;
@@ -392,8 +394,11 @@ export function calculatePortfolioValuation(
     ? (totalUnrealizedPnL / pricedCostBasis) * 100
     : null;
 
-  const totalPortfolioValue = cashStatus === 'available'
-    ? cashAvailable + totalMarketValue
+  const investedMarketValue = holdingsWithMarket.length > 0 && valuedHoldingsCount === 0
+    ? null
+    : totalMarketValue;
+  const totalPortfolioValue = cashStatus === 'available' && investedMarketValue !== null
+    ? cashAvailable + investedMarketValue
     : null;
   const valuationStatus = cashStatus === 'unavailable' || hasUnavailablePricing
     ? 'partial'
@@ -426,7 +431,7 @@ export function calculatePortfolioValuation(
           ? (totalCostBasis > 0 ? 'partial' : 'unavailable')
           : 'complete',
       pricedCostBasis: pricedCostBasis,
-      totalMarketValue: totalMarketValue,
+      totalMarketValue: investedMarketValue,
       totalUnrealizedPnL: totalUnrealizedPnL,
       totalUnrealizedPnLPercent: totalUnrealizedPnLPercent,
       totalPortfolioValue: totalPortfolioValue,

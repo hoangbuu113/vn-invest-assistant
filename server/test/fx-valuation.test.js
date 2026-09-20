@@ -143,7 +143,8 @@ describe('Feature 19 — FX and VND portfolio valuation foundation', () => {
     assert.equal(valued.marketValue, null);
     assert.equal(valued.valuationStatus, 'unavailable');
     assert.equal(valued.valuationReason, 'FX_PROVIDER_UNCONFIGURED');
-    assert.equal(overview.summary.totalMarketValue, 0);
+    assert.equal(overview.summary.totalMarketValue, null);
+    assert.equal(overview.summary.totalPortfolioValue, null);
     assert.equal(overview.summary.valuationStatus, 'partial');
   });
 

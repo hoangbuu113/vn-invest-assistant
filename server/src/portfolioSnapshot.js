@@ -213,7 +213,15 @@ function assertOverviewConsistency(overview) {
       ? sum + holding.reportingMarketValue
       : sum;
   }, 0);
-  if (overview.summary.totalMarketValue !== valuedHoldingsTotal) {
+  const valuedHoldingsCount = overview.holdings.filter((holding) => (
+    ['available', 'stale'].includes(holding?.valuationStatus)
+    && typeof holding.reportingMarketValue === 'number'
+    && Number.isFinite(holding.reportingMarketValue)
+  )).length;
+  const expectedInvestedValue = overview.holdings.length > 0 && valuedHoldingsCount === 0
+    ? null
+    : valuedHoldingsTotal;
+  if (overview.summary.totalMarketValue !== expectedInvestedValue) {
     throw new Error('Portfolio overview invested market value is inconsistent with valued holdings');
   }
 
@@ -225,7 +233,9 @@ function assertOverviewConsistency(overview) {
     ) {
       throw new Error('Portfolio overview available cash must be a finite non-negative number');
     }
-    const expectedTotal = overview.summary.cashAvailable + valuedHoldingsTotal;
+    const expectedTotal = expectedInvestedValue === null
+      ? null
+      : overview.summary.cashAvailable + expectedInvestedValue;
     if (overview.summary.totalPortfolioValue !== expectedTotal) {
       throw new Error('Portfolio overview total is inconsistent with cash plus valued holdings');
     }
@@ -256,6 +266,7 @@ export function buildPortfolioSnapshot({ profileId, overview, calculatedAt }) {
   })}`;
   const status = snapshotStatus(overview, composition);
   const totalPortfolioValueStatus = overview.summary.cashStatus === 'available'
+    && overview.summary.totalPortfolioValue !== null
     ? status
     : PORTFOLIO_DATA_STATES.UNAVAILABLE;
   const investedStatus = investedValueStatus(composition);

@@ -147,7 +147,8 @@ export function normalizeFxRate(rawRate, requestedBaseCurrency, requestedQuoteCu
 
 /**
  * Resolves a direct FX quote for converting non-VND asset prices into VND reporting currency.
- * Dispatches USD -> VND to Twelve Data FX provider.
+ * Dispatches USD -> VND to Twelve Data and current USDT -> VND to the
+ * production-approved CoinMarketCap conversion provider.
  *
  * @param {string} baseCurrency - Source quote currency (e.g. 'USD')
  * @param {string} [quoteCurrency=REPORTING_CURRENCY] - Target reporting currency (defaults to 'VND')
@@ -181,36 +182,52 @@ export async function getFxRate(baseCurrency, quoteCurrency = REPORTING_CURRENCY
   }
 
   if (requestedBase === 'USDT' && requestedQuote === 'VND') {
-    const { getAccountingRate } = await import('./accountingRate.js');
-    const resolveAccountingRate = options.getAccountingRateFn || getAccountingRate;
-    const result = await resolveAccountingRate({
-      baseCurrency: requestedBase,
-      quoteCurrency: requestedQuote
-    }, {
-      enabled: options.accountingRateEnabled,
-      now: options.now,
-      fetchFn: options.fetchFn,
-      apiKey: options.apiKey,
-      getCurrentObservationFn: options.getCurrentObservationFn
-    });
+    const { getCoinMarketCapCurrentUsdtVndRate } = await import('./providers/coinmarketcap.js');
+    const resolveCurrentUsdtVndRate = options.getCurrentUsdtVndRateFn
+      || getCoinMarketCapCurrentUsdtVndRate;
+    let result;
+    try {
+      result = await resolveCurrentUsdtVndRate({
+        baseCurrency: requestedBase,
+        quoteCurrency: requestedQuote,
+        now: options.now,
+        fetchFn: options.fetchFn,
+        apiKey: options.coinMarketCapApiKey ?? options.apiKey,
+        cache: options.cache,
+        timeoutMs: options.timeoutMs
+      });
+    } catch {
+      result = null;
+    }
 
     if (result?.availability !== 'available') {
       return createUnavailableFxRate(requestedBase, requestedQuote, result?.reason || 'FX_UNAVAILABLE', {
-        provider: result?.provider,
-        sourceTimestamp: result?.observedAt,
-        freshness: result?.availability === 'stale' ? 'stale' : 'unknown'
+        provider: result?.provider || 'COINMARKETCAP',
+        sourceTimestamp: result?.providerTimestamp,
+        freshness: result?.freshness
       });
     }
 
-    return normalizeFxRate({
+    const normalized = normalizeFxRate({
       baseCurrency: requestedBase,
       quoteCurrency: requestedQuote,
       rate: result.rate,
       provider: result.provider,
-      sourceTimestamp: result.observedAt,
+      sourceTimestamp: result.providerTimestamp,
       availability: 'available',
       freshness: 'current'
     }, requestedBase, requestedQuote);
+    return normalized.availability === 'available'
+      ? {
+          ...normalized,
+          providerTimestamp: result.providerTimestamp,
+          lastUpdated: result.lastUpdated,
+          fetchedAt: result.fetchedAt,
+          sourceAssetId: result.sourceAssetId,
+          sourceAssetSymbol: result.sourceAssetSymbol,
+          cacheStatus: result.cacheStatus
+        }
+      : normalized;
   }
 
   return createUnavailableFxRate(

@@ -197,7 +197,11 @@ describe('Portfolio V1 P0.3 unified current-state snapshot', () => {
     assert.equal(snapshot.investedMarketValue, null);
     assert.equal(snapshot.summary.totalMarketValue, null);
     assert.equal(snapshot.summary.metricStates.investedMarketValue, PORTFOLIO_DATA_STATES.UNAVAILABLE);
-    assert.equal(snapshot.totalPortfolioValue, 500);
+    assert.equal(snapshot.totalPortfolioValue, null);
+    assert.equal(
+      snapshot.summary.metricStates.totalPortfolioValue,
+      PORTFOLIO_DATA_STATES.UNAVAILABLE
+    );
     assert.equal(snapshot.status, PORTFOLIO_DATA_STATES.PARTIAL);
     assert.equal(snapshot.holdings[0].reportingMarketValue, null);
   });
@@ -251,7 +255,7 @@ describe('Portfolio V1 P0.3 unified current-state snapshot', () => {
         }
       }],
       { BTC: { price: 60_000, currency: 'USD', source: 'CoinGecko', priceAsOf: '2026-09-10T02:00:00.000Z' } },
-      { USDT: { baseCurrency: 'USDT', quoteCurrency: 'VND', rate: 25_000, availability: 'available', provider: 'CoinGecko', sourceTimestamp: '2026-09-10T01:00:00.000Z', freshness: 'current' } },
+      { USDT: { baseCurrency: 'USDT', quoteCurrency: 'VND', rate: 25_000, availability: 'available', provider: 'COINMARKETCAP', sourceTimestamp: '2026-09-10T01:00:00.000Z', freshness: 'current' } },
       { BTC: { price: 61_000, currency: 'USDT', source: 'Binance', observedAt: '2026-09-10T02:00:01.000Z' } }
     );
     const snapshot = buildPortfolioSnapshot({ profileId: PROFILE_ID, overview, calculatedAt: CALCULATED_AT });
@@ -271,7 +275,7 @@ describe('Portfolio V1 P0.3 unified current-state snapshot', () => {
     assert.equal(snapshot.totalCostBasis, null);
     assert.equal(snapshot.unrealizedPnL, null);
     assert.equal(snapshot.sources.prices[0].source, 'Binance');
-    assert.equal(snapshot.sources.fx[0].provider, 'CoinGecko');
+    assert.equal(snapshot.sources.fx[0].provider, 'COINMARKETCAP');
   });
 
   test('cash-only production path is provider-free and reports truthful applicability', async () => {
