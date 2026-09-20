@@ -1222,6 +1222,7 @@ export function calculatePortfolioPerformance({
 
 function dailyHistoryUnavailableResult({ range, requestedStartDate, endDate, reason }) {
   const insufficient = reason === 'INSUFFICIENT_VALUATION_OBSERVATIONS';
+  const hasObservations = reason !== 'NO_DAILY_VALUATION_HISTORY';
   return {
     status: insufficient ? 'insufficient_data' : 'unavailable',
     reportingCurrency: REPORTING_CURRENCY,
@@ -1229,7 +1230,7 @@ function dailyHistoryUnavailableResult({ range, requestedStartDate, endDate, rea
       range,
       requestedStartDate,
       actualStartDate: null,
-      endDate,
+      endDate: hasObservations ? endDate : null,
       inceptionDate: null,
       clippedToInception: false,
       performanceTimezone: PERFORMANCE_TIMEZONE
@@ -1259,7 +1260,7 @@ function dailyHistoryUnavailableResult({ range, requestedStartDate, endDate, rea
     pnl: {
       status: 'unavailable',
       currency: REPORTING_CURRENCY,
-      asOfDate: endDate,
+      asOfDate: hasObservations ? endDate : null,
       realizedPnlDuringPeriod: null,
       cumulativeRealizedPnlToEnd: null,
       unrealizedPnlAtEnd: null,

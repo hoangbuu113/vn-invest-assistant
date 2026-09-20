@@ -131,6 +131,12 @@ export function buildPortfolioPerformanceDisplay(performance, { holdingsCount = 
 
   const drawdownValue = metricValue(performance.drawdown, 'maxDrawdownPct');
 
+  const hasObservations = observationCount > 0;
+  const startDate = hasObservations ? (performance?.period?.actualStartDate || null) : null;
+  const endDate = hasObservations ? (performance?.period?.endDate || null) : null;
+  const historicalAsOf = hasObservations ? (performance?.period?.endDate || null) : null;
+  const pnlAsOfDate = hasObservations ? (performance?.pnl?.asOfDate || null) : null;
+
   return {
     state,
     stateMeta: performanceStateMeta(state),
@@ -139,11 +145,11 @@ export function buildPortfolioPerformanceDisplay(performance, { holdingsCount = 
     coverageReasons,
     period: {
       requestedRange: performance?.period?.range || null,
-      startDate: performance?.period?.actualStartDate || null,
-      endDate: performance?.period?.endDate || null,
+      startDate,
+      endDate,
       clippedToInception: Boolean(performance?.period?.clippedToInception)
     },
-    historicalAsOf: performance?.period?.endDate || null,
+    historicalAsOf,
     observationCount,
     series,
     historyMode,
@@ -171,7 +177,7 @@ export function buildPortfolioPerformanceDisplay(performance, { holdingsCount = 
     pnl: {
       state: normalizePerformanceState(performance?.pnl?.status, performance?.pnl?.reason),
       reason: performance?.pnl?.reason || null,
-      asOfDate: performance?.pnl?.asOfDate || null,
+      asOfDate: pnlAsOfDate,
       totalAtEnd: finiteNumber(performance?.pnl?.totalAccountingPnlAtEnd)
         ? performance.pnl.totalAccountingPnlAtEnd
         : null,
@@ -195,7 +201,8 @@ export function buildBenchmarkDisplay({
   benchmark = null,
   loading = false,
   error = null,
-  holdingsCount = 0
+  holdingsCount = 0,
+  observationCount = null
 } = {}) {
   const id = typeof benchmarkId === 'string' ? benchmarkId.toUpperCase() : 'NONE';
   if (holdingsCount === 0) {
@@ -218,6 +225,20 @@ export function buildBenchmarkDisplay({
       state: PERFORMANCE_DATA_STATES.NOT_APPLICABLE,
       reason: 'BENCHMARK_NOT_SELECTED',
       name: null,
+      series: [],
+      canOverlay: false,
+      isReferenceOnly: false,
+      portfolioReturnPct: null,
+      benchmarkReturnPct: null,
+      differencePctPoints: null
+    };
+  }
+  if (observationCount === 0) {
+    return {
+      id,
+      state: PERFORMANCE_DATA_STATES.UNAVAILABLE,
+      reason: 'NO_DAILY_VALUATION_HISTORY',
+      name: benchmark?.benchmark?.name || (id === 'SP500' ? 'S&P 500' : 'VN-Index'),
       series: [],
       canOverlay: false,
       isReferenceOnly: false,

@@ -235,12 +235,15 @@ function LoadingSkeleton() {
 
 function HistorySummary({ view }) {
   if (view.historyMode === 'SUFFICIENT' && view.canRenderChart) return null;
-  const isSingle = view.observationCount <= 1;
+  const isZero = view.observationCount === 0;
+  const isSingle = view.observationCount === 1;
   const title = view.isCashOnly
     ? 'Danh mục hiện chỉ có tiền mặt'
-    : isSingle
-      ? 'Chưa đủ lịch sử để đánh giá hiệu suất.'
-      : 'Kỳ đo hiện có ít quan sát';
+    : isZero
+      ? 'Chưa có lịch sử định giá'
+      : isSingle
+        ? 'Chưa đủ lịch sử để đánh giá hiệu suất.'
+        : 'Kỳ đo hiện có ít quan sát';
   const description = view.isCashOnly
     ? 'Biểu đồ đầu tư và benchmark được thu gọn; các số liệu hợp lệ vẫn hiển thị.'
     : view.primaryReason
@@ -321,8 +324,13 @@ export function PortfolioPerformanceSection({
     };
   }, [range]);
 
+  const view = useMemo(
+    () => buildPortfolioPerformanceDisplay(performance, { holdingsCount }),
+    [performance, holdingsCount]
+  );
+
   useEffect(() => {
-    if (holdingsCount === 0 || benchmarkId === 'NONE') {
+    if (holdingsCount === 0 || benchmarkId === 'NONE' || view.observationCount === 0) {
       setBenchmark(null);
       setBenchmarkLoading(false);
       setBenchmarkError(null);
@@ -347,19 +355,16 @@ export function PortfolioPerformanceSection({
       active = false;
       controller.abort();
     };
-  }, [range, benchmarkId, holdingsCount]);
+  }, [range, benchmarkId, holdingsCount, view.observationCount]);
 
-  const view = useMemo(
-    () => buildPortfolioPerformanceDisplay(performance, { holdingsCount }),
-    [performance, holdingsCount]
-  );
   const benchmarkView = useMemo(() => buildBenchmarkDisplay({
     benchmarkId,
     benchmark,
     loading: benchmarkLoading,
     error: benchmarkError,
-    holdingsCount
-  }), [benchmarkId, benchmark, benchmarkLoading, benchmarkError, holdingsCount]);
+    holdingsCount,
+    observationCount: view.observationCount
+  }), [benchmarkId, benchmark, benchmarkLoading, benchmarkError, holdingsCount, view.observationCount]);
   const showChart = view.canRenderChart;
   const hasCoverageWarning = view.coverage?.carriedForwardMarks > 0
     || view.coverage?.missingValuationMarks > 0
@@ -418,7 +423,11 @@ export function PortfolioPerformanceSection({
               <div className="performance-primary-value">
                 <PercentValue value={view.twr.value} unavailableText={view.twr.state === PERFORMANCE_DATA_STATES.INSUFFICIENT_HISTORY ? 'Chưa đủ lịch sử' : '—'} />
               </div>
-              <p>{formatDateKey(view.period.startDate)}–{formatDateKey(view.period.endDate)} · {view.observationCount} quan sát hợp lệ</p>
+              {view.observationCount === 0 ? (
+                <p>Bắt đầu: — · Kết thúc: — · 0 quan sát hợp lệ</p>
+              ) : (
+                <p>{formatDateKey(view.period.startDate)}–{formatDateKey(view.period.endDate)} · {view.observationCount} quan sát hợp lệ</p>
+              )}
               <small>Đã loại ảnh hưởng của tiền nạp/rút; ước tính theo chuỗi cuối ngày.</small>
             </article>
 
@@ -435,7 +444,7 @@ export function PortfolioPerformanceSection({
             </article>
           </div>
 
-          {view.state !== PERFORMANCE_DATA_STATES.AVAILABLE && (
+          {view.state !== PERFORMANCE_DATA_STATES.AVAILABLE && view.historyMode === 'SUFFICIENT' && (
             <div className={`performance-inline-state is-${view.state.toLowerCase()}`}>
               <strong>{view.stateMeta.label}</strong>
               <span>{view.primaryReasonMessage}</span>
