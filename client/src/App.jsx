@@ -1,7 +1,6 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, Suspense } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { apiFetch } from './utils/api.js';
-import { Fintech3DOrb } from './components/Fintech3DOrb.jsx';
 import { MarketTicker } from './components/MarketTicker.jsx';
 import { MoneyFlowAmbience } from './components/MoneyFlowAmbience.jsx';
 import { WealthOrbit } from './components/WealthOrbit.jsx';
@@ -18,22 +17,7 @@ import {
   AnimatedNavTabs
 } from './components/MotionHelpers.jsx';
 
-import { PriceHistoryChart } from './components/PriceHistoryChart.jsx';
-import { AssetAnalysisSection } from './components/AssetAnalysisSection.jsx';
-import { EquityFundamentalsSection } from './components/EquityFundamentalsSection.jsx';
-import { PortfolioCompositionSection } from './components/PortfolioCompositionSection.jsx';
-import { AssetComparisonSection } from './components/AssetComparisonSection.jsx';
-import PriceAlertModal from './components/PriceAlertModal.jsx';
-import AlertCenterSection from './components/AlertCenterSection.jsx';
-import TransactionModal from './components/TransactionModal.jsx';
-import CashMovementModal from './components/CashMovementModal.jsx';
-import OpeningPositionModal from './components/OpeningPositionModal.jsx';
-import { PortfolioPerformanceSection } from './components/PortfolioPerformanceSection.jsx';
-import { PortfolioSummaryHoldings } from './components/PortfolioSummaryHoldings.jsx';
-import { PortfolioActivitySection } from './components/PortfolioActivitySection.jsx';
 import { useAppNavigation } from './hooks/useAppNavigation.js';
-import { OpportunitySection } from './components/OpportunitySection.jsx';
-import { InvestmentBriefPanel } from './components/InvestmentBriefPanel.jsx';
 import {
   formatNativeAmount,
   formatMarketChange,
@@ -48,6 +32,44 @@ import {
   isCryptoDisplayAsset,
   selectCryptoWatchlistDisplayData
 } from './utils/watchlistDisplay.js';
+
+// Lazy-loaded components to optimize critical startup path and code-split non-dashboard features
+const Fintech3DOrb = React.lazy(() =>
+  import('./components/Fintech3DOrb.jsx').then((m) => ({ default: m.Fintech3DOrb }))
+);
+const PriceHistoryChart = React.lazy(() =>
+  import('./components/PriceHistoryChart.jsx').then((m) => ({ default: m.PriceHistoryChart }))
+);
+const AssetAnalysisSection = React.lazy(() =>
+  import('./components/AssetAnalysisSection.jsx').then((m) => ({ default: m.AssetAnalysisSection }))
+);
+const EquityFundamentalsSection = React.lazy(() =>
+  import('./components/EquityFundamentalsSection.jsx').then((m) => ({ default: m.EquityFundamentalsSection }))
+);
+const PortfolioCompositionSection = React.lazy(() =>
+  import('./components/PortfolioCompositionSection.jsx').then((m) => ({ default: m.PortfolioCompositionSection }))
+);
+const AssetComparisonSection = React.lazy(() =>
+  import('./components/AssetComparisonSection.jsx').then((m) => ({ default: m.AssetComparisonSection }))
+);
+const PriceAlertModal = React.lazy(() => import('./components/PriceAlertModal.jsx'));
+const AlertCenterSection = React.lazy(() => import('./components/AlertCenterSection.jsx'));
+const TransactionModal = React.lazy(() => import('./components/TransactionModal.jsx'));
+const CashMovementModal = React.lazy(() => import('./components/CashMovementModal.jsx'));
+const OpeningPositionModal = React.lazy(() => import('./components/OpeningPositionModal.jsx'));
+const PortfolioPerformanceSection = React.lazy(() =>
+  import('./components/PortfolioPerformanceSection.jsx').then((m) => ({ default: m.PortfolioPerformanceSection }))
+);
+const PortfolioSummaryHoldings = React.lazy(() =>
+  import('./components/PortfolioSummaryHoldings.jsx').then((m) => ({ default: m.PortfolioSummaryHoldings }))
+);
+const PortfolioActivitySection = React.lazy(() =>
+  import('./components/PortfolioActivitySection.jsx').then((m) => ({ default: m.PortfolioActivitySection }))
+);
+const OpportunitySection = React.lazy(() =>
+  import('./components/OpportunitySection.jsx').then((m) => ({ default: m.OpportunitySection }))
+);
+
 
 const CATEGORY_STYLES = {
   market: { label: 'Thị trường', bg: '#eff6ff', color: '#1d4ed8', border: '#bfdbfe', accent: '#2563eb' },
@@ -227,7 +249,7 @@ const sectionItemVariants = {
   animate: { opacity: 1, y: 0, transition: { duration: 0.25, ease: [0.16, 1, 0.3, 1] } }
 };
 
-function App({ onLogout }) {
+function App({ onLogout, user: initialUser, profile: initialProfile }) {
   const loadAssetDetailRef = useRef(null);
   const clearAssetDetailRef = useRef(null);
 
@@ -244,16 +266,16 @@ function App({ onLogout }) {
     onClearAsset: () => clearAssetDetailRef.current?.()
   });
 
-  // Profile state
-  const [profile, setProfile] = useState(null);
-  const [profileLoading, setProfileLoading] = useState(true);
+  // Profile state - initialized directly from AuthGate prop to eliminate duplicate startup fetch
+  const [profile, setProfile] = useState(initialProfile || null);
+  const [profileLoading, setProfileLoading] = useState(!initialProfile);
   const [profileSaving, setProfileSaving] = useState(false);
   const [profileError, setProfileError] = useState(null);
   const [profileSuccess, setProfileSuccess] = useState(false);
 
-  // Form states
-  const [riskTolerance, setRiskTolerance] = useState('moderate');
-  const [investmentHorizon, setInvestmentHorizon] = useState('medium');
+  // Form states - initialized from initialProfile preferences if present
+  const [riskTolerance, setRiskTolerance] = useState(initialProfile?.risk_tolerance || 'moderate');
+  const [investmentHorizon, setInvestmentHorizon] = useState(initialProfile?.investment_horizon || 'medium');
 
   // Holdings state
   const [holdings, setHoldings] = useState([]);
@@ -408,10 +430,12 @@ function App({ onLogout }) {
       });
   }, []);
 
-  // Fetch profile on initial mount
+  // Fetch profile on initial mount only if not already provided by AuthGate
   useEffect(() => {
-    fetchProfile(true);
-  }, [fetchProfile]);
+    if (!initialProfile) {
+      fetchProfile(true);
+    }
+  }, [fetchProfile, initialProfile]);
 
   // Handle saving profile changes (preferences only; cash is ledger-authoritative)
   const handleSaveProfile = (e) => {
@@ -484,10 +508,12 @@ function App({ onLogout }) {
       });
   }, []);
 
-  // Fetch holdings on mount
+  // Fetch holdings only when on profile tab or when opening position modal is opened
   useEffect(() => {
-    fetchHoldings(true);
-  }, [fetchHoldings]);
+    if (activeTab === 'profile' || isOpeningPositionModalOpen) {
+      fetchHoldings(holdings.length === 0);
+    }
+  }, [activeTab, isOpeningPositionModalOpen, fetchHoldings, holdings.length]);
 
   // Feature 17: Handle opening position modal actions
   const handleOpenOpeningPositionModal = (mode = 'CREATE', targetHolding = null) => {
@@ -503,26 +529,29 @@ function App({ onLogout }) {
     fetchPersonalizedNews(false);
   };
 
-  // Load all assets on mount
+  // Load assets when entering assets tab or when a modal requiring asset definitions is opened
   useEffect(() => {
-    apiFetch('/api/assets')
-      .then((res) => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return res.json();
-      })
-      .then((json) => {
-        if (json.status === 'ok' && Array.isArray(json.data)) {
-          setAssets(json.data);
-        } else {
-          throw new Error(json.message || 'Không thể tải danh sách tài sản');
-        }
-        setLoading(false);
-      })
-      .catch((err) => {
-        setError(err.message || 'Không thể kết nối đến máy chủ');
-        setLoading(false);
-      });
-  }, []);
+    if (assets.length > 0) return;
+    if (activeTab === 'assets' || isAlertModalOpen || isTransactionModalOpen || isCashModalOpen || isOpeningPositionModalOpen) {
+      apiFetch('/api/assets')
+        .then((res) => {
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          return res.json();
+        })
+        .then((json) => {
+          if (json.status === 'ok' && Array.isArray(json.data)) {
+            setAssets(json.data);
+          } else {
+            throw new Error(json.message || 'Không thể tải danh sách tài sản');
+          }
+          setLoading(false);
+        })
+        .catch((err) => {
+          setError(err.message || 'Không thể kết nối đến máy chủ');
+          setLoading(false);
+        });
+    }
+  }, [activeTab, assets.length, isAlertModalOpen, isTransactionModalOpen, isCashModalOpen, isOpeningPositionModalOpen]);
 
   // Fetch news data
   const fetchNews = useCallback((isInitial = false) => {
@@ -585,11 +614,17 @@ function App({ onLogout }) {
       });
   }, []);
 
-  // Fetch news on initial mount
+  // Fetch general news on initial mount for dashboard preview
   useEffect(() => {
     fetchNews(true);
-    fetchPersonalizedNews(true);
-  }, [fetchNews, fetchPersonalizedNews]);
+  }, [fetchNews]);
+
+  // Fetch personalized news only when navigating to news tab
+  useEffect(() => {
+    if (activeTab === 'news') {
+      fetchPersonalizedNews(personalizedNews.length === 0);
+    }
+  }, [activeTab, fetchPersonalizedNews, personalizedNews.length]);
 
   // Fetch one authoritative current-state snapshot for Summary, Holdings, and Allocation.
   const fetchPortfolio = useCallback((isInitial = false) => {
@@ -798,21 +833,18 @@ function App({ onLogout }) {
     fetchPersonalizedNews(false);
   }, [fetchHoldings, fetchPortfolio, fetchTransactions, fetchCashOverview, fetchCashLedger, fetchPersonalizedNews]);
 
-  // Fetch portfolio, composition, transactions & cash on initial mount
+  // Fetch portfolio overview on initial mount for dashboard summary card
   useEffect(() => {
     fetchPortfolio(true);
-    fetchTransactions(true);
-    fetchCashOverview(true);
-    fetchCashLedger(true);
-  }, [fetchPortfolio, fetchTransactions, fetchCashOverview, fetchCashLedger]);
+  }, [fetchPortfolio]);
 
-  // Periodic 5-minute auto-refresh when on portfolio tab
+  // Fetch / auto-refresh portfolio activity and cash ledger when on portfolio tab
   useEffect(() => {
     if (activeTab !== 'portfolio') return;
     fetchPortfolio(false);
-    fetchTransactions(false);
-    fetchCashOverview(false);
-    fetchCashLedger(false);
+    fetchTransactions(transactions.length === 0);
+    fetchCashOverview(cashOverview === null);
+    fetchCashLedger(cashLedger.length === 0);
     const intervalId = setInterval(() => {
       fetchPortfolio(false);
       fetchTransactions(false);
@@ -820,7 +852,7 @@ function App({ onLogout }) {
       fetchCashLedger(false);
     }, 5 * 60 * 1000);
     return () => clearInterval(intervalId);
-  }, [activeTab, fetchPortfolio, fetchTransactions, fetchCashOverview, fetchCashLedger]);
+  }, [activeTab, fetchPortfolio, fetchTransactions, fetchCashOverview, fetchCashLedger, transactions.length, cashOverview, cashLedger.length]);
 
   // Fetch display prices for Watchlist and Dashboard while preserving the
   // canonical snapshot map used by alert threshold defaults.
@@ -1412,7 +1444,9 @@ function App({ onLogout }) {
               {/* SECTION 1: DASHBOARD HERO / PERSONAL SUMMARY */}
               <motion.div variants={sectionItemVariants} className="section-header" style={{ alignItems: 'center', marginBottom: '1.5rem' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
-                  <Fintech3DOrb size={68} className="dashboard-3d-accent" />
+                  <Suspense fallback={<div className="dashboard-3d-accent" style={{ width: 68, height: 68, borderRadius: '50%', background: 'radial-gradient(circle, #38bdf8 0%, #1d4ed8 70%)', opacity: 0.8 }} />}>
+                    <Fintech3DOrb size={68} className="dashboard-3d-accent" />
+                  </Suspense>
                   <div>
                     <h2 className="section-title">Tổng quan đầu tư</h2>
                     <p className="section-subtitle">
@@ -1773,14 +1807,16 @@ function App({ onLogout }) {
               animate="animate"
               exit="exit"
             >
-              <OpportunitySection
-                data={opportunityData}
-                loading={opportunityLoading}
-                refreshing={opportunityRefreshing}
-                error={opportunityError}
-                onRefresh={() => fetchOpportunities(Boolean(!opportunityData))}
-                onSelectAsset={handleSelectAsset}
-              />
+              <Suspense fallback={<div className="skeleton-shimmer" style={{ width: '100%', height: '240px', borderRadius: '12px' }} />}>
+                <OpportunitySection
+                  data={opportunityData}
+                  loading={opportunityLoading}
+                  refreshing={opportunityRefreshing}
+                  error={opportunityError}
+                  onRefresh={() => fetchOpportunities(Boolean(!opportunityData))}
+                  onSelectAsset={handleSelectAsset}
+                />
+              </Suspense>
             </motion.section>
           )}
 
@@ -1796,7 +1832,9 @@ function App({ onLogout }) {
               {/* Header with 3D Constellation Orb & Wealth Orbit Widget */}
               <motion.div variants={sectionItemVariants} className="section-header" style={{ alignItems: 'center' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
-                  <Fintech3DOrb size={74} className="dashboard-3d-accent" />
+                  <Suspense fallback={<div className="dashboard-3d-accent" style={{ width: 74, height: 74, borderRadius: '50%', background: 'radial-gradient(circle, #38bdf8 0%, #1d4ed8 70%)', opacity: 0.8 }} />}>
+                    <Fintech3DOrb size={74} className="dashboard-3d-accent" />
+                  </Suspense>
                   <div>
                     <h2 className="section-title">Tổng quan danh mục</h2>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
@@ -1901,7 +1939,7 @@ function App({ onLogout }) {
 
               {/* Portfolio V1: one current snapshot drives Summary and Holdings. */}
               {!portfolioLoading && portfolioOverview && (
-                <>
+                <Suspense fallback={<div className="skeleton-shimmer" style={{ width: '100%', height: '280px', borderRadius: '12px', margin: '1rem 0' }} />}>
                   <PortfolioSummaryHoldings
                     snapshot={portfolioOverview}
                     onRecordTransaction={() => {
@@ -1967,7 +2005,7 @@ function App({ onLogout }) {
                     }}
                     onRetryTransactions={() => fetchTransactions(true)}
                   />
-                </>
+                </Suspense>
               )}
             </motion.section>
           )}
@@ -2623,24 +2661,28 @@ function App({ onLogout }) {
             >
               {isViewingAlerts ? (
                 /* Feature 12: Price Alerts View */
-                <AlertCenterSection
-                  onSelectAsset={(sym) => {
-                    setIsViewingAlerts(false);
-                    handleSelectAsset(sym);
-                  }}
-                  onBackToAssets={() => setIsViewingAlerts(false)}
-                />
+                <Suspense fallback={<div className="skeleton-shimmer" style={{ width: '100%', height: '300px', borderRadius: '12px' }} />}>
+                  <AlertCenterSection
+                    onSelectAsset={(sym) => {
+                      setIsViewingAlerts(false);
+                      handleSelectAsset(sym);
+                    }}
+                    onBackToAssets={() => setIsViewingAlerts(false)}
+                  />
+                </Suspense>
               ) : isComparingAssets ? (
                 /* Feature 11: Asset Comparison View */
-                <AssetComparisonSection
-                  availableAssets={assets}
-                  initialSymbols={comparePresetSymbols}
-                  onBack={() => setIsComparingAssets(false)}
-                  onSelectAsset={(sym) => {
-                    setIsComparingAssets(false);
-                    handleSelectAsset(sym);
-                  }}
-                />
+                <Suspense fallback={<div className="skeleton-shimmer" style={{ width: '100%', height: '300px', borderRadius: '12px' }} />}>
+                  <AssetComparisonSection
+                    availableAssets={assets}
+                    initialSymbols={comparePresetSymbols}
+                    onBack={() => setIsComparingAssets(false)}
+                    onSelectAsset={(sym) => {
+                      setIsComparingAssets(false);
+                      handleSelectAsset(sym);
+                    }}
+                  />
+                </Suspense>
               ) : selectedSymbol ? (
                 /* Detail View */
                 <div>
@@ -2884,7 +2926,9 @@ function App({ onLogout }) {
                     );
                   })()}
 
-                  <EquityFundamentalsSection asset={assetDetail} />
+                  <Suspense fallback={<div className="skeleton-shimmer" style={{ width: '100%', height: '140px', borderRadius: '12px', marginTop: '1.25rem' }} />}>
+                    <EquityFundamentalsSection asset={assetDetail} />
+                  </Suspense>
 
 
                   {/* Historical Price & Trend Card (Feature 06) */}
@@ -3058,11 +3102,13 @@ function App({ onLogout }) {
                             </div>
 
                             {/* Visual Trend Chart */}
-                            <PriceHistoryChart
-                              bars={historyData.bars || []}
-                              percentageChange={historyData.metrics?.percentageChange}
-                              currency={historyCurrency}
-                            />
+                            <Suspense fallback={<div className="skeleton-shimmer" style={{ width: '100%', height: '220px', borderRadius: 'var(--radius-md)' }} />}>
+                              <PriceHistoryChart
+                                bars={historyData.bars || []}
+                                percentageChange={historyData.metrics?.percentageChange}
+                                currency={historyCurrency}
+                              />
+                            </Suspense>
                           </div>
                         );
                       })()}
@@ -3070,13 +3116,15 @@ function App({ onLogout }) {
                   )}
 
                   {/* Deterministic Asset Analysis (Feature 07) */}
-                  <AssetAnalysisSection
-                    data={analysisData}
-                    loading={analysisLoading}
-                    error={analysisError}
-                    onRetry={() => fetchAnalysisData(selectedSymbol, false)}
-                    symbol={selectedSymbol}
-                  />
+                  <Suspense fallback={<div className="skeleton-shimmer" style={{ width: '100%', height: '260px', borderRadius: '12px', marginTop: '1.25rem' }} />}>
+                    <AssetAnalysisSection
+                      data={analysisData}
+                      loading={analysisLoading}
+                      error={analysisError}
+                      onRetry={() => fetchAnalysisData(selectedSymbol, false)}
+                      symbol={selectedSymbol}
+                    />
+                  </Suspense>
                 </div>
               ) : (
                 /* Asset List View */
@@ -4001,62 +4049,65 @@ function App({ onLogout }) {
 
         </AnimatePresence>
 
-        {/* Feature 17: Opening Position Modal Dialog */}
-        <OpeningPositionModal
-          isOpen={isOpeningPositionModalOpen}
-          onClose={() => {
-            setIsOpeningPositionModalOpen(false);
-            setOpeningPositionTargetHolding(null);
-          }}
-          mode={openingPositionModalMode}
-          targetHolding={openingPositionTargetHolding}
-          assets={assets}
-          holdings={holdings}
-          onSuccess={handleOpeningPositionSuccess}
-        />
+        {/* Modals lazy-loaded with null fallback */}
+        <Suspense fallback={null}>
+          {/* Feature 17: Opening Position Modal Dialog */}
+          <OpeningPositionModal
+            isOpen={isOpeningPositionModalOpen}
+            onClose={() => {
+              setIsOpeningPositionModalOpen(false);
+              setOpeningPositionTargetHolding(null);
+            }}
+            mode={openingPositionModalMode}
+            targetHolding={openingPositionTargetHolding}
+            assets={assets}
+            holdings={holdings}
+            onSuccess={handleOpeningPositionSuccess}
+          />
 
-        {/* Feature 12: Price Alert Modal Dialog */}
-        <PriceAlertModal
-          isOpen={isAlertModalOpen}
-          onClose={() => {
-            setIsAlertModalOpen(false);
-            setAlertTargetAsset(null);
-          }}
-          asset={alertTargetAsset}
-          currentPrice={
-            alertTargetAsset?.symbol === selectedSymbol && marketData?.price
-              ? marketData.price
-              : alertTargetAsset?.symbol && watchlistMarketData[alertTargetAsset.symbol]?.price
-              ? watchlistMarketData[alertTargetAsset.symbol].price
-              : null
-          }
-          onAlertCreated={() => {
-            // Callback when alert is created
-          }}
-        />
+          {/* Feature 12: Price Alert Modal Dialog */}
+          <PriceAlertModal
+            isOpen={isAlertModalOpen}
+            onClose={() => {
+              setIsAlertModalOpen(false);
+              setAlertTargetAsset(null);
+            }}
+            asset={alertTargetAsset}
+            currentPrice={
+              alertTargetAsset?.symbol === selectedSymbol && marketData?.price
+                ? marketData.price
+                : alertTargetAsset?.symbol && watchlistMarketData[alertTargetAsset.symbol]?.price
+                ? watchlistMarketData[alertTargetAsset.symbol].price
+                : null
+            }
+            onAlertCreated={() => {
+              // Callback when alert is created
+            }}
+          />
 
-        {/* Feature 14: Transaction Entry Modal Dialog */}
-        <TransactionModal
-          isOpen={isTransactionModalOpen}
-          onClose={() => {
-            setIsTransactionModalOpen(false);
-            setTransactionModalDefaultAsset(null);
-          }}
-          assets={assets}
-          holdings={portfolioOverview?.holdings || holdings}
-          defaultType={transactionModalDefaultType}
-          defaultAsset={transactionModalDefaultAsset}
-          onTransactionRecorded={handleTransactionRecorded}
-        />
+          {/* Feature 14: Transaction Entry Modal Dialog */}
+          <TransactionModal
+            isOpen={isTransactionModalOpen}
+            onClose={() => {
+              setIsTransactionModalOpen(false);
+              setTransactionModalDefaultAsset(null);
+            }}
+            assets={assets}
+            holdings={portfolioOverview?.holdings || holdings}
+            defaultType={transactionModalDefaultType}
+            defaultAsset={transactionModalDefaultAsset}
+            onTransactionRecorded={handleTransactionRecorded}
+          />
 
-        {/* Feature 15: Cash Movement Modal Dialog (Deposit / Withdraw) */}
-        <CashMovementModal
-          isOpen={isCashModalOpen}
-          onClose={() => setIsCashModalOpen(false)}
-          mode={cashModalMode}
-          currentCash={cashOverview?.currentCash ?? null}
-          onMovementSuccess={handleCashMovementSuccess}
-        />
+          {/* Feature 15: Cash Movement Modal Dialog (Deposit / Withdraw) */}
+          <CashMovementModal
+            isOpen={isCashModalOpen}
+            onClose={() => setIsCashModalOpen(false)}
+            mode={cashModalMode}
+            currentCash={cashOverview?.currentCash ?? null}
+            onMovementSuccess={handleCashMovementSuccess}
+          />
+        </Suspense>
       </main>
     </div>
   );
