@@ -22,6 +22,8 @@ import {
   isSimplifiedCryptoExternalEntry
 } from '../../client/src/utils/transactionEntryDisplay.js';
 import { buildPortfolioRecentActivity } from '../../client/src/utils/portfolioSnapshotDisplay.js';
+import { formatNativeAmount } from '../../client/src/utils/formatting.js';
+// Centralized financial formatter tests for native crypto values
 
 const cryptoAsset = {
   id: 'asset-ondo',
@@ -586,5 +588,134 @@ describe('Crypto transaction form UX', () => {
 
     assert.match(activity.detail, /0,36402 USDT/);
     assert.doesNotMatch(activity.detail, /USD(?!T)|9\.500|₫/);
+  });
+
+  test('crypto price formatters preserve precision and handle null/undefined safely without throwing', () => {
+    assert.equal(formatNativeAmount(0.36402, 'USDT'), '0,36402 USDT');
+    assert.equal(formatNativeAmount(0.1641, 'USDT'), '0,1641 USDT');
+    assert.equal(formatNativeAmount(null, 'USDT'), '—');
+    assert.equal(formatNativeAmount(undefined, 'USDT'), '—');
+    assert.equal(formatNativeAmount('', 'USDT'), '—');
+    assert.equal(formatNativeAmount(0, 'USDT'), '0 USDT');
+    assert.equal(formatNativeAmount(NaN, 'USDT'), '—');
+  });
+
+  test('TransactionModal source has zero undeclared setters and safe open/transition effects', async () => {
+    const source = await readFile(
+      new URL('../../client/src/components/TransactionModal.jsx', import.meta.url),
+      'utf8'
+    );
+    assert.doesNotMatch(source, /\bsetIsAdvancedAccountingOpen\b/);
+    assert.doesNotMatch(source, /\bsetAccountingPriceError\b/);
+  });
+
+  test('TransactionModal renders safely across ONDO+ENA, null asset, zero cash, missing FX, and no VND basis', async () => {
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const vite = await import('../../client/node_modules/vite/dist/node/index.js');
+    const React = await import('../../client/node_modules/react/index.js');
+    const ReactDOMServer = await import('../../client/node_modules/react-dom/server.node.js');
+
+    const source = await readFile(
+      new URL('../../client/src/components/TransactionModal.jsx', import.meta.url),
+      'utf8'
+    );
+    const { fileURLToPath, pathToFileURL } = await import('node:url');
+    const tmpUrl = new URL('../../client/src/components/.test-modal-render.js', import.meta.url);
+    const tmpPath = fileURLToPath(tmpUrl);
+    const transpiled = await vite.transformWithOxc(source, 'TransactionModal.jsx');
+
+    try {
+      fs.writeFileSync(tmpPath, transpiled.code);
+      const { default: TransactionModal } = await import(pathToFileURL(tmpPath).href);
+
+      const assets = [
+        { id: 'ondo', symbol: 'ONDO', name: 'Ondo', asset_type: 'crypto', quote_currency: 'USD' },
+        { id: 'ena', symbol: 'ENA', name: 'Ethena', asset_type: 'crypto', quote_currency: 'USD' }
+      ];
+      const holdings = [
+        { symbol: 'ONDO', quantity: 226, marketValueVnd: 1000000 },
+        { symbol: 'ENA', quantity: 500, marketValueVnd: 2000000 }
+      ];
+
+      // A. Portfolio with ONDO + ENA, VND valuation available: click "Ghi giao dịch"
+      const markupA = ReactDOMServer.renderToStaticMarkup(
+        React.createElement(TransactionModal, {
+          isOpen: true,
+          assets,
+          holdings,
+          defaultType: 'BUY',
+          defaultAsset: null
+        })
+      );
+      assert.ok(markupA.includes('Tài sản giao dịch'));
+
+      // B. Selected asset initially null/undefined
+      const markupB = ReactDOMServer.renderToStaticMarkup(
+        React.createElement(TransactionModal, {
+          isOpen: true,
+          assets: [],
+          holdings: [],
+          defaultType: 'BUY',
+          defaultAsset: null
+        })
+      );
+      assert.ok(markupB.includes('Chọn mã tài sản...'));
+
+      // C. Crypto asset: native execution currency presentation works
+      const cryptoDefaults = getTransactionEntryDefaults(assets[0]);
+      assert.equal(cryptoDefaults.priceCurrency, 'USDT');
+      const markupC = ReactDOMServer.renderToStaticMarkup(
+        React.createElement(TransactionModal, {
+          isOpen: true,
+          assets,
+          holdings,
+          defaultType: 'BUY',
+          defaultAsset: 'ONDO'
+        })
+      );
+      assert.ok(markupC.includes('Ghi nhận giao dịch'));
+
+      // D. No historical VND basis: modal renders; no manual VND requirement for external settlement
+      const externalCryptoDefaults = getTransactionEntryDefaults({ symbol: 'ONDO', asset_type: 'crypto', quote_currency: 'USD' });
+      assert.equal(externalCryptoDefaults.settlementMode, 'EXTERNAL_SETTLEMENT');
+      assert.equal(isSimplifiedCryptoExternalEntry({ symbol: 'ONDO', asset_type: 'crypto' }, externalCryptoDefaults.settlementMode), true);
+      const markupD = ReactDOMServer.renderToStaticMarkup(
+        React.createElement(TransactionModal, {
+          isOpen: true,
+          assets,
+          holdings: [{ symbol: 'ONDO', quantity: 226, averageCost: null }],
+          defaultType: 'SELL',
+          defaultAsset: 'ONDO'
+        })
+      );
+      assert.ok(markupD.includes('Ghi nhận giao dịch'));
+
+      // E. Missing current FX: modal renders; accounting state unavailable but no crash
+      const markupE = ReactDOMServer.renderToStaticMarkup(
+        React.createElement(TransactionModal, {
+          isOpen: true,
+          assets,
+          holdings,
+          defaultType: 'BUY',
+          defaultAsset: 'ENA'
+        })
+      );
+      assert.ok(markupE.includes('Ghi nhận giao dịch'));
+
+      // F. Zero cash: modal renders
+      const markupF = ReactDOMServer.renderToStaticMarkup(
+        React.createElement(TransactionModal, {
+          isOpen: true,
+          assets,
+          holdings,
+          defaultType: 'BUY',
+          defaultAsset: null
+        })
+      );
+      assert.ok(markupF.includes('Ghi nhận giao dịch'));
+    } finally {
+      if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
+    }
   });
 });

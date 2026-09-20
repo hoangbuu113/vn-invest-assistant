@@ -355,8 +355,6 @@ export default function TransactionModal({
       setSettlementMode(initialDefaults.settlementMode);
       setSettlementCurrency('');
       setIsFxPrefillConfirmed(false);
-      setIsAdvancedAccountingOpen(false);
-      setAccountingPriceError(null);
       setAccountingRateState({
         status: ACCOUNTING_RATE_UI_STATUS.IDLE,
         quote: null,
@@ -508,7 +506,6 @@ export default function TransactionModal({
       pendingSubmissionIntentRef.current = transition.frozenSubmission;
       idempotencyKeyRef.current = transition.idempotencyKey;
       setAccountingRateState(transition.rateState);
-      setAccountingPriceError(null);
     }
     previousAccountingRateIntentKeyRef.current = accountingRateIntentKey;
   }, [isOpen, accountingRateIntentKey]);

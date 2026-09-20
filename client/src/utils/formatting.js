@@ -14,7 +14,7 @@
  * 2. REPORTING PORTFOLIO VALUE:
  *    - Explicitly VND (₫)
  * 3. Fallbacks:
- *    - Unavailable / null / non-finite numbers return '—' or 'N/A' without fabricating numbers.
+ *    - Unavailable / null / empty string / non-finite numbers return '—' or 'N/A' without fabricating numbers.
  */
 
 const ASSET_TYPE_LABELS = {
@@ -70,7 +70,14 @@ export function getMarketDisplayDecimals(value, currency = 'VND') {
 }
 
 export function formatNativeAmount(value, currency = 'VND', options = {}) {
-  if (value === null || value === undefined || isNaN(value) || !Number.isFinite(Number(value))) {
+  if (
+    value === null ||
+    value === undefined ||
+    value === '' ||
+    (typeof value === 'string' && value.trim() === '') ||
+    Number.isNaN(value) ||
+    !Number.isFinite(Number(value))
+  ) {
     return options.fallback ?? '—';
   }
 
@@ -107,7 +114,14 @@ export function formatNativeAmount(value, currency = 'VND', options = {}) {
 }
 
 export function formatMarketChange(value, currency = 'VND', options = {}) {
-  if (value === null || value === undefined || isNaN(value) || !Number.isFinite(Number(value))) {
+  if (
+    value === null ||
+    value === undefined ||
+    value === '' ||
+    (typeof value === 'string' && value.trim() === '') ||
+    Number.isNaN(value) ||
+    !Number.isFinite(Number(value))
+  ) {
     return options.fallback ?? '—';
   }
 
@@ -138,7 +152,14 @@ export function formatMarketChange(value, currency = 'VND', options = {}) {
 }
 
 export function formatVNDReporting(value, options = {}) {
-  if (value === null || value === undefined || isNaN(value) || !Number.isFinite(Number(value))) {
+  if (
+    value === null ||
+    value === undefined ||
+    value === '' ||
+    (typeof value === 'string' && value.trim() === '') ||
+    Number.isNaN(value) ||
+    !Number.isFinite(Number(value))
+  ) {
     return options.fallback ?? '—';
   }
   const num = Number(value);
@@ -146,7 +167,14 @@ export function formatVNDReporting(value, options = {}) {
 }
 
 export function formatPercentVN(val, showSign = true) {
-  if (val === null || val === undefined || isNaN(val) || !Number.isFinite(Number(val))) return '—';
+  if (
+    val === null ||
+    val === undefined ||
+    val === '' ||
+    (typeof val === 'string' && val.trim() === '') ||
+    Number.isNaN(val) ||
+    !Number.isFinite(Number(val))
+  ) return '—';
   const num = Number(val);
   const formatted = Math.abs(num).toFixed(2).replace('.', ',');
   if (num > 0) return showSign ? `+${formatted}%` : `${formatted}%`;
