@@ -361,4 +361,189 @@ describe('Automatic Acquisition FX Accounting', () => {
     assert.equal(summary.transactions.length, 1);
     assert.equal(summary.transactions[0].status, 'ENRICHED');
   });
+
+  test('Feature flag safety: absent/false disables provider, explicit true enables it', async () => {
+    const { isCoinGeckoAccountingRateEnabled, resolveAcquisitionFx } = await import('../src/accountingRate.js');
+
+    assert.equal(isCoinGeckoAccountingRateEnabled(undefined), false);
+    assert.equal(isCoinGeckoAccountingRateEnabled(''), false);
+    assert.equal(isCoinGeckoAccountingRateEnabled('false'), false);
+    assert.equal(isCoinGeckoAccountingRateEnabled('0'), false);
+    assert.equal(isCoinGeckoAccountingRateEnabled('true'), true);
+    assert.equal(isCoinGeckoAccountingRateEnabled('1'), true);
+
+    // Disabled resolution fails safely without calling provider
+    let providerCalled = false;
+    const result = await resolveAcquisitionFx({
+      baseCurrency: 'USDT',
+      reportingCurrency: 'VND'
+    }, {
+      enabled: false,
+      getCurrentObservationFn: async () => {
+        providerCalled = true;
+        return { rate: 26000, observedAt: new Date().toISOString() };
+      }
+    });
+
+    assert.equal(providerCalled, false);
+    assert.equal(result.availability, 'unavailable');
+    assert.equal(result.reason, 'PROVIDER_NOT_ENABLED');
+  });
+
+  test('VND asset never hits USDT/VND resolver', async () => {
+    let resolverCalled = false;
+    const mockResolver = async () => {
+      resolverCalled = true;
+      return { availability: 'available', rate: 26000 };
+    };
+
+    const mockClient = {
+      rpc: async (fnName, args) => ({
+        data: {
+          openingPosition: {
+            id: 'op-vnd',
+            opening_quantity: args.p_quantity,
+            opening_average_cost: args.p_average_cost,
+            execution_unit_price: args.p_average_cost,
+            price_currency: 'VND'
+          },
+          holding: {
+            id: 'h-vnd',
+            quantity: args.p_quantity,
+            average_cost: args.p_average_cost
+          }
+        },
+        error: null
+      })
+    };
+
+    await createOpeningPosition({
+      profileId: PROFILE_ID,
+      assetId: ASSET_ID,
+      quantity: 10,
+      averageCost: 50000,
+      priceCurrency: 'VND'
+    }, mockClient, {
+      resolveAcquisitionFxFn: mockResolver
+    });
+
+    assert.equal(resolverCalled, false);
+  });
+
+  test('429 rate limit sets cooldown and stops batch execution without hammering', async () => {
+    const {
+      setAcquisitionFxRateLimitCooldown,
+      getAcquisitionFxRateLimitCooldown
+    } = await import('../src/acquisitionFx.js');
+
+    // Reset cooldown
+    setAcquisitionFxRateLimitCooldown(0);
+
+    const mockBaselines = [
+      {
+        id: 'op-1',
+        profile_id: PROFILE_ID,
+        asset_id: 'asset-1',
+        opening_quantity: 100,
+        opening_average_cost: null,
+        execution_unit_price: 1,
+        price_currency: 'USDT',
+        accounting_cutoff_at: '2026-09-19T14:00:00.000Z'
+      },
+      {
+        id: 'op-2',
+        profile_id: PROFILE_ID,
+        asset_id: 'asset-2',
+        opening_quantity: 200,
+        opening_average_cost: null,
+        execution_unit_price: 2,
+        price_currency: 'USDT',
+        accounting_cutoff_at: '2026-09-19T15:00:00.000Z'
+      }
+    ];
+
+    let resolverCalls = 0;
+    const mockRateLimitedResolver = async () => {
+      resolverCalls++;
+      return {
+        availability: 'unavailable',
+        rate: null,
+        reason: 'PROVIDER_RATE_LIMITED'
+      };
+    };
+
+    const createMockBuilder = () => {
+      const builder = {
+        select: () => builder,
+        eq: () => builder,
+        is: () => builder,
+        gt: () => builder,
+        order: () => builder,
+        limit: () => builder,
+        then: (resolve) => resolve({ data: mockBaselines, error: null })
+      };
+      return builder;
+    };
+
+    const mockClient = { from: () => createMockBuilder() };
+
+    const summary = await enrichMissingAcquisitionFx({
+      client: mockClient,
+      limit: 5,
+      resolveAcquisitionFxFn: mockRateLimitedResolver
+    });
+
+    // Only 1 call made; broke out immediately on 429
+    assert.equal(resolverCalls, 1);
+    assert.equal(summary.baselines.length, 1);
+    assert.equal(summary.baselines[0].reason, 'PROVIDER_RATE_LIMITED');
+    assert.ok(getAcquisitionFxRateLimitCooldown() > Date.now());
+
+    // Subsequent call within cooldown returns immediately without calling resolver
+    const cooledSummary = await enrichMissingAcquisitionFx({
+      client: mockClient,
+      limit: 5,
+      resolveAcquisitionFxFn: mockRateLimitedResolver
+    });
+
+    assert.equal(resolverCalls, 1); // No new calls
+    assert.equal(cooledSummary.reason, 'PROVIDER_RATE_LIMITED_COOLDOWN');
+
+    // Clean up cooldown
+    setAcquisitionFxRateLimitCooldown(0);
+  });
+
+  test('Scheduler invokes acquisition FX enrichment with token and bounded execution', async () => {
+    const { runScheduledAcquisitionFxEnrichment } = await import('../../client/server/index.js');
+
+    let fetchCalled = false;
+    let capturedUrl = null;
+    let capturedOptions = null;
+
+    const mockFetch = async (url, options) => {
+      fetchCalled = true;
+      capturedUrl = url;
+      capturedOptions = options;
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          status: 'ok',
+          data: { processedCount: 1, enrichedCount: 1, skippedCount: 0, errors: [] }
+        })
+      };
+    };
+
+    const result = await runScheduledAcquisitionFxEnrichment(
+      { ALERT_SCHEDULER_TOKEN: 'test-scheduler-token-32-chars-long!!' },
+      { fetchFn: mockFetch, limit: 5 }
+    );
+
+    assert.equal(fetchCalled, true);
+    assert.ok(capturedUrl.includes('/api/internal/portfolio/acquisition-fx/enrich'));
+    assert.equal(capturedOptions.method, 'POST');
+    assert.equal(capturedOptions.headers.Authorization, 'Bearer test-scheduler-token-32-chars-long!!');
+    assert.deepEqual(JSON.parse(capturedOptions.body), { limit: 5 });
+    assert.equal(result.enrichedCount, 1);
+  });
 });

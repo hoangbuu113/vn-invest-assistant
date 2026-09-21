@@ -599,9 +599,7 @@ export async function resolveAcquisitionFx({
 
   const effectiveEnabled = options.enabled !== undefined
     ? isCoinGeckoAccountingRateEnabled(options.enabled)
-    : (process.env.COINGECKO_ACCOUNTING_RATE_ENABLED !== undefined
-      ? isCoinGeckoAccountingRateEnabled()
-      : true);
+    : isCoinGeckoAccountingRateEnabled();
 
   const accountingRateResult = await getAccountingRate({
     baseCurrency: base,

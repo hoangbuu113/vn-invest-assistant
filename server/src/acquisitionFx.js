@@ -13,6 +13,16 @@ function requireDatabaseClient(client) {
 }
 
 const DEFAULT_BATCH_LIMIT = 5;
+const RATE_LIMIT_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes governed cooldown on 429
+let rateLimitCooldownUntilMs = 0;
+
+export function getAcquisitionFxRateLimitCooldown() {
+  return rateLimitCooldownUntilMs;
+}
+
+export function setAcquisitionFxRateLimitCooldown(untilMs) {
+  rateLimitCooldownUntilMs = untilMs;
+}
 
 /**
  * Idempotent server-side service to enrich unresolved historical acquisition FX
@@ -41,6 +51,7 @@ const DEFAULT_BATCH_LIMIT = 5;
  * - Never fabricates rates.
  * - Bounded batches (limit).
  * - Safe to run repeatedly.
+ * - Respects provider rate-limits (governed 5m cooldown, breaks immediately on 429).
  */
 export async function enrichMissingAcquisitionFx({
   profileId = null,
@@ -48,6 +59,21 @@ export async function enrichMissingAcquisitionFx({
   client = privateSupabase,
   resolveAcquisitionFxFn = resolveAcquisitionFx
 } = {}, options = {}) {
+  const nowMs = options?.now instanceof Date ? options.now.getTime() : (typeof options?.nowMs === 'number' ? options.nowMs : Date.now());
+
+  if (nowMs < rateLimitCooldownUntilMs) {
+    return {
+      processedCount: 0,
+      enrichedCount: 0,
+      skippedCount: 0,
+      cooldownRemainingMs: rateLimitCooldownUntilMs - nowMs,
+      baselines: [],
+      transactions: [],
+      errors: [],
+      reason: 'PROVIDER_RATE_LIMITED_COOLDOWN'
+    };
+  }
+
   const db = requireDatabaseClient(client);
   const maxItems = Math.max(1, Math.min(limit || DEFAULT_BATCH_LIMIT, 50));
 
@@ -59,6 +85,8 @@ export async function enrichMissingAcquisitionFx({
     transactions: [],
     errors: []
   };
+
+  let rateLimited = false;
 
   // 1. Query eligible opening position baselines
   let baselinesQuery = db
@@ -175,31 +203,43 @@ export async function enrichMissingAcquisitionFx({
           }
         } else {
           result.skippedCount += 1;
+          const reason = fx?.reason || 'FX_UNAVAILABLE';
           result.baselines.push({
             id: baseline.id,
             assetId: baseline.asset_id,
             status: 'SKIPPED',
             rate: null,
             openingAverageCost: null,
-            reason: fx?.reason || 'FX_UNAVAILABLE'
+            reason
           });
+          if (reason === 'PROVIDER_RATE_LIMITED') {
+            rateLimitCooldownUntilMs = nowMs + RATE_LIMIT_COOLDOWN_MS;
+            rateLimited = true;
+            break;
+          }
         }
       } catch (err) {
         result.skippedCount += 1;
+        const isRateLimited = err?.code === 'PROVIDER_RATE_LIMITED' || err?.message?.includes('429');
         result.baselines.push({
           id: baseline.id,
           assetId: baseline.asset_id,
           status: 'FAILED',
           rate: null,
           openingAverageCost: null,
-          reason: err.message
+          reason: isRateLimited ? 'PROVIDER_RATE_LIMITED' : err.message
         });
+        if (isRateLimited) {
+          rateLimitCooldownUntilMs = nowMs + RATE_LIMIT_COOLDOWN_MS;
+          rateLimited = true;
+          break;
+        }
       }
     }
   }
 
   // 2. Query eligible BUY portfolio transactions
-  const remainingLimit = maxItems - result.processedCount;
+  const remainingLimit = rateLimited ? 0 : (maxItems - result.processedCount);
   if (remainingLimit > 0) {
     let txQuery = db
       .from('portfolio_transactions')
@@ -285,25 +325,35 @@ export async function enrichMissingAcquisitionFx({
             }
           } else {
             result.skippedCount += 1;
+            const reason = fx?.reason || 'FX_UNAVAILABLE';
             result.transactions.push({
               id: tx.id,
               assetId: tx.asset_id,
               status: 'SKIPPED',
               rate: null,
               price: null,
-              reason: fx?.reason || 'FX_UNAVAILABLE'
+              reason
             });
+            if (reason === 'PROVIDER_RATE_LIMITED') {
+              rateLimitCooldownUntilMs = nowMs + RATE_LIMIT_COOLDOWN_MS;
+              break;
+            }
           }
         } catch (err) {
           result.skippedCount += 1;
+          const isRateLimited = err?.code === 'PROVIDER_RATE_LIMITED' || err?.message?.includes('429');
           result.transactions.push({
             id: tx.id,
             assetId: tx.asset_id,
             status: 'FAILED',
             rate: null,
             price: null,
-            reason: err.message
+            reason: isRateLimited ? 'PROVIDER_RATE_LIMITED' : err.message
           });
+          if (isRateLimited) {
+            rateLimitCooldownUntilMs = nowMs + RATE_LIMIT_COOLDOWN_MS;
+            break;
+          }
         }
       }
     }

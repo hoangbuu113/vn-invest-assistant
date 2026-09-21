@@ -216,6 +216,50 @@ export async function runScheduledNewsRefresh(env, options = {}) {
   }
 }
 
+export async function runScheduledAcquisitionFxEnrichment(env, options = {}) {
+  const token = env?.ALERT_SCHEDULER_TOKEN;
+  if (typeof token !== 'string' || token.length < 32) {
+    throw schedulerError('ACQUISITION_FX_SCHEDULER_NOT_CONFIGURED', 'Acquisition FX scheduler secret is not configured');
+  }
+
+  const fetchFn = options.fetchFn || globalThis.fetch.bind(globalThis);
+  const timeoutMs = Number.isFinite(options.timeoutMs) && options.timeoutMs > 0
+    ? options.timeoutMs
+    : 30_000;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const limit = Number.isFinite(options.limit) && options.limit > 0 ? options.limit : 5;
+    const response = await fetchFn(`${APP_API_BASE_URL}/api/internal/portfolio/acquisition-fx/enrich`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ limit }),
+      redirect: 'manual',
+      signal: controller.signal
+    });
+
+    if (!response.ok && response.status !== 503) {
+      throw schedulerError('ACQUISITION_FX_SCHEDULER_HTTP_ERROR', `Acquisition FX enrichment returned HTTP ${response.status}`);
+    }
+
+    const payload = await response.json();
+    if (!payload?.data || typeof payload.data !== 'object') {
+      throw schedulerError('ACQUISITION_FX_SCHEDULER_MALFORMED_RESPONSE', 'Acquisition FX enrichment returned malformed data');
+    }
+    return payload.data;
+  } catch (error) {
+    throw error?.code
+      ? error
+      : schedulerError('ACQUISITION_FX_SCHEDULER_TRANSPORT_ERROR', 'Acquisition FX enrichment transport failed');
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -245,8 +289,9 @@ export default {
         runScheduledAlertEvaluation(env),
         runScheduledContextRefresh(env),
         runScheduledNewsRefresh(env),
-        runScheduledPortfolioDailyValuation(env, { now: scheduledNow })
-      ]).then(([alertResult, contextResult, newsResult, portfolioValuationResult]) => {
+        runScheduledPortfolioDailyValuation(env, { now: scheduledNow }),
+        runScheduledAcquisitionFxEnrichment(env)
+      ]).then(([alertResult, contextResult, newsResult, portfolioValuationResult, acquisitionFxResult]) => {
         if (alertResult.status === 'rejected') {
           console.error('Scheduled alert evaluation failed', alertResult.reason?.code || 'ALERT_SCHEDULER_FAILED');
         }
@@ -262,7 +307,13 @@ export default {
             portfolioValuationResult.reason?.code || 'PORTFOLIO_VALUATION_SCHEDULER_FAILED'
           );
         }
-        return [alertResult, contextResult, newsResult, portfolioValuationResult];
+        if (acquisitionFxResult?.status === 'rejected') {
+          console.error(
+            'Scheduled acquisition FX enrichment failed',
+            acquisitionFxResult.reason?.code || 'ACQUISITION_FX_SCHEDULER_FAILED'
+          );
+        }
+        return [alertResult, contextResult, newsResult, portfolioValuationResult, acquisitionFxResult];
       })
     );
   }

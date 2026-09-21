@@ -479,11 +479,12 @@ describe('V1.1 Improvement 04 — reliable background price alerts', () => {
       assert.ok(waitUntilPromise);
       const results = await waitUntilPromise;
 
-      assert.equal(calls.length, 3);
+      assert.equal(calls.length, 4);
       assert.deepEqual(calls.map(({ url }) => url).sort(), [
         `${ALERT_EVALUATION_API_BASE_URL}/api/internal/alerts/evaluate`,
         `${APP_API_BASE_URL}/api/internal/context/refresh`,
-        `${APP_API_BASE_URL}/api/internal/news/refresh`
+        `${APP_API_BASE_URL}/api/internal/news/refresh`,
+        `${APP_API_BASE_URL}/api/internal/portfolio/acquisition-fx/enrich`
       ].sort());
       assert.ok(calls.every(({ authorization }) => authorization === `Bearer ${SCHEDULER_TOKEN}`));
       assert.equal(results[0].status, 'rejected');
@@ -493,6 +494,8 @@ describe('V1.1 Improvement 04 — reliable background price alerts', () => {
       assert.deepEqual(results[2].value, { success: true, persisted: 6 });
       assert.equal(results[3].status, 'fulfilled');
       assert.deepEqual(results[3].value, { due: false, valuationDate: '2026-09-01' });
+      assert.equal(results[4].status, 'fulfilled');
+      assert.deepEqual(results[4].value, { success: true, persisted: 6 });
     } finally {
       globalThis.fetch = originalFetch;
       console.error = originalConsoleError;

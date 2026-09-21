@@ -223,9 +223,7 @@ export function createApp(services = {}) {
     getAccountingRateFn = getAccountingRate,
     resolveAcquisitionFxFn = resolveAcquisitionFx,
     enrichMissingAcquisitionFxFn = enrichMissingAcquisitionFx,
-    accountingRateEnabled = process.env.COINGECKO_ACCOUNTING_RATE_ENABLED !== undefined
-      ? isCoinGeckoAccountingRateEnabled(process.env.COINGECKO_ACCOUNTING_RATE_ENABLED)
-      : true,
+    accountingRateEnabled = isCoinGeckoAccountingRateEnabled(process.env.COINGECKO_ACCOUNTING_RATE_ENABLED),
     accountingRateQuoteSecret = process.env.ACCOUNTING_RATE_QUOTE_SECRET,
     accountingRateNowFn = () => new Date(),
     getCashOverviewFn = getCashOverview,
