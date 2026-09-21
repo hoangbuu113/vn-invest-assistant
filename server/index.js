@@ -49,6 +49,8 @@ import {
   USDT_VND_ACCOUNTING_PROVENANCE,
   attachAccountingRateQuoteProof,
   getAccountingRate,
+  isCoinGeckoAccountingRateEnabled,
+  resolveAcquisitionFx,
   validateCoinGeckoAccountingRateWrite
 } from './src/accountingRate.js';
 import {
@@ -102,6 +104,7 @@ import {
   runVietnamEquityOpportunityRefresh
 } from './src/equityOpportunities/index.js';
 import { importManualOfficialMonetaryEvidence } from './src/monetaryEvidence.js';
+import { enrichMissingAcquisitionFx } from './src/acquisitionFx.js';
 
 dotenv.config();
 
@@ -218,7 +221,11 @@ export function createApp(services = {}) {
     reversePortfolioTransactionFn = reversePortfolioTransaction,
     hasPortfolioIdempotencyRecordFn = hasPortfolioIdempotencyRecord,
     getAccountingRateFn = getAccountingRate,
-    accountingRateEnabled = process.env.COINGECKO_ACCOUNTING_RATE_ENABLED,
+    resolveAcquisitionFxFn = resolveAcquisitionFx,
+    enrichMissingAcquisitionFxFn = enrichMissingAcquisitionFx,
+    accountingRateEnabled = process.env.COINGECKO_ACCOUNTING_RATE_ENABLED !== undefined
+      ? isCoinGeckoAccountingRateEnabled(process.env.COINGECKO_ACCOUNTING_RATE_ENABLED)
+      : true,
     accountingRateQuoteSecret = process.env.ACCOUNTING_RATE_QUOTE_SECRET,
     accountingRateNowFn = () => new Date(),
     getCashOverviewFn = getCashOverview,
@@ -652,7 +659,12 @@ export function createApp(services = {}) {
       if (normalizedFxObservedAt !== undefined) openingPayload.fxObservedAt = normalizedFxObservedAt;
       if (idempotencyKey) openingPayload.idempotencyKey = idempotencyKey;
 
-      const result = await createOpeningPositionFn(openingPayload, positionClient, getProfileOptions(req, profileId));
+      const openingOptions = {
+        ...getProfileOptions(req, profileId),
+        enabled: accountingRateEnabled,
+        resolveAcquisitionFxFn
+      };
+      const result = await createOpeningPositionFn(openingPayload, positionClient, openingOptions);
 
       if (result.replayed) {
         res.set('Idempotent-Replayed', 'true');
@@ -1090,7 +1102,12 @@ export function createApp(services = {}) {
       if (normalizedFxObservedAt !== undefined) transactionPayload.fxObservedAt = normalizedFxObservedAt;
       if (idempotencyKey) transactionPayload.idempotencyKey = idempotencyKey;
 
-      const result = await createPortfolioTransactionFn(transactionPayload, transactionClient, getProfileOptions(req, profileId));
+      const transactionOptions = {
+        ...getProfileOptions(req, profileId),
+        enabled: accountingRateEnabled,
+        resolveAcquisitionFxFn
+      };
+      const result = await createPortfolioTransactionFn(transactionPayload, transactionClient, transactionOptions);
 
       if (result.replayed) {
         res.set('Idempotent-Replayed', 'true');
@@ -2197,6 +2214,27 @@ export function createApp(services = {}) {
       return res.status(500).json({
         status: 'error',
         message: 'Failed to capture Portfolio daily valuations'
+      });
+    }
+  });
+
+  // Internal acquisition FX enrichment endpoint — idempotent historical FX backfill
+  app.post('/api/internal/portfolio/acquisition-fx/enrich', requireAlertScheduler, async (req, res) => {
+    try {
+      const { profileId, limit } = req.body || {};
+      const summary = await enrichMissingAcquisitionFxFn({
+        profileId: profileId || null,
+        limit: typeof limit === 'number' ? limit : 5,
+        client: supabaseAuthClient
+      });
+      return res.status(summary.errors.length > 0 ? 503 : 200).json({
+        status: summary.errors.length > 0 ? 'degraded' : 'ok',
+        data: summary
+      });
+    } catch (err) {
+      return res.status(500).json({
+        status: 'error',
+        message: err.message || 'Failed to enrich acquisition FX'
       });
     }
   });

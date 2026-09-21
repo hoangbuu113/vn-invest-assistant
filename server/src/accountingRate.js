@@ -543,3 +543,110 @@ export async function getAccountingRate({
     });
   }
 }
+
+/**
+ * Resolves acquisition FX for one transaction or opening position.
+ * Distinguishes CURRENT vs HISTORICAL acquisition based on whether executedAt
+ * is provided. Never mutates Portfolio state, never derives USDT through USD,
+ * and never returns fake rates.
+ */
+export async function resolveAcquisitionFx({
+  baseCurrency,
+  reportingCurrency = 'VND',
+  executedAt
+} = {}, options = {}) {
+  const base = normalizeCurrency(baseCurrency);
+  const quote = normalizeCurrency(reportingCurrency || 'VND');
+  const hasExecutedAt = executedAt !== undefined && executedAt !== null && String(executedAt).trim() !== '';
+  const now = normalizeDate(options.now ?? new Date());
+  const requestedDate = hasExecutedAt ? normalizeDate(executedAt) : now;
+  const mode = hasExecutedAt ? 'HISTORICAL' : 'CURRENT';
+  const requestedAt = requestedDate?.toISOString() ?? (typeof executedAt === 'string' ? executedAt : null);
+
+  if (!now || (hasExecutedAt && !requestedDate)) {
+    return {
+      availability: 'unavailable',
+      rate: null,
+      baseCurrency: base,
+      quoteCurrency: quote,
+      source: null,
+      sourceObservedAt: null,
+      requestedAt,
+      distanceFromExecution: null,
+      observationDeltaMs: null,
+      provenance: null,
+      mode,
+      reason: 'INVALID_REQUEST_TIME'
+    };
+  }
+
+  if (base !== 'USDT' || quote !== 'VND') {
+    return {
+      availability: 'unavailable',
+      rate: null,
+      baseCurrency: base,
+      quoteCurrency: quote,
+      source: null,
+      sourceObservedAt: null,
+      requestedAt,
+      distanceFromExecution: null,
+      observationDeltaMs: null,
+      provenance: null,
+      mode,
+      reason: 'PAIR_UNSUPPORTED'
+    };
+  }
+
+  const effectiveEnabled = options.enabled !== undefined
+    ? isCoinGeckoAccountingRateEnabled(options.enabled)
+    : (process.env.COINGECKO_ACCOUNTING_RATE_ENABLED !== undefined
+      ? isCoinGeckoAccountingRateEnabled()
+      : true);
+
+  const accountingRateResult = await getAccountingRate({
+    baseCurrency: base,
+    quoteCurrency: quote,
+    at: hasExecutedAt ? requestedDate.toISOString() : null
+  }, {
+    ...options,
+    enabled: effectiveEnabled,
+    now
+  });
+
+  if (
+    accountingRateResult.availability === 'available'
+    && typeof accountingRateResult.rate === 'number'
+    && Number.isFinite(accountingRateResult.rate)
+    && accountingRateResult.rate > 0
+  ) {
+    return {
+      availability: 'available',
+      rate: accountingRateResult.rate,
+      baseCurrency: accountingRateResult.baseCurrency,
+      quoteCurrency: accountingRateResult.quoteCurrency,
+      source: accountingRateResult.provider || 'CoinGecko',
+      sourceObservedAt: accountingRateResult.observedAt,
+      requestedAt: accountingRateResult.requestedAt,
+      distanceFromExecution: accountingRateResult.observationDeltaMs,
+      observationDeltaMs: accountingRateResult.observationDeltaMs,
+      provenance: accountingRateResult.provenance || USDT_VND_ACCOUNTING_PROVENANCE,
+      mode: accountingRateResult.mode || mode,
+      reason: null
+    };
+  }
+
+  return {
+    availability: 'unavailable',
+    rate: null,
+    baseCurrency: base,
+    quoteCurrency: quote,
+    source: accountingRateResult.provider || 'CoinGecko',
+    sourceObservedAt: accountingRateResult.observedAt || null,
+    requestedAt: accountingRateResult.requestedAt || requestedAt,
+    distanceFromExecution: null,
+    observationDeltaMs: accountingRateResult.observationDeltaMs || null,
+    provenance: null,
+    mode: accountingRateResult.mode || mode,
+    reason: accountingRateResult.reason || 'UNAVAILABLE'
+  };
+}

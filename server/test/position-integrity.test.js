@@ -369,7 +369,7 @@ describe('Feature 17A — opening position and ledger authority', () => {
     assert.equal(fake.state.cashLedger.length, 0);
     assert.equal(fake.state.cashAvailable, startingCash);
     assert.deepEqual(Object.keys(fake.state.rpcCalls[0].args).sort(), [
-      'p_asset_id', 'p_average_cost', 'p_profile_id', 'p_quantity'
+      'p_asset_id', 'p_average_cost', 'p_fx_rate_to_vnd', 'p_profile_id', 'p_quantity'
     ]);
   });
 

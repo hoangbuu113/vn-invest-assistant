@@ -1,5 +1,9 @@
 import { getInvestorProfile, privateSupabase } from './supabase.js';
 import { normalizeCashLedgerEntry } from './cash.js';
+import {
+  USDT_VND_ACCOUNTING_PROVENANCE,
+  resolveAcquisitionFx
+} from './accountingRate.js';
 
 export const TRANSACTION_TYPES = Object.freeze(['BUY', 'SELL']);
 export const SETTLEMENT_MODES = Object.freeze(['INTERNAL_VND_CASH', 'EXTERNAL_SETTLEMENT']);
@@ -293,12 +297,59 @@ export async function createPortfolioTransaction({
   const targetProfileId = options?.profileId || null;
   const effectiveIdempotencyKey = options?.idempotencyKey || idempotencyKey || null;
 
+  // Auto-resolve acquisition FX for BUY/USDT/EXTERNAL_SETTLEMENT when no FX is explicitly supplied
+  let effectivePrice = price ?? null;
+  let effectiveFxRateToVnd = fxRateToVnd ?? null;
+  let effectiveFxProvenance = fxProvenance ?? null;
+  let effectiveFxObservedAt = fxObservedAt ?? null;
+
+  const normalizedPriceCurrency = typeof priceCurrency === 'string'
+    ? priceCurrency.trim().toUpperCase()
+    : null;
+  const normalizedSettlementMode = typeof settlementMode === 'string'
+    ? settlementMode.trim().toUpperCase()
+    : null;
+
+  if (
+    transactionType === 'BUY'
+    && normalizedPriceCurrency === 'USDT'
+    && normalizedSettlementMode === 'EXTERNAL_SETTLEMENT'
+    && effectiveFxRateToVnd === null
+    && effectivePrice === null
+    && executionUnitPrice !== undefined
+    && executionUnitPrice !== null
+    && Number(executionUnitPrice) > 0
+  ) {
+    const resolveFxFn = options?.resolveAcquisitionFxFn || resolveAcquisitionFx;
+    try {
+      const fx = await resolveFxFn({
+        baseCurrency: normalizedPriceCurrency,
+        reportingCurrency: 'VND',
+        executedAt: executedAt || null
+      }, options);
+
+      if (
+        fx?.availability === 'available'
+        && typeof fx.rate === 'number'
+        && Number.isFinite(fx.rate)
+        && fx.rate > 0
+      ) {
+        effectiveFxRateToVnd = fx.rate;
+        effectiveFxProvenance = fx.provenance || USDT_VND_ACCOUNTING_PROVENANCE;
+        effectiveFxObservedAt = fx.sourceObservedAt || null;
+        effectivePrice = Number(executionUnitPrice) * fx.rate;
+      }
+    } catch {
+      // Graceful fallback: native transaction proceeds with null price
+    }
+  }
+
   const rpcArgs = {
     p_symbol: typeof symbol === 'string' && symbol.trim() ? symbol.trim().toUpperCase() : null,
     p_asset_id: typeof assetId === 'string' && assetId.trim() ? assetId.trim() : null,
     p_transaction_type: transactionType,
     p_quantity: quantity,
-    p_price: price,
+    p_price: effectivePrice,
     p_executed_at: executedAt || null
   };
   if (targetProfileId) {
@@ -319,14 +370,14 @@ export async function createPortfolioTransaction({
   if (settlementCurrency !== undefined && settlementCurrency !== null) {
     rpcArgs.p_settlement_currency = typeof settlementCurrency === 'string' ? settlementCurrency.trim().toUpperCase() : settlementCurrency;
   }
-  if (fxRateToVnd !== undefined && fxRateToVnd !== null) {
-    rpcArgs.p_fx_rate_to_vnd = fxRateToVnd;
+  if (effectiveFxRateToVnd !== null) {
+    rpcArgs.p_fx_rate_to_vnd = effectiveFxRateToVnd;
   }
-  if (fxProvenance !== undefined && fxProvenance !== null) {
-    rpcArgs.p_fx_provenance = normalizeFxProvenanceInput(fxProvenance);
+  if (effectiveFxProvenance !== null) {
+    rpcArgs.p_fx_provenance = normalizeFxProvenanceInput(effectiveFxProvenance);
   }
-  if (fxObservedAt !== undefined && fxObservedAt !== null) {
-    rpcArgs.p_fx_observed_at = fxObservedAt;
+  if (effectiveFxObservedAt !== null) {
+    rpcArgs.p_fx_observed_at = effectiveFxObservedAt;
   }
 
   const { data, error } = await db.rpc('create_portfolio_transaction', rpcArgs);

@@ -296,7 +296,9 @@ describe('Portfolio V1 P0.2.1 native-currency opening positions', () => {
       averageCost: null,
       executionUnitPrice: 0.82,
       priceCurrency: 'usdt'
-    }, client);
+    }, client, {
+      resolveAcquisitionFxFn: async () => ({ availability: 'unavailable', rate: null })
+    });
 
     assert.equal(captured.name, 'create_opening_position');
     assert.equal(captured.args.p_average_cost, null);
@@ -529,7 +531,8 @@ describe('Portfolio V1 P0.2.1 native-currency opening positions', () => {
           portfolio_eligibility: 'PORTFOLIO_ELIGIBLE',
           is_active: true
         }),
-        positionClient: createPglitePositionClient(db)
+        positionClient: createPglitePositionClient(db),
+        resolveAcquisitionFxFn: async () => ({ availability: 'unavailable', rate: null })
       });
       const server = http.createServer(app);
       await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));

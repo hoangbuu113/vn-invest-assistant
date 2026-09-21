@@ -1,4 +1,8 @@
 import { getInvestorProfile, privateSupabase } from './supabase.js';
+import {
+  USDT_VND_ACCOUNTING_PROVENANCE,
+  resolveAcquisitionFx
+} from './accountingRate.js';
 
 function requireDatabaseClient(client) {
   if (!client) {
@@ -136,10 +140,53 @@ export async function createOpeningPosition({
   const profileId = options?.profileId || payloadProfileId || null;
   const effectiveIdempotencyKey = options?.idempotencyKey || idempotencyKey || null;
 
+  // Auto-resolve acquisition FX for USDT opening positions when no FX is explicitly supplied
+  let effectiveAverageCost = averageCost ?? null;
+  let effectiveFxRateToVnd = fxRateToVnd ?? null;
+  let effectiveFxProvenance = fxProvenance ?? null;
+  let effectiveFxObservedAt = fxObservedAt ?? null;
+
+  const normalizedPriceCurrency = typeof priceCurrency === 'string'
+    ? priceCurrency.trim().toUpperCase()
+    : null;
+
+  if (
+    normalizedPriceCurrency === 'USDT'
+    && effectiveFxRateToVnd === null
+    && executionUnitPrice !== undefined
+    && executionUnitPrice !== null
+    && Number(executionUnitPrice) > 0
+  ) {
+    const resolveFxFn = options?.resolveAcquisitionFxFn || resolveAcquisitionFx;
+    try {
+      const fx = await resolveFxFn({
+        baseCurrency: normalizedPriceCurrency,
+        reportingCurrency: 'VND',
+        executedAt: options?.accountingCutoffAt || null
+      }, options);
+
+      if (
+        fx?.availability === 'available'
+        && typeof fx.rate === 'number'
+        && Number.isFinite(fx.rate)
+        && fx.rate > 0
+      ) {
+        effectiveFxRateToVnd = fx.rate;
+        effectiveFxProvenance = fx.provenance || USDT_VND_ACCOUNTING_PROVENANCE;
+        effectiveFxObservedAt = fx.sourceObservedAt || null;
+        if (effectiveAverageCost === null) {
+          effectiveAverageCost = Number(executionUnitPrice) * fx.rate;
+        }
+      }
+    } catch {
+      // Graceful fallback: native opening position proceeds with null VND basis
+    }
+  }
+
   const rpcArgs = {
     p_asset_id: assetId,
     p_quantity: quantity,
-    p_average_cost: averageCost
+    p_average_cost: effectiveAverageCost
   };
   if (profileId) {
     rpcArgs.p_profile_id = profileId;
@@ -153,14 +200,13 @@ export async function createOpeningPosition({
   if (priceCurrency !== undefined && priceCurrency !== null) {
     rpcArgs.p_price_currency = typeof priceCurrency === 'string' ? priceCurrency.trim().toUpperCase() : priceCurrency;
   }
-  if (fxRateToVnd !== undefined && fxRateToVnd !== null) {
-    rpcArgs.p_fx_rate_to_vnd = fxRateToVnd;
+  // Always set FX fields explicitly (null is meaningful — signals no VND basis resolved)
+  rpcArgs.p_fx_rate_to_vnd = effectiveFxRateToVnd;
+  if (effectiveFxProvenance !== null) {
+    rpcArgs.p_fx_provenance = normalizeFxProvenanceInput(effectiveFxProvenance);
   }
-  if (fxProvenance !== undefined && fxProvenance !== null) {
-    rpcArgs.p_fx_provenance = normalizeFxProvenanceInput(fxProvenance);
-  }
-  if (fxObservedAt !== undefined && fxObservedAt !== null) {
-    rpcArgs.p_fx_observed_at = fxObservedAt;
+  if (effectiveFxObservedAt !== null) {
+    rpcArgs.p_fx_observed_at = effectiveFxObservedAt;
   }
 
   const { data, error } = await db.rpc('create_opening_position', rpcArgs);
