@@ -63,23 +63,33 @@ export function buildPortfolioSummaryDisplay(snapshot) {
   const state = normalizedState(snapshot?.status);
   const cashState = normalizedState(snapshot?.cash?.status);
   const investedState = normalizedState(snapshot?.summary?.metricStates?.investedMarketValue);
-  const pnlState = normalizedState(snapshot?.summary?.metricStates?.unrealizedPnl);
+  const pnlState = normalizedState(
+    snapshot?.summary?.metricStates?.unrealizedPnl
+    ?? (snapshot?.pnlCoverageStatus === 'partial' || snapshot?.summary?.pnlCoverageStatus === 'partial'
+        ? PORTFOLIO_DISPLAY_STATES.PARTIAL
+        : undefined)
+  );
   const totalState = normalizedState(snapshot?.summary?.metricStates?.totalPortfolioValue, state);
 
   const cash = displayableNumber(snapshot?.cash?.value, cashState);
   const invested = displayableNumber(snapshot?.investedMarketValue, investedState);
   const total = displayableNumber(snapshot?.totalPortfolioValue, totalState);
-  const unrealizedPnl = displayableNumber(snapshot?.unrealizedPnL, pnlState);
+
+  const isPnlPartial = pnlState === PORTFOLIO_DISPLAY_STATES.PARTIAL;
+  const unrealizedPnl = isPnlPartial ? null : displayableNumber(snapshot?.unrealizedPnL, pnlState);
   const unrealizedPnlPercent = unrealizedPnl === null || !finiteNumber(snapshot?.unrealizedPnLPercent)
     ? null
     : snapshot.unrealizedPnLPercent;
 
-  const rawKnownPnl = snapshot?.knownUnrealizedPnL ?? snapshot?.summary?.knownUnrealizedPnL ?? null;
+  const rawKnownPnl = snapshot?.knownUnrealizedPnL
+    ?? snapshot?.summary?.knownUnrealizedPnL
+    ?? (isPnlPartial ? (snapshot?.unrealizedPnL ?? snapshot?.summary?.totalUnrealizedPnL) : null);
   const knownUnrealizedPnl = finiteNumber(rawKnownPnl) ? rawKnownPnl : null;
-  const rawKnownPnlPct = snapshot?.knownUnrealizedPnLPercent ?? snapshot?.summary?.knownUnrealizedPnLPercent ?? null;
+  const rawKnownPnlPct = snapshot?.knownUnrealizedPnLPercent
+    ?? snapshot?.summary?.knownUnrealizedPnLPercent
+    ?? (isPnlPartial ? (snapshot?.unrealizedPnLPercent ?? snapshot?.summary?.totalUnrealizedPnLPercent) : null);
   const knownUnrealizedPnlPercent = finiteNumber(rawKnownPnlPct) ? rawKnownPnlPct : null;
 
-  const isPnlPartial = pnlState === PORTFOLIO_DISPLAY_STATES.PARTIAL && knownUnrealizedPnl !== null;
   const pnlExplanation = isPnlPartial
     ? 'Một số tài sản có lãi/lỗ bằng đồng tiền gốc nhưng chưa có đủ cơ sở tỷ giá lịch sử để quy đổi sang VND.'
     : null;

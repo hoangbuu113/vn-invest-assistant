@@ -354,8 +354,6 @@ describe('Portfolio Valuation Integrity (Patch A & A2)', () => {
     assert.equal(result.summary.totalCostBasis, 100 * 50000 + 200 * 30000); // 11,000,000
     assert.equal(result.summary.pricedCostBasis, 100 * 50000);              // 5,000,000
     assert.equal(result.summary.totalMarketValue, 100 * 60000);            // 6,000,000
-    assert.equal(result.summary.totalUnrealizedPnL, 1000000);
-    assert.equal(result.summary.totalUnrealizedPnLPercent, 20);
     assert.equal(result.summary.totalUnrealizedPnL, null);
     assert.equal(result.summary.totalUnrealizedPnLPercent, null);
     assert.equal(result.summary.knownUnrealizedPnL, 1000000);

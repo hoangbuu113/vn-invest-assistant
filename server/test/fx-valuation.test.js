@@ -295,7 +295,6 @@ describe('Feature 19 — FX and VND portfolio valuation foundation', () => {
     assert.equal(usdHoldingNoFx.pnlReason, 'FX_PROVIDER_RATE_LIMITED');
     assert.equal(resultNoFx.summary.totalCostBasis, 1000 + 160);
     assert.equal(resultNoFx.summary.pricedCostBasis, 1000);
-    assert.equal(resultNoFx.summary.totalUnrealizedPnL, 200);
     assert.equal(resultNoFx.summary.totalUnrealizedPnL, null);
     assert.equal(resultNoFx.summary.knownUnrealizedPnL, 200);
     assert.equal(resultNoFx.summary.pnlCoverageStatus, 'partial');

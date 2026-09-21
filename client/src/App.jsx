@@ -1556,7 +1556,48 @@ function App({ onLogout, user: initialUser, profile: initialProfile }) {
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                               <span style={{ fontSize: '0.88rem', color: 'var(--color-slate-500)' }}>Lãi/lỗ tạm tính:</span>
                               <div style={{ textAlign: 'right' }}>
-                                {portfolioOverview.summary.totalUnrealizedPnL !== null ? (
+                                {portfolioOverview.summary.pnlCoverageStatus === 'partial' ? (
+                                  (() => {
+                                    const knownVndPnl = typeof portfolioOverview.summary.knownUnrealizedPnL === 'number'
+                                      ? portfolioOverview.summary.knownUnrealizedPnL
+                                      : (typeof portfolioOverview.summary.totalUnrealizedPnL === 'number' ? portfolioOverview.summary.totalUnrealizedPnL : null);
+                                    const usdtPnl = portfolioOverview.summary.nativePnlSummaries?.USDT?.value;
+                                    return (
+                                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
+                                        <span style={{ color: 'var(--color-slate-500)', fontWeight: 700, fontSize: '0.95rem' }}>—</span>
+                                        <span style={{ fontSize: '0.73rem', color: 'var(--color-amber-600, #d97706)', fontWeight: 500 }}>Chưa thể tổng hợp toàn bộ sang VND</span>
+                                        {knownVndPnl !== null && (
+                                          <span style={{ fontSize: '0.78rem', color: 'var(--color-slate-600)' }}>
+                                            Phần có cơ sở VND: <strong style={{
+                                              color: knownVndPnl > 0
+                                                ? 'var(--color-gain-700)'
+                                                : knownVndPnl < 0
+                                                  ? 'var(--color-loss-700)'
+                                                  : 'var(--color-slate-700)'
+                                            }}>
+                                              {knownVndPnl > 0 ? '+' : ''}
+                                              {knownVndPnl.toLocaleString('vi-VN')} đ
+                                            </strong>
+                                          </span>
+                                        )}
+                                        {typeof usdtPnl === 'number' && (
+                                          <span style={{ fontSize: '0.78rem', color: 'var(--color-slate-600)' }}>
+                                            Lãi/lỗ Crypto: <strong style={{
+                                              color: usdtPnl > 0
+                                                ? 'var(--color-gain-700)'
+                                                : usdtPnl < 0
+                                                  ? 'var(--color-loss-700)'
+                                                  : 'var(--color-slate-700)'
+                                            }}>
+                                              {usdtPnl > 0 ? '+' : ''}
+                                              {usdtPnl.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 })} USDT
+                                            </strong>
+                                          </span>
+                                        )}
+                                      </div>
+                                    );
+                                  })()
+                                ) : portfolioOverview.summary.totalUnrealizedPnL !== null ? (
                                   <span style={{
                                     fontWeight: 800,
                                     fontSize: '0.95rem',
@@ -1575,23 +1616,6 @@ function App({ onLogout, user: initialUser, profile: initialProfile }) {
                                       </span>
                                     )}
                                   </span>
-                                ) : portfolioOverview.summary.pnlCoverageStatus === 'partial' && typeof portfolioOverview.summary.knownUnrealizedPnL === 'number' ? (
-                                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
-                                    <span style={{ color: 'var(--color-slate-500)', fontWeight: 700, fontSize: '0.95rem' }}>—</span>
-                                    <span style={{ fontSize: '0.73rem', color: 'var(--color-amber-600, #d97706)' }}>Chưa thể tổng hợp sang VND</span>
-                                    <span style={{ fontSize: '0.78rem', color: 'var(--color-slate-600)' }}>
-                                      Cơ sở VND: <strong style={{
-                                        color: portfolioOverview.summary.knownUnrealizedPnL > 0
-                                          ? 'var(--color-gain-700)'
-                                          : portfolioOverview.summary.knownUnrealizedPnL < 0
-                                            ? 'var(--color-loss-700)'
-                                            : 'var(--color-slate-700)'
-                                      }}>
-                                        {portfolioOverview.summary.knownUnrealizedPnL > 0 ? '+' : ''}
-                                        {portfolioOverview.summary.knownUnrealizedPnL.toLocaleString('vi-VN')} đ
-                                      </strong>
-                                    </span>
-                                  </div>
                                 ) : (
                                   <span style={{ color: 'var(--color-slate-400)' }}>—</span>
                                 )}

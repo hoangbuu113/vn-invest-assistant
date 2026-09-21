@@ -71,7 +71,6 @@ function PortfolioActions({ onRecordTransaction, onDeclarePosition, onOpenDeposi
 
 function Summary({ snapshot, actions }) {
   const view = buildPortfolioSummaryDisplay(snapshot);
-  const hasPnl = view.unrealizedPnl !== null;
   const hasPnl = view.unrealizedPnl !== null || view.isPnlPartial;
 
   return (
@@ -100,13 +99,6 @@ function Summary({ snapshot, actions }) {
         </div>
         {hasPnl && (
           <div>
-            <span>Lãi/lỗ chưa thực hiện</span>
-            <strong className={view.unrealizedPnl > 0 ? 'is-gain' : view.unrealizedPnl < 0 ? 'is-loss' : ''}>
-              {view.unrealizedPnl > 0 ? '+' : ''}{formatVNDReporting(view.unrealizedPnl)}
-              {view.unrealizedPnlPercent !== null && (
-                <small>{formatPercentVN(view.unrealizedPnlPercent)}</small>
-              )}
-            </strong>
             {view.unrealizedPnl !== null ? (
               <>
                 <span>Lãi/lỗ chưa thực hiện</span>

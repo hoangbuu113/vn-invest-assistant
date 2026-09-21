@@ -385,7 +385,6 @@ export function calculatePortfolioValuation(
     }
   }
 
-  const totalUnrealizedPnL = comparablePnlCount > 0
   const pnlCoverageStatus = holdingsWithMarket.length === 0
     ? 'not_applicable'
     : comparablePnlCount === holdingsWithMarket.length
@@ -400,8 +399,6 @@ export function calculatePortfolioValuation(
     : holdingsWithMarket.length === 0
       ? 0
       : null;
-  const totalUnrealizedPnLPercent = pricedCostBasis > 0
-    ? (totalUnrealizedPnL / pricedCostBasis) * 100
   const knownUnrealizedPnLPercent = pricedCostBasis > 0 && knownUnrealizedPnL !== null
     ? (knownUnrealizedPnL / pricedCostBasis) * 100
     : null;
@@ -456,13 +453,6 @@ export function calculatePortfolioValuation(
     : hasStalePricing
       ? 'stale'
       : 'complete';
-  const pnlCoverageStatus = holdingsWithMarket.length === 0
-    ? 'not_applicable'
-    : comparablePnlCount === holdingsWithMarket.length
-      ? (hasStalePnl ? 'stale' : 'complete')
-      : comparablePnlCount > 0
-        ? 'partial'
-        : 'unavailable';
 
   return {
     summary: {
