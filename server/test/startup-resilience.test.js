@@ -103,6 +103,54 @@ describe('Startup Resilience & Transient Rate Limit Handling', () => {
 
       assert.equal(networkCallCount, 2, 'POST requests must never be deduplicated');
     });
+
+    test('different URLs or query parameters are not incorrectly deduped', async () => {
+      const requestedUrls = [];
+
+      global.fetch = async (url) => {
+        requestedUrls.push(url);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        return new Response(JSON.stringify({ status: 'ok' }), { status: 200 });
+      };
+
+      await Promise.all([
+        apiFetch('/api/market/FPT'),
+        apiFetch('/api/market/VCB'),
+        apiFetch('/api/watchlist?page=1'),
+        apiFetch('/api/watchlist?page=2')
+      ]);
+
+      assert.equal(requestedUrls.length, 4, 'All 4 distinct URLs must result in independent network calls');
+      assert.deepEqual(requestedUrls, [
+        '/api/market/FPT',
+        '/api/market/VCB',
+        '/api/watchlist?page=1',
+        '/api/watchlist?page=2'
+      ]);
+    });
+
+    test('failed requests are removed from in-flight map and do not leave stale promises', async () => {
+      let attempt = 0;
+
+      global.fetch = async () => {
+        attempt++;
+        if (attempt === 1) {
+          throw new Error('Network connection reset');
+        }
+        return new Response(JSON.stringify({ status: 'ok' }), { status: 200 });
+      };
+
+      // First call fails across all retries
+      await assert.rejects(
+        () => apiFetch('/api/market/HPG', { retry: { maxAttempts: 1 } }),
+        { message: 'Network connection reset' }
+      );
+
+      // Second call must NOT be stuck on the previous failed promise
+      const secondRes = await apiFetch('/api/market/HPG', { retry: { maxAttempts: 1 } });
+      assert.equal(secondRes.status, 200);
+      assert.equal(attempt, 2, 'Second call must make a fresh network request');
+    });
   });
 
   describe('Bounded Retry & Backoff on HTTP 429 / 503', () => {
@@ -228,6 +276,31 @@ describe('Startup Resilience & Transient Rate Limit Handling', () => {
       const res401 = await apiFetch('/api/profile', { retry: { maxAttempts: 1 } });
       assert.equal(res401.status, 401);
       assert.equal(authInvalidDispatched, true, 'HTTP 401 must dispatch AUTH_INVALID_EVENT');
+    });
+
+    test('HTTP 401 and 403 are never retried automatically', async () => {
+      let callCount401 = 0;
+      let callCount403 = 0;
+
+      global.fetch = async (url) => {
+        if (url === '/api/profile-401') {
+          callCount401++;
+          return new Response('Unauthorized', { status: 401 });
+        }
+        if (url === '/api/profile-403') {
+          callCount403++;
+          return new Response('Forbidden', { status: 403 });
+        }
+        return new Response('OK', { status: 200 });
+      };
+
+      const res401 = await apiFetch('/api/profile-401');
+      assert.equal(res401.status, 401);
+      assert.equal(callCount401, 1, 'HTTP 401 must never be retried');
+
+      const res403 = await apiFetch('/api/profile-403');
+      assert.equal(res403.status, 403);
+      assert.equal(callCount403, 1, 'HTTP 403 must never be retried');
     });
 
     test('does not retry non-idempotent mutations on 429 by default', async () => {
