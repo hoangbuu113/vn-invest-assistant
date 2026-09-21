@@ -339,4 +339,34 @@ describe('Portfolio Historical Performance Readiness — Deterministic Test Fixt
     assert.strictEqual(emptyResult.twr.returnPct, null, 'unavailable return must be null');
     assert.strictEqual(emptyResult.drawdown.maxDrawdownPct, null, 'unavailable drawdown must be null');
   });
+
+  // ---------------------------------------------------------------------------
+  // CASE H — 1 PARTIAL observation (stored observation vs. complete mark distinction)
+  // ---------------------------------------------------------------------------
+  test('CASE H: 1 PARTIAL observation reports 1 stored observation and 0 complete valuation marks', () => {
+    const obs = mockObservation({
+      valuationDate: '2026-09-20',
+      total: null,
+      status: 'PARTIAL',
+      flow: null,
+      flowStatus: 'NOT_APPLICABLE',
+      flowIntervalType: 'FIRST_OBSERVATION'
+    });
+
+    const result = calculatePortfolioPerformanceFromDailyValuations({
+      range: '1M',
+      now: new Date('2026-09-21T02:00:00.000Z'),
+      observations: [obs]
+    });
+
+    assert.equal(result.status, 'insufficient_data');
+    assert.equal(result.valuationCoverage.observationCount, 1);
+    assert.equal(result.valuationCoverage.valuationMarks, 0);
+    assert.ok(result.valuationCoverage.reasons.includes('INCOMPLETE_DAILY_VALUATION'));
+
+    const view = buildPortfolioPerformanceDisplay(result, { holdingsCount: 1 });
+    assert.equal(view.observationCount, 1);
+    assert.equal(view.valuationMarks, 0);
+    assert.equal(view.canRenderChart, false);
+  });
 });

@@ -520,7 +520,10 @@ export async function capturePortfolioDailyValuationForProfile({
   getSnapshotFn = getPortfolioSnapshot,
   getCashLedgerFn = getCashLedger,
   getTransactionsFn = getPortfolioTransactions,
-  persistFn = persistPortfolioDailyValuation
+  persistFn = persistPortfolioDailyValuation,
+  maxRetries = 0,
+  retryDelayMs = 2000,
+  sleepFn = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 } = {}) {
   const observedAt = (now instanceof Date ? now : new Date(now)).toISOString();
   const valuationDate = getCanonicalDate(observedAt, DAILY_VALUATION_TIMEZONE);
@@ -528,11 +531,31 @@ export async function capturePortfolioDailyValuationForProfile({
   if (existing) return { observation: existing, replayed: true };
 
   const previousObservation = await getPreviousFn({ profileId, valuationDate }, client);
-  const [snapshot, cashEntries, transactions] = await Promise.all([
+  let [snapshot, cashEntries, transactions] = await Promise.all([
     getSnapshotFn({ profileId, now: () => new Date(observedAt) }),
     getCashLedgerFn(client, { profileId }),
     getTransactionsFn({ profileId }, client, { profileId })
   ]);
+
+  const hasHoldings = Array.isArray(snapshot?.holdings) && snapshot.holdings.length > 0;
+  if (hasHoldings && snapshot?.status !== 'AVAILABLE' && maxRetries > 0) {
+    for (let attempt = 1; attempt <= maxRetries; attempt += 1) {
+      if (retryDelayMs > 0) {
+        await sleepFn(retryDelayMs);
+      }
+      try {
+        const retrySnapshot = await getSnapshotFn({ profileId, now: () => new Date(observedAt) });
+        if (retrySnapshot) {
+          snapshot = retrySnapshot;
+          if (snapshot.status === 'AVAILABLE') {
+            break;
+          }
+        }
+      } catch {
+        // Retry failed; retain prior snapshot
+      }
+    }
+  }
   const boundaryFlow = previousObservation
     ? buildBoundaryExternalFlowEvidence({
         startExclusive: previousObservation.observedAt,
@@ -556,7 +579,9 @@ export async function runScheduledPortfolioDailyValuationCapture({
   now = new Date(),
   client = privateSupabase,
   listProfileIdsFn = listDailyValuationProfileIds,
-  captureProfileFn = capturePortfolioDailyValuationForProfile
+  captureProfileFn = capturePortfolioDailyValuationForProfile,
+  maxRetries = 2,
+  retryDelayMs = 2000
 } = {}) {
   const schedule = getDailyValuationSchedule(now);
   if (!schedule.due) {
@@ -575,7 +600,7 @@ export async function runScheduledPortfolioDailyValuationCapture({
   let failedCount = 0;
   for (const profileId of profileIds) {
     try {
-      const result = await captureProfileFn({ profileId, now, client });
+      const result = await captureProfileFn({ profileId, now, client, maxRetries, retryDelayMs });
       if (result.replayed) replayedCount += 1;
       else capturedCount += 1;
     } catch {

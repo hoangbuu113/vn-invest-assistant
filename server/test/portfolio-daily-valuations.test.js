@@ -652,4 +652,94 @@ describe('Portfolio daily valuation history foundation', () => {
       await db.close();
     }
   });
+
+  test('bounded retry recovers from transient provider failure before persistence', async () => {
+    let attempts = 0;
+    let persisted = null;
+    const result = await capturePortfolioDailyValuationForProfile({
+      profileId: PROFILE_ID,
+      now: new Date('2026-09-20T16:45:00.000Z'),
+      getExistingFn: async () => null,
+      getPreviousFn: async () => null,
+      getSnapshotFn: async () => {
+        attempts += 1;
+        return attempts === 1
+          ? availableSnapshot({ status: 'PARTIAL' })
+          : availableSnapshot({ status: 'AVAILABLE' });
+      },
+      getCashLedgerFn: async () => [],
+      getTransactionsFn: async () => [],
+      persistFn: async (obs) => {
+        persisted = obs;
+        return { observation: obs, replayed: false };
+      },
+      maxRetries: 2,
+      retryDelayMs: 0
+    });
+
+    assert.equal(attempts, 2, 'Must retry once after initial PARTIAL');
+    assert.equal(result.observation.status, 'AVAILABLE');
+    assert.equal(persisted.status, 'AVAILABLE');
+  });
+
+  test('bounded retry exhausts attempts and persists truthful PARTIAL when failure persists', async () => {
+    let attempts = 0;
+    let persisted = null;
+    const result = await capturePortfolioDailyValuationForProfile({
+      profileId: PROFILE_ID,
+      now: new Date('2026-09-20T16:45:00.000Z'),
+      getExistingFn: async () => null,
+      getPreviousFn: async () => null,
+      getSnapshotFn: async () => {
+        attempts += 1;
+        return availableSnapshot({ status: 'PARTIAL' });
+      },
+      getCashLedgerFn: async () => [],
+      getTransactionsFn: async () => [],
+      persistFn: async (obs) => {
+        persisted = obs;
+        return { observation: obs, replayed: false };
+      },
+      maxRetries: 2,
+      retryDelayMs: 0
+    });
+
+    assert.equal(attempts, 3, 'Must attempt 1 initial + 2 retries = 3 attempts total');
+    assert.equal(result.observation.status, 'PARTIAL');
+    assert.equal(persisted.status, 'PARTIAL');
+  });
+
+  test('bounded retry skips retries for cash-only profile or empty holdings', async () => {
+    let attempts = 0;
+    const result = await capturePortfolioDailyValuationForProfile({
+      profileId: OTHER_PROFILE_ID,
+      now: new Date('2026-09-20T16:45:00.000Z'),
+      getExistingFn: async () => null,
+      getPreviousFn: async () => null,
+      getSnapshotFn: async () => {
+        attempts += 1;
+        return {
+          profileId: OTHER_PROFILE_ID,
+          snapshotId: 'snapshot-cash-only',
+          ledgerRevision: 'rev-1',
+          status: 'AVAILABLE',
+          completeness: { unrealizedPnl: 'NOT_APPLICABLE' },
+          cash: { value: 0, status: 'AVAILABLE' },
+          investedMarketValue: 0,
+          totalPortfolioValue: 0,
+          unrealizedPnL: 0,
+          holdings: [],
+          sources: { prices: [], fx: [] }
+        };
+      },
+      getCashLedgerFn: async () => [],
+      getTransactionsFn: async () => [],
+      persistFn: async (obs) => ({ observation: obs, replayed: false }),
+      maxRetries: 2,
+      retryDelayMs: 0
+    });
+
+    assert.equal(attempts, 1, 'Must not retry when holdings are empty');
+    assert.equal(result.observation.status, 'AVAILABLE');
+  });
 });

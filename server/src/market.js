@@ -1,6 +1,7 @@
 import { resolveProviderMapping } from './assets.js';
 import {
   attachApproximateVndReference,
+  binanceProvider,
   getProviderAdapter,
   MARKET_PROVIDERS,
   isBinanceSupported,
@@ -218,7 +219,7 @@ export async function getMarketRealtime(rawSymbol, options = {}) {
 
   const symbol = rawSymbol.trim().toUpperCase();
   const resolver = options.resolveProviderMappingFn || resolveProviderMapping;
-  const { asset } = await resolver(
+  const { asset, mapping } = await resolver(
     symbol,
     options.provider || null,
     providerResolverOptions(options, 'realtime')
@@ -235,7 +236,44 @@ export async function getMarketRealtime(rawSymbol, options = {}) {
   }
 
   const binanceSvc = options.binanceService || getBinanceService();
-  const obs = binanceSvc.getSnapshot(assetId, options);
+  let obs = binanceSvc ? binanceSvc.getSnapshot(assetId, options) : null;
+
+  if (!obs || obs.price === null) {
+    // Attempt Binance REST fallback before declaring unavailable
+    if (mapping && options.enableRestFallback !== false) {
+      try {
+        const binanceAdapter = options.binanceAdapter || binanceProvider;
+        const restSnapshot = await binanceAdapter.getSnapshot(asset, mapping, options);
+        if (restSnapshot && typeof restSnapshot.price === 'number' && Number.isFinite(restSnapshot.price) && restSnapshot.price > 0) {
+          obs = {
+            assetId,
+            symbol: asset.symbol,
+            binanceSymbol: restSnapshot.symbol || mapping?.providerSymbol,
+            realtimeCurrency: 'USDT',
+            currency: 'USDT',
+            price: restSnapshot.price,
+            rollingOpen: restSnapshot.rollingOpen ?? (
+              typeof restSnapshot.change === 'number' && restSnapshot.change !== null
+                ? restSnapshot.price - restSnapshot.change
+                : null
+            ),
+            rollingHigh: restSnapshot.dayHigh ?? null,
+            rollingLow: restSnapshot.dayLow ?? null,
+            changeBasis: restSnapshot.changeBasis || 'ROLLING_24H',
+            baseVolume: restSnapshot.volume ?? null,
+            quoteVolume: null,
+            observedAt: restSnapshot.priceAsOf || restSnapshot.updatedAt || new Date().toISOString(),
+            cachedAtMs: Date.now(),
+            connectionState: 'REST_FALLBACK',
+            priceSource: restSnapshot.priceSource || 'binance_rest_24hr',
+            freshness: restSnapshot.freshness || 'live'
+          };
+        }
+      } catch {
+        // Fallback unavailable
+      }
+    }
+  }
 
   if (!obs || obs.price === null) {
     const err = new Error(`No realtime market observation available for '${asset?.symbol || symbol}'`);
@@ -251,14 +289,14 @@ export async function getMarketRealtime(rawSymbol, options = {}) {
     price: obs.price,
     currency: 'USDT',
     canonicalQuoteCurrency: asset.quoteCurrency ?? asset.quote_currency ?? null,
-    source: 'binance_websocket',
-    priceSource: 'binance_websocket',
+    source: obs.priceSource || 'binance_websocket',
+    priceSource: obs.priceSource || 'binance_websocket',
     observedAt: obs.observedAt,
     change: obs.rollingOpen !== null ? obs.price - obs.rollingOpen : null,
     changePercent: obs.rollingOpen !== null && obs.rollingOpen > 0
       ? ((obs.price - obs.rollingOpen) / obs.rollingOpen) * 100
       : null,
-    changeBasis: 'ROLLING_24H',
+    changeBasis: obs.changeBasis || 'ROLLING_24H',
     dayHigh: obs.rollingHigh ?? null,
     dayLow: obs.rollingLow ?? null,
     volume: obs.baseVolume ?? null,

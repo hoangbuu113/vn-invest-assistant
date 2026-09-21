@@ -121,6 +121,9 @@ export function buildPortfolioPerformanceDisplay(performance, { holdingsCount = 
   const observationCount = Number.isInteger(reportedObservationCount) && reportedObservationCount >= 0
     ? reportedObservationCount
     : series.length;
+  const valuationMarks = Number.isInteger(performance?.valuationCoverage?.valuationMarks)
+    ? performance.valuationCoverage.valuationMarks
+    : null;
   const twr = metricValue(performance.twr, 'returnPct');
   const isCashOnly = holdingsCount === 0;
   const historyMode = observationCount <= 1
@@ -151,6 +154,7 @@ export function buildPortfolioPerformanceDisplay(performance, { holdingsCount = 
     },
     historicalAsOf,
     observationCount,
+    valuationMarks,
     series,
     historyMode,
     canRenderChart: !isCashOnly && historyMode === 'SUFFICIENT' && twr !== null,

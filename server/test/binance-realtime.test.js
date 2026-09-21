@@ -367,6 +367,44 @@ describe('Feature 24A — Binance Realtime & Canonical Separation', () => {
     emptySvc.destroy();
   });
 
+  it('J3. getMarketRealtime falls back to Binance REST when WebSocket cache is empty and mapping is provided', async () => {
+    const btcId = '1aca9503-acf1-4450-9b75-4f8935324398';
+    const emptySvc = makeDisabledService();
+    const mockFetchFn = async () => ({
+      ok: true,
+      json: async () => ({
+        lastPrice: '67500.50',
+        openPrice: '66000.00',
+        highPrice: '68000.00',
+        lowPrice: '65500.00',
+        volume: '12345.67',
+        closeTime: Date.now()
+      })
+    });
+
+    const realtime = await getMarketRealtime('BTC', {
+      binanceService: emptySvc,
+      fetchFn: mockFetchFn,
+      resolveProviderMappingFn: async () => ({
+        asset: { id: btcId, symbol: 'BTC', marketPolicy: 'CONTINUOUS_24_7', quoteCurrency: 'USD' },
+        mapping: { provider: 'binance', providerSymbol: 'BTCUSDT' }
+      }),
+      getFxRateFn: async () => ({
+        availability: 'available',
+        rate: 25400,
+        provider: 'coinmarketcap'
+      })
+    });
+
+    assert.equal(realtime.price, 67500.50);
+    assert.equal(realtime.currency, 'USDT');
+    assert.equal(realtime.priceSource, 'binance_rest_24hr');
+    assert.equal(realtime.connectionState, 'REST_FALLBACK');
+    assert.equal(realtime.referenceOnly, true);
+    assert.ok(realtime.priceVnd > 0);
+    emptySvc.destroy();
+  });
+
   // ---------------------------------------------------------------------------
   // K. Shared WebSocket & No Duplicate Connections
   // ---------------------------------------------------------------------------

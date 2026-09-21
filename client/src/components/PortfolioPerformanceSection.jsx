@@ -258,7 +258,8 @@ function HistorySummary({ view }) {
       <dl>
         <div><dt>Bắt đầu</dt><dd>{formatDateKey(view.period.startDate)}</dd></div>
         <div><dt>Kết thúc</dt><dd>{formatDateKey(view.period.endDate)}</dd></div>
-        <div><dt>Quan sát hợp lệ</dt><dd>{view.observationCount}</dd></div>
+        <div><dt>Quan sát đã lưu</dt><dd>{view.observationCount}</dd></div>
+        <div><dt>Mốc hoàn chỉnh</dt><dd>{view.valuationMarks ?? '—'}</dd></div>
       </dl>
     </div>
   );
@@ -424,7 +425,9 @@ export function PortfolioPerformanceSection({
                 <PercentValue value={view.twr.value} unavailableText={view.twr.state === PERFORMANCE_DATA_STATES.INSUFFICIENT_HISTORY ? 'Chưa đủ lịch sử' : '—'} />
               </div>
               {view.observationCount === 0 ? (
-                <p>Bắt đầu: — · Kết thúc: — · 0 quan sát hợp lệ</p>
+                <p>Bắt đầu: — · Kết thúc: — · 0 quan sát đã lưu</p>
+              ) : view.valuationMarks !== null && view.valuationMarks !== view.observationCount ? (
+                <p>{formatDateKey(view.period.startDate)}–{formatDateKey(view.period.endDate)} · {view.observationCount} quan sát đã lưu ({view.valuationMarks} mốc hoàn chỉnh)</p>
               ) : (
                 <p>{formatDateKey(view.period.startDate)}–{formatDateKey(view.period.endDate)} · {view.observationCount} quan sát hợp lệ</p>
               )}
