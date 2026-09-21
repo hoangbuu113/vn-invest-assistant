@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { formatNativeAmount } from '../utils/formatting.js';
+import { parseFinancialInput } from '../utils/financialInput.js';
 import { apiFetch } from '../utils/api.js';
 
 export default function PriceAlertModal({
@@ -24,16 +25,28 @@ export default function PriceAlertModal({
     }
   }, [isOpen, asset]);
 
-  if (!isOpen || !asset) return null;
+  const quoteCurrency = asset?.quote_currency || asset?.quoteCurrency || 'VND';
+  const parsedTargetPrice = parseFinancialInput(targetPriceInput, quoteCurrency, { allowZero: false });
+  const numericTargetPrice = parsedTargetPrice.value;
+  const isValidPrice = parsedTargetPrice.isValid && numericTargetPrice > 0;
 
-  const quoteCurrency = asset.quote_currency || asset.quoteCurrency || 'VND';
-  const numericTargetPrice = parseFloat(targetPriceInput.replace(/[^0-9.]/g, ''));
-  const isValidPrice = Number.isFinite(numericTargetPrice) && numericTargetPrice > 0;
+  const priceAlertPreview = useMemo(() => {
+    if (!targetPriceInput.trim()) return null;
+    if (!isValidPrice) {
+      return { isValid: false, error: parsedTargetPrice.error };
+    }
+    return {
+      isValid: true,
+      text: formatNativeAmount(numericTargetPrice, quoteCurrency)
+    };
+  }, [targetPriceInput, isValidPrice, numericTargetPrice, quoteCurrency, parsedTargetPrice]);
+
+  if (!isOpen || !asset) return null;
 
   const handleSubmit = async (e) => {
     e?.preventDefault();
     if (!isValidPrice) {
-      setErrorMsg('Vui lòng nhập mức giá mục tiêu hợp lệ (> 0).');
+      setErrorMsg(parsedTargetPrice.error || 'Vui lòng nhập mức giá mục tiêu hợp lệ (> 0).');
       return;
     }
 
@@ -255,10 +268,9 @@ export default function PriceAlertModal({
             </label>
             <div style={{ position: 'relative' }}>
               <input
-                type="number"
-                step="any"
-                min="0.00000001"
-                placeholder={`VD: ${quoteCurrency === 'VND' ? '80000' : '80.5'}`}
+                type="text"
+                inputMode={quoteCurrency === 'VND' ? 'numeric' : 'decimal'}
+                placeholder={`VD: ${quoteCurrency === 'VND' ? '80.000 hoặc 80000' : '80.5'}`}
                 value={targetPriceInput}
                 onChange={(e) => setTargetPriceInput(e.target.value)}
                 disabled={loading}
@@ -275,10 +287,16 @@ export default function PriceAlertModal({
                 required
               />
             </div>
-            {isValidPrice && (
-              <div style={{ marginTop: '0.4rem', fontSize: '0.8rem', color: 'var(--color-slate-500)' }}>
-                ≈ {formatNativeAmount(numericTargetPrice, quoteCurrency)}
-              </div>
+            {priceAlertPreview && (
+              priceAlertPreview.isValid ? (
+                <div style={{ marginTop: '0.4rem', fontSize: '0.8rem', color: 'var(--color-slate-500)' }}>
+                  ≈ {priceAlertPreview.text}
+                </div>
+              ) : (
+                <div style={{ marginTop: '0.4rem', fontSize: '0.78rem', color: 'var(--color-loss-600, #dc2626)' }}>
+                  {priceAlertPreview.error}
+                </div>
+              )
             )}
           </div>
 

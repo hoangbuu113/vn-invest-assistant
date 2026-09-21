@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { apiFetch } from '../utils/api.js';
+import { parseVndInput, formatVndPreview } from '../utils/financialInput.js';
 
 function getClientUUID() {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -52,6 +53,18 @@ export default function CashMovementModal({
 
   const isDeposit = mode === 'DEPOSIT';
 
+  const cashAmountPreview = useMemo(() => {
+    if (!amountInput.trim()) return null;
+    const parsed = parseVndInput(amountInput, { allowZero: false });
+    if (!parsed.isValid) {
+      return { isValid: false, error: parsed.error };
+    }
+    return {
+      isValid: true,
+      text: formatVndPreview(parsed.value)
+    };
+  }, [amountInput]);
+
   useEffect(() => {
     if (isOpen) {
       idempotencyKeyRef.current = getClientUUID();
@@ -77,11 +90,12 @@ export default function CashMovementModal({
       return;
     }
 
-    const numAmount = parseFloat(rawAmount);
-    if (!Number.isFinite(numAmount) || numAmount <= 0) {
-      setErrorMsg('Số tiền phải là số dương lớn hơn 0.');
+    const parsed = parseVndInput(rawAmount, { allowZero: false });
+    if (!parsed.isValid) {
+      setErrorMsg(parsed.error || 'Số tiền phải là số dương lớn hơn 0.');
       return;
     }
+    const numAmount = parsed.value;
 
     setLoading(true);
 
@@ -242,11 +256,10 @@ export default function CashMovementModal({
               {isDeposit ? 'Số tiền nạp (₫)' : 'Số tiền rút (₫)'} <span style={{ color: 'var(--color-loss-600)' }}>*</span>
             </label>
             <input
-              type="number"
-              step="any"
-              min="1"
+              type="text"
+              inputMode="numeric"
               autoFocus
-              placeholder={isDeposit ? 'Ví dụ: 10000000' : 'Ví dụ: 5000000'}
+              placeholder={isDeposit ? 'Ví dụ: 10.000.000 hoặc 10000000' : 'Ví dụ: 5.000.000 hoặc 5000000'}
               value={amountInput}
               onChange={(e) => {
                 setAmountInput(e.target.value);
@@ -264,10 +277,16 @@ export default function CashMovementModal({
                 color: 'var(--color-slate-900)'
               }}
             />
-            {Number(amountInput) > 0 && (
-              <div style={{ marginTop: '0.35rem', fontSize: '0.82rem', color: 'var(--color-brand-600)', fontWeight: 600 }}>
-                ≈ {formatVND(Number(amountInput))}
-              </div>
+            {cashAmountPreview && (
+              cashAmountPreview.isValid ? (
+                <div style={{ marginTop: '0.35rem', fontSize: '0.85rem', color: 'var(--color-brand-600)', fontWeight: 600 }}>
+                  = {cashAmountPreview.text}
+                </div>
+              ) : (
+                <div style={{ marginTop: '0.35rem', fontSize: '0.8rem', color: 'var(--color-loss-600, #dc2626)' }}>
+                  {cashAmountPreview.error}
+                </div>
+              )
             )}
           </div>
 

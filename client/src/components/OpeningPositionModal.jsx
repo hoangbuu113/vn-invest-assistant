@@ -2,8 +2,9 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { MagneticButton } from './MotionHelpers.jsx';
 import { apiFetch } from '../utils/api.js';
-import { formatAssetType } from '../utils/formatting.js';
+import { formatAssetType, formatNativeAmount } from '../utils/formatting.js';
 import { isPortfolioTradeableAsset } from '../utils/assetCapabilities.js';
+import { parseFinancialInput, formatVndPreview, getAssetUnitLabel } from '../utils/financialInput.js';
 
 function getClientUUID() {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -164,6 +165,38 @@ export default function OpeningPositionModal({
     return !(holdings || []).some((h) => h.asset_id === a.id);
   });
 
+  const costPreview = useMemo(() => {
+    if (isNonVnd) {
+      if (!executionUnitPrice.trim()) return null;
+      const parsed = parseFinancialInput(executionUnitPrice, priceCurrency, { allowZero: true });
+      const unitLabel = getAssetUnitLabel(selectedAsset);
+      if (!parsed.isValid) {
+        return { isValid: false, error: parsed.error };
+      }
+      const qty = Number(quantity);
+      const hasValidQty = Number.isFinite(qty) && qty > 0;
+      return {
+        isValid: true,
+        unitText: `${formatNativeAmount(parsed.value, priceCurrency)} / ${unitLabel}`,
+        totalText: hasValidQty ? formatNativeAmount(qty * parsed.value, priceCurrency) : null
+      };
+    }
+
+    if (!averageCost.trim()) return null;
+    const parsed = parseFinancialInput(averageCost, 'VND', { allowZero: true });
+    const unitLabel = getAssetUnitLabel(selectedAsset);
+    if (!parsed.isValid) {
+      return { isValid: false, error: parsed.error };
+    }
+    const qty = Number(quantity);
+    const hasValidQty = Number.isFinite(qty) && qty > 0;
+    return {
+      isValid: true,
+      unitText: formatVndPreview(parsed.value, unitLabel),
+      totalText: hasValidQty ? formatVndPreview(qty * parsed.value) : null
+    };
+  }, [isNonVnd, executionUnitPrice, priceCurrency, averageCost, quantity, selectedAsset]);
+
   const handleSubmit = async (e) => {
     if (e) e.preventDefault();
     setError(null);
@@ -217,17 +250,19 @@ export default function OpeningPositionModal({
     let numAverageCost = null;
     let numExecPrice = null;
     if (isNonVnd) {
-      numExecPrice = Number(executionUnitPrice);
-      if (executionUnitPrice === '' || !Number.isFinite(numExecPrice) || numExecPrice < 0) {
-        setError(`Giá mua trung bình (${priceCurrency}) phải là số không âm.`);
+      const parsed = parseFinancialInput(executionUnitPrice, priceCurrency, { allowZero: true });
+      if (!parsed.isValid) {
+        setError(parsed.error || `Giá mua trung bình (${priceCurrency}) phải là số không âm.`);
         return;
       }
+      numExecPrice = parsed.value;
     } else {
-      numAverageCost = Number(averageCost);
-      if (averageCost === '' || !Number.isFinite(numAverageCost) || numAverageCost < 0) {
-        setError('Giá mua trung bình (VND) phải là số không âm.');
+      const parsed = parseFinancialInput(averageCost, 'VND', { allowZero: true });
+      if (!parsed.isValid) {
+        setError(parsed.error || 'Giá mua trung bình (VND) phải là số không âm.');
         return;
       }
+      numAverageCost = parsed.value;
     }
 
     setLoading(true);
@@ -538,10 +573,9 @@ export default function OpeningPositionModal({
                   </label>
                   <div style={{ display: 'grid', gridTemplateColumns: isNonVnd ? 'minmax(0, 2fr) minmax(90px, 1fr)' : '1fr', gap: '10px' }}>
                     <input
-                      type="number"
-                      min="0"
-                      step="any"
-                      placeholder={isGold ? 'Ví dụ: 2500' : (isCrypto ? 'Ví dụ: 0.82' : 'Ví dụ: 35000')}
+                      type="text"
+                      inputMode={isNonVnd ? 'decimal' : 'numeric'}
+                      placeholder={isGold ? 'Ví dụ: 2500' : (isCrypto ? 'Ví dụ: 0.4265' : 'Ví dụ: 68.603 hoặc 68603')}
                       value={isNonVnd ? executionUnitPrice : averageCost}
                       onChange={(e) => {
                         if (isNonVnd) setExecutionUnitPrice(e.target.value);
@@ -578,6 +612,24 @@ export default function OpeningPositionModal({
                       ? 'Nhập đúng đồng tiền bạn đã dùng khi mua. Không cần tự quy đổi sang VND.'
                       : 'Giá mua trung bình theo VND.'}
                   </div>
+
+                  {/* Live Normalized Preview Helper */}
+                  {costPreview && (
+                    costPreview.isValid ? (
+                      <div style={{ marginTop: '6px', fontSize: '0.8rem', color: 'var(--color-brand-600, #2563eb)', fontWeight: 600 }}>
+                        <div>= {costPreview.unitText}</div>
+                        {costPreview.totalText && (
+                          <div style={{ marginTop: '2px', color: 'var(--color-slate-700)' }}>
+                            Tổng giá vốn: <strong>{costPreview.totalText}</strong>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div style={{ marginTop: '6px', fontSize: '0.78rem', color: 'var(--color-loss-600, #dc2626)' }}>
+                        {costPreview.error}
+                      </div>
+                    )
+                  )}
                 </div>
 
                 {/* Calculation preview */}

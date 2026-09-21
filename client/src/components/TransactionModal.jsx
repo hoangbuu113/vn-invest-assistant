@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { apiFetch } from '../utils/api.js';
-import { formatAssetType } from '../utils/formatting.js';
+import { formatAssetType, formatNativeAmount } from '../utils/formatting.js';
+import { parseFinancialInput, formatVndPreview, getAssetUnitLabel } from '../utils/financialInput.js';
 import { isPortfolioTradeableAsset } from '../utils/assetCapabilities.js';
 import {
   buildTransactionConfirmationSummary,
@@ -552,6 +553,22 @@ export default function TransactionModal({
     };
   }, [priceCurrency, isGold]);
 
+  const vndPricePreview = useMemo(() => {
+    if (!priceInput.trim()) return null;
+    const parsed = parseFinancialInput(priceInput, 'VND', { allowZero: false });
+    const unitLabel = getAssetUnitLabel(selectedAssetObject);
+    if (!parsed.isValid) {
+      return { isValid: false, error: parsed.error };
+    }
+    const qty = Number(quantityInput);
+    const hasValidQty = Number.isFinite(qty) && qty > 0;
+    return {
+      isValid: true,
+      unitText: formatVndPreview(parsed.value, unitLabel),
+      totalText: hasValidQty ? formatVndPreview(qty * parsed.value) : null
+    };
+  }, [priceInput, quantityInput, selectedAssetObject]);
+
   // Resolve a direct CoinGecko Tether/VND observation for crypto external
   // settlement. The stable intent key covers asset, currency, settlement,
   // execution price, and transaction timestamp without using object identity.
@@ -741,11 +758,12 @@ export default function TransactionModal({
       return null;
     }
     if (isNonVnd && rawExecutionPrice) {
-      numExecUnitPrice = parseFloat(rawExecutionPrice);
-      if (!Number.isFinite(numExecUnitPrice) || numExecUnitPrice <= 0) {
-        setErrorMsg(`Giá thực hiện (${priceCurrency}) phải là số dương lớn hơn 0.`);
+      const parsedExec = parseFinancialInput(rawExecutionPrice, priceCurrency, { allowZero: false });
+      if (!parsedExec.isValid) {
+        setErrorMsg(parsedExec.error || `Giá thực hiện (${priceCurrency}) phải là số dương lớn hơn 0.`);
         return null;
       }
+      numExecUnitPrice = parsedExec.value;
     }
 
     let normalizedExecutedAt;
@@ -784,11 +802,12 @@ export default function TransactionModal({
         setErrorMsg(isNonVnd ? 'Vui lòng nhập giá vốn / giá trị quy đổi VND.' : 'Vui lòng nhập giá giao dịch.');
         return null;
       }
-      numPrice = parseFloat(rawPrice);
-      if (!Number.isFinite(numPrice) || numPrice <= 0) {
-        setErrorMsg('Giá vốn quy đổi VND phải là số dương lớn hơn 0.');
+      const parsedPrice = parseFinancialInput(rawPrice, 'VND', { allowZero: false });
+      if (!parsedPrice.isValid) {
+        setErrorMsg(parsedPrice.error || 'Giá vốn quy đổi VND phải là số dương lớn hơn 0.');
         return null;
       }
+      numPrice = parsedPrice.value;
     } else if (priceCurrency === 'USD' && isFxPrefillConfirmed && currentUsdVndRate && !isCustomTime) {
       numPrice = Number(executionUnitPrice) * currentUsdVndRate;
     }
@@ -1352,9 +1371,8 @@ export default function TransactionModal({
                       {isSimplifiedCryptoExternal && <span style={{ color: 'var(--color-loss-600)' }}> *</span>}
                     </label>
                     <input
-                      type="number"
-                      step="any"
-                      min="0.00000001"
+                      type="text"
+                      inputMode="decimal"
                       placeholder={`Ví dụ: ${isGold ? '2650' : (isCrypto ? '0.36402' : '95000')}`}
                       value={executionUnitPrice}
                       onChange={(e) => {
@@ -1546,10 +1564,9 @@ export default function TransactionModal({
                 </label>
                 <input
                   id="transaction-vnd-accounting-price"
-                  type="number"
-                  step="any"
-                  min="1"
-                  placeholder={isGold ? 'Ví dụ: 68000000' : 'Ví dụ: 120000'}
+                  type="text"
+                  inputMode="numeric"
+                  placeholder={isGold ? 'Ví dụ: 68.000.000 hoặc 68000000' : 'Ví dụ: 66.400 hoặc 66400'}
                   value={priceInput}
                   onChange={(event) => {
                     invalidateFrozenSubmission();
@@ -1573,6 +1590,24 @@ export default function TransactionModal({
                     ? 'Bắt buộc vì giao dịch này dùng tiền mặt VND đang theo dõi trong ứng dụng.'
                     : 'Giá tiền đồng cho mỗi đơn vị tài sản.'}
                 </div>
+
+                {/* Live Normalized Preview Helper */}
+                {vndPricePreview && (
+                  vndPricePreview.isValid ? (
+                    <div style={{ marginTop: '6px', fontSize: '0.8rem', color: 'var(--color-brand-600, #2563eb)', fontWeight: 600 }}>
+                      <div>= {vndPricePreview.unitText}</div>
+                      {vndPricePreview.totalText && (
+                        <div style={{ marginTop: '2px', color: 'var(--color-slate-700)' }}>
+                          Tổng giá trị: <strong>{vndPricePreview.totalText}</strong>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div style={{ marginTop: '6px', fontSize: '0.78rem', color: 'var(--color-loss-600, #dc2626)' }}>
+                      {vndPricePreview.error}
+                    </div>
+                  )
+                )}
               </div>
             )}
 
