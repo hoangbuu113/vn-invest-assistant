@@ -453,7 +453,8 @@ export async function getPortfolioOverview({
   getHoldingsFn = getHoldings,
   getMarketSnapshotFn = getMarketSnapshot,
   getMarketRealtimeFn = getMarketRealtime,
-  getFxRateFn = getFxRate
+  getFxRateFn = getFxRate,
+  bypassTransientFailureBackoff = false
 } = {}) {
   const [cashOverview, holdings] = await Promise.all([
     Promise.resolve()
@@ -569,7 +570,9 @@ export async function getPortfolioOverview({
   const fxRateEntries = await Promise.all(
     fxCurrencies.map(async (currency) => {
       try {
-        return [currency, await getFxRateFn(currency, REPORTING_CURRENCY)];
+        return [currency, await getFxRateFn(currency, REPORTING_CURRENCY, {
+          bypassTransientFailureBackoff
+        })];
       } catch {
         return [currency, createUnavailableFxRate(
           currency,

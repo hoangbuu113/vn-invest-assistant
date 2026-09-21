@@ -742,4 +742,98 @@ describe('Portfolio daily valuation history foundation', () => {
     assert.equal(attempts, 1, 'Must not retry when holdings are empty');
     assert.equal(result.observation.status, 'AVAILABLE');
   });
+
+  test('end-to-end scheduler recovery: attempt 0 transient CMC FX failure -> attempt 1 succeeds with bypassTransientFailureBackoff', async () => {
+    let attempts = 0;
+    const bypassFlags = [];
+    const persistedRows = [];
+    const observedAt = '2026-09-20T16:45:00.000Z';
+
+    const result = await capturePortfolioDailyValuationForProfile({
+      profileId: PROFILE_ID,
+      now: new Date(observedAt),
+      getExistingFn: async () => null,
+      getPreviousFn: async () => null,
+      getSnapshotFn: async ({ bypassTransientFailureBackoff }) => {
+        attempts += 1;
+        bypassFlags.push(bypassTransientFailureBackoff);
+        if (attempts === 1) {
+          return availableSnapshot({
+            status: 'PARTIAL',
+            sources: {
+              prices: [{ assetId: 'crypto-1', symbol: 'ONDO', status: 'AVAILABLE' }],
+              fx: [{ assetId: 'crypto-1', baseCurrency: 'USDT', quoteCurrency: 'VND', rate: null, status: 'UNAVAILABLE' }]
+            }
+          });
+        }
+        return availableSnapshot({
+          status: 'AVAILABLE',
+          sources: {
+            prices: [{ assetId: 'crypto-1', symbol: 'ONDO', status: 'AVAILABLE' }],
+            fx: [{ assetId: 'crypto-1', baseCurrency: 'USDT', quoteCurrency: 'VND', rate: 26_000, status: 'AVAILABLE' }]
+          }
+        });
+      },
+      getCashLedgerFn: async () => [],
+      getTransactionsFn: async () => [],
+      persistFn: async (obs) => {
+        persistedRows.push(obs);
+        return { observation: obs, replayed: false };
+      },
+      maxRetries: 2,
+      retryDelayMs: 0
+    });
+
+    assert.equal(attempts, 2, 'Must recover on attempt 1');
+    assert.equal(bypassFlags[0], undefined, 'Attempt 0 must not bypass transient failure backoff');
+    assert.equal(bypassFlags[1], true, 'Attempt 1 must pass bypassTransientFailureBackoff: true');
+    assert.equal(persistedRows.length, 1, 'Exactly one row persisted');
+    assert.equal(persistedRows[0].status, 'AVAILABLE');
+    assert.equal(result.observation.status, 'AVAILABLE');
+    assert.equal(result.observation.observedAt, observedAt);
+    assert.equal(result.observation.valuationDate, '2026-09-20');
+  });
+
+  test('end-to-end scheduler: CMC 429 rate limit across all bounded attempts persists PARTIAL without hammering', async () => {
+    let attempts = 0;
+    const bypassFlags = [];
+    const persistedRows = [];
+    const observedAt = '2026-09-20T16:45:00.000Z';
+
+    const result = await capturePortfolioDailyValuationForProfile({
+      profileId: PROFILE_ID,
+      now: new Date(observedAt),
+      getExistingFn: async () => null,
+      getPreviousFn: async () => null,
+      getSnapshotFn: async ({ bypassTransientFailureBackoff }) => {
+        attempts += 1;
+        bypassFlags.push(bypassTransientFailureBackoff);
+        return availableSnapshot({
+          status: 'PARTIAL',
+          sources: {
+            prices: [{ assetId: 'crypto-1', symbol: 'ONDO', status: 'AVAILABLE' }],
+            fx: [{ assetId: 'crypto-1', baseCurrency: 'USDT', quoteCurrency: 'VND', rate: null, status: 'UNAVAILABLE' }]
+          }
+        });
+      },
+      getCashLedgerFn: async () => [],
+      getTransactionsFn: async () => [],
+      persistFn: async (obs) => {
+        persistedRows.push(obs);
+        return { observation: obs, replayed: false };
+      },
+      maxRetries: 2,
+      retryDelayMs: 0
+    });
+
+    assert.equal(attempts, 3, 'Must exhaust all 3 attempts (1 initial + 2 retries)');
+    assert.equal(bypassFlags[0], undefined);
+    assert.equal(bypassFlags[1], true);
+    assert.equal(bypassFlags[2], true);
+    assert.equal(persistedRows.length, 1, 'Exactly one row persisted');
+    assert.equal(persistedRows[0].status, 'PARTIAL');
+    assert.equal(result.observation.status, 'PARTIAL');
+    assert.equal(result.observation.observedAt, observedAt);
+    assert.equal(result.observation.valuationDate, '2026-09-20');
+  });
 });

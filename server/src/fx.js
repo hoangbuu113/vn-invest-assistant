@@ -194,7 +194,8 @@ export async function getFxRate(baseCurrency, quoteCurrency = REPORTING_CURRENCY
         fetchFn: options.fetchFn,
         apiKey: options.coinMarketCapApiKey ?? options.apiKey,
         cache: options.cache,
-        timeoutMs: options.timeoutMs
+        timeoutMs: options.timeoutMs,
+        bypassTransientFailureBackoff: options.bypassTransientFailureBackoff === true
       });
     } catch {
       result = null;

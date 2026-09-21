@@ -14,6 +14,12 @@ export const COINMARKETCAP_CURRENT_RATE_POLICY = Object.freeze({
   maximumBackoffMs: 60 * 60 * 1000
 });
 
+export const TRANSIENT_RETRYABLE_REASONS = Object.freeze(new Set([
+  'FX_PROVIDER_UNAVAILABLE',
+  'FX_PROVIDER_TIMEOUT',
+  'FX_OBSERVATION_STALE'
+]));
+
 export function createCoinMarketCapCurrentRateCache() {
   return {
     rateEntry: null,
@@ -328,7 +334,10 @@ export async function getCoinMarketCapCurrentUsdtVndRate(options = {}) {
     return cachedRate(entry, 'hit');
   }
 
-  if (cache && nowMs < cache.backoffUntilMs) {
+  const isTransientFailure = TRANSIENT_RETRYABLE_REASONS.has(cache?.lastFailureReason);
+  const shouldBypassBackoff = options.bypassTransientFailureBackoff === true && isTransientFailure;
+
+  if (cache && nowMs < cache.backoffUntilMs && !shouldBypassBackoff) {
     if (entry && isHardFresh(entry.value, nowMs)) {
       return cachedRate(entry, 'fallback');
     }

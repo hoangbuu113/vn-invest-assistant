@@ -544,7 +544,11 @@ export async function capturePortfolioDailyValuationForProfile({
         await sleepFn(retryDelayMs);
       }
       try {
-        const retrySnapshot = await getSnapshotFn({ profileId, now: () => new Date(observedAt) });
+        const retrySnapshot = await getSnapshotFn({
+          profileId,
+          now: () => new Date(observedAt),
+          bypassTransientFailureBackoff: true
+        });
         if (retrySnapshot) {
           snapshot = retrySnapshot;
           if (snapshot.status === 'AVAILABLE') {

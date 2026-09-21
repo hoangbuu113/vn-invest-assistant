@@ -414,4 +414,290 @@ describe('CoinMarketCap current USDT/VND valuation provider', () => {
     assert.equal(display.invested, null);
     assert.notEqual(display.total, 0);
   });
+
+  describe('Scheduler in-flight retry vs failure-cache backoff', () => {
+    test('CASE A: attempt 0 network error -> retry with bypassTransientFailureBackoff fetches again and succeeds', async () => {
+      let fetchCount = 0;
+      const cache = createCoinMarketCapCurrentRateCache();
+      const mockFetch = async (url) => {
+        fetchCount += 1;
+        const parsed = new URL(url);
+        if (parsed.pathname === '/v1/fiat/map') {
+          return response({ data: fiatPayload() });
+        }
+        if (fetchCount === 2) {
+          // Attempt 0 fails on conversion
+          throw new Error('Network socket hangup');
+        }
+        return response({ data: conversionPayload({ rate: 26_000 }) });
+      };
+
+      // Attempt 0
+      const res0 = await getCoinMarketCapCurrentUsdtVndRate({
+        cache,
+        apiKey: FAKE_API_KEY,
+        fetchFn: mockFetch,
+        now: new Date(NOW)
+      });
+      assert.equal(res0.availability, 'unavailable');
+      assert.equal(res0.reason, 'FX_PROVIDER_UNAVAILABLE');
+      assert.equal(fetchCount, 2); // 1 for fiat map + 1 for conversion
+
+      // Attempt 1: 2s later with bypassTransientFailureBackoff: true
+      const res1 = await getCoinMarketCapCurrentUsdtVndRate({
+        cache,
+        apiKey: FAKE_API_KEY,
+        fetchFn: mockFetch,
+        now: new Date(Date.parse(NOW) + 2000),
+        bypassTransientFailureBackoff: true
+      });
+      assert.equal(res1.availability, 'available');
+      assert.equal(res1.rate, 26_000);
+      assert.equal(fetchCount, 3); // second conversion fetch occurred
+    });
+
+    test('CASE B: attempt 0 HTTP 502/503 -> retry with bypassTransientFailureBackoff fetches again and recovers', async () => {
+      let fetchCount = 0;
+      const cache = createCoinMarketCapCurrentRateCache();
+      const mockFetch = async (url) => {
+        fetchCount += 1;
+        const parsed = new URL(url);
+        if (parsed.pathname === '/v1/fiat/map') {
+          return response({ data: fiatPayload() });
+        }
+        if (fetchCount === 2) {
+          return response({ status: 502, data: {} });
+        }
+        return response({ data: conversionPayload({ rate: 26_100 }) });
+      };
+
+      const res0 = await getCoinMarketCapCurrentUsdtVndRate({
+        cache,
+        apiKey: FAKE_API_KEY,
+        fetchFn: mockFetch,
+        now: new Date(NOW)
+      });
+      assert.equal(res0.availability, 'unavailable');
+      assert.equal(res0.reason, 'FX_PROVIDER_UNAVAILABLE');
+      assert.equal(fetchCount, 2);
+
+      const res1 = await getCoinMarketCapCurrentUsdtVndRate({
+        cache,
+        apiKey: FAKE_API_KEY,
+        fetchFn: mockFetch,
+        now: new Date(Date.parse(NOW) + 2000),
+        bypassTransientFailureBackoff: true
+      });
+      assert.equal(res1.availability, 'available');
+      assert.equal(res1.rate, 26_100);
+      assert.equal(fetchCount, 3);
+    });
+
+    test('CASE C: timeout on attempt 0 -> retry with bypassTransientFailureBackoff reaches network', async () => {
+      let fetchCount = 0;
+      const cache = createCoinMarketCapCurrentRateCache();
+      const mockFetch = async (url) => {
+        fetchCount += 1;
+        const parsed = new URL(url);
+        if (parsed.pathname === '/v1/fiat/map') {
+          return response({ data: fiatPayload() });
+        }
+        if (fetchCount === 2) {
+          const timeoutErr = new Error('request aborted');
+          timeoutErr.name = 'AbortError';
+          throw timeoutErr;
+        }
+        return response({ data: conversionPayload({ rate: 26_200 }) });
+      };
+
+      const res0 = await getCoinMarketCapCurrentUsdtVndRate({
+        cache,
+        apiKey: FAKE_API_KEY,
+        fetchFn: mockFetch,
+        now: new Date(NOW)
+      });
+      assert.equal(res0.availability, 'unavailable');
+      assert.equal(res0.reason, 'FX_PROVIDER_TIMEOUT');
+      assert.equal(fetchCount, 2);
+
+      const res1 = await getCoinMarketCapCurrentUsdtVndRate({
+        cache,
+        apiKey: FAKE_API_KEY,
+        fetchFn: mockFetch,
+        now: new Date(Date.parse(NOW) + 2000),
+        bypassTransientFailureBackoff: true
+      });
+      assert.equal(res1.availability, 'available');
+      assert.equal(res1.rate, 26_200);
+      assert.equal(fetchCount, 3);
+    });
+
+    test('CASE D: HTTP 429 rate limit -> retry respects backoff and does NOT hammer network', async () => {
+      let conversionFetchCount = 0;
+      const cache = createCoinMarketCapCurrentRateCache();
+      const mockFetch = async (url) => {
+        const parsed = new URL(url);
+        if (parsed.pathname === '/v1/fiat/map') {
+          return response({ data: fiatPayload() });
+        }
+        conversionFetchCount += 1;
+        return response({ status: 429, data: {} });
+      };
+
+      // Attempt 0
+      const res0 = await getCoinMarketCapCurrentUsdtVndRate({
+        cache,
+        apiKey: FAKE_API_KEY,
+        fetchFn: mockFetch,
+        now: new Date(NOW)
+      });
+      assert.equal(res0.availability, 'unavailable');
+      assert.equal(res0.reason, 'FX_PROVIDER_RATE_LIMITED');
+      assert.equal(conversionFetchCount, 1);
+
+      // Attempt 1: 2s later
+      const res1 = await getCoinMarketCapCurrentUsdtVndRate({
+        cache,
+        apiKey: FAKE_API_KEY,
+        fetchFn: mockFetch,
+        now: new Date(Date.parse(NOW) + 2000),
+        bypassTransientFailureBackoff: true
+      });
+      assert.equal(res1.availability, 'unavailable');
+      assert.equal(res1.reason, 'FX_PROVIDER_RATE_LIMITED');
+      assert.equal(conversionFetchCount, 1, 'Attempt 1 must NOT execute network request during rate-limit backoff');
+
+      // Attempt 2: 4s later
+      const res2 = await getCoinMarketCapCurrentUsdtVndRate({
+        cache,
+        apiKey: FAKE_API_KEY,
+        fetchFn: mockFetch,
+        now: new Date(Date.parse(NOW) + 4000),
+        bypassTransientFailureBackoff: true
+      });
+      assert.equal(res2.availability, 'unavailable');
+      assert.equal(res2.reason, 'FX_PROVIDER_RATE_LIMITED');
+      assert.equal(conversionFetchCount, 1, 'Attempt 2 must NOT execute network request during rate-limit backoff');
+    });
+
+    test('CASE E: invalid API key / auth error -> deterministic error is not retried', async () => {
+      let conversionFetchCount = 0;
+      const cache = createCoinMarketCapCurrentRateCache();
+      const mockFetch = async (url) => {
+        const parsed = new URL(url);
+        if (parsed.pathname === '/v1/fiat/map') {
+          return response({ data: fiatPayload() });
+        }
+        conversionFetchCount += 1;
+        return response({ status: 401, data: {} });
+      };
+
+      const res0 = await getCoinMarketCapCurrentUsdtVndRate({
+        cache,
+        apiKey: 'invalid-key',
+        fetchFn: mockFetch,
+        now: new Date(NOW)
+      });
+      assert.equal(res0.availability, 'unavailable');
+      assert.equal(res0.reason, 'FX_PROVIDER_ACCESS_DENIED');
+      assert.equal(conversionFetchCount, 1);
+
+      const res1 = await getCoinMarketCapCurrentUsdtVndRate({
+        cache,
+        apiKey: 'invalid-key',
+        fetchFn: mockFetch,
+        now: new Date(Date.parse(NOW) + 2000),
+        bypassTransientFailureBackoff: true
+      });
+      assert.equal(res1.availability, 'unavailable');
+      assert.equal(res1.reason, 'FX_PROVIDER_ACCESS_DENIED');
+      assert.equal(conversionFetchCount, 1, 'Must not retry deterministic auth error');
+    });
+
+    test('CASE F: fresh successful CMC rate exists -> retry path uses valid cache without unnecessary request', async () => {
+      let conversionFetchCount = 0;
+      const cache = createCoinMarketCapCurrentRateCache();
+      const mockFetch = async (url) => {
+        const parsed = new URL(url);
+        if (parsed.pathname === '/v1/fiat/map') {
+          return response({ data: fiatPayload() });
+        }
+        conversionFetchCount += 1;
+        return response({ data: conversionPayload({ rate: 26_300 }) });
+      };
+
+      const res0 = await getCoinMarketCapCurrentUsdtVndRate({
+        cache,
+        apiKey: FAKE_API_KEY,
+        fetchFn: mockFetch,
+        now: new Date(NOW)
+      });
+      assert.equal(res0.availability, 'available');
+      assert.equal(res0.rate, 26_300);
+      assert.equal(conversionFetchCount, 1);
+
+      const res1 = await getCoinMarketCapCurrentUsdtVndRate({
+        cache,
+        apiKey: FAKE_API_KEY,
+        fetchFn: mockFetch,
+        now: new Date(Date.parse(NOW) + 2000),
+        bypassTransientFailureBackoff: true
+      });
+      assert.equal(res1.availability, 'available');
+      assert.equal(res1.rate, 26_300);
+      assert.equal(res1.cacheStatus, 'hit');
+      assert.equal(conversionFetchCount, 1, 'Must reuse valid fresh cache without extra request');
+    });
+
+    test('CASE G: FX fails all permitted attempts -> final snapshot PARTIAL, rate null, no zero fabrication', () => {
+      const overview = calculatePortfolioValuation(
+        { cash_available: 100_000 },
+        [{
+          id: 'holding-ena',
+          asset_id: 'asset-ena',
+          quantity: 184.50502,
+          average_cost: null,
+          native_average_cost: 0.21,
+          native_cost_currency: 'USDT',
+          asset: {
+            id: 'asset-ena', symbol: 'ENA', name: 'Ethena',
+            asset_type: 'crypto', quote_currency: 'USD'
+          }
+        }],
+        {},
+        {
+          USDT: {
+            availability: 'unavailable',
+            baseCurrency: 'USDT',
+            quoteCurrency: 'VND',
+            rate: null,
+            reason: 'FX_PROVIDER_UNAVAILABLE'
+          }
+        },
+        {
+          ENA: {
+            price: 0.2123, currency: 'USDT', source: 'binance_websocket',
+            priceAsOf: NOW, freshness: 'live'
+          }
+        }
+      );
+
+      const holding = overview.holdings[0];
+      assert.equal(holding.valuationStatus, 'unavailable');
+      assert.equal(holding.reportingMarketValue, null);
+      assert.equal(holding.fxRateToReporting, null);
+      assert.equal(overview.summary.totalMarketValue, null);
+      assert.equal(overview.summary.totalPortfolioValue, null);
+      assert.notEqual(overview.summary.totalPortfolioValue, 0);
+
+      const snapshot = buildPortfolioSnapshot({
+        profileId: 'profile-test',
+        overview,
+        calculatedAt: NOW
+      });
+      assert.equal(snapshot.status, 'PARTIAL');
+      assert.equal(snapshot.totalPortfolioValue, null);
+      assert.notEqual(snapshot.totalPortfolioValue, 0);
+    });
+  });
 });

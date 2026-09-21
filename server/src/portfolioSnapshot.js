@@ -362,9 +362,10 @@ export function buildPortfolioSnapshot({ profileId, overview, calculatedAt }) {
 export async function getPortfolioSnapshot({
   profileId,
   now,
-  getPortfolioOverviewFn = getPortfolioOverview
+  getPortfolioOverviewFn = getPortfolioOverview,
+  bypassTransientFailureBackoff = false
 } = {}) {
-  const overview = await getPortfolioOverviewFn({ profileId });
+  const overview = await getPortfolioOverviewFn({ profileId, bypassTransientFailureBackoff });
   const calculatedAt = requireClock(now);
   return buildPortfolioSnapshot({ profileId, overview, calculatedAt });
 }
