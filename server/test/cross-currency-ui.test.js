@@ -330,6 +330,8 @@ describe('V1.1 Improvement 07E — Cross-Currency User-Facing Activation & Valua
       assert.equal(result.summary.pnlCoverageStatus, 'partial');
       assert.equal(result.summary.totalMarketValue, 11000000); // only priced holding included
       assert.equal(result.summary.totalUnrealizedPnL, 1000000);
+      assert.equal(result.summary.totalUnrealizedPnL, null);
+      assert.equal(result.summary.knownUnrealizedPnL, 1000000);
     });
 
     it('Malformed quantity and explicitly unknown VND cost degrade safely without zero fabrication', () => {

@@ -301,6 +301,9 @@ export function buildPortfolioSnapshot({ profileId, overview, calculatedAt }) {
     totalCostBasis,
     totalUnrealizedPnL: unrealizedPnL,
     totalUnrealizedPnLPercent: unrealizedPnLPercent,
+    knownUnrealizedPnL: overview.summary.knownUnrealizedPnL ?? null,
+    knownUnrealizedPnLPercent: overview.summary.knownUnrealizedPnLPercent ?? null,
+    nativePnlSummaries: overview.summary.nativePnlSummaries ?? null,
     snapshotId,
     status,
     metricStates: {
@@ -345,6 +348,9 @@ export function buildPortfolioSnapshot({ profileId, overview, calculatedAt }) {
     totalCostBasis,
     unrealizedPnL,
     unrealizedPnLPercent,
+    knownUnrealizedPnL: overview.summary.knownUnrealizedPnL ?? null,
+    knownUnrealizedPnLPercent: overview.summary.knownUnrealizedPnLPercent ?? null,
+    nativePnlSummaries: overview.summary.nativePnlSummaries ?? null,
     valuationCoverage: {
       status: stateFromLegacy(composition.valuationCoverageLevel),
       totalHoldingsCount: composition.totalHoldingsCount,

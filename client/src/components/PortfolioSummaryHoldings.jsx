@@ -72,6 +72,7 @@ function PortfolioActions({ onRecordTransaction, onDeclarePosition, onOpenDeposi
 function Summary({ snapshot, actions }) {
   const view = buildPortfolioSummaryDisplay(snapshot);
   const hasPnl = view.unrealizedPnl !== null;
+  const hasPnl = view.unrealizedPnl !== null || view.isPnlPartial;
 
   return (
     <motion.section variants={sectionItemVariants} className="portfolio-summary-card" aria-labelledby="portfolio-summary-title">
@@ -106,6 +107,51 @@ function Summary({ snapshot, actions }) {
                 <small>{formatPercentVN(view.unrealizedPnlPercent)}</small>
               )}
             </strong>
+            {view.unrealizedPnl !== null ? (
+              <>
+                <span>Lãi/lỗ chưa thực hiện</span>
+                <strong className={view.unrealizedPnl > 0 ? 'is-gain' : view.unrealizedPnl < 0 ? 'is-loss' : ''}>
+                  {view.unrealizedPnl > 0 ? '+' : ''}{formatVNDReporting(view.unrealizedPnl)}
+                  {view.unrealizedPnlPercent !== null && (
+                    <small>{formatPercentVN(view.unrealizedPnlPercent)}</small>
+                  )}
+                </strong>
+              </>
+            ) : view.isPnlPartial ? (
+              <div className="portfolio-partial-pnl-cell">
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                  Lãi/lỗ chưa thực hiện
+                  <span
+                    className="portfolio-info-hint"
+                    title={view.pnlExplanation}
+                    aria-label={view.pnlExplanation}
+                    style={{ cursor: 'help', fontSize: '0.75rem', opacity: 0.8 }}
+                  >
+                    ℹ️
+                  </span>
+                </span>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', marginTop: '2px' }}>
+                  <span style={{ fontSize: '1.05rem', fontWeight: 700, color: 'var(--color-slate-500)' }}>—</span>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--color-amber-600, #d97706)', fontWeight: 500 }}>
+                    Chưa thể tổng hợp toàn bộ sang VND
+                  </span>
+                  {view.knownUnrealizedPnl !== null && (
+                    <span style={{ fontSize: '0.78rem', color: 'var(--color-slate-600)' }}>
+                      Phần có cơ sở VND: <strong className={view.knownUnrealizedPnl > 0 ? 'is-gain' : view.knownUnrealizedPnl < 0 ? 'is-loss' : ''}>
+                        {view.knownUnrealizedPnl > 0 ? '+' : ''}{formatVNDReporting(view.knownUnrealizedPnl)}
+                      </strong>
+                    </span>
+                  )}
+                  {view.nativePnlSummaries?.USDT && (
+                    <span style={{ fontSize: '0.78rem', color: 'var(--color-slate-600)' }}>
+                      Lãi/lỗ Crypto: <strong className={view.nativePnlSummaries.USDT.value > 0 ? 'is-gain' : view.nativePnlSummaries.USDT.value < 0 ? 'is-loss' : ''}>
+                        {view.nativePnlSummaries.USDT.value > 0 ? '+' : ''}{formatNativeAmount(view.nativePnlSummaries.USDT.value, 'USDT')}
+                      </strong>
+                    </span>
+                  )}
+                </div>
+              </div>
+            ) : null}
           </div>
         )}
       </div>

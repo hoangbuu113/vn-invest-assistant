@@ -1575,6 +1575,23 @@ function App({ onLogout, user: initialUser, profile: initialProfile }) {
                                       </span>
                                     )}
                                   </span>
+                                ) : portfolioOverview.summary.pnlCoverageStatus === 'partial' && typeof portfolioOverview.summary.knownUnrealizedPnL === 'number' ? (
+                                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
+                                    <span style={{ color: 'var(--color-slate-500)', fontWeight: 700, fontSize: '0.95rem' }}>—</span>
+                                    <span style={{ fontSize: '0.73rem', color: 'var(--color-amber-600, #d97706)' }}>Chưa thể tổng hợp sang VND</span>
+                                    <span style={{ fontSize: '0.78rem', color: 'var(--color-slate-600)' }}>
+                                      Cơ sở VND: <strong style={{
+                                        color: portfolioOverview.summary.knownUnrealizedPnL > 0
+                                          ? 'var(--color-gain-700)'
+                                          : portfolioOverview.summary.knownUnrealizedPnL < 0
+                                            ? 'var(--color-loss-700)'
+                                            : 'var(--color-slate-700)'
+                                      }}>
+                                        {portfolioOverview.summary.knownUnrealizedPnL > 0 ? '+' : ''}
+                                        {portfolioOverview.summary.knownUnrealizedPnL.toLocaleString('vi-VN')} đ
+                                      </strong>
+                                    </span>
+                                  </div>
                                 ) : (
                                   <span style={{ color: 'var(--color-slate-400)' }}>—</span>
                                 )}

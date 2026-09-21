@@ -74,6 +74,20 @@ export function buildPortfolioSummaryDisplay(snapshot) {
     ? null
     : snapshot.unrealizedPnLPercent;
 
+  const rawKnownPnl = snapshot?.knownUnrealizedPnL ?? snapshot?.summary?.knownUnrealizedPnL ?? null;
+  const knownUnrealizedPnl = finiteNumber(rawKnownPnl) ? rawKnownPnl : null;
+  const rawKnownPnlPct = snapshot?.knownUnrealizedPnLPercent ?? snapshot?.summary?.knownUnrealizedPnLPercent ?? null;
+  const knownUnrealizedPnlPercent = finiteNumber(rawKnownPnlPct) ? rawKnownPnlPct : null;
+
+  const isPnlPartial = pnlState === PORTFOLIO_DISPLAY_STATES.PARTIAL && knownUnrealizedPnl !== null;
+  const pnlExplanation = isPnlPartial
+    ? 'Một số tài sản có lãi/lỗ bằng đồng tiền gốc nhưng chưa có đủ cơ sở tỷ giá lịch sử để quy đổi sang VND.'
+    : null;
+
+  const nativePnlSummaries = snapshot?.nativePnlSummaries
+    ?? snapshot?.summary?.nativePnlSummaries
+    ?? null;
+
   return {
     snapshotId: snapshot?.snapshotId || null,
     state,
@@ -91,6 +105,11 @@ export function buildPortfolioSummaryDisplay(snapshot) {
     investedState,
     unrealizedPnl,
     unrealizedPnlPercent,
+    knownUnrealizedPnl,
+    knownUnrealizedPnlPercent,
+    isPnlPartial,
+    pnlExplanation,
+    nativePnlSummaries,
     pnlState,
     holdingsCount: holdings.length,
     isCashOnly: holdings.length === 0 && cash !== null

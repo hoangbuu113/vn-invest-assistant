@@ -386,13 +386,64 @@ export function calculatePortfolioValuation(
   }
 
   const totalUnrealizedPnL = comparablePnlCount > 0
+  const pnlCoverageStatus = holdingsWithMarket.length === 0
+    ? 'not_applicable'
+    : comparablePnlCount === holdingsWithMarket.length
+      ? (hasStalePnl ? 'stale' : 'complete')
+      : comparablePnlCount > 0
+        ? 'partial'
+        : 'unavailable';
+
+  const isPnlComplete = ['complete', 'stale'].includes(pnlCoverageStatus);
+  const knownUnrealizedPnL = comparablePnlCount > 0
     ? pnlComparableMarketValue - pricedCostBasis
     : holdingsWithMarket.length === 0
       ? 0
       : null;
   const totalUnrealizedPnLPercent = pricedCostBasis > 0
     ? (totalUnrealizedPnL / pricedCostBasis) * 100
+  const knownUnrealizedPnLPercent = pricedCostBasis > 0 && knownUnrealizedPnL !== null
+    ? (knownUnrealizedPnL / pricedCostBasis) * 100
     : null;
+
+  const totalUnrealizedPnL = isPnlComplete
+    ? knownUnrealizedPnL
+    : holdingsWithMarket.length === 0
+      ? 0
+      : null;
+  const totalUnrealizedPnLPercent = isPnlComplete
+    ? knownUnrealizedPnLPercent
+    : null;
+
+  const nativePnlSummaries = {};
+  for (const item of holdingsWithMarket) {
+    if (
+      item.nativeCostCurrency
+      && item.nativeCostCurrency !== REPORTING_CURRENCY
+      && ['available', 'stale'].includes(item.nativePnlStatus)
+      && typeof item.nativeUnrealizedPnL === 'number'
+      && Number.isFinite(item.nativeUnrealizedPnL)
+    ) {
+      const curr = item.nativeCostCurrency;
+      if (!nativePnlSummaries[curr]) {
+        nativePnlSummaries[curr] = {
+          currency: curr,
+          value: 0,
+          costBasis: 0,
+          count: 0
+        };
+      }
+      nativePnlSummaries[curr].value += item.nativeUnrealizedPnL;
+      if (typeof item.nativeCostBasis === 'number' && Number.isFinite(item.nativeCostBasis)) {
+        nativePnlSummaries[curr].costBasis += item.nativeCostBasis;
+      }
+      nativePnlSummaries[curr].count += 1;
+    }
+  }
+  for (const curr of Object.keys(nativePnlSummaries)) {
+    const s = nativePnlSummaries[curr];
+    s.percent = s.costBasis > 0 ? (s.value / s.costBasis) * 100 : null;
+  }
 
   const investedMarketValue = holdingsWithMarket.length > 0 && valuedHoldingsCount === 0
     ? null
@@ -434,6 +485,9 @@ export function calculatePortfolioValuation(
       totalMarketValue: investedMarketValue,
       totalUnrealizedPnL: totalUnrealizedPnL,
       totalUnrealizedPnLPercent: totalUnrealizedPnLPercent,
+      knownUnrealizedPnL,
+      knownUnrealizedPnLPercent,
+      nativePnlSummaries: Object.keys(nativePnlSummaries).length > 0 ? nativePnlSummaries : null,
       totalPortfolioValue: totalPortfolioValue,
       valuationStatus: valuationStatus,
       pnlCoverageStatus
