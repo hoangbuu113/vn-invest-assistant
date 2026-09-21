@@ -541,6 +541,16 @@ export async function getAccountingRate({
       mode,
       reason: safeProviderReason(error)
     });
+    return {
+      ...resultBase({
+        baseCurrency: base,
+        quoteCurrency: quote,
+        requestedAt,
+        mode,
+        reason: safeProviderReason(error)
+      }),
+      retryAfterMs: Number.isFinite(error?.retryAfterMs) ? error.retryAfterMs : null
+    };
   }
 }
 
@@ -645,6 +655,7 @@ export async function resolveAcquisitionFx({
     observationDeltaMs: accountingRateResult.observationDeltaMs || null,
     provenance: null,
     mode: accountingRateResult.mode || mode,
-    reason: accountingRateResult.reason || 'UNAVAILABLE'
+    reason: accountingRateResult.reason || 'UNAVAILABLE',
+    retryAfterMs: accountingRateResult.retryAfterMs ?? null
   };
 }

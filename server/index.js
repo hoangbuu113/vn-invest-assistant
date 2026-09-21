@@ -104,7 +104,7 @@ import {
   runVietnamEquityOpportunityRefresh
 } from './src/equityOpportunities/index.js';
 import { importManualOfficialMonetaryEvidence } from './src/monetaryEvidence.js';
-import { enrichMissingAcquisitionFx } from './src/acquisitionFx.js';
+import { enrichMissingAcquisitionFx, getAcquisitionFxStatus } from './src/acquisitionFx.js';
 
 dotenv.config();
 
@@ -223,6 +223,7 @@ export function createApp(services = {}) {
     getAccountingRateFn = getAccountingRate,
     resolveAcquisitionFxFn = resolveAcquisitionFx,
     enrichMissingAcquisitionFxFn = enrichMissingAcquisitionFx,
+    getAcquisitionFxStatusFn = getAcquisitionFxStatus,
     accountingRateEnabled = isCoinGeckoAccountingRateEnabled(process.env.COINGECKO_ACCOUNTING_RATE_ENABLED),
     accountingRateQuoteSecret = process.env.ACCOUNTING_RATE_QUOTE_SECRET,
     accountingRateNowFn = () => new Date(),
@@ -2216,17 +2217,35 @@ export function createApp(services = {}) {
     }
   });
 
+  // Internal acquisition FX status inspection endpoint — read-only operational telemetry
+  app.get('/api/internal/portfolio/acquisition-fx/status', async (req, res) => {
+    try {
+      const status = await getAcquisitionFxStatusFn({ client: supabaseAuthClient });
+      return res.json({
+        status: 'ok',
+        data: status
+      });
+    } catch (err) {
+      return res.status(500).json({
+        status: 'error',
+        message: err.message || 'Failed to retrieve acquisition FX status'
+      });
+    }
+  });
+
   // Internal acquisition FX enrichment endpoint — idempotent historical FX backfill
   app.post('/api/internal/portfolio/acquisition-fx/enrich', requireAlertScheduler, async (req, res) => {
     try {
-      const { profileId, limit } = req.body || {};
+      const { profileId, limit, triggerSource } = req.body || {};
       const summary = await enrichMissingAcquisitionFxFn({
         profileId: profileId || null,
         limit: typeof limit === 'number' ? limit : 5,
         client: supabaseAuthClient
+      }, {
+        triggerSource: triggerSource || 'scheduler'
       });
-      return res.status(summary.errors.length > 0 ? 503 : 200).json({
-        status: summary.errors.length > 0 ? 'degraded' : 'ok',
+      return res.status(summary.errors?.length > 0 ? 503 : 200).json({
+        status: summary.errors?.length > 0 ? 'degraded' : 'ok',
         data: summary
       });
     } catch (err) {
