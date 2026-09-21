@@ -194,12 +194,9 @@ async function executeWithRetry(url, fetchOptions, retryConfig, isPrivate, onRet
 
 export async function apiFetch(path, options = {}) {
   const headers = new Headers(options.headers || {});
-  const method = options.method || 'GET';
   const method = (options.method || 'GET').toUpperCase();
   const isPrivate = isPrivateApiPath(path, method);
 
-  if (isPrivateApiPath(path, method)) {
-    const token = await getAccessToken();
   let token = null;
   if (isPrivate) {
     token = await getAccessToken();
@@ -208,7 +205,6 @@ export async function apiFetch(path, options = {}) {
     }
   }
 
-  const response = await fetch(apiUrl(path), {
   // Deduplication check: only for safe GET requests without explicit opt-out
   const canDedupe = method === 'GET' && !options.body && options.dedupe !== false && options.skipDedupe !== true;
   const fullUrl = apiUrl(path);
@@ -261,12 +257,8 @@ export async function apiFetch(path, options = {}) {
     method,
     credentials: options.credentials || 'same-origin',
     headers
-  });
   };
 
-  // 401 AUTH_INVALID triggers session cleanup and return to login
-  if (isPrivateApiPath(path) && response.status === 401) {
-    notifyAuthInvalid();
   if (canDedupe) {
     const entry = { waiters: [] };
     inFlightGetRequests.set(dedupeKey, entry);
@@ -294,9 +286,7 @@ export async function apiFetch(path, options = {}) {
       inFlightGetRequests.delete(dedupeKey);
     }
   }
-  // Note: 403 (PROFILE_REQUIRED) is specifically NOT treated as logout!
 
-  return response;
   // Non-deduplicated requests (e.g. POST, PUT, DELETE, or explicit opt-out)
   return executeWithRetry(fullUrl, fetchOptions, retryConfig, isPrivate, options.onRetry);
 }
