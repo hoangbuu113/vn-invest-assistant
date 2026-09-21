@@ -223,12 +223,13 @@ function VndValue({ value }) {
 
 function LoadingSkeleton() {
   return (
-    <div className="performance-skeleton" aria-label="Đang tải dữ liệu hiệu suất">
-      <div className="performance-skeleton-grid">
+    <div className="performance-skeleton" role="status" aria-live="polite">
+      <span className="sr-only">Đang tải dữ liệu hiệu suất</span>
+      <div className="performance-skeleton-grid" aria-hidden="true">
         <div className="performance-skeleton-card skeleton-shimmer" />
         <div className="performance-skeleton-card skeleton-shimmer" />
       </div>
-      <div className="performance-skeleton-chart skeleton-shimmer" />
+      <div className="performance-skeleton-chart skeleton-shimmer" aria-hidden="true" />
     </div>
   );
 }
@@ -270,7 +271,11 @@ function BenchmarkSummary({ view }) {
     return <p className="performance-benchmark-note">Không dùng benchmark cho kỳ này.</p>;
   }
   if (view.state === 'LOADING') {
-    return <div className="performance-benchmark-loading skeleton-shimmer" aria-label="Đang tải benchmark" />;
+    return (
+      <div className="performance-benchmark-loading skeleton-shimmer" role="status" aria-live="polite">
+        <span className="sr-only">Đang tải benchmark</span>
+      </div>
+    );
   }
   if (view.state !== PERFORMANCE_DATA_STATES.AVAILABLE) {
     return (
@@ -387,7 +392,7 @@ export function PortfolioPerformanceSection({
           </div>
           <p>Đo trên dữ liệu cuối ngày; tách biệt với định giá hiện tại của Summary.</p>
         </div>
-        <div className="performance-range-control" aria-label="Chọn khoảng thời gian hiệu suất">
+        <div className="performance-range-control" role="group" aria-label="Chọn khoảng thời gian hiệu suất">
           {PERFORMANCE_RANGES.map((item) => (
             <button
               type="button"
@@ -413,7 +418,7 @@ export function PortfolioPerformanceSection({
 
       {performance && (
         <div className="performance-unified-card">
-          {performanceLoading && <div className="performance-refresh-line skeleton-shimmer" />}
+          {performanceLoading && <div className="performance-refresh-line skeleton-shimmer" aria-hidden="true" />}
 
           <div className="performance-primary-grid">
             <article className="performance-primary-metric performance-twr-metric">
@@ -480,7 +485,7 @@ export function PortfolioPerformanceSection({
               <span>Chỉ tải khi bạn chủ động chọn.</span>
             </div>
             {holdingsCount > 0 ? (
-              <div className="performance-benchmark-selector" aria-label="Chọn chỉ số tham chiếu">
+              <div className="performance-benchmark-selector" role="group" aria-label="Chọn chỉ số tham chiếu">
                 {BENCHMARK_OPTIONS.map((option) => (
                   <button
                     type="button"
@@ -541,7 +546,7 @@ export function PortfolioPerformanceSection({
           )}
 
           <div className="performance-methodology-note">
-            <span>i</span>
+            <span aria-hidden="true">i</span>
             <p>Hiệu suất dùng dữ liệu cuối ngày và chưa bao gồm đầy đủ phí, thuế, cổ tức hoặc điều chỉnh doanh nghiệp.</p>
           </div>
         </div>
