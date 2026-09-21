@@ -237,7 +237,7 @@ export async function runScheduledAcquisitionFxEnrichment(env, options = {}) {
         Authorization: `Bearer ${token}`,
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({ limit }),
+      body: JSON.stringify({ limit, triggerSource: 'scheduler' }),
       redirect: 'manual',
       signal: controller.signal
     });

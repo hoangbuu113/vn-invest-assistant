@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
+import http from 'node:http';
 import test from 'node:test';
 
 import cloudflareWorker, {
   runScheduledAcquisitionFxEnrichment
 } from '../../client/server/index.js';
+import { createApp } from '../index.js';
 import {
   ACQUISITION_FX_SOURCE_KEY,
   ACQUISITION_FX_STATUS,
@@ -608,5 +610,110 @@ test('Acquisition FX Observability & Governed Backoff', async (t) => {
     assert.equal(enaBaseline.execution_unit_price, 0.1641);
     assert.equal(enaBaseline.opening_average_cost, null);
     assert.equal(enaBaseline.fx_rate_to_vnd, null);
+  });
+
+  await t.test('K. Cloudflare scheduled path persists trigger_source = "scheduler", manual invocation persists "manual"', async () => {
+    let capturedSummary = null;
+    const SCHEDULER_TOKEN = 'test-scheduler-token-32-chars-long!!';
+    const app = createApp({
+      alertSchedulerToken: SCHEDULER_TOKEN,
+      enrichMissingAcquisitionFxFn: async (params, options) => {
+        capturedSummary = {
+          params,
+          options,
+          status: 'SUCCESS',
+          errors: []
+        };
+        return {
+          status: 'SUCCESS',
+          triggerSource: options?.triggerSource || 'manual',
+          errors: []
+        };
+      }
+    });
+
+    const server = http.createServer(app);
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+    try {
+      // 1. Cloudflare scheduled invocation via runScheduledAcquisitionFxEnrichment
+      const scheduledResult = await runScheduledAcquisitionFxEnrichment(
+        { ALERT_SCHEDULER_TOKEN: SCHEDULER_TOKEN },
+        {
+          fetchFn: (url, opts) => fetch(url.replace('https://vn-invest-assistant-api.onrender.com', baseUrl), opts),
+          limit: 5
+        }
+      );
+      assert.ok(scheduledResult);
+      assert.equal(capturedSummary.options.triggerSource, 'scheduler');
+
+      // 2. Manual invocation (no triggerSource in payload)
+      const manualRes = await fetch(`${baseUrl}/api/internal/portfolio/acquisition-fx/enrich`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${SCHEDULER_TOKEN}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ limit: 5 })
+      });
+      assert.equal(manualRes.status, 200);
+      assert.equal(capturedSummary.options.triggerSource, 'manual');
+    } finally {
+      server.close();
+    }
+  });
+
+  await t.test('L. Status endpoint GET /api/internal/portfolio/acquisition-fx/status is protected by alert scheduler auth', async () => {
+    const SCHEDULER_TOKEN = 'test-scheduler-token-32-chars-long!!';
+    const app = createApp({
+      alertSchedulerToken: SCHEDULER_TOKEN,
+      getAcquisitionFxStatusFn: async () => ({
+        sourceKey: 'acquisition_fx_enrichment',
+        status: 'SUCCESS',
+        reason: 'SUCCESS',
+        triggerSource: 'scheduler',
+        backoffStep: 0,
+        cooldownRemainingMs: 0
+      })
+    });
+
+    const server = http.createServer(app);
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+    try {
+      // 1. No auth -> 401
+      const noAuthRes = await fetch(`${baseUrl}/api/internal/portfolio/acquisition-fx/status`);
+      assert.equal(noAuthRes.status, 401);
+      const noAuthJson = await noAuthRes.json();
+      assert.equal(noAuthJson.code, 'ALERT_SCHEDULER_AUTH_REQUIRED');
+
+      // 2. Wrong token -> 403
+      const wrongAuthRes = await fetch(`${baseUrl}/api/internal/portfolio/acquisition-fx/status`, {
+        headers: { Authorization: 'Bearer wrong-token-with-at-least-thirty-two-characters' }
+      });
+      assert.equal(wrongAuthRes.status, 403);
+      const wrongAuthJson = await wrongAuthRes.json();
+      assert.equal(wrongAuthJson.code, 'ALERT_SCHEDULER_AUTH_INVALID');
+
+      // 3. Correct scheduler token -> 200
+      const okRes = await fetch(`${baseUrl}/api/internal/portfolio/acquisition-fx/status`, {
+        headers: { Authorization: `Bearer ${SCHEDULER_TOKEN}` }
+      });
+      assert.equal(okRes.status, 200);
+      const okJson = await okRes.json();
+      assert.equal(okJson.status, 'ok');
+      assert.equal(okJson.data.status, 'SUCCESS');
+
+      // 4. Response contains no secrets/tokens
+      const rawText = JSON.stringify(okJson);
+      assert.equal(rawText.includes(SCHEDULER_TOKEN), false);
+      assert.equal(rawText.toLowerCase().includes('secret'), false);
+      assert.equal(rawText.toLowerCase().includes('token'), false);
+      assert.equal(rawText.toLowerCase().includes('key='), false);
+    } finally {
+      server.close();
+    }
   });
 });

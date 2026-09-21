@@ -2218,7 +2218,7 @@ export function createApp(services = {}) {
   });
 
   // Internal acquisition FX status inspection endpoint — read-only operational telemetry
-  app.get('/api/internal/portfolio/acquisition-fx/status', async (req, res) => {
+  app.get('/api/internal/portfolio/acquisition-fx/status', requireAlertScheduler, async (req, res) => {
     try {
       const status = await getAcquisitionFxStatusFn({ client: supabaseAuthClient });
       return res.json({
@@ -2242,7 +2242,7 @@ export function createApp(services = {}) {
         limit: typeof limit === 'number' ? limit : 5,
         client: supabaseAuthClient
       }, {
-        triggerSource: triggerSource || 'scheduler'
+        triggerSource: triggerSource || 'manual'
       });
       return res.status(summary.errors?.length > 0 ? 503 : 200).json({
         status: summary.errors?.length > 0 ? 'degraded' : 'ok',

@@ -543,7 +543,7 @@ describe('Automatic Acquisition FX Accounting', () => {
     assert.ok(capturedUrl.includes('/api/internal/portfolio/acquisition-fx/enrich'));
     assert.equal(capturedOptions.method, 'POST');
     assert.equal(capturedOptions.headers.Authorization, 'Bearer test-scheduler-token-32-chars-long!!');
-    assert.deepEqual(JSON.parse(capturedOptions.body), { limit: 5 });
+    assert.deepEqual(JSON.parse(capturedOptions.body), { limit: 5, triggerSource: 'scheduler' });
     assert.equal(result.enrichedCount, 1);
   });
 });
