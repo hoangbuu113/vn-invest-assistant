@@ -349,6 +349,13 @@ function App({ onLogout, user: initialUser, profile: initialProfile }) {
   const [isCashModalOpen, setIsCashModalOpen] = useState(false);
   const [cashModalMode, setCashModalMode] = useState('DEPOSIT'); // 'DEPOSIT' | 'WITHDRAWAL'
 
+  const transactionsRef = useRef(transactions);
+  transactionsRef.current = transactions;
+  const cashOverviewRef = useRef(cashOverview);
+  cashOverviewRef.current = cashOverview;
+  const cashLedgerRef = useRef(cashLedger);
+  cashLedgerRef.current = cashLedger;
+
   // Request controller refs for stale response protection
   const activeMarketReqRef = useRef(null);
   const activeRealtimeReqRef = useRef(null);
@@ -644,7 +651,7 @@ function App({ onLogout, user: initialUser, profile: initialProfile }) {
     setPortfolioError(null);
     setCompositionError(null);
 
-    return apiFetch('/api/portfolio/snapshot', { signal: controller.signal })
+    return apiFetch('/api/portfolio/snapshot', { signal: controller.signal, dedupe: false })
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.json();
@@ -842,9 +849,9 @@ function App({ onLogout, user: initialUser, profile: initialProfile }) {
   useEffect(() => {
     if (activeTab !== 'portfolio') return;
     fetchPortfolio(false);
-    fetchTransactions(transactions.length === 0);
-    fetchCashOverview(cashOverview === null);
-    fetchCashLedger(cashLedger.length === 0);
+    fetchTransactions(transactionsRef.current.length === 0);
+    fetchCashOverview(cashOverviewRef.current === null);
+    fetchCashLedger(cashLedgerRef.current.length === 0);
     const intervalId = setInterval(() => {
       fetchPortfolio(false);
       fetchTransactions(false);
@@ -852,7 +859,7 @@ function App({ onLogout, user: initialUser, profile: initialProfile }) {
       fetchCashLedger(false);
     }, 5 * 60 * 1000);
     return () => clearInterval(intervalId);
-  }, [activeTab, fetchPortfolio, fetchTransactions, fetchCashOverview, fetchCashLedger, transactions.length, cashOverview, cashLedger.length]);
+  }, [activeTab, fetchPortfolio, fetchTransactions, fetchCashOverview, fetchCashLedger]);
 
   // Fetch display prices for Watchlist and Dashboard while preserving the
   // canonical snapshot map used by alert threshold defaults.
@@ -1900,18 +1907,18 @@ function App({ onLogout, user: initialUser, profile: initialProfile }) {
                     fetchCashOverview(false);
                     fetchCashLedger(false);
                   }}
-                  disabled={portfolioRefreshing || compositionRefreshing || transactionsRefreshing || cashOverviewRefreshing || cashLedgerRefreshing || portfolioLoading}
+                  disabled={portfolioRefreshing || portfolioLoading}
                   className="fintech-btn btn-secondary btn-sm"
                 >
-                  <span className={portfolioRefreshing || compositionRefreshing || transactionsRefreshing || cashOverviewRefreshing || cashLedgerRefreshing ? 'spin-icon' : ''}>
-                    {portfolioRefreshing || compositionRefreshing || transactionsRefreshing || cashOverviewRefreshing || cashLedgerRefreshing ? '⟳' : '↻'}
+                  <span className={portfolioRefreshing ? 'spin-icon' : ''}>
+                    {portfolioRefreshing ? '⟳' : '↻'}
                   </span>
-                  <span>{portfolioRefreshing || compositionRefreshing || transactionsRefreshing || cashOverviewRefreshing || cashLedgerRefreshing ? 'Đang làm mới...' : 'Làm mới'}</span>
+                  <span>{portfolioRefreshing ? 'Đang làm mới...' : 'Làm mới'}</span>
                 </MagneticButton>
               </motion.div>
 
               {/* Loading State */}
-              {portfolioLoading && (
+              {portfolioLoading && !portfolioOverview && (
                 <div className="state-box">
                   <div className="state-icon spin-icon">⏳</div>
                   <h3 className="state-title">Đang tính toán tổng quan danh mục...</h3>
@@ -1943,7 +1950,7 @@ function App({ onLogout, user: initialUser, profile: initialProfile }) {
               )}
 
               {/* Partial Valuation Warning Banner */}
-              {!portfolioLoading && portfolioOverview && portfolioOverview.summary?.valuationStatus === 'partial' && (() => {
+              {portfolioOverview && portfolioOverview.summary?.valuationStatus === 'partial' && (() => {
                 const holdingsList = Array.isArray(portfolioOverview.holdings) ? portfolioOverview.holdings : [];
                 const unvalued = holdingsList.filter(
                   (h) => !(['available', 'stale'].includes(h?.valuationStatus) && typeof h?.reportingMarketValue === 'number')
@@ -1969,7 +1976,7 @@ function App({ onLogout, user: initialUser, profile: initialProfile }) {
                 );
               })()}
 
-              {!portfolioLoading && portfolioOverview && portfolioOverview.summary?.valuationStatus === 'stale' && (
+              {portfolioOverview && portfolioOverview.summary?.valuationStatus === 'stale' && (
                 <div className="fintech-banner banner-warning">
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                     <span>⚠️</span>
@@ -1979,7 +1986,7 @@ function App({ onLogout, user: initialUser, profile: initialProfile }) {
               )}
 
               {/* Portfolio V1: one current snapshot drives Summary and Holdings. */}
-              {!portfolioLoading && portfolioOverview && (
+              {portfolioOverview && (
                 <Suspense fallback={<div className="skeleton-shimmer" style={{ width: '100%', height: '280px', borderRadius: '12px', margin: '1rem 0' }} />}>
                   <PortfolioSummaryHoldings
                     snapshot={portfolioOverview}
@@ -2047,6 +2054,18 @@ function App({ onLogout, user: initialUser, profile: initialProfile }) {
                     onRetryTransactions={() => fetchTransactions(true)}
                   />
                 </Suspense>
+              )}
+
+              {/* Empty / Unresolved Fallback State */}
+              {!portfolioLoading && !portfolioOverview && !portfolioError && (
+                <div className="state-box">
+                  <div className="state-icon">📊</div>
+                  <h3 className="state-title">Chưa có dữ liệu danh mục</h3>
+                  <p className="state-desc">Không thể tải thông tin danh mục hoặc chưa có dữ liệu. Vui lòng tải lại.</p>
+                  <MagneticButton onClick={() => fetchPortfolio(true)} className="fintech-btn btn-primary btn-sm" style={{ marginTop: '0.75rem' }}>
+                    Tải lại danh mục
+                  </MagneticButton>
+                </div>
               )}
             </motion.section>
           )}

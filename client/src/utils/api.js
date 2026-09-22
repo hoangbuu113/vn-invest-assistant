@@ -210,29 +210,44 @@ export async function apiFetch(path, options = {}) {
   const fullUrl = apiUrl(path);
   const dedupeKey = canDedupe ? `${token || 'anon'}:${fullUrl}` : null;
 
-  if (canDedupe && inFlightGetRequests.has(dedupeKey)) {
-    const entry = inFlightGetRequests.get(dedupeKey);
-    if (options.signal?.aborted) {
-      const err = options.signal.reason || (typeof DOMException !== 'undefined' ? new DOMException('The user aborted a request.', 'AbortError') : new Error('The user aborted a request.'));
+  if (options.signal?.aborted) {
+    const err = options.signal.reason || (typeof DOMException !== 'undefined' ? new DOMException('The user aborted a request.', 'AbortError') : new Error('The user aborted a request.'));
+    return Promise.reject(err);
+  }
+
+  function attachDedupeConsumer(entry, callerSignal) {
+    if (callerSignal?.aborted) {
+      const err = callerSignal.reason || (typeof DOMException !== 'undefined' ? new DOMException('The user aborted a request.', 'AbortError') : new Error('The user aborted a request.'));
       return Promise.reject(err);
     }
 
     return new Promise((resolve, reject) => {
-      const waiter = { resolve, reject, signal: options.signal };
+      const consumer = { resolve, reject, signal: callerSignal };
 
-      if (options.signal) {
+      if (callerSignal) {
         const onAbort = () => {
-          const idx = entry.waiters.indexOf(waiter);
-          if (idx !== -1) entry.waiters.splice(idx, 1);
-          const err = options.signal.reason || (typeof DOMException !== 'undefined' ? new DOMException('The user aborted a request.', 'AbortError') : new Error('The user aborted a request.'));
+          entry.consumers.delete(consumer);
+          if (consumer.cleanup) consumer.cleanup();
+          const err = callerSignal.reason || (typeof DOMException !== 'undefined' ? new DOMException('The user aborted a request.', 'AbortError') : new Error('The user aborted a request.'));
           reject(err);
+
+          // Only abort underlying network fetch if all consumers have aborted
+          if (entry.consumers.size === 0) {
+            entry.internalAbortController.abort();
+            inFlightGetRequests.delete(dedupeKey);
+          }
         };
-        options.signal.addEventListener('abort', onAbort, { once: true });
-        waiter.cleanup = () => options.signal.removeEventListener('abort', onAbort);
+        callerSignal.addEventListener('abort', onAbort, { once: true });
+        consumer.cleanup = () => callerSignal.removeEventListener('abort', onAbort);
       }
 
-      entry.waiters.push(waiter);
+      entry.consumers.add(consumer);
     });
+  }
+
+  if (canDedupe && inFlightGetRequests.has(dedupeKey)) {
+    const entry = inFlightGetRequests.get(dedupeKey);
+    return attachDedupeConsumer(entry, options.signal);
   }
 
   // Retry configuration:
@@ -252,40 +267,57 @@ export async function apiFetch(path, options = {}) {
     }
   }
 
+  if (canDedupe) {
+    const internalAbortController = new AbortController();
+    const entry = {
+      internalAbortController,
+      consumers: new Set()
+    };
+    inFlightGetRequests.set(dedupeKey, entry);
+
+    const consumerPromise = attachDedupeConsumer(entry, options.signal);
+
+    const fetchOptions = {
+      ...options,
+      method,
+      credentials: options.credentials || 'same-origin',
+      headers,
+      signal: internalAbortController.signal
+    };
+
+    (async () => {
+      try {
+        const response = await executeWithRetry(fullUrl, fetchOptions, retryConfig, isPrivate, options.onRetry);
+
+        const consumers = Array.from(entry.consumers);
+        for (let i = 0; i < consumers.length; i++) {
+          const consumer = consumers[i];
+          if (consumer.cleanup) consumer.cleanup();
+          try {
+            consumer.resolve(i < consumers.length - 1 ? response.clone() : response);
+          } catch {
+            consumer.resolve(response);
+          }
+        }
+      } catch (err) {
+        for (const consumer of entry.consumers) {
+          if (consumer.cleanup) consumer.cleanup();
+          consumer.reject(err);
+        }
+      } finally {
+        inFlightGetRequests.delete(dedupeKey);
+      }
+    })();
+
+    return consumerPromise;
+  }
+
   const fetchOptions = {
     ...options,
     method,
     credentials: options.credentials || 'same-origin',
     headers
   };
-
-  if (canDedupe) {
-    const entry = { waiters: [] };
-    inFlightGetRequests.set(dedupeKey, entry);
-
-    try {
-      const response = await executeWithRetry(fullUrl, fetchOptions, retryConfig, isPrivate, options.onRetry);
-
-      // Distribute cloned responses to in-flight waiters
-      for (const waiter of entry.waiters) {
-        if (waiter.cleanup) waiter.cleanup();
-        try {
-          waiter.resolve(response.clone());
-        } catch {
-          waiter.resolve(response);
-        }
-      }
-      return response;
-    } catch (err) {
-      for (const waiter of entry.waiters) {
-        if (waiter.cleanup) waiter.cleanup();
-        waiter.reject(err);
-      }
-      throw err;
-    } finally {
-      inFlightGetRequests.delete(dedupeKey);
-    }
-  }
 
   // Non-deduplicated requests (e.g. POST, PUT, DELETE, or explicit opt-out)
   return executeWithRetry(fullUrl, fetchOptions, retryConfig, isPrivate, options.onRetry);
